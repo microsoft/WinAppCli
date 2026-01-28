@@ -15,5 +15,5 @@ internal interface INugetService
     /// Queries the NuGet v3 flat container API for the dependencies of a specific package version.
     /// Returns a dictionary mapping dependency package ID to its version (or version range).
     /// </summary>
-    Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default);
+    Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageId, string version, CancellationToken cancellationToken = default);
 }

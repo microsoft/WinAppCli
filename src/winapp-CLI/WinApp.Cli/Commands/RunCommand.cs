@@ -4,7 +4,6 @@
 using Microsoft.Extensions.Logging;
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -41,15 +40,11 @@ internal partial class RunCommand : Command
         Options.Add(ArgsOption);
     }
 
-    [GeneratedRegex(@"^\s*.+?\s->\s(?<path>.+\.(dll|exe))\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled, "en-US")]
-    private static partial Regex BuildOutputPathRegex();
-
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IStatusService statusService,
-        IDotNetService dotNetService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -75,26 +70,8 @@ internal partial class RunCommand : Command
             {
                 try
                 {
-                    // Step 1: Build the project
-                    taskContext.AddStatusMessage($"{UiSymbols.Tools} Building project...");
-
                     var currentDirectoryInfo = currentDirectoryProvider.GetCurrentDirectoryInfo();
-                    var csprojFiles = currentDirectoryInfo.GetFiles("*.csproj").FirstOrDefault();
-                    if (csprojFiles == null)
-                    {
-                        throw new Exception("No .csproj file found in the current directory.");
-                    }
-
-                    // get current architecture (arm64, x64)
-                    var currentArch = WorkspaceSetupService.GetSystemArchitecture();
-
-                    var buildResult = await dotNetService.RunDotnetCommandAsync(currentDirectoryInfo, $"build {csprojFiles.Name} -c Debug -r win-{currentArch}", cancellationToken);
-
-                    if (buildResult.ExitCode != 0)
-                    {
-                        throw new Exception($"Build failed: {buildResult.Output}");
-                    }
-                    taskContext.AddStatusMessage($"{UiSymbols.Check} Build succeeded.");
+                    DirectoryInfo? outputDirectory = null;
 
                     DirectoryInfo inputDirectory;
 
@@ -102,16 +79,9 @@ internal partial class RunCommand : Command
                     {
                         inputDirectory = manifest.Directory!;
                     }
-                    else
+                    else if (outputDirectory != null)
                     {
-                        var match = BuildOutputPathRegex().Match(buildResult.Output);
-                        if (!match.Success)
-                        {
-                            throw new Exception("Failed to determine build output path.");
-                        }
-                        var outputDirectory = match.Groups["path"].Value;
-
-                        inputDirectory = new DirectoryInfo(Path.GetDirectoryName(outputDirectory)!);
+                        inputDirectory = outputDirectory;
 
                         manifest = new FileInfo(Path.Combine(inputDirectory.FullName, "AppxManifest.xml"));
                         if (!manifest.Exists)
@@ -140,10 +110,29 @@ internal partial class RunCommand : Command
                             }
                         }
                     }
+                    else
+                    {
+                        // No build and no manifest specified - try to find manifest in current directory
+                        inputDirectory = currentDirectoryInfo;
+
+                        manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "appxmanifest.xml"));
+                        if (!manifest.Exists)
+                        {
+                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "AppxManifest.xml"));
+                        }
+                        if (!manifest.Exists)
+                        {
+                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.AppxManifest"));
+                        }
+                        if (!manifest.Exists)
+                        {
+                            throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path, or remove --no-build to build the project first.");
+                        }
+                    }
 
                     outputAppXDirectory ??= GetDefaultAppXDirectory(manifest);
 
-                    // Step 2: Create and register the debug identitymy
+                    // Step 2: Create and register the debug identity
                     taskContext.AddStatusMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
                         manifest,
