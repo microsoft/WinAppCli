@@ -25,7 +25,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ### Debug with Package Identity
 For apps that need Windows APIs requiring identity (push notifications, etc.):
-1. Ensure a appxmanifest.xml is present, either via `winapp init` or `winapp manifest generate`
+1. Ensure an appxmanifest.xml is present, either via `winapp init` or `winapp manifest generate`
 2. `winapp create-debug-identity ./myapp.exe` - generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
 3. Run your app - it now has package identity
 
