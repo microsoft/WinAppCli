@@ -198,7 +198,7 @@ try
         $GenerateLlmDocsScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
         $CliExePath = Join-Path $ProjectRoot "$ArtifactsPath\cli\win-x64\winapp.exe"
         
-        & $GenerateLlmDocsScript -CliPath $CliExePath
+        & $GenerateLlmDocsScript -CliPath $CliExePath -CalledFromBuildScript
         
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "LLM documentation generation failed, but continuing..."

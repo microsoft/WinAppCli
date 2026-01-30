@@ -17,10 +17,14 @@
 
 param(
     [string]$CliPath = "",
-    [string]$DocsPath = ""
+    [string]$DocsPath = "",
+    [switch]$CalledFromBuildScript = $false
 )
 
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
+
+# Track if running with default paths (likely direct invocation)
+$UsingDefaultPaths = (-not $CliPath -and -not $DocsPath)
 
 if (-not $CliPath) {
     $CliPath = Join-Path $ProjectRoot "artifacts\cli\win-x64\winapp.exe"
@@ -187,3 +191,10 @@ $LlmContext | Set-Content $LlmContextPath -Encoding UTF8
 Write-Host "[DOCS] Saved: $LlmContextPath" -ForegroundColor Green
 
 Write-Host "[DOCS] LLM documentation generated successfully!" -ForegroundColor Green
+
+# Warn if running directly (not from build-cli.ps1)
+if (-not $CalledFromBuildScript -and $UsingDefaultPaths) {
+    Write-Host ""
+    Write-Host "[DOCS] Warning: Running generate-llm-docs.ps1 directly may use stale CLI binaries." -ForegroundColor Yellow
+    Write-Host "[DOCS] For accurate docs, run 'scripts/build-cli.ps1' which rebuilds and regenerates docs." -ForegroundColor Yellow
+}

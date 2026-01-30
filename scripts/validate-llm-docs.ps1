@@ -42,13 +42,13 @@ Write-Host "CLI path: $CliPath" -ForegroundColor Gray
 
 # Check if doc files exist
 if (-not (Test-Path $SchemaPath)) {
-    Write-Host "::error::docs/cli-schema.json not found. Run 'scripts/generate-llm-docs.ps1' first." -ForegroundColor Red
+    Write-Host "::error::docs/cli-schema.json not found. Run 'scripts/build-cli.ps1' to build CLI and generate docs." -ForegroundColor Red
     if ($FailOnDrift) { exit 1 }
     exit 0
 }
 
 if (-not (Test-Path $ContextPath)) {
-    Write-Host "::error::docs/llm-context.md not found. Run 'scripts/generate-llm-docs.ps1' first." -ForegroundColor Red
+    Write-Host "::error::docs/llm-context.md not found. Run 'scripts/build-cli.ps1' to build CLI and generate docs." -ForegroundColor Red
     if ($FailOnDrift) { exit 1 }
     exit 0
 }
@@ -94,7 +94,7 @@ if ($SchemaDrift) {
     Write-Host "::error::docs/cli-schema.json is out of sync with CLI!" -ForegroundColor Red
     Write-Host ""
     Write-Host "The committed schema doesn't match what the CLI generates." -ForegroundColor Yellow
-    Write-Host "Run 'scripts/generate-llm-docs.ps1' locally and commit the changes." -ForegroundColor Yellow
+    Write-Host "Run 'scripts/build-cli.ps1' locally to rebuild CLI and regenerate docs, then commit the changes." -ForegroundColor Yellow
     Write-Host ""
     
     # Show diff details for debugging
@@ -165,7 +165,7 @@ try {
     if ($FreshContextNormalized -ne $CommittedContextNormalized) {
         Write-Host "::error::docs/llm-context.md is out of sync with CLI schema!" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Run 'scripts/generate-llm-docs.ps1' locally and commit the changes." -ForegroundColor Yellow
+        Write-Host "Run 'scripts/build-cli.ps1' locally to rebuild CLI and regenerate docs, then commit the changes." -ForegroundColor Yellow
         Write-Host ""
         
         # Show diff details for debugging
@@ -227,4 +227,10 @@ finally {
 }
 
 Write-Host "[VALIDATE] LLM documentation is up-to-date!" -ForegroundColor Green
+
+# Warn about potential stale artifacts
+Write-Host ""
+Write-Host "[VALIDATE] Note: This validated against CLI binaries in artifacts/cli/." -ForegroundColor Gray
+Write-Host "[VALIDATE] If you changed CLI code, run 'scripts/build-cli.ps1' first to rebuild." -ForegroundColor Gray
+
 exit 0
