@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Before/After winapp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #e8d5f7 0%, #c5e8f7 100%);
+      min-height: 100vh;
+      padding: 30px;
+      transition: background 0.3s ease;
+    }
+    
+    /* Dark mode */
+    body.dark {
+      background: linear-gradient(135deg, #1e1b4b 0%, #172554 100%);
+    }
+    
+    .container {
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    
+    .panel {
+      background: white;
+      border-radius: 16px;
+      padding: 24px 28px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    body.dark .panel {
+      background: #1e293b;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    
+    h1 {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 20px;
+      letter-spacing: -0.5px;
+      transition: color 0.3s ease;
+    }
+    
+    body.dark h1 {
+      color: #f1f5f9;
+    }
+    
+    .toggle-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #1e293b;
+      color: white;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      z-index: 100;
+      transition: background 0.3s ease;
+    }
+    
+    body.dark .toggle-btn {
+      background: #f1f5f9;
+      color: #1e293b;
+    }
+    
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 0;
+      align-items: stretch;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border-radius: 8px;
+      transition: box-shadow 0.3s ease;
+    }
+    
+    body.dark .row {
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    
+    .row.full-width {
+      grid-template-columns: 1fr;
+      background: #ecfdf5;
+      padding: 8px 12px;
+      border-left: 3px solid #10b981;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+      transition: background 0.3s ease;
+    }
+    
+    body.dark .row.full-width {
+      background: rgba(16, 185, 129, 0.15);
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+    }
+    
+    .steps-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      background: #f8fafc;
+      padding: 12px 14px;
+      border-radius: 8px 0 0 8px;
+      transition: background 0.3s ease;
+    }
+    
+    body.dark .steps-col {
+      background: #334155;
+    }
+    
+    .row.full-width .steps-col {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+    }
+    
+    body.dark .row.full-width .steps-col {
+      background: transparent;
+    }
+    
+    .step {
+      font-size: 13px;
+      line-height: 1.4;
+      color: #6b7280;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      white-space: nowrap;
+      font-weight: 400;
+      transition: color 0.3s ease;
+    }
+    
+    body.dark .step {
+      color: #94a3b8;
+    }
+    
+    .step-num {
+      font-weight: 600;
+      min-width: 22px;
+      color: #9ca3af;
+      transition: color 0.3s ease;
+    }
+    
+    body.dark .step-num {
+      color: #64748b;
+    }
+    
+    /* Steps that you still do */
+    .step.yours {
+      color: #1f2937;
+      font-weight: 500;
+    }
+    
+    body.dark .step.yours {
+      color: #f1f5f9;
+    }
+    
+    .step.yours .step-num {
+      color: #059669;
+    }
+    
+    body.dark .step.yours .step-num {
+      color: #34d399;
+    }
+    
+    .command-col {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+    .command {
+      background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      color: #5eead4;
+      font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 12px;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      gap: 4px;
+      flex: 1;
+      font-weight: 500;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    
+    .command-text {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .command-text::before {
+      content: "❯";
+      color: #64748b;
+      font-size: 10px;
+    }
+    
+    .command-label {
+      color: #5eead4;
+      font-family: 'Inter', sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      align-self: flex-end;
+      margin-top: auto;
+      opacity: 0.6;
+    }
+    
+    .command-label::before {
+      content: "✓ ";
+      opacity: 0.8;
+    }
+    
+    .summary {
+      margin-top: 20px;
+      padding: 12px 20px;
+      background: #f8fafc;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 400;
+      font-style: italic;
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+    
+    body.dark .summary {
+      background: #334155;
+      color: #94a3b8;
+    }
+    
+    .summary strong {
+      color: #333;
+      transition: color 0.3s ease;
+    }
+    
+    body.dark .summary strong {
+      color: #f1f5f9;
+    }
+    
+    .summary .highlight {
+      color: #0078d4;
+      font-weight: 600;
+    }
+    
+    body.dark .summary .highlight {
+      color: #38bdf8;
+    }
+  </style>
+</head>
+<body>
+  <button class="toggle-btn" onclick="document.body.classList.toggle('dark'); this.textContent = document.body.classList.contains('dark') ? '☀️ Light Mode' : '🌙 Dark Mode'">🌙 Dark Mode</button>
+  <div class="container">
+    <div class="panel">
+      <h1>Using modern Windows APIs in your cross-platform app</h1>
+      
+      <!-- Row 1: Steps 1-4 + winapp init -->
+      <div class="row">
+        <div class="steps-col">
+          <div class="step"><span class="step-num">1.</span> Download Windows (App) SDK packages from NuGet</div>
+          <div class="step"><span class="step-num">2.</span> Generate C++ headers with C++/WinRT</div>
+          <div class="step"><span class="step-num">3.</span> Install Windows App SDK runtime</div>
+          <div class="step"><span class="step-num">4.</span> Create appxmanifest.xml and image assets</div>
+        </div>
+        <div class="command-col">
+          <div class="command">
+            <span class="command-text">winapp init</span>
+            <span class="command-label">replaces steps 1–4</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Row 2: Steps 5-6 + winapp node create-addon -->
+      <div class="row">
+        <div class="steps-col">
+          <div class="step"><span class="step-num">5.</span> Create native addon and install build tools</div>
+          <div class="step"><span class="step-num">6.</span> Reference generated headers and bootstrap APIs</div>
+        </div>
+        <div class="command-col">
+          <div class="command" style="position: relative;">
+            <span style="position: absolute; top: 4px; right: 8px; font-size: 10px; color: #94a3b8; font-family: 'Inter', sans-serif;">*</span>
+            <span class="command-text">winapp node create-addon</span>
+            <span class="command-label">replaces steps 5–6</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Row 3: Step 7 full width -->
+      <div class="row full-width">
+        <div class="steps-col">
+          <div class="step yours"><span class="step-num">7.</span> <span style="margin-right: 4px;">✨</span> Write native code and call from your app</div>
+        </div>
+      </div>
+      
+      <!-- Row 4: Steps 8-11 + winapp node add-electron-debug-identity -->
+      <div class="row">
+        <div class="steps-col">
+          <div class="step"><span class="step-num">8.</span> Build package files</div>
+          <div class="step"><span class="step-num">9.</span> Layout manifest and assets in right locations</div>
+          <div class="step"><span class="step-num">10.</span> Create MSIX or register loose folder</div>
+          <div class="step"><span class="step-num">11.</span> Run packaged app to test</div>
+          <div class="step"><span class="step-num"></span> Repeat 7–11 for every code change</div>
+        </div>
+        <div class="command-col">
+          <div class="command">
+            <span class="command-text">winapp create-debug-identity</span>
+            <span class="command-label">replaces steps 8–11</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Row 5: Step 12 + winapp pack -->
+      <div class="row">
+        <div class="steps-col">
+          <div class="step"><span class="step-num">12.</span> Package for distribution</div>
+        </div>
+        <div class="command-col">
+          <div class="command">
+            <span class="command-text">winapp pack</span>
+            <span class="command-label">replaces step 12</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="summary">
+        These steps are generalized and may vary by framework. winapp CLI works with CMAKE based frameworks, .NET, Electron, Tauri, Rust, and more.<br>
+        <span style="font-size: 11px; opacity: 0.8;">* `create-addon` is part of npm package only. More framework packages coming soon.</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
