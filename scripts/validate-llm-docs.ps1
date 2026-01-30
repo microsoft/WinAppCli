@@ -79,6 +79,44 @@ if ($SchemaDrift) {
     Write-Host "Run 'scripts/generate-llm-docs.ps1' locally and commit the changes." -ForegroundColor Yellow
     Write-Host ""
     
+    # Show diff details for debugging
+    Write-Host "[DEBUG] Schema differences:" -ForegroundColor Cyan
+    Write-Host "  Fresh schema length: $($FreshSchemaNormalized.Length) chars" -ForegroundColor Gray
+    Write-Host "  Committed schema length: $($CommittedSchemaNormalized.Length) chars" -ForegroundColor Gray
+    
+    # Parse and compare versions if possible
+    try {
+        $FreshObj = $FreshSchemaNormalized | ConvertFrom-Json
+        $CommittedObj = $CommittedSchemaNormalized | ConvertFrom-Json
+        Write-Host "  Fresh version: $($FreshObj.version)" -ForegroundColor Gray
+        Write-Host "  Committed version: $($CommittedObj.version)" -ForegroundColor Gray
+    } catch {
+        Write-Host "  (Could not parse JSON for version comparison)" -ForegroundColor Gray
+    }
+    
+    # Find first differing line
+    $FreshLines = $FreshSchemaNormalized -split "`n"
+    $CommittedLines = $CommittedSchemaNormalized -split "`n"
+    Write-Host "  Fresh schema lines: $($FreshLines.Count)" -ForegroundColor Gray
+    Write-Host "  Committed schema lines: $($CommittedLines.Count)" -ForegroundColor Gray
+    
+    $MaxLines = [Math]::Max($FreshLines.Count, $CommittedLines.Count)
+    $DiffCount = 0
+    $MaxDiffsToShow = 5
+    for ($i = 0; $i -lt $MaxLines -and $DiffCount -lt $MaxDiffsToShow; $i++) {
+        $FreshLine = if ($i -lt $FreshLines.Count) { $FreshLines[$i] } else { "<EOF>" }
+        $CommittedLine = if ($i -lt $CommittedLines.Count) { $CommittedLines[$i] } else { "<EOF>" }
+        
+        if ($FreshLine -ne $CommittedLine) {
+            $DiffCount++
+            Write-Host ""
+            Write-Host "  [Line $($i + 1)] Difference #$DiffCount" -ForegroundColor Yellow
+            Write-Host "    Expected: $($FreshLine.Substring(0, [Math]::Min(100, $FreshLine.Length)))$(if ($FreshLine.Length -gt 100) { '...' })" -ForegroundColor Green
+            Write-Host "    Actual: $($CommittedLine.Substring(0, [Math]::Min(100, $CommittedLine.Length)))$(if ($CommittedLine.Length -gt 100) { '...' })" -ForegroundColor Red
+        }
+    }
+    Write-Host ""
+    
     if ($FailOnDrift) {
         exit 1
     }
@@ -110,6 +148,52 @@ try {
         Write-Host "::error::docs/llm-context.md is out of sync with CLI schema!" -ForegroundColor Red
         Write-Host ""
         Write-Host "Run 'scripts/generate-llm-docs.ps1' locally and commit the changes." -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Show diff details for debugging
+        Write-Host "[DEBUG] Showing differences:" -ForegroundColor Cyan
+        Write-Host "  Fresh file length: $($FreshContextNormalized.Length) chars" -ForegroundColor Gray
+        Write-Host "  Committed file length: $($CommittedContextNormalized.Length) chars" -ForegroundColor Gray
+        
+        # Split into lines for comparison
+        $FreshLines = $FreshContextNormalized -split "`n"
+        $CommittedLines = $CommittedContextNormalized -split "`n"
+        Write-Host "  Fresh file lines: $($FreshLines.Count)" -ForegroundColor Gray
+        Write-Host "  Committed file lines: $($CommittedLines.Count)" -ForegroundColor Gray
+        
+        # Find first differing line
+        $MaxLines = [Math]::Max($FreshLines.Count, $CommittedLines.Count)
+        $DiffCount = 0
+        $MaxDiffsToShow = 10
+        for ($i = 0; $i -lt $MaxLines -and $DiffCount -lt $MaxDiffsToShow; $i++) {
+            $FreshLine = if ($i -lt $FreshLines.Count) { $FreshLines[$i] } else { "<EOF>" }
+            $CommittedLine = if ($i -lt $CommittedLines.Count) { $CommittedLines[$i] } else { "<EOF>" }
+            
+            if ($FreshLine -ne $CommittedLine) {
+                $DiffCount++
+                Write-Host ""
+                Write-Host "  [Line $($i + 1)] Difference #$DiffCount" -ForegroundColor Yellow
+                Write-Host "    Expected (fresh): $($FreshLine.Substring(0, [Math]::Min(120, $FreshLine.Length)))$(if ($FreshLine.Length -gt 120) { '...' })" -ForegroundColor Green
+                Write-Host "    Actual (committed): $($CommittedLine.Substring(0, [Math]::Min(120, $CommittedLine.Length)))$(if ($CommittedLine.Length -gt 120) { '...' })" -ForegroundColor Red
+            }
+        }
+        
+        if ($DiffCount -eq 0) {
+            Write-Host "  [DEBUG] No line-by-line differences found, but content differs (possible whitespace/encoding issue)" -ForegroundColor Yellow
+            # Check for BOM or other encoding differences
+            $FreshBytes = [System.Text.Encoding]::UTF8.GetBytes($FreshContextNormalized.Substring(0, [Math]::Min(100, $FreshContextNormalized.Length)))
+            $CommittedBytes = [System.Text.Encoding]::UTF8.GetBytes($CommittedContextNormalized.Substring(0, [Math]::Min(100, $CommittedContextNormalized.Length)))
+            Write-Host "  Fresh first bytes: $($FreshBytes[0..9] -join ', ')" -ForegroundColor Gray
+            Write-Host "  Committed first bytes: $($CommittedBytes[0..9] -join ', ')" -ForegroundColor Gray
+        } elseif ($DiffCount -ge $MaxDiffsToShow) {
+            $TotalDiffs = ($FreshLines | ForEach-Object -Begin { $idx = 0 } -Process { 
+                if ($idx -lt $CommittedLines.Count -and $_ -ne $CommittedLines[$idx]) { 1 }
+                $idx++
+            } | Measure-Object -Sum).Sum
+            Write-Host ""
+            Write-Host "  ... and more differences (showing first $MaxDiffsToShow of ~$TotalDiffs)" -ForegroundColor Yellow
+        }
+        Write-Host ""
         
         if ($FailOnDrift) {
             exit 1
