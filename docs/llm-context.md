@@ -3,7 +3,6 @@ name: winapp-cli
 description: CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
 version: 0.1.11
 schema_version: 1.0
-generated: 2026-01-30
 ---
 
 # winapp CLI Context for LLMs
@@ -56,7 +55,7 @@ Trust a certificate on this machine (requires admin). Run before installing MSIX
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp create-debug-identity`
 
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Re-run after changing appxmanifest.xml or Assets/.
+Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.
 
 **Arguments:**
 - `<entrypoint>` - Path to the .exe that will need to run with identity, or entrypoint script.
@@ -76,7 +75,7 @@ Print the path to the .winapp directory. Use --global for the shared cache locat
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp init`
 
-Start here for new projects. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK packages. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.
 
 **Arguments:**
 - `<base-directory>` - Base/root directory for the winapp workspace, for consumption or installation.
@@ -97,7 +96,7 @@ Create and modify appxmanifest.xml files for package identity and MSIX packaging
 
 #### `winapp manifest generate`
 
-Create appxmanifest.xml without full project setup. Use when you only need a manifest (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).
+Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).
 
 **Arguments:**
 - `<directory>` - Directory to generate manifest in
@@ -127,7 +126,7 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp package`
 
-Create MSIX installer from your built app. Run after building your app. Input folder must contain appxmanifest.xml and your compiled files. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --cert ./devcert.pfx
+Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
 
 **Aliases:** `pack`
 

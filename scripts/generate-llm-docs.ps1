@@ -65,15 +65,12 @@ $Schema = $SchemaJson | ConvertFrom-Json
 # Step 2: Generate llm-context.md
 Write-Host "[DOCS] Generating llm-context.md..." -ForegroundColor Blue
 
-$GeneratedDate = Get-Date -Format "yyyy-MM-dd"
-
 $LlmContext = @"
 ---
 name: winapp-cli
 description: CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
 version: $($Schema.version)
 schema_version: $($Schema.schemaVersion)
-generated: $GeneratedDate
 ---
 
 # winapp CLI Context for LLMs

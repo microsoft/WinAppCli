@@ -260,7 +260,7 @@
       }
     },
     "create-debug-identity": {
-      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Re-run after changing appxmanifest.xml or Assets/.",
+      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.",
       "hidden": false,
       "arguments": {
         "entrypoint": {
@@ -387,7 +387,7 @@
       }
     },
     "init": {
-      "description": "Start here for new projects. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK packages. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.",
+      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -538,7 +538,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).",
+          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -757,7 +757,7 @@
       }
     },
     "package": {
-      "description": "Create MSIX installer from your built app. Run after building your app. Input folder must contain appxmanifest.xml and your compiled files. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --cert ./devcert.pfx",
+      "description": "Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx",
       "hidden": false,
       "aliases": [
         "pack"
