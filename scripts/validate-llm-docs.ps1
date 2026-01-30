@@ -70,7 +70,25 @@ $CommittedSchema = Get-Content $SchemaPath -Raw
 $FreshSchemaNormalized = $FreshSchema -replace "`r`n", "`n"
 $CommittedSchemaNormalized = $CommittedSchema -replace "`r`n", "`n"
 
-$SchemaDrift = $FreshSchemaNormalized -ne $CommittedSchemaNormalized
+# Compare JSON semantically (ignore formatting differences like indentation)
+$SchemaDrift = $false
+try {
+    $FreshObj = $FreshSchemaNormalized | ConvertFrom-Json -Depth 100
+    $CommittedObj = $CommittedSchemaNormalized | ConvertFrom-Json -Depth 100
+    
+    # Re-serialize both with consistent formatting for comparison
+    $FreshReserialized = $FreshObj | ConvertTo-Json -Depth 100 -Compress
+    $CommittedReserialized = $CommittedObj | ConvertTo-Json -Depth 100 -Compress
+    
+    $SchemaDrift = $FreshReserialized -ne $CommittedReserialized
+    
+    if (-not $SchemaDrift -and $FreshSchemaNormalized -ne $CommittedSchemaNormalized) {
+        Write-Host "[VALIDATE] docs/cli-schema.json has formatting differences but content is identical (OK)" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "[VALIDATE] Warning: Could not parse JSON for semantic comparison, falling back to string comparison" -ForegroundColor Yellow
+    $SchemaDrift = $FreshSchemaNormalized -ne $CommittedSchemaNormalized
+}
 
 if ($SchemaDrift) {
     Write-Host "::error::docs/cli-schema.json is out of sync with CLI!" -ForegroundColor Red
