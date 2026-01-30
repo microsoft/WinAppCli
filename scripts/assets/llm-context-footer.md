@@ -2,7 +2,7 @@
 
 ### New Project Setup
 1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certificate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
-2. Edit `appxmanifest.xml` if need to modify properties, set capabilities, or other configurations
+2. Edit `appxmanifest.xml` if you need to modify properties, set capabilities, or other configurations
 3. Build your app
 4. `winapp create-debug-identity <exe-path>` - to generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
 5. Run the app
