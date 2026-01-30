@@ -59,9 +59,9 @@ Perfect for:
 
 ## 🤔 Why?
 
-Many powerful Windows APIs require your app to have *package identity* - a way for Windows to trust and recognize your app. Without it, features like notifications, deep OS integrations, and even AI APIs are off-limits.
+Many powerful Windows APIs require your app to have *package identity*, a way for Windows to trust and recognize your app. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
 
-Visual Studio provides great tooling for WinUI 3 and .NET apps. This CLI attemps to bring a similar streamlined experience to cross-platform frameworks and tools like CMAKE, Electron, and Rust - handling SDK setup, header generation, manifests, certificates, and MSIX packaging in just a few commands:
+For the best experience, we recommend WinUI 3 with Visual Studio, but we also want to support developers wherever they are. This CLI attempts to bring a streamlined experience for integrating with the modern Windows developer platform to cross-platform frameworks like CMake, Electron, and Rust - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
 
 <p align="center">
   <picture>
