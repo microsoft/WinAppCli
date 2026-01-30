@@ -71,5 +71,5 @@ node cli.js help
 ## Integration points
 
 - **NuGet**: Packages downloaded to `.winapp/packages`. Global `.winapp` cache defaults to `%USERPROFILE%\.winapp` (or `WINAPP_CLI_CACHE_DIRECTORY` if set). 
-- **Build Tools**: makeappx.exe, signtool.exe, makepri.exe, etc. Auto-downloaded by `tool` command or when commands then need them are invoked.
+- **Build Tools**: makeappx.exe, signtool.exe, makepri.exe, etc. Auto-downloaded by the `tool` command or when commands that need them are invoked.
 - **CppWinRT**: Generated headers in `.winapp/generated/include`. Response file at `.cppwinrt.rsp`.
