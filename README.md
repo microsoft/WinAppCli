@@ -59,9 +59,10 @@ Perfect for:
 
 ## 🤔 Why?
 
-Many powerful Windows APIs require your app to have *package identity*, a way for Windows to trust and recognize your app. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
+Many powerful Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
 
-For the best experience, we recommend WinUI 3 with Visual Studio, but we also want to support developers wherever they are. This CLI brings a streamlined experience for integrating with the modern Windows developer platform to cross-platform frameworks like CMake, Electron, and Rust - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
+Our goal is to support developers wherever they are, with the tools and frameworks they already use. Based on feedback from partners shipping cross-platform apps on Windows, we built this CLI to streamline integrating with the Windows developer platform - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
+
 
 <p align="center">
   <picture>
@@ -70,21 +71,22 @@ For the best experience, we recommend WinUI 3 with Visual Studio, but we also wa
     <img src="./docs/images/before-after-winapp.png" alt="Before: 12 manual steps to access Windows APIs. After: 4 winapp commands (init, create-addon, add-electron-debug-identity, pack)">
   </picture>
 </p>
+<p align="center"><i>Without winapp CLI, setting up a project involves 12 manual steps—downloading SDKs, generating headers, creating manifests, and more. With the CLI, it's just 4 commands.</i></p>
 
 **Few examples of what package identity and MSIX packaging unlocks:**
 
-- Interactive native notifications and notification management
-- Integration with Windows Explorer, Taskbar, Share sheet, and other shell surfaces
-- Protocol handlers (`yourapp://` URIs)
-- Web-to-app linking (`yoursite.com` opens your app)
-- On-device AI (Local LLM, Text and Image AI APIs)
-- Custom CLI commands via AppExecutionAlias
-- Controlled access to camera, microphone, location, and other devices (with user consent)
-- Background tasks (run when app is closed)
-- File type associations (open `.xyz` files with your app)
-- Startup tasks (launch at Windows login)
-- App services (expose APIs to other apps)
-- Clean install/uninstall & auto-updates
+- [Interactive native notifications](https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart?tabs=cs) and notification management
+- [Integration with Windows Explorer, Taskbar, Share sheet](https://learn.microsoft.com/windows/apps/develop/windows-integration/integrate-sharesheet-packaged), and other shell surfaces
+- [Protocol handlers](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-your-application-in-different-ways) (`yourapp://` URIs)
+- [Web-to-app linking](https://learn.microsoft.com/windows/apps/develop/launch/web-to-app-linking) (`yoursite.com` opens your app)
+- [On-device AI](https://learn.microsoft.com/windows/ai/apis/) (Local LLM, Text and Image AI APIs)
+- [Custom CLI commands via AppExecutionAlias](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-your-application-in-different-ways)
+- [Controlled access to camera, microphone, location](https://learn.microsoft.com/windows/uwp/packaging/app-capability-declarations), and other devices (with user consent)
+- [Background tasks](https://learn.microsoft.com/windows/uwp/launch-resume/declare-background-tasks-in-the-application-manifest) (run when app is closed)
+- [File type associations](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#integrate-with-file-explorer) (open `.xyz` files with your app)
+- [Startup tasks](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-an-executable-file-when-users-log-into-windows) (launch at Windows login)
+- [App services](https://learn.microsoft.com/windows/uwp/launch-resume/how-to-create-and-consume-an-app-service) (expose APIs to other apps)
+- [Clean install/uninstall & auto-updates](https://learn.microsoft.com/windows/msix/overview)
 
 ## ✏️ Get started
 
