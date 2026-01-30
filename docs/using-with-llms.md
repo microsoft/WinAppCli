@@ -12,7 +12,7 @@ image assets, test certificates, Windows (App) SDK projections, package identity
 and packaging for any app framework targeting Windows.
 
 Please read and reference the official LLM context documentation:
-https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/winappCLI/main/docs/llm-context.md
 
 My specific task: [describe what you need help with]
 ```

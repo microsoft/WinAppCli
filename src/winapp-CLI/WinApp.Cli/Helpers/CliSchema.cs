@@ -69,6 +69,7 @@ internal static class CliSchema
     public record RootCommandDetails(
         string name,
         string version,
+        string schemaVersion,
         string? description,
         bool hidden,
         string[]? aliases,
@@ -105,9 +106,13 @@ internal static class CliSchema
         var fullVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
         var semanticVersion = $"{fullVersion.Major}.{fullVersion.Minor}.{fullVersion.Build}";
 
+        // Schema version tracks breaking changes to the JSON schema structure (not CLI version)
+        const string schemaVersion = "1.0";
+
         return new RootCommandDetails(
             name: command.Name,
             version: semanticVersion,
+            schemaVersion: schemaVersion,
             description: command.Description?.ReplaceLineEndings("\n"),
             hidden: command.Hidden,
             aliases: DetermineAliases(command.Aliases),

@@ -1,12 +1,12 @@
 ## Common Workflows
 
 ### New Project Setup
-1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certicate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
+1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certificate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
 2. Edit `appxmanifest.xml` if need to modify properties, set capabilities, or other configurations
 3. Build your app
 4. `winapp create-debug-identity <exe-path>` - to generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
 5. Run the app
-4. `winapp pack <output-folder-to-package> --cert .\devcert.pfx` - Create signed MSIX (--cert is optional)
+6. `winapp pack <output-folder-to-package> --cert .\devcert.pfx` - Create signed MSIX (--cert is optional)
 
 ### Existing Project (Clone/CI)
 1. `winapp restore` - Reinstall packages and generate C++ projections from `winapp.yaml`
@@ -40,7 +40,7 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 
 | Command | Requires | Creates/Modifies |
 |---------|----------|------------------|
-| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/`, `.devcert.pfx` |
+| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/`, `devcert.pfx` |
 | `restore` | `winapp.yaml` | `.winapp/packages/` |
 | `update` | `winapp.yaml` | Updates versions in `winapp.yaml` |
 | `manifest generate` | Nothing | `appxmanifest.xml`, `Assets/` |

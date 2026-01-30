@@ -1,6 +1,7 @@
 {
   "name": "winapp",
   "version": "0.1.11",
+  "schemaVersion": "1.0",
   "description": "CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows",
   "hidden": false,
   "options": {
