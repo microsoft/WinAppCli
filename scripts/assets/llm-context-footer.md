@@ -25,7 +25,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ### Debug with Package Identity
 For apps that need Windows APIs requiring identity (push notifications, etc.):
-1. Ensure a appxmanifest.xml is present, either via `winapp init` or `winapp manifest generate`
+1. Ensure an appxmanifest.xml is present, either via `winapp init` or `winapp manifest generate`
 2. `winapp create-debug-identity ./myapp.exe` - generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
 3. Run your app - it now has package identity
 
@@ -34,7 +34,7 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 2. `winapp node create-addon --template cs` - Generate native C# addon for Windows APIs (`--template cpp` for C++ addon)
 3. `winapp node add-electron-debug-identity` - Enable identity for debugging
 4. `npm start` to launch app normally, but now with identity
-4. For production, create production files with the prefered packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
+4. For production, create production files with the preferred packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
 
 ## Command Selection Guide
 
