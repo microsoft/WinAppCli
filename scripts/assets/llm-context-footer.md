@@ -36,6 +36,36 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 4. `npm start` to launch app normally, but now with identity
 4. For production, create production files with the prefered packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
 
+## Command Selection Guide
+
+Use this decision tree to pick the right command:
+
+```
+Using winapp CLI in a new project?
+├─ Yes → run winapp init
+│        (creates manifest + cert + SDKs + config)
+└─ No
+   ├─ Cloned/pulled a repo with winapp.yaml?
+   │  └─ Yes → winapp restore
+   │           (reinstalls SDKs from config)
+   ├─ Want newer SDK versions?
+   │  └─ Yes → winapp update
+   │           (checks NuGet, updates config)
+   ├─ Only need a manifest (no SDKs/cert)?
+   │  └─ Yes → winapp manifest generate
+   ├─ Only need a dev certificate?
+   │  └─ Yes → winapp cert generate
+   ├─ Ready to create MSIX installer?
+   │  └─ Yes → winapp package <build-output>
+   │           (add --cert for signing)
+   ├─ Need to add package identity for debugging Windows APIs that need it?
+   │  └─ Yes → winapp create-debug-identity <exe>
+   │           (enables push notifications, etc.)
+   └─ Need to run SDK tools directly?
+      └─ Yes → winapp tool <toolname> <args>
+               (makeappx, signtool, makepri)
+```
+
 ## Prerequisites & State
 
 | Command | Requires | Creates/Modifies |
@@ -47,6 +77,18 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 | `cert generate` | Nothing (or `appxmanifest.xml` for publisher inference) | `*.pfx` file |
 | `package` | App build output + `appxmanifest.xml` (+ `devcert.pfx` for optional signing) | `*.msix` file |
 | `create-debug-identity` | `appxmanifest.xml` + exe | Registers sparse package with Windows |
+
+## Common Errors & Solutions
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "winapp.yaml not found" | Running `restore` or `update` without config | Run `winapp init` first, or ensure you're in the right directory |
+| "appxmanifest.xml not found" | Running `package` or `create-debug-identity` without manifest | Run `winapp init` or `winapp manifest generate` first |
+| "Publisher mismatch" | Certificate publisher doesn't match manifest | Regenerate cert with `--manifest` flag, or edit manifest Publisher to match |
+| "Access denied" / "elevation required" | `cert install` without admin | Run terminal as Administrator |
+| "Package installation failed" | Signing issue or existing package conflict | Run `Get-AppxPackage <name> | Remove-AppxPackage` first, ensure cert is trusted |
+| "Certificate not trusted" | Dev cert not installed on machine | Run `winapp cert install ./devcert.pfx` as admin |
+| "Build tools not found" | First run, tools not downloaded yet | winapp auto-downloads; ensure internet access. Or run `winapp tool --help` to trigger download |
 
 ## Machine-Readable Schema
 

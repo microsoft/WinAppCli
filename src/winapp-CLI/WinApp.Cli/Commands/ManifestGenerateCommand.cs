@@ -70,7 +70,7 @@ internal class ManifestGenerateCommand : Command
         };
     }
 
-    public ManifestGenerateCommand() : base("generate", "Create a new appxmanifest.xml file. Use this when you need a manifest without running full 'init' setup, or to regenerate a manifest with different settings. Supports packaged apps (full MSIX), sparse packages (desktop app with identity), and hosted apps (scripts running under a host like Python/Node).")
+    public ManifestGenerateCommand() : base("generate", "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).")
     {
         Arguments.Add(DirectoryArgument);
         Options.Add(PackageNameOption);

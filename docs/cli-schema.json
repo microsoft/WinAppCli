@@ -55,7 +55,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create a self-signed development certificate (PFX) for signing for testing. The certificate publisher must match the Publisher in your AppxManifest.xml. Not for production use - obtain a trusted certificate for distribution.",
+          "description": "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.",
           "hidden": false,
           "options": {
             "--if-exists": {
@@ -181,7 +181,7 @@
           }
         },
         "install": {
-          "description": "Add a certificate to the Trusted People store so Windows trusts packages signed with it. Required before installing MSIX packages signed with development certificates. Needs administrator privileges.",
+          "description": "Trust a certificate on this machine (requires admin). Run before installing MSIX packages signed with dev certificates. Example: winapp cert install ./devcert.pfx. Only needed once per certificate.",
           "hidden": false,
           "arguments": {
             "cert-path": {
@@ -260,7 +260,7 @@
       }
     },
     "create-debug-identity": {
-      "description": "Create and install a temporary package to enable package identity during debugging. Requires appxmanifest.xml in current directory or passed via flag. This lets you test Windows APIs and features that require package identity without creating a full MSIX package. Re-run after changing appxmanifest.xml or assets.",
+      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Re-run after changing appxmanifest.xml or Assets/.",
       "hidden": false,
       "arguments": {
         "entrypoint": {
@@ -387,7 +387,7 @@
       }
     },
     "init": {
-      "description": "Set up a new Windows app project. Interactive by default, use --use-defaults to skip prompts. Creates appxmanifest.xml with default assets, generates a devcert.pfx development certificate, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. This is the recommended way to start - it combines what 'manifest generate' and 'cert generate' do individually. For existing projects, use 'restore' to reinstall packages from winapp.yaml.",
+      "description": "Start here for new projects. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK packages. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -538,7 +538,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create a new appxmanifest.xml file. Use this when you need a manifest without running full 'init' setup, or to regenerate a manifest with different settings. Supports packaged apps (full MSIX), sparse packages (desktop app with identity), and hosted apps (scripts running under a host like Python/Node).",
+          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -757,7 +757,7 @@
       }
     },
     "package": {
-      "description": "Build an MSIX installer package from your app's output directory. Combines makeappx packaging with optional code signing. The input folder should contain your compiled app.",
+      "description": "Create MSIX installer from your built app. Run after building your app. Input folder must contain appxmanifest.xml and your compiled files. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --cert ./devcert.pfx",
       "hidden": false,
       "aliases": [
         "pack"
@@ -936,7 +936,7 @@
       }
     },
     "restore": {
-      "description": "Reinstall packages defined in winapp.yaml. Use this after cloning a project or when packages are missing. Requires an existing winapp.yaml file (created by 'init'). Does not update package versions - use 'update' for that.",
+      "description": "Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -999,7 +999,7 @@
       }
     },
     "sign": {
-      "description": "Code-sign a package or executable with a certificate. Use a development certificate for testing, or a trusted certificate for distribution.",
+      "description": "Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.",
       "hidden": false,
       "arguments": {
         "file-path": {
@@ -1086,7 +1086,7 @@
       }
     },
     "tool": {
-      "description": "Execute Windows SDK build tools (makeappx.exe, signtool.exe, makepri.exe, etc.). Automatically downloads and caches Build Tools if not present. Pass the tool name followed by its arguments.",
+      "description": "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix",
       "hidden": false,
       "aliases": [
         "run-buildtool"
@@ -1127,7 +1127,7 @@
       }
     },
     "update": {
-      "description": "Check for newer versions of packages in winapp.yaml and update them. Also refreshes build tools cache. Requires an existing winapp.yaml file (created by 'init'). Use --setup-sdks to control whether to use stable, preview, or experimental SDK versions.",
+      "description": "Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.",
       "hidden": false,
       "options": {
         "--quiet": {

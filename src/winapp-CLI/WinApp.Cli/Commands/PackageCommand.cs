@@ -77,7 +77,7 @@ internal class PackageCommand : Command
     }
 
     public PackageCommand()
-        : base("package", "Build an MSIX installer package from your app's output directory. Combines makeappx packaging with optional code signing. The input folder should contain your compiled app.")
+        : base("package", "Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx")
     {
         Aliases.Add("pack");
         Arguments.Add(InputFolderArgument);

@@ -12,7 +12,7 @@ image assets, test certificates, Windows (App) SDK projections, package identity
 and packaging for any app framework targeting Windows.
 
 Please read and reference the official LLM context documentation:
-https://raw.githubusercontent.com/microsoft/winappCLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 My specific task: [describe what you need help with]
 ```
@@ -33,7 +33,7 @@ and packaging. It works with any app framework targeting Windows.
 ## Documentation Reference
 
 **Primary LLM-optimized documentation (please fetch and reference):**
-https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 This contains:
 - Complete command reference with all options
@@ -42,9 +42,9 @@ This contains:
 - Machine-readable CLI schema
 
 Additional resources if needed:
-- Main README: https://github.com/microsoft/winapp CLI/blob/main/README.md
-- Full usage docs: https://github.com/microsoft/winapp CLI/blob/main/docs/usage.md
-- Electron guide: https://github.com/microsoft/winapp CLI/blob/main/docs/electron-get-started.md
+- Main README: https://github.com/microsoft/WinAppCli/blob/main/README.md
+- Full usage docs: https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md
+- Electron guide: https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md
 
 ## My Project Details
 
@@ -79,16 +79,15 @@ Additional resources if needed:
 
 1. Download the LLM-optimized documentation locally:
    ```bash
-   # Create .ai directory for AI context files
    mkdir -p .ai
-   curl -o .ai/winapp-llm-context.md https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+   curl -o .ai/winapp-llm-context.md https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
    ```
 
 2. Keep the file open in your editor while coding - Copilot will automatically use it as context
 
 3. Optionally, also download the CLI schema for structured data:
    ```bash
-   curl -o .ai/winapp-cli-schema.json https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/cli-schema.json
+   curl -o .ai/winapp-cli-schema.json https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json
    ```
 
 ### Method 2: Project Instructions
@@ -129,8 +128,8 @@ This project uses winapp CLI for Windows app development, packaging, and identit
 - `winapp tool` - Run Windows SDK build tools
 
 ## Documentation Reference
-Primary: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
-Schema: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/cli-schema.json
+Primary: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
+Schema: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json
 
 When helping with winapp CLI tasks:
 1. Reference the llm-context.md for command details and workflows
@@ -150,7 +149,7 @@ I need help with winapp CLI - a CLI for managing appxmanifest.xml,
 image assets, certificates, Windows SDK projections, and MSIX packaging.
 
 Please fetch and reference the LLM-optimized documentation:
-https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 My task: [describe what you need]
 
@@ -173,10 +172,10 @@ I'm building an Electron app and need help with winapp CLI for:
 - [ ] Code signing with certificates
 
 Please reference the LLM-optimized docs:
-https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 Also see Electron-specific guide if needed:
-https://github.com/microsoft/winapp CLI/blob/main/docs/electron-get-started.md
+https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md
 
 My current setup: [describe your Electron project structure]
 My specific need: [e.g., "add push notification support via native addon"]
@@ -198,10 +197,10 @@ I'm building a .NET [WPF/WinForms/Console] app and need winapp CLI help with:
 - [ ] Windows Store preparation
 
 Reference the LLM-optimized docs:
-https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 Framework guide:
-https://github.com/microsoft/winapp CLI/blob/main/docs/guides/dotnet.md
+https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md
 
 My project: [describe your .NET project]
 ```
@@ -221,8 +220,8 @@ I'm building a C++ Win32 app with [CMake/MSBuild] and need winapp CLI for:
 - [ ] MSIX packaging
 - [ ] Manifest generation
 
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
-C++ guide: https://github.com/microsoft/winapp CLI/blob/main/docs/guides/cpp.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
+C++ guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md
 
 My build system: [CMake/MSBuild/other]
 My specific need: [e.g., "integrate Windows App SDK with CMake build"]
@@ -249,15 +248,15 @@ I need to integrate winapp CLI into my [GitHub Actions/Azure DevOps] pipeline fo
 Current pipeline: [describe your CI/CD setup]
 
 Please reference:
-- Setup action: https://github.com/microsoft/setup-winapp CLI
-- LLM docs: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+- Setup action: https://github.com/microsoft/setup-WinAppCli
+- LLM docs: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 
 My specific need: [e.g., "restore packages and build MSIX in GitHub Actions"]
 ```
 
 **Example GitHub Actions workflow:**
 ```yaml
-- uses: microsoft/setup-winapp CLI@v1
+- uses: microsoft/setup-WinAppCli@v1
 - name: Restore winapp CLI packages
   run: winapp restore
 - name: Build app
@@ -274,7 +273,7 @@ My specific need: [e.g., "restore packages and build MSIX in GitHub Actions"]
 ```
 Help me set up a new [framework] project with winapp CLI.
 Run: winapp init . --use-defaults
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Generate manifest only:**
@@ -282,7 +281,7 @@ Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-
 I need to create an appxmanifest.xml for my [framework] app.
 Use: winapp manifest generate
 Project details: [app name, publisher, entry point]
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Add debug identity:**
@@ -290,7 +289,7 @@ Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-
 I need package identity to debug Windows APIs that require it (e.g., push notifications).
 Help me use: winapp create-debug-identity <my-app.exe>
 I have: [appxmanifest.xml location]
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Package as MSIX:**
@@ -298,28 +297,28 @@ Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-
 Help me create a signed MSIX package for distribution.
 App output folder: [path]
 Use: winapp pack [folder] --cert devcert.pfx
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Create development certificate:**
 ```
 Help me generate a test certificate for code signing.
 Use: winapp cert generate --publisher "CN=MyCompany" --install
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Restore from existing project:**
 ```
 I cloned a project with winapp.yaml and need to restore packages.
 Use: winapp restore
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 
 **Update SDK versions:**
 ```
 Help me update to the latest Windows SDK and App SDK versions.
 Use: winapp update --setup-sdks stable
-Reference: https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
 ```
 **Install SDKs after initial setup:**
 ```
@@ -334,7 +333,7 @@ Reference: https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-c
 
 1. **Always reference the LLM-optimized docs** - Include the llm-context.md URL in your prompt:
    ```
-   https://raw.githubusercontent.com/microsoft/winapp CLI/main/docs/llm-context.md
+   https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
    ```
 
 2. **Be specific about your framework** - Electron, .NET, C++, Rust, Python, etc.

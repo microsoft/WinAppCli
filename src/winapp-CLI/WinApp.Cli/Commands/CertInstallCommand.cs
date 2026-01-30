@@ -34,7 +34,7 @@ internal class CertInstallCommand : Command
     }
 
     public CertInstallCommand()
-        : base("install", "Add a certificate to the Trusted People store so Windows trusts packages signed with it. Required before installing MSIX packages signed with development certificates. Needs administrator privileges.")
+        : base("install", "Trust a certificate on this machine (requires admin). Run before installing MSIX packages signed with dev certificates. Example: winapp cert install ./devcert.pfx. Only needed once per certificate.")
     {
         Arguments.Add(CertPathArgument);
         Options.Add(PasswordOption);

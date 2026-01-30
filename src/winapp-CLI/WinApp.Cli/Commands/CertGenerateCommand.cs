@@ -60,7 +60,7 @@ internal class CertGenerateCommand : Command
     }
 
     public CertGenerateCommand()
-        : base("generate", "Create a self-signed development certificate (PFX) for signing for testing. The certificate publisher must match the Publisher in your AppxManifest.xml. Not for production use - obtain a trusted certificate for distribution.")
+        : base("generate", "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.")
     {
         Options.Add(PublisherOption);
         Options.Add(ManifestOption);
