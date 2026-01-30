@@ -1,6 +1,6 @@
 ---
 name: winapp-cli
-description: CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
+description: CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
 version: 0.1.11
 schema_version: 1.0
 ---
