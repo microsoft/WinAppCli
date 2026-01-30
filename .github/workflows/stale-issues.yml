@@ -1,0 +1,54 @@
+name: Close stale issues
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+  workflow_dispatch:     # Allow manual trigger for testing
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          # Only process issues with this label
+          only-issue-labels: 'needs-author-response'
+          
+          # Mark stale after 14 days of no activity
+          days-before-issue-stale: 14
+          
+          # Close 7 days after being marked stale
+          days-before-issue-close: 7
+          
+          # Label to add when marking stale
+          stale-issue-label: 'stale'
+          
+          # Warning message when marking as stale
+          stale-issue-message: >
+            This issue has been automatically marked as stale because it has not had
+            recent activity after requesting information from the author. It will be
+            closed in 7 days if no further activity occurs.
+          
+          # Message when closing
+          close-issue-message: >
+            This issue was closed because it has been stale for 7 days with no activity.
+            Feel free to reopen if you have the requested information.
+          
+          # Remove these labels when issue becomes unstale (any comment/activity)
+          labels-to-remove-when-unstale: 'needs-author-response,stale'
+          
+          # Add this label when issue becomes unstale (author responded)
+          labels-to-add-when-unstale: 'needs-maintainer-response'
+          
+          # Exempt issues with these labels from stale processing
+          exempt-issue-labels: 'exempt-from-stale'
+          
+          # Don't process PRs
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          
+          # Enable for testing - remove this line after verifying behavior
+          # debug-only: true

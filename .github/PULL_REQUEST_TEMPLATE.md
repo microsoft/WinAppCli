@@ -8,34 +8,25 @@
 
 ## Type of Change
 
-<!-- Mark the appropriate option(s) with an "x" -->
+<!-- Keep the applicable line(s), delete the rest -->
 
-- [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
-- [ ] ✨ New feature (non-breaking change that adds functionality)
-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] 📝 Documentation update
-- [ ] 🔧 Configuration/build change
-- [ ] ♻️ Refactoring (no functional changes)
-- [ ] 🧪 Test update
+- 🐛 Bug fix
+- ✨ New feature
+- 💥 Breaking change
+- 📝 Documentation
+- 🔧 Config/build
+- ♻️ Refactoring
+- 🧪 Test update
 
 ## Checklist
+<!-- Delete the ones that do not apply to your changes -->
 
-### Build & Tests
-
-- [ ] All CI builds pass (Build and Package workflow)
-- [ ] All existing tests pass
 - [ ] New tests added for new functionality (if applicable)
 - [ ] Tested locally on Windows
-
-### README & Guides
-
-<!-- Check all that apply to your changes -->
-
 - [ ] Main [README.md](../README.md) updated (if applicable)
 - [ ] [docs/usage.md](../docs/usage.md) updated (if CLI commands changed)
 - [ ] [Language-specific guides](../docs/guides) updated (if applicable)
 - [ ] [Sample projects updated](../samples) to reflect changes (if applicable)
-- [ ] No documentation updates needed
 
 ## Screenshots / Demo
 
