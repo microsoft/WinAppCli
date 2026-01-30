@@ -30,10 +30,11 @@ jobs:
         node-version: '24'
     
     # Run the build script which handles building, testing, versioning, npm packaging, and MSIX bundling
+    # Skip doc generation in CI - we validate the committed docs separately to detect drift
     - name: Build, test, and package
       id: build
       run: |
-        .\scripts\build-cli.ps1
+        .\scripts\build-cli.ps1 -SkipDocs
         
         # Get version information for release tagging
         $versionJson = Get-Content "version.json" | ConvertFrom-Json
@@ -46,7 +47,7 @@ jobs:
         echo "base_version=$baseVersion" >> $env:GITHUB_OUTPUT
         echo "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
     
-    # Validate LLM documentation is up-to-date
+    # Validate LLM documentation is up-to-date (runs after build so CLI binary exists, but docs weren't regenerated)
     - name: Validate LLM documentation
       run: |
         $FailOnDrift = ("${{ github.event_name }}" -eq "pull_request" -and "${{ github.base_ref }}" -eq "main")
