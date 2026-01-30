@@ -72,7 +72,7 @@ Write-Host "[DOCS] Generating llm-context.md..." -ForegroundColor Blue
 $LlmContext = @"
 ---
 name: winapp-cli
-description: CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
+description: $($Schema.description)
 version: $($Schema.version)
 schema_version: $($Schema.schemaVersion)
 ---
