@@ -34,7 +34,7 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 2. `winapp node create-addon --template cs` - Generate native C# addon for Windows APIs (`--template cpp` for C++ addon)
 3. `winapp node add-electron-debug-identity` - Enable identity for debugging
 4. `npm start` to launch app normally, but now with identity
-4. For production, create production files with the preferred packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
+5. For production, create production files with the preferred packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
 
 ## Command Selection Guide
 
