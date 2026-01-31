@@ -192,7 +192,7 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 
 ### New Project Setup
 1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certificate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
-2. Edit `appxmanifest.xml` if need to modify properties, set capabilities, or other configurations
+2. Edit `appxmanifest.xml` if you need to modify properties, set capabilities, or other configurations
 3. Build your app
 4. `winapp create-debug-identity <exe-path>` - to generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
 5. Run the app
@@ -224,7 +224,7 @@ For apps that need Windows APIs requiring identity (push notifications, etc.):
 2. `winapp node create-addon --template cs` - Generate native C# addon for Windows APIs (`--template cpp` for C++ addon)
 3. `winapp node add-electron-debug-identity` - Enable identity for debugging
 4. `npm start` to launch app normally, but now with identity
-4. For production, create production files with the preferred packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
+5. For production, create production files with the preferred packager and run `winapp pack <generated-production-files> --cert .\devcert.pfx`
 
 ## Command Selection Guide
 
