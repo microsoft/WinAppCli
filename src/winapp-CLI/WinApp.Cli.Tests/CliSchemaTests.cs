@@ -59,6 +59,7 @@ public class CliSchemaTests : BaseCommandTests
         // Verify root properties exist
         Assert.IsTrue(root.TryGetProperty("name", out _), "Schema should contain 'name' property");
         Assert.IsTrue(root.TryGetProperty("version", out _), "Schema should contain 'version' property");
+        Assert.IsTrue(root.TryGetProperty("schemaVersion", out _), "Schema should contain 'schemaVersion' property");
         Assert.IsTrue(root.TryGetProperty("description", out _), "Schema should contain 'description' property");
     }
 

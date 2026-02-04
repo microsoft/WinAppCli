@@ -42,13 +42,13 @@ internal class ManifestGenerateCommand : Command
 
         VersionOption = new Option<string>("--version")
         {
-            Description = "Version",
+            Description = "App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0).",
             DefaultValueFactory = (argumentResult) => "1.0.0.0"
         };
 
         DescriptionOption = new Option<string>("--description")
         {
-            Description = "Description",
+            Description = "Human-readable app description shown during installation and in Windows Settings",
             DefaultValueFactory = (argumentResult) => SystemDefaultsHelper.GetDefaultDescription(),
         };
 
@@ -60,7 +60,7 @@ internal class ManifestGenerateCommand : Command
 
         TemplateOption = new Option<ManifestTemplates>("--template")
         {
-            Description = "Generate manifest using specified template",
+            Description = "Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host)",
             DefaultValueFactory = (argumentResult) => ManifestTemplates.Packaged
         };
 
@@ -70,7 +70,7 @@ internal class ManifestGenerateCommand : Command
         };
     }
 
-    public ManifestGenerateCommand() : base("generate", "Generate a manifest in directory")
+    public ManifestGenerateCommand() : base("generate", "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).")
     {
         Arguments.Add(DirectoryArgument);
         Options.Add(PackageNameOption);
