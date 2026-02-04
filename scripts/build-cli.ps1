@@ -14,6 +14,8 @@
     Skip npm package creation
 .PARAMETER SkipMsix
     Skip MSIX packages creation
+.PARAMETER SkipDocs
+    Skip LLM documentation generation (useful in CI where docs are validated separately)
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -34,6 +36,7 @@ param(
     [switch]$FailOnTestFailure = $true,
     [switch]$SkipNpm = $false,
     [switch]$SkipMsix = $false,
+    [switch]$SkipDocs = $false,
     [switch]$Stable = $false
 )
 
@@ -187,7 +190,27 @@ try
         exit 1
     }
 
-    # Step 6: Create npm package (optional)
+    # Step 6: Generate LLM documentation (optional)
+    if (-not $SkipDocs) {
+        Write-Host ""
+        Write-Host "[DOCS] Generating LLM documentation..." -ForegroundColor Blue
+        
+        $GenerateLlmDocsScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
+        $CliExePath = Join-Path $ProjectRoot "$ArtifactsPath\cli\win-x64\winapp.exe"
+        
+        & $GenerateLlmDocsScript -CliPath $CliExePath -CalledFromBuildScript
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "LLM documentation generation failed, but continuing..."
+        } else {
+            Write-Host "[DOCS] LLM documentation generated successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[DOCS] Skipping LLM documentation generation (-SkipDocs)" -ForegroundColor Yellow
+    }
+
+    # Step 7: Create npm package (optional)
     if (-not $SkipNpm) {
         Write-Host ""
         Write-Host "[NPM] Creating npm package..." -ForegroundColor Blue
@@ -206,7 +229,7 @@ try
         Write-Host "[NPM] Skipping npm package creation (use -SkipNpm:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 7: Create MSIX packages (optional)
+    # Step 8: Create MSIX packages (optional)
     if (-not $SkipMsix) {
         Write-Host ""
         Write-Host "[MSIX] Creating MSIX packages..." -ForegroundColor Blue

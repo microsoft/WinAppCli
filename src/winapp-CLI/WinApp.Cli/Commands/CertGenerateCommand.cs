@@ -54,13 +54,13 @@ internal class CertGenerateCommand : Command
         };
         IfExistsOption = new Option<IfExists>("--if-exists")
         {
-            Description = "Skip generation if the file already exists",
+            Description = "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
             DefaultValueFactory = (argumentResult) => IfExists.Error,
         };
     }
 
     public CertGenerateCommand()
-        : base("generate", "Generate a new development certificate")
+        : base("generate", "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.")
     {
         Options.Add(PublisherOption);
         Options.Add(ManifestOption);

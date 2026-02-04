@@ -1,0 +1,25 @@
+# winapp CLI
+
+> CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
+
+winapp helps developers add Windows-specific features (MSIX packaging, push notifications, native APIs) to apps built with any framework—Electron, Tauri, .NET, C++, Rust, or others. It handles the complexity of Windows app identity, code signing, and SDK integration.
+
+## Docs
+
+- [LLM Context](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md): Complete command reference, workflows, and prerequisites for AI assistants
+- [CLI Schema](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json): Machine-readable JSON schema of all commands, options, and types
+- [Usage Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md): Full documentation for humans
+
+## Guides
+
+- [Electron Setup](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md): Setting up Electron apps with Windows features
+- [Electron Packaging](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md): Creating MSIX packages for Electron apps
+- [C++ Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md): Native C++ apps with Windows SDK
+- [.NET Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md): .NET apps with winapp
+- [Rust Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/rust.md): Rust apps with Windows features
+- [Tauri Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/tauri.md): Tauri apps with MSIX packaging
+
+## Optional
+
+- [Copilot Instructions](https://github.com/microsoft/WinAppCli/blob/main/.github/copilot-instructions.md): For AI assistants working on the winapp repo itself
+- [Using with LLMs](https://github.com/microsoft/WinAppCli/blob/main/docs/using-with-llms.md): Prompt templates and integration patterns
