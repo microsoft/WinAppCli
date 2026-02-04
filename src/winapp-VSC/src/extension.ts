@@ -83,90 +83,90 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 		return config;
 	}
 
-	       async resolveDebugConfigurationWithSubstitutedVariables(
-		       folder: vscode.WorkspaceFolder | undefined,
-		       config: vscode.DebugConfiguration,
-		       _token?: vscode.CancellationToken
-	       ): Promise<vscode.DebugConfiguration | undefined> {
-		       if (!folder) {
-			       vscode.window.showErrorMessage('No workspace folder open');
-			       return undefined;
-		       }
+	async resolveDebugConfigurationWithSubstitutedVariables(
+		folder: vscode.WorkspaceFolder | undefined,
+		config: vscode.DebugConfiguration,
+		_token?: vscode.CancellationToken
+	): Promise<vscode.DebugConfiguration | undefined> {
+		if (!folder) {
+			vscode.window.showErrorMessage('No workspace folder open');
+			return undefined;
+		}
 
-		       try {
-			       // Build the command with mapped arguments
-			       const cmdParts: string[] = ['D:\\WinAppCli\\src\\winapp-CLI\\WinApp.Cli\\bin\\Debug\\net10.0-windows\\win-arm64\\winapp.exe', 'run'];
+		try {
+			// Build the command with mapped arguments
+			const cmdParts: string[] = ['D:\\WinAppCli\\src\\winapp-CLI\\WinApp.Cli\\bin\\Debug\\net10.0-windows\\win-arm64\\winapp.exe', 'run'];
 
-			       if (config.manifest) {
-				       cmdParts.push('--manifest', `"${config.manifest}"`);
-			       }
+			if (config.manifest) {
+				cmdParts.push('--manifest', `"${config.manifest}"`);
+			}
 
-				   // Determine the debugger type based on config or default to coreclr
-				   const debuggerType = config.debuggerType || 'coreclr';
+			// Determine the debugger type based on config or default to coreclr
+			const debuggerType = config.debuggerType || 'coreclr';
 
-				   if (debuggerType === 'node') {
-						if (!config.args) {
-							config.args = '';
-						}
-						config.args = '--inspect' + (config.port ? `=${config.port}` : '') + ' ' + config.args;
-				   }
+			if (debuggerType === 'node') {
+				if (!config.args) {
+					config.args = '';
+				}
+				config.args = '--inspect' + (config.port ? `=${config.port}` : '') + ' ' + config.args;
+			}
 
-			       if (config.args) {
-				       cmdParts.push('--args', `"${config.args}"`);
-			       }
+			if (config.args) {
+				cmdParts.push('--args', `"${config.args}"`);
+			}
 
-			       const command = cmdParts.join(' ');
+			const command = cmdParts.join(' ');
 
-			       // Run "winapp run" which returns the process ID
-			       const processId = await vscode.window.withProgress({
-				       location: vscode.ProgressLocation.Notification,
-				       title: 'Launching package...',
-				       cancellable: false
-			       }, async (progress) => {
-				       progress.report({ message: 'Running winapp run...' });
+			// Run "winapp run" which returns the process ID
+			const processId = await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'Launching package...',
+				cancellable: false
+			}, async (progress) => {
+				progress.report({ message: 'Running winapp run...' });
 
-					   let cwd = folder.uri.fsPath;
-					   if (config.workingDirectory) {
-						   cwd = config.workingDirectory;
-					   }
+				let cwd = folder.uri.fsPath;
+				if (config.workingDirectory) {
+					cwd = config.workingDirectory;
+				}
 
-				       const { stdout, stderr } = await execAsync(command, { cwd });
+				const { stdout, stderr } = await execAsync(command, { cwd });
 
-				       if (stderr) {
-					       console.warn('winapp run stderr:', stderr);
-				       }
+				if (stderr) {
+					console.warn('winapp run stderr:', stderr);
+				}
 
-				       const pid = parseProcessId(stdout);
-				       if (!pid) {
-					       throw new Error(`Could not parse process ID from winapp run output: ${stdout}`);
-				       }
+				const pid = parseProcessId(stdout);
+				if (!pid) {
+					throw new Error(`Could not parse process ID from winapp run output: ${stdout}`);
+				}
 
-				       return pid;
-			       });
+				return pid;
+			});
 
-				   // define debugConfiguration using vscode.DebugConfiguration type
-				   var debugConfiguration = {
-					   type: debuggerType,
-					   name: config.name || 'Attach to WinApp Package',
-					   request: 'attach'
-					} as vscode.DebugConfiguration;
+			// define debugConfiguration using vscode.DebugConfiguration type
+			var debugConfiguration = {
+				type: debuggerType,
+				name: config.name || 'Attach to WinApp Package',
+				request: 'attach'
+			} as vscode.DebugConfiguration;
 
-					// if debuggerType is 'node', use port from config or default to 9229
-					if (debuggerType === 'node') {
-						debugConfiguration.port = config.port || 9229;
-					}else{
-						// for other debugger types, set processId in config
-						debugConfiguration.processId = processId;
-					}
-			       // Start the child debug session and return undefined so VS Code doesn't try to start a debug adapter for 'winapp'
-			       await vscode.debug.startDebugging(folder, debugConfiguration);
-			       return undefined;
-		       } catch (error) {
-			       const message = error instanceof Error ? error.message : String(error);
-			       vscode.window.showErrorMessage(`Failed to launch and attach: ${message}`);
-			       return undefined;
-		       }
-	       }
+			// if debuggerType is 'node', use port from config or default to 9229
+			if (debuggerType === 'node') {
+				debugConfiguration.port = config.port || 9229;
+			} else {
+				// for other debugger types, set processId in config
+				debugConfiguration.processId = processId;
+			}
+			// Start the child debug session and return undefined so VS Code doesn't try to start a debug adapter for 'winapp'
+			await vscode.debug.startDebugging(folder, debugConfiguration);
+			return undefined;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Failed to launch and attach: ${message}`);
+			return undefined;
+		}
+	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -180,7 +180,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.init', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const sdkMode = await vscode.window.showQuickPick(
 				['stable', 'preview', 'experimental', 'none'],
@@ -200,7 +202,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.restore', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			await runWinappCommand('restore', workspacePath);
 		})
@@ -210,7 +214,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.update', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const sdkMode = await vscode.window.showQuickPick(
 				['stable', 'preview', 'experimental'],
@@ -230,10 +236,14 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.pack', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const inputFolder = await selectFolder('Select input folder to package');
-			if (!inputFolder) return;
+			if (!inputFolder) {
+				return;
+			}
 
 			const generateCert = await vscode.window.showQuickPick(
 				['Yes', 'No'],
@@ -261,7 +271,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.run', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			await runWinappCommand('run', workspacePath);
 		})
@@ -271,8 +283,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.createDebugIdentity', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
-
+			if (!workspacePath) {
+				return;
+			}
 			const entrypoint = await selectFile('Select executable or script', {
 				'Executables': ['exe'],
 				'Scripts': ['py', 'js'],
@@ -292,7 +305,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.manifestGenerate', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const template = await vscode.window.showQuickPick(
 				['packaged', 'sparse', 'hostedapp'],
@@ -312,7 +327,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.manifestUpdateAssets', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const imagePath = await selectFile('Select source image for assets', {
 				'Images': ['png', 'jpg', 'jpeg', 'gif', 'bmp']
@@ -331,7 +348,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.certGenerate', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const install = await vscode.window.showQuickPick(
 				['Yes', 'No'],
@@ -351,7 +370,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.certInstall', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const certPath = await selectFile('Select certificate to install', {
 				'Certificates': ['pfx', 'cer']
@@ -370,7 +391,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.sign', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const filePath = await selectFile('Select file to sign', {
 				'MSIX Packages': ['msix', 'appx'],
@@ -400,14 +423,18 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.tool', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const toolName = await vscode.window.showQuickPick(
 				['makeappx', 'signtool', 'mt', 'makepri'],
 				{ placeHolder: 'Select Windows SDK tool' }
 			);
 
-			if (!toolName) return;
+			if (!toolName) {
+				return;
+			}
 
 			const args = await vscode.window.showInputBox({
 				prompt: `Enter arguments for ${toolName}`,
@@ -427,7 +454,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.getWinappPath', async () => {
 			const workspacePath = getWorkspacePath();
-			if (!workspacePath) return;
+			if (!workspacePath) {
+				return;
+			}
 
 			const global = await vscode.window.showQuickPick(
 				['Local (.winapp in workspace)', 'Global (shared cache)'],
@@ -477,4 +506,5 @@ function parseProcessId(output: string): number | undefined {
 	return undefined;
 }
 
-export function deactivate() {}
+export function deactivate() {
+}
