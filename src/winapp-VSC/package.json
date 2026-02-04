@@ -1,19 +1,99 @@
 {
   "name": "winapp",
   "displayName": "WinApp",
-  "description": "",
+  "description": "WinApp extension for Visual Studio Code to assist in building, debugging, and packaging Windows applications using the WinAppCLI.",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.107.0"
+    "vscode": "^1.108.1"
   },
   "categories": [
     "Other"
   ],
   "activationEvents": [
-    "onDebug"
+    "onDebug",
+    "onCommand:winapp.init",
+    "onCommand:winapp.restore",
+    "onCommand:winapp.update",
+    "onCommand:winapp.pack",
+    "onCommand:winapp.run",
+    "onCommand:winapp.createDebugIdentity",
+    "onCommand:winapp.manifestGenerate",
+    "onCommand:winapp.manifestUpdateAssets",
+    "onCommand:winapp.certGenerate",
+    "onCommand:winapp.certInstall",
+    "onCommand:winapp.sign",
+    "onCommand:winapp.tool",
+    "onCommand:winapp.getWinappPath"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "winapp.init",
+        "title": "WinApp: Initialize Project",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.restore",
+        "title": "WinApp: Restore Packages",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.update",
+        "title": "WinApp: Update Packages",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.pack",
+        "title": "WinApp: Create MSIX Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.run",
+        "title": "WinApp: Run Application",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.createDebugIdentity",
+        "title": "WinApp: Create Debug Identity",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestGenerate",
+        "title": "WinApp: Generate Manifest",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestUpdateAssets",
+        "title": "WinApp: Update Manifest Assets",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certGenerate",
+        "title": "WinApp: Generate Certificate",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certInstall",
+        "title": "WinApp: Install Certificate",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.sign",
+        "title": "WinApp: Sign Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.tool",
+        "title": "WinApp: Run SDK Tool",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.getWinappPath",
+        "title": "WinApp: Get WinApp Path",
+        "category": "WinApp"
+      }
+    ],
     "debuggers": [
       {
         "type": "winapp",
@@ -72,11 +152,11 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.107.0",
+    "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.48.1",
-    "eslint": "^9.39.1",
+    "typescript-eslint": "^8.54.0",
+    "eslint": "^9.39.2",
     "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2"
