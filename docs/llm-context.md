@@ -92,7 +92,7 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp manifest`
 
-Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, or 'manifest update-assets' to regenerate app icons from a source image.
+Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, 'manifest update-assets' to regenerate app icons from a source image, or 'manifest validate' to check if a manifest is valid.
 
 #### `winapp manifest generate`
 
@@ -122,6 +122,17 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 
 **Options:**
 - `--manifest` - Path to AppxManifest.xml file (default: search current directory)
+- `--quiet` / `-q` - Suppress progress messages
+- `--verbose` / `-v` - Enable verbose output
+
+#### `winapp manifest validate`
+
+Validate an AppxManifest.xml file against the schema
+
+**Arguments:**
+- `<manifest-path>` *(required)* - Path to AppxManifest.xml or Package.appxmanifest file to validate
+
+**Options:**
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp package`

@@ -534,7 +534,7 @@
       }
     },
     "manifest": {
-      "description": "Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, or 'manifest update-assets' to regenerate app icons from a source image.",
+      "description": "Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, 'manifest update-assets' to regenerate app icons from a source image, or 'manifest validate' to check if a manifest is valid.",
       "hidden": false,
       "subcommands": {
         "generate": {
@@ -720,6 +720,57 @@
               "required": false,
               "recursive": false
             },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "validate": {
+          "description": "Validate an AppxManifest.xml file against the schema",
+          "hidden": false,
+          "arguments": {
+            "manifest-path": {
+              "description": "Path to AppxManifest.xml or Package.appxmanifest file to validate",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.IO.FileInfo",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
             "--quiet": {
               "description": "Suppress progress messages",
               "hidden": false,
