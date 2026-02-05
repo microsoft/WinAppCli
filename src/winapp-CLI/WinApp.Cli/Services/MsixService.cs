@@ -446,6 +446,18 @@ internal partial class MsixService(
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
+        // Copy all assets
+        var filesCopied = await CopyAllAssetsAsync(appxManifestPath, null, outputAppXDirectory, taskContext, cancellationToken);
+        if (filesCopied == 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} No assets were copied from the original manifest directory. Trying to copy from the current directory instead.");
+            filesCopied = await CopyAllAssetsAsync(appxManifestPath, currentDirectoryProvider.GetCurrentDirectoryInfo(), outputAppXDirectory, taskContext, cancellationToken);
+            if (filesCopied == 0)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} No assets were copied from the current directory either. Please ensure that any referenced assets in the manifest are present in the output directory.");
+            }
+        }
+
         var identity = ParseAppxManifestAsync(manifestContent);
 
         // Unregister any existing package first
@@ -869,7 +881,7 @@ internal partial class MsixService(
         if (!inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
             .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
         {
-            await CopyAllAssetsAsync(resolvedManifestPath, inputFolder, taskContext, cancellationToken);
+            await CopyAllAssetsAsync(resolvedManifestPath, null, inputFolder, taskContext, cancellationToken);
         }
 
         taskContext.AddDebugMessage($"Creating MSIX package from: {inputFolder.FullName}");
@@ -1351,7 +1363,7 @@ internal partial class MsixService(
         if (!string.IsNullOrEmpty(entryPointDir))
         {
             var entryPointDirInfo = new DirectoryInfo(entryPointDir);
-            await CopyAllAssetsAsync(originalManifestPath, entryPointDirInfo, taskContext, cancellationToken);
+            await CopyAllAssetsAsync(originalManifestPath, null, entryPointDirInfo, taskContext, cancellationToken);
         }
 
         return (debugManifestPath, debugIdentity);
@@ -1736,35 +1748,38 @@ $1");
     /// <summary>
     /// Copies files referenced in the manifest to the target directory
     /// </summary>
-    private static async Task CopyAllAssetsAsync(FileInfo manifestPath, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
+    private static async Task<int> CopyAllAssetsAsync(FileInfo manifestPath, DirectoryInfo? manifestRelativeDirectory, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var originalManifestDir = manifestPath.DirectoryName;
 
         if (string.Equals(originalManifestDir, targetDir.FullName, StringComparison.OrdinalIgnoreCase))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
-            return;
+            return 0;
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Copying manifest-referenced files from: {originalManifestDir}");
 
-        var filesCopied = await CopyManifestReferencedFilesAsync(manifestPath, targetDir, taskContext, cancellationToken);
+        manifestRelativeDirectory ??= manifestPath.Directory;
+        if (manifestRelativeDirectory == null)
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest directory not found for: {manifestPath}");
+            return 0;
+        }
+
+        var filesCopied = await CopyManifestReferencedFilesAsync(manifestPath, manifestRelativeDirectory, targetDir, taskContext, cancellationToken);
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
+
+        return filesCopied;
     }
 
     /// <summary>
     /// Copies files that are referenced in the manifest using regex pattern matching
     /// </summary>
-    private static async Task<int> CopyManifestReferencedFilesAsync(FileInfo manifestPath, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
+    private static async Task<int> CopyManifestReferencedFilesAsync(FileInfo manifestPath, DirectoryInfo manifestRelativeDirectory, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var filesCopied = 0;
-        var manifestDir = manifestPath.Directory;
-        if (manifestDir == null)
-        {
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest directory not found for: {manifestPath}");
-            return filesCopied;
-        }
 
         // Read the manifest content
         var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
@@ -1869,7 +1884,7 @@ $1");
         // Copy MRT variants for each referenced file
         foreach (var relativeFilePath in referencedFiles)
         {
-            var logicalSourceFile = new FileInfo(Path.Combine(manifestDir.FullName, relativeFilePath));
+            var logicalSourceFile = new FileInfo(Path.Combine(manifestRelativeDirectory.FullName, relativeFilePath));
             var sourceDir = logicalSourceFile.Directory;
 
             if (sourceDir is null || !sourceDir.Exists)

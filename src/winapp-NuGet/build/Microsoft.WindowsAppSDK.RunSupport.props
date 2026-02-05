@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft.WindowsAppSDK.RunSupport.props
+  
+  This file is imported early in the build process and sets up default properties
+  for packaged WinUI/WinAppSDK application support.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <!--
+      WinAppCLI tool path - set to the bundled CLI in the NuGet package.
+      The CLI is located in the tools folder, with architecture-specific subfolders.
+    -->
+    <WinAppCliToolsPath>$(MSBuildThisFileDirectory)..\tools\</WinAppCliToolsPath>
+    
+    <!-- 
+      Determine the correct architecture for the CLI tool.
+      Default to x64 if processor architecture is not ARM64.
+    -->
+    <WinAppCliArch Condition="'$(PROCESSOR_ARCHITECTURE)' == 'ARM64' Or '$(PROCESSOR_ARCHITEW6432)' == 'ARM64'">win-arm64</WinAppCliArch>
+    <WinAppCliArch Condition="'$(WinAppCliArch)' == ''">win-x64</WinAppCliArch>
+    
+    <!-- Full path to the winapp.exe CLI tool -->
+    <WinAppCliPath Condition="'$(WinAppCliPath)' == ''">$(WinAppCliToolsPath)$(WinAppCliArch)\winapp.exe</WinAppCliPath>
+    
+    <!--
+      Enable or disable the run support functionality.
+      Set to false in your project to disable this package's behavior.
+    -->
+    <EnableWinAppRunSupport Condition="'$(EnableWinAppRunSupport)' == ''">true</EnableWinAppRunSupport>
+    
+    <!--
+      Additional arguments to pass to the application on launch.
+    -->
+    <WinAppLaunchArgs Condition="'$(WinAppLaunchArgs)' == ''"></WinAppLaunchArgs>
+  </PropertyGroup>
+
+</Project>

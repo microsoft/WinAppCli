@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft.WindowsAppSDK.RunSupport.targets
+  
+  This file provides MSBuild targets that enable 'dotnet run' for packaged
+  WinUI and Windows App SDK applications.
+  
+  Key targets:
+  - _WinAppValidateRunSupport: Validates prerequisites and detects packaged apps
+  - _WinAppPrepareLooseLayout: Prepares the loose-layout package for debugging
+  - RunPackagedWinAppSdkApp: Runs the packaged application via the WinAppCLI
+  
+  Integration point:
+  - Hooks into the Run target to intercept 'dotnet run' for packaged apps
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!--
+    ============================================================================
+    Property refinement after package resolution
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <!-- 
+      Refine IsPackagedWinAppSdkApp detection.
+      We check for WindowsAppSDK package reference and manifest presence.
+    -->
+    <_HasWindowsAppSdkReference>false</_HasWindowsAppSdkReference>
+    
+    <!--
+      Output directory for the loose-layout AppX package.
+      Defaults to AppX subfolder in the output directory.
+      This is set here (in targets) because $(OutputPath) is not available in props.
+    -->
+    <WinAppLooseLayoutPath Condition="'$(WinAppLooseLayoutPath)' == ''">$(OutputPath)AppX\</WinAppLooseLayoutPath>
+    
+    <!--
+      Path to the AppxManifest.xml file.
+      Auto-detected from output directory first, then project directory.
+      This is set here (in targets) because $(OutputPath) is not available in props.
+    -->
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
+    
+    <!--
+      Detect if this is a packaged app based on manifest presence.
+      This will be refined in _WinAppDetectPackagedApp target after checking for WindowsAppSDK reference.
+    -->
+    <IsPackagedWinAppSdkApp Condition="'$(IsPackagedWinAppSdkApp)' == '' And '$(WinAppManifestPath)' != ''">true</IsPackagedWinAppSdkApp>
+    <IsPackagedWinAppSdkApp Condition="'$(IsPackagedWinAppSdkApp)' == ''">false</IsPackagedWinAppSdkApp>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    _WinAppDetectPackagedApp Target
+    
+    Runs early to detect if this project is a packaged WinAppSDK application.
+    ============================================================================
+  -->
+  <Target Name="_WinAppDetectPackagedApp" 
+          BeforeTargets="Build;Run"
+          Condition="'$(EnableWinAppRunSupport)' == 'true'">
+    
+    <!-- Check for WindowsAppSDK package reference -->
+    <PropertyGroup>
+      <_HasWindowsAppSdkReference Condition="'@(PackageReference->WithMetadataValue('Identity', 'Microsoft.WindowsAppSDK'))' != ''">true</_HasWindowsAppSdkReference>
+    </PropertyGroup>
+    
+    <!-- Final packaged app detection -->
+    <PropertyGroup>
+      <IsPackagedWinAppSdkApp Condition="'$(IsPackagedWinAppSdkApp)' == 'true' And '$(_HasWindowsAppSdkReference)' == 'true'">true</IsPackagedWinAppSdkApp>
+      <IsPackagedWinAppSdkApp Condition="'$(WinAppManifestPath)' == '' Or '$(_HasWindowsAppSdkReference)' != 'true'">false</IsPackagedWinAppSdkApp>
+    </PropertyGroup>
+    
+    <Message Condition="'$(IsPackagedWinAppSdkApp)' == 'true'" 
+             Text="[WinAppRunSupport] Detected packaged WinAppSDK application" 
+             Importance="normal" />
+    <Message Condition="'$(IsPackagedWinAppSdkApp)' == 'true'" 
+             Text="[WinAppRunSupport] Manifest: $(WinAppManifestPath)" 
+             Importance="normal" />
+  </Target>
+
+  <!--
+    ============================================================================
+    _WinAppValidateRunSupport Target
+    
+    Validates that all prerequisites are met for running the packaged app.
+    ============================================================================
+  -->
+  <Target Name="_WinAppValidateRunSupport"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'">
+    
+    <!-- Validate CLI tool exists -->
+    <Error Condition="!Exists('$(WinAppCliPath)')"
+           Text="[WinAppRunSupport] WinAppCLI tool not found at '$(WinAppCliPath)'. The NuGet package may be corrupted." />
+    
+    <!-- Validate manifest exists -->
+    <Error Condition="'$(WinAppManifestPath)' != '' And !Exists('$(WinAppManifestPath)')"
+           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure appxmanifest.xml exists in your project directory." />
+    
+    <Message Text="[WinAppRunSupport] Using CLI: $(WinAppCliPath)" Importance="normal" />
+    <Message Text="[WinAppRunSupport] Loose layout path: $(WinAppLooseLayoutPath)" Importance="normal" />
+  </Target>
+
+  <!--
+    ============================================================================
+    RunPackagedWinAppSdkApp Target
+    
+    The main target that runs the packaged application.
+    This target:
+    1. Invokes the WinAppCLI 'run' command
+    2. The CLI handles debug identity registration and app launch
+    ============================================================================
+  -->
+  <Target Name="RunPackagedWinAppSdkApp"
+          DependsOnTargets="_WinAppValidateRunSupport"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'">
+    
+    <PropertyGroup>
+      <!-- Build the CLI command arguments -->
+      <_WinAppRunArgs>run --no-build</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppManifestPath)' != ''">$(_WinAppRunArgs) --manifest "$(WinAppManifestPath)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppLooseLayoutPath)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(WinAppLooseLayoutPath)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
+    </PropertyGroup>
+    
+    <Message Text="[WinAppRunSupport] Launching packaged application..." Importance="high" />
+    <Message Text="[WinAppRunSupport] Command: &quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)" Importance="normal" />
+    
+    <!-- Execute the CLI to run the packaged app -->
+    <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="false"
+          ConsoleToMSBuild="false">
+      <Output TaskParameter="ExitCode" PropertyName="_WinAppRunExitCode" />
+    </Exec>
+    
+    <Message Condition="'$(_WinAppRunExitCode)' == '0'" 
+             Text="[WinAppRunSupport] Application launched successfully" 
+             Importance="high" />
+    <Error Condition="'$(_WinAppRunExitCode)' != '0'"
+           Text="[WinAppRunSupport] Failed to launch application (exit code: $(_WinAppRunExitCode))" />
+  </Target>
+
+  <!--
+    ============================================================================
+    Run Target Override
+    
+    This hooks into the standard Run target used by 'dotnet run'.
+    For packaged apps, we redirect to our custom RunPackagedWinAppSdkApp target.
+    For unpackaged apps, the default behavior continues normally.
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <!-- 
+      For packaged apps, we need to intercept the run and use our custom runner.
+      We set RunCommand to our handler that will invoke the CLI.
+    -->
+    <_OriginalRunCommand>$(RunCommand)</_OriginalRunCommand>
+  </PropertyGroup>
+
+  <!--
+    Override the ComputeRunArguments target from Microsoft.NET.Sdk.targets.
+    This is the official extensibility point for customizing 'dotnet run'.
+    For packaged apps, this sets RunCommand to use our CLI-based launcher.
+  -->
+  <Target Name="_WinAppPrepareRunArguments"
+          BeforeTargets="ComputeRunArguments"
+          DependsOnTargets="_WinAppDetectPackagedApp;_WinAppValidateRunSupport">
+    
+    <!-- 
+      For packaged WinAppSDK apps, override RunCommand to use our CLI runner.
+      The CLI will handle debug identity and launch.
+    -->
+    <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'">
+      <RunCommand>$(WinAppCliPath)</RunCommand>
+      <!-- Remove trailing backslash from paths to avoid escaping the closing quote -->
+      <_WinAppManifestPathArg>$(WinAppManifestPath.TrimEnd('\'))</_WinAppManifestPathArg>
+      <_WinAppLooseLayoutPathArg>$(WinAppLooseLayoutPath.TrimEnd('\'))</_WinAppLooseLayoutPathArg>
+      <RunArguments>run --no-build --manifest "$(_WinAppManifestPathArg)" --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</RunArguments>
+      <RunArguments Condition="'$(WinAppLaunchArgs)' != ''">$(RunArguments) --args "$(WinAppLaunchArgs)"</RunArguments>
+      <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+    </PropertyGroup>
+    
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'"
+             Text="[WinAppRunSupport] Intercepted 'dotnet run' for packaged app" Importance="high" />
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'"
+             Text="[WinAppRunSupport] RunCommand: $(RunCommand)" Importance="normal" />
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(IsPackagedWinAppSdkApp)' == 'true'"
+             Text="[WinAppRunSupport] RunArguments: $(RunArguments)" Importance="normal" />
+  </Target>
+
+  <!--
+    ============================================================================
+    Debugging Support
+    
+    Target to help with debugging and diagnostics.
+    ============================================================================
+  -->
+  <Target Name="WinAppRunSupportInfo">
+    <Message Text="=== WinApp Run Support Information ===" Importance="high" />
+    <Message Text="EnableWinAppRunSupport: $(EnableWinAppRunSupport)" Importance="high" />
+    <Message Text="IsPackagedWinAppSdkApp: $(IsPackagedWinAppSdkApp)" Importance="high" />
+    <Message Text="WinAppCliPath: $(WinAppCliPath)" Importance="high" />
+    <Message Text="WinAppCliArch: $(WinAppCliArch)" Importance="high" />
+    <Message Text="WinAppManifestPath: $(WinAppManifestPath)" Importance="high" />
+    <Message Text="WinAppLooseLayoutPath: $(WinAppLooseLayoutPath)" Importance="high" />
+    <Message Text="HasWindowsAppSdkReference: $(_HasWindowsAppSdkReference)" Importance="high" />
+    <Message Text="======================================" Importance="high" />
+  </Target>
+
+</Project>

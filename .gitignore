@@ -212,3 +212,4 @@ devcert.pfx
 /src/winapp-GUI/winapp-GUI/BundleArtifacts
 /src/winapp-GUI/winapp-GUI/Properties/PublishProfiles
 /src/winapp-GUI/winapp-GUI/winapp-GUI.csproj
+/src/winapp-NuGet/tools

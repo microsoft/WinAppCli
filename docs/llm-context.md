@@ -158,6 +158,17 @@ Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK pack
 - `--config-dir` - Directory to read configuration from (default: current directory)
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
+### `winapp run`
+
+Create debug identity and launch the packaged application. Returns the process ID for debugger attachment.
+
+**Options:**
+- `--args` - Command-line arguments to pass to the application
+- `--manifest` - Path to the appxmanifest.xml
+- `--no-build` - Skip the build step before launching
+- `--output-appx-directory` - Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.
+- `--quiet` / `-q` - Suppress progress messages
+- `--verbose` / `-v` - Enable verbose output
 ### `winapp sign`
 
 Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.

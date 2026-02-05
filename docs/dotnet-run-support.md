@@ -1,0 +1,255 @@
+# dotnet run Support for Packaged WinUI Apps
+
+This document describes the implementation of `dotnet run` support for packaged WinUI applications using a custom NuGet package.
+
+## Overview
+
+The solution enables developers to run packaged WinUI (WinAppSDK) applications using just the .NET CLI:
+
+```bash
+dotnet new winui
+dotnet run
+```
+
+## Architecture
+
+### Components
+
+1. **Microsoft.WindowsAppSDK.RunSupport** (NuGet Package)
+   - Contains the WinAppCLI binary in `tools/` folder
+   - Provides MSBuild targets that hook into `dotnet run`
+   - Automatically detects packaged WinUI apps and handles launch
+
+2. **Microsoft.WindowsAppSDK.Templates** (NuGet Package)
+   - Provides `dotnet new winui` template
+   - Pre-configured with RunSupport package reference
+   - Mirrors Visual Studio WinUI template structure
+
+3. **WinAppCLI**
+   - Handles debug identity registration
+   - Launches packaged apps via Windows Application Activation Manager
+
+### How It Works
+
+```
+dotnet run
+    │
+    ▼
+MSBuild Build Target
+    │
+    ▼
+_WinAppDetectPackagedApp (detects Package.appxmanifest + WindowsAppSDK)
+    │
+    ▼
+_WinAppInterceptRun (overrides RunCommand with CLI path)
+    │
+    ▼
+Run Target (invokes: winapp run --no-build --manifest ...)
+    │
+    ▼
+WinAppCLI
+    ├── Creates loose-layout package
+    ├── Registers debug identity
+    └── Launches via Application Activation Manager
+```
+
+## File Structure
+
+```
+src/
+├── winapp-NuGet/                           # RunSupport NuGet package
+│   ├── Microsoft.WindowsAppSDK.RunSupport.csproj
+│   ├── README.md
+│   ├── build/
+│   │   ├── Microsoft.WindowsAppSDK.RunSupport.props
+│   │   └── Microsoft.WindowsAppSDK.RunSupport.targets
+│   ├── buildMultiTargeting/
+│   │   ├── Microsoft.WindowsAppSDK.RunSupport.props
+│   │   └── Microsoft.WindowsAppSDK.RunSupport.targets
+│   └── tools/                              # CLI binaries (copied by build script)
+│       ├── win-x64/
+│       └── win-arm64/
+│
+├── winapp-Templates/                       # Templates NuGet package
+│   ├── Microsoft.WindowsAppSDK.Templates.csproj
+│   ├── README.md
+│   └── templates/
+│       └── winui/                          # WinUI app template
+│           ├── .template.config/
+│           │   └── template.json
+│           ├── WinUIApp1.csproj
+│           ├── App.xaml
+│           ├── App.xaml.cs
+│           ├── MainWindow.xaml
+│           ├── MainWindow.xaml.cs
+│           ├── app.manifest
+│           ├── Package.appxmanifest
+│           ├── Properties/
+│           └── Assets/
+│
+samples/
+└── winui-app/                              # Sample WinUI app for testing
+```
+
+## MSBuild Integration Details
+
+### Properties (Microsoft.WindowsAppSDK.RunSupport.props)
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
+| `WinAppManifestPath` | Auto-detected | Path to the AppxManifest file |
+| `WinAppLooseLayoutPath` | `$(OutputPath)AppX\` | Output directory for loose-layout package |
+| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
+| `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
+
+### Targets (Microsoft.WindowsAppSDK.RunSupport.targets)
+
+| Target | Description |
+|--------|-------------|
+| `_WinAppDetectPackagedApp` | Detects if project is a packaged WinAppSDK app |
+| `_WinAppValidateRunSupport` | Validates prerequisites (CLI exists, manifest exists) |
+| `_WinAppInterceptRun` | Overrides RunCommand to use CLI |
+| `RunPackagedWinAppSdkApp` | Direct target to run packaged app |
+| `WinAppRunSupportInfo` | Diagnostic target showing all properties |
+
+### Detection Logic
+
+The package detects a packaged WinUI app when:
+1. A manifest file exists: `Package.appxmanifest`, `appxmanifest.xml`, or `AppxManifest.xml`
+2. The project references `Microsoft.WindowsAppSDK` package
+
+## Build Scripts
+
+### package-nuget.ps1
+
+Creates both NuGet packages:
+
+```powershell
+.\scripts\package-nuget.ps1                    # Prerelease version
+.\scripts\package-nuget.ps1 -Version 1.0.0 -Stable  # Stable version
+```
+
+### Integration with build-cli.ps1
+
+The main build script now includes NuGet packaging:
+
+```powershell
+.\scripts\build-cli.ps1                        # Full build including NuGet
+.\scripts\build-cli.ps1 -SkipNuGet             # Skip NuGet packages
+```
+
+## Usage
+
+### Installing the Template
+
+```bash
+# From local build
+dotnet nuget add source "path/to/artifacts/nuget" --name WinAppLocal
+dotnet new install Microsoft.WindowsAppSDK.Templates::1.0.0-test --nuget-source WinAppLocal
+
+# From NuGet.org (when published)
+dotnet new install Microsoft.WindowsAppSDK.Templates
+```
+
+### Creating and Running a WinUI App
+
+```bash
+dotnet new winui -n MyApp
+cd MyApp
+dotnet run
+```
+
+### Customization
+
+Disable run support for a project:
+```xml
+<PropertyGroup>
+  <EnableWinAppRunSupport>false</EnableWinAppRunSupport>
+</PropertyGroup>
+```
+
+Specify manifest path:
+```xml
+<PropertyGroup>
+  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\appxmanifest.xml</WinAppManifestPath>
+</PropertyGroup>
+```
+
+Pass launch arguments:
+```xml
+<PropertyGroup>
+  <WinAppLaunchArgs>--debug --verbose</WinAppLaunchArgs>
+</PropertyGroup>
+```
+
+## Outstanding Production Blockers
+
+### 1. CLI AOT Build Issues (BLOCKING)
+
+The CLI currently has NativeAOT compilation errors related to Newtonsoft.Json and NuGet.Protocol. These must be resolved before the NuGet package can include the CLI binaries.
+
+**Error summary:**
+- 146 trim/AOT analysis errors
+- Related to reflection-heavy code in Newtonsoft.Json
+- Related to dynamic code generation in NuGet.Protocol
+
+**Resolution options:**
+- Switch to System.Text.Json (preferred for AOT)
+- Add TrimmerRootDescriptor entries for problematic types
+- Disable PublishAot for CLI when building for NuGet distribution
+
+### 2. Template Certificate Generation
+
+The template creates projects without development certificates. Users will need to:
+- Run `winapp init` to generate certificates, OR
+- Use unpackaged mode first, OR
+- Add certificate generation to the template post-action
+
+### 3. Developer Mode Requirement
+
+Running packaged apps requires Developer Mode enabled on Windows. The solution should:
+- Detect when Developer Mode is disabled
+- Provide clear error messages
+- Consider documenting this requirement prominently
+
+### 4. First-run Experience
+
+On first `dotnet run`, the CLI needs to:
+- Download Windows SDK Build Tools (if not cached)
+- This can take time on slow connections
+
+Consider pre-caching or documenting this.
+
+### 5. Platform Detection
+
+The current implementation defaults to x64. For ARM64 machines, the targets correctly detect architecture, but the template's default Platform may need adjustment.
+
+## Testing
+
+### Local Testing (without published NuGet)
+
+The sample project imports the MSBuild targets directly:
+
+```xml
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.WindowsAppSDK.RunSupport.props" />
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.WindowsAppSDK.RunSupport.targets" />
+```
+
+### Diagnostic Commands
+
+```bash
+# Show MSBuild property values
+dotnet msbuild -t:WinAppRunSupportInfo
+
+# Verbose build output
+dotnet run -v:detailed
+```
+
+## Future Enhancements
+
+1. **Hot Reload Support**: Integrate with `dotnet watch` for live reloading
+2. **Debug Attachment**: Return process ID for debugger attachment in IDEs
+3. **Unpackaged Mode**: Auto-detect and use unpackaged mode when appropriate
+4. **Certificate Management**: Template could include cert generation post-action
+5. **Multiple Apps**: Support projects with multiple Application entries in manifest

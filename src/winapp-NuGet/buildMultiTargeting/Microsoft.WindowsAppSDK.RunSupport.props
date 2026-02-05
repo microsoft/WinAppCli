@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft.WindowsAppSDK.RunSupport.props (Multi-Targeting)
+  
+  This file is imported for multi-targeting projects.
+  It imports the main props file.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\build\Microsoft.WindowsAppSDK.RunSupport.props" />
+</Project>

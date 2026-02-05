@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- This is a package-only project that produces a NuGet package with MSBuild targets and tools -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <NoBuild>true</NoBuild>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    
+    <!-- NuGet Package Metadata -->
+    <PackageId>Microsoft.WindowsAppSDK.RunSupport</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Microsoft</Authors>
+    <Company>Microsoft Corporation</Company>
+    <Product>Windows App SDK Run Support</Product>
+    <Description>Enables 'dotnet run' for packaged WinUI and Windows App SDK applications. This package provides MSBuild targets that integrate with the .NET CLI to build, register, and launch packaged applications seamlessly.</Description>
+    <PackageTags>winui;winappsdl;msix;packaged;dotnet-run;msbuild</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/microsoft/WinAppCli</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/microsoft/WinAppCli.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    
+    <!-- Package as a tools package -->
+    <IsTool>false</IsTool>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    
+    <!-- Ensure package is generated -->
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageOutputPath>..\..\artifacts\nuget</PackageOutputPath>
+  </PropertyGroup>
+
+  <!-- Include the README file in the package -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <!-- Include MSBuild targets and props files -->
+  <ItemGroup>
+    <None Include="build\**\*" Pack="true" PackagePath="build" />
+    <None Include="buildMultiTargeting\**\*" Pack="true" PackagePath="buildMultiTargeting" />
+  </ItemGroup>
+
+  <!-- Include tools (CLI binaries) - these will be copied by the build script -->
+  <ItemGroup>
+    <Content Include="tools\**\*.*" Pack="true" PackagePath="tools" CopyToOutputDirectory="Never" />
+  </ItemGroup>
+
+</Project>
