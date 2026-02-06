@@ -171,10 +171,10 @@ export async function checkAndInstallDotnetSdk(version: string = '10', verbose: 
 }
 
 /**
- * Check if Visual Studio Build Tools are installed
- * @returns true if Visual Studio Build Tools are found, false otherwise
+ * Check if required Visual Studio Tools are installed
+ * @returns true if required Visual Studio Tools are found, false otherwise
  */
-function checkVisualStudioBuildTools(): boolean {
+function checkVisualStudioTools(): boolean {
   // Refresh PATH to pick up any newly installed tools
   refreshPath();
 
@@ -216,10 +216,10 @@ function checkVisualStudioBuildTools(): boolean {
 }
 
 /**
- * Get the winget command line for installing Visual Studio Build Tools
+ * Get the winget command line for installing Visual Studio Tools
  * @returns The winget command line
  */
-function getVisualStudioBuildToolsWingetCommand(): string {
+function getVisualStudioWingetCommand(): string {
   const components = ['Microsoft.VisualStudio.Workload.NativeDesktop'];
 
   const addFlags = components.map((c) => `--add ${c}`).join(' ');
@@ -227,13 +227,13 @@ function getVisualStudioBuildToolsWingetCommand(): string {
 }
 
 /**
- * Install Visual Studio Build Tools using winget
+ * Install Visual Studio Tools using winget
  * @returns true if successful, false otherwise
  */
-function installVisualStudioBuildTools(): Promise<boolean> {
+function installVisualStudio(): Promise<boolean> {
   return new Promise((resolve) => {
     // Use winget to install Visual Studio Community with Native Desktop workload
-    const command = getVisualStudioBuildToolsWingetCommand();
+    const command = getVisualStudioWingetCommand();
     const winget = spawn(command, {
       stdio: 'inherit',
       shell: true,
@@ -251,15 +251,15 @@ function installVisualStudioBuildTools(): Promise<boolean> {
 }
 
 /**
- * Check for Visual Studio Build Tools and offer to install if missing
+ * Check for Visual Studio Tools and offer to install if missing
  * @param _verbose - Enable verbose logging (reserved for future use)
  * @returns true if something was installed, false otherwise
  */
-export async function checkAndInstallVisualStudioBuildTools(_verbose: boolean = false): Promise<boolean> {
-  const hasVisualStudioBuildTools = checkVisualStudioBuildTools();
+export async function checkAndInstallVisualStudio(_verbose: boolean = false): Promise<boolean> {
+  const hasVisualStudioTools = checkVisualStudioTools();
   const vsDownloadUrl = 'https://aka.ms/vs/download';
 
-  if (!hasVisualStudioBuildTools) {
+  if (!hasVisualStudioTools) {
     // Check if we're in an interactive terminal
     if (process.stdin.isTTY) {
       const readline = await import('readline');
@@ -270,21 +270,21 @@ export async function checkAndInstallVisualStudioBuildTools(_verbose: boolean = 
 
       return new Promise((resolve) => {
         rl.question(
-          '❓ Visual Studio Build Tools are not installed - install Microsoft.VisualStudio.Community with winget (user interaction may be required)? (y/N): ',
+          '❓ Visual Studio with the Native Desktop workload is not installed - install Microsoft.VisualStudio.Community with winget (user interaction may be required)? (y/N): ',
           async (answer) => {
             rl.close();
 
             if (answer.toLowerCase() === 'y') {
               console.log('');
-              console.log(`Installing with \`${getVisualStudioBuildToolsWingetCommand()}\``);
-              const success = await installVisualStudioBuildTools();
+              console.log(`Installing with \`${getVisualStudioWingetCommand()}\``);
+              const success = await installVisualStudio();
 
               if (!success) {
-                console.error('❌ Failed to install Visual Studio Build Tools.');
+                console.error('❌ Failed to install Visual Studio with the Native Desktop workload.');
                 console.error(`   Please install it manually from: ${vsDownloadUrl}`);
                 process.exit(1);
               } else {
-                console.log('✅ Visual Studio Build Tools installed successfully!');
+                console.log('✅ Visual Studio with the Native Desktop workload installed successfully!');
                 console.log('');
               }
               resolve(true);
@@ -297,7 +297,9 @@ export async function checkAndInstallVisualStudioBuildTools(_verbose: boolean = 
         );
       });
     } else {
-      console.error(`❌ Visual Studio Build Tools are not installed - you can install them from: ${vsDownloadUrl}`);
+      console.error(
+        `❌ Visual Studio with the Native Desktop workload is not installed - you can install it from: ${vsDownloadUrl}`
+      );
       process.exit(1);
     }
   }
