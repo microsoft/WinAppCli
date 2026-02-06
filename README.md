@@ -112,6 +112,10 @@ Checkout our getting started guides for step by step instructions of how to setu
   <a href="/docs/guides/tauri.md">
     <img src="https://img.shields.io/badge/Tauri-Get%20Started-FFC131?style=for-the-badge&logo=tauri&logoColor=black" alt="Get Started with Tauri">
   </a>
+    <br />
+  <a href="./docs/guides/flutter.md">
+    <img src="https://img.shields.io/badge/Flutter-Get%20Started-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Get Started with Flutter">
+  </a>
 </p>
 
 Additional guides:
