@@ -133,7 +133,7 @@ internal partial class RunCommand : Command
                     outputAppXDirectory ??= GetDefaultAppXDirectory(manifest);
 
                     // Step 2: Create and register the debug identity
-                    taskContext.AddStatusMessage($"{UiSymbols.Package} Creating debug identity...");
+                    taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
                         manifest,
                         inputDirectory,
@@ -141,9 +141,9 @@ internal partial class RunCommand : Command
                         taskContext,
                         cancellationToken);
 
-                    taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {identityResult.PackageName}");
-                    taskContext.AddStatusMessage($"{UiSymbols.User} Publisher: {identityResult.Publisher}");
-                    taskContext.AddStatusMessage($"{UiSymbols.Id} App ID: {identityResult.ApplicationId}");
+                    taskContext.AddDebugMessage($"{UiSymbols.Package} Package: {identityResult.PackageName}");
+                    taskContext.AddDebugMessage($"{UiSymbols.User} Publisher: {identityResult.Publisher}");
+                    taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {identityResult.ApplicationId}");
 
                     // Step 3: Compute the AUMID (Application User Model ID)
                     var packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -151,16 +151,11 @@ internal partial class RunCommand : Command
                         identityResult.Publisher);
                     var aumid = $"{packageFamilyName}!{identityResult.ApplicationId}";
 
-                    taskContext.AddStatusMessage($"{UiSymbols.Link} AUMID: {aumid}");
+                    taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
 
                     // Step 4: Launch the application using IApplicationActivationManager
-                    taskContext.AddStatusMessage($"{UiSymbols.Rocket} Launching application...");
+                    taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
                     var processId = appLauncherService.LaunchByAumid(aumid, appArgs);
-
-                    taskContext.AddStatusMessage($"{UiSymbols.Check} Process ID: {processId}");
-
-                    // Print PID to stdout (for debugger integration)
-                    Console.WriteLine(processId);
 
                     return (0, $"Application launched successfully (PID: {processId})");
                 }

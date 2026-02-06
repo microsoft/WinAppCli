@@ -47,6 +47,20 @@
   </PropertyGroup>
 
   <!--
+    Design-time build support:
+    When DesignTimeBuild is true, include all .cs files in the obj folder to enable features like IntelliSense and XAML designer.
+    This is necessary because the targets may generate source files in the obj directory that need to be included during design-time builds
+    Also, there is a bug in C# DevKit where generated files in obj are not included during design-time builds, so we need to explicitly include them here.
+    https://github.com/microsoft/vscode-dotnettools/issues/1018
+  -->
+  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true'">
+    <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
+      <AutoGen>True</AutoGen>
+      <Visible>False</Visible>
+    </Compile>
+  </ItemGroup>
+
+  <!--
     ============================================================================
     _WinAppValidateRunSupport Target
     

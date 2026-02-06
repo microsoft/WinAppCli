@@ -404,7 +404,7 @@ internal partial class MsixService(
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Copied: {relativePath}");
             }
 
-            taskContext.AddStatusMessage($"{UiSymbols.Check} Copied files to output directory: {outputAppXDirectory.FullName}");
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Copied files to output directory: {outputAppXDirectory.FullName}");
         }
 
         // Copy the appxmanifest to the output directory, if not already present

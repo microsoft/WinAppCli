@@ -153,8 +153,8 @@ try
     New-Item -ItemType Directory -Path $ToolsX64Path -Force | Out-Null
     New-Item -ItemType Directory -Path $ToolsArm64Path -Force | Out-Null
     
-    Copy-Item -Path "$X64Path\*" -Destination $ToolsX64Path -Recurse -Force
-    Copy-Item -Path "$Arm64Path\*" -Destination $ToolsArm64Path -Recurse -Force
+    Copy-Item -Path "$X64Path\*.exe" -Destination $ToolsX64Path -Recurse -Force
+    Copy-Item -Path "$Arm64Path\*.exe" -Destination $ToolsArm64Path -Recurse -Force
     
     Write-Host "[COPY] CLI binaries copied successfully" -ForegroundColor Green
     
