@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Microsoft.WindowsAppSDK.RunSupport.targets (Multi-Targeting)
+  Microsoft.Windows.SDK.BuildTools.Extras.targets (Multi-Targeting)
   
   This file is imported for multi-targeting projects.
   It imports the main targets file.
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\build\Microsoft.WindowsAppSDK.RunSupport.targets" />
+  <Import Project="..\build\Microsoft.Windows.SDK.BuildTools.Extras.targets" />
 </Project>

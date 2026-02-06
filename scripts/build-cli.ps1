@@ -4,7 +4,7 @@
     Build script for Windows App Development CLI, npm package, NuGet packages, and MSIX packages
 .DESCRIPTION
     This script builds the Windows App Development CLI for both x64 and arm64 architectures,
-    creates the npm package, NuGet packages (RunSupport + Templates), creates MSIX packages 
+    creates the npm package, NuGet packages (BuildTools.Extras + Templates), creates MSIX packages 
     with distribution package, and places all artifacts in an artifacts folder. 
     Run this script from the root of the project.
 .PARAMETER SkipTests
@@ -14,7 +14,7 @@
 .PARAMETER SkipNpm
     Skip npm package creation
 .PARAMETER SkipNuGet
-    Skip NuGet packages creation (RunSupport + Templates)
+    Skip NuGet packages creation (BuildTools.Extras + Templates)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs

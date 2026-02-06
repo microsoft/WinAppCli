@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Microsoft.WindowsAppSDK.RunSupport.props
+  Microsoft.Windows.SDK.BuildTools.Extras.props
   
   This file is imported early in the build process and sets up default properties
-  for packaged WinUI/WinAppSDK application support.
+  for packaged application support.
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 

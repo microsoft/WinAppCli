@@ -4,7 +4,7 @@
     Package Windows App Development CLI as NuGet packages
 .DESCRIPTION
     This script creates NuGet packages for:
-    1. Microsoft.WindowsAppSDK.RunSupport - MSBuild integration for 'dotnet run' with packaged apps
+    1. Microsoft.Windows.SDK.BuildTools.Extras - MSBuild integration for 'dotnet run' with packaged apps
     2. Microsoft.WindowsAppSDK.Templates - Project templates for 'dotnet new winui'
     
     These packages include the CLI binaries from artifacts/cli and output to artifacts/nuget.
@@ -40,7 +40,7 @@ try
     # Define standard paths
     $CliBinariesPath = Join-Path $ProjectRoot "artifacts\cli"
     $OutputPath = Join-Path $ProjectRoot "artifacts\nuget"
-    $RunSupportProjectPath = Join-Path $ProjectRoot "src\winapp-NuGet"
+    $ExtrasProjectPath = Join-Path $ProjectRoot "src\winapp-NuGet"
     $TemplatesProjectPath = Join-Path $ProjectRoot "src\winapp-Templates"
     
     Write-Host "[NUGET] Starting NuGet package creation..." -ForegroundColor Green
@@ -130,25 +130,25 @@ try
     }
 
     # ============================================================================
-    # Step 1: Build Microsoft.WindowsAppSDK.RunSupport package
+    # Step 1: Build Microsoft.Windows.SDK.BuildTools.Extras package
     # ============================================================================
     Write-Host ""
-    Write-Host "[NUGET] Building Microsoft.WindowsAppSDK.RunSupport package..." -ForegroundColor Blue
+    Write-Host "[NUGET] Building Microsoft.Windows.SDK.BuildTools.Extras package..." -ForegroundColor Blue
     
     # Create tools directory structure in the NuGet project
-    $RunSupportToolsPath = Join-Path $RunSupportProjectPath "tools"
+    $ExtrasToolsPath = Join-Path $ExtrasProjectPath "tools"
     
     # Clean and recreate tools directory
-    if (Test-Path $RunSupportToolsPath) {
-        Remove-Item $RunSupportToolsPath -Recurse -Force
+    if (Test-Path $ExtrasToolsPath) {
+        Remove-Item $ExtrasToolsPath -Recurse -Force
     }
-    New-Item -ItemType Directory -Path $RunSupportToolsPath -Force | Out-Null
+    New-Item -ItemType Directory -Path $ExtrasToolsPath -Force | Out-Null
     
     # Copy CLI binaries to tools folder
     Write-Host "[COPY] Copying CLI binaries to tools folder..." -ForegroundColor Blue
     
-    $ToolsX64Path = Join-Path $RunSupportToolsPath "win-x64"
-    $ToolsArm64Path = Join-Path $RunSupportToolsPath "win-arm64"
+    $ToolsX64Path = Join-Path $ExtrasToolsPath "win-x64"
+    $ToolsArm64Path = Join-Path $ExtrasToolsPath "win-arm64"
     
     New-Item -ItemType Directory -Path $ToolsX64Path -Force | Out-Null
     New-Item -ItemType Directory -Path $ToolsArm64Path -Force | Out-Null
@@ -161,16 +161,16 @@ try
     # Pack the NuGet package
     Write-Host "[PACK] Creating NuGet package..." -ForegroundColor Blue
     
-    $RunSupportCsproj = Join-Path $RunSupportProjectPath "Microsoft.WindowsAppSDK.RunSupport.csproj"
+    $ExtrasCsproj = Join-Path $ExtrasProjectPath "Microsoft.Windows.SDK.BuildTools.Extras.csproj"
     
-    dotnet pack $RunSupportCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
+    dotnet pack $ExtrasCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to create Microsoft.WindowsAppSDK.RunSupport NuGet package"
+        Write-Error "Failed to create Microsoft.Windows.SDK.BuildTools.Extras NuGet package"
         exit 1
     }
     
-    Write-Host "[NUGET] Microsoft.WindowsAppSDK.RunSupport package created successfully!" -ForegroundColor Green
+    Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.Extras package created successfully!" -ForegroundColor Green
 
     # ============================================================================
     # Step 2: Build Microsoft.WindowsAppSDK.Templates package
@@ -181,12 +181,12 @@ try
         
         $TemplatesCsproj = Join-Path $TemplatesProjectPath "Microsoft.WindowsAppSDK.Templates.csproj"
         
-        # Update the template.json to reference the correct RunSupport version
+        # Update the template.json to reference the correct Extras version
         $TemplateJsonPath = Join-Path $TemplatesProjectPath "templates\winui\.template.config\template.json"
-        Write-Host "[TEMPLATE] Updating RunSupportVersion in template.json to $Version..." -ForegroundColor Blue
+        Write-Host "[TEMPLATE] Updating ExtrasVersion in template.json to $Version..." -ForegroundColor Blue
         
         $TemplateJson = Get-Content $TemplateJsonPath -Raw | ConvertFrom-Json
-        $TemplateJson.symbols.RunSupportVersion.defaultValue = $Version
+        $TemplateJson.symbols.ExtrasVersion.defaultValue = $Version
         $TemplateJson | ConvertTo-Json -Depth 10 | Set-Content $TemplateJsonPath -Encoding UTF8
         
         dotnet pack $TemplatesCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version

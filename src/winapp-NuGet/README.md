@@ -1,6 +1,6 @@
-# Microsoft.WindowsAppSDK.RunSupport
+# Microsoft.Windows.SDK.BuildTools.Extras
 
-Enables `dotnet run` for packaged WinUI and Windows App SDK applications.
+Enables `dotnet run` for packaged Windows applications.
 
 ## Overview
 
@@ -18,7 +18,7 @@ This package provides MSBuild targets that seamlessly integrate with the .NET CL
 1. Add this package to your WinUI project:
 
 ```xml
-<PackageReference Include="Microsoft.WindowsAppSDK.RunSupport" Version="0.1.10" PrivateAssets="all" />
+<PackageReference Include="Microsoft.Windows.SDK.BuildTools.Extras" Version="0.1.10" PrivateAssets="all" />
 ```
 
 2. Run your application:

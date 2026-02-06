@@ -53,12 +53,12 @@
       "defaultValue": "10.0.26100.7463",
       "replaces": "BUILDTOOLSVERSION"
     },
-    "RunSupportVersion": {
+    "ExtrasVersion": {
       "type": "parameter",
-      "description": "The version of the Run Support package to use.",
+      "description": "The version of the BuildTools.Extras package to use.",
       "datatype": "string",
-      "defaultValue": "0.1.11-prerelease.15",
-      "replaces": "RUNSUPPORTVERSION"
+      "defaultValue": "0.1.11-prerelease.16",
+      "replaces": "EXTRASVERSION"
     },
     "packageGuid": {
       "type": "generated",

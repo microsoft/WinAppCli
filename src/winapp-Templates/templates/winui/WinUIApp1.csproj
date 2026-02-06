@@ -42,7 +42,7 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="BUILDTOOLSVERSION" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="WINAPPSDKVERSION" />
     <!-- Run support for 'dotnet run' with packaged apps -->
-    <PackageReference Include="Microsoft.WindowsAppSDK.RunSupport" Version="RUNSUPPORTVERSION" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.Extras" Version="EXTRASVERSION" PrivateAssets="all" />
   </ItemGroup>
 
   <!--

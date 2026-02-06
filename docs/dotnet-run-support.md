@@ -15,14 +15,14 @@ dotnet run
 
 ### Components
 
-1. **Microsoft.WindowsAppSDK.RunSupport** (NuGet Package)
+1. **Microsoft.Windows.SDK.BuildTools.Extras** (NuGet Package)
    - Contains the WinAppCLI binary in `tools/` folder
    - Provides MSBuild targets that hook into `dotnet run`
    - Automatically detects packaged WinUI apps and handles launch
 
 2. **Microsoft.WindowsAppSDK.Templates** (NuGet Package)
    - Provides `dotnet new winui` template
-   - Pre-configured with RunSupport package reference
+   - Pre-configured with BuildTools.Extras package reference
    - Mirrors Visual Studio WinUI template structure
 
 3. **WinAppCLI**
@@ -38,7 +38,7 @@ dotnet run
 MSBuild Build Target
     │
     ▼
-_WinAppDetectPackagedApp (detects Package.appxmanifest + WindowsAppSDK)
+_WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
     │
     ▼
 _WinAppInterceptRun (overrides RunCommand with CLI path)
@@ -57,15 +57,15 @@ WinAppCLI
 
 ```
 src/
-├── winapp-NuGet/                           # RunSupport NuGet package
-│   ├── Microsoft.WindowsAppSDK.RunSupport.csproj
+├── winapp-NuGet/                           # BuildTools.Extras NuGet package
+│   ├── Microsoft.Windows.SDK.BuildTools.Extras.csproj
 │   ├── README.md
 │   ├── build/
-│   │   ├── Microsoft.WindowsAppSDK.RunSupport.props
-│   │   └── Microsoft.WindowsAppSDK.RunSupport.targets
+│   │   ├── Microsoft.Windows.SDK.BuildTools.Extras.props
+│   │   └── Microsoft.Windows.SDK.BuildTools.Extras.targets
 │   ├── buildMultiTargeting/
-│   │   ├── Microsoft.WindowsAppSDK.RunSupport.props
-│   │   └── Microsoft.WindowsAppSDK.RunSupport.targets
+│   │   ├── Microsoft.Windows.SDK.BuildTools.Extras.props
+│   │   └── Microsoft.Windows.SDK.BuildTools.Extras.targets
 │   └── tools/                              # CLI binaries (copied by build script)
 │       ├── win-x64/
 │       └── win-arm64/
@@ -93,7 +93,7 @@ samples/
 
 ## MSBuild Integration Details
 
-### Properties (Microsoft.WindowsAppSDK.RunSupport.props)
+### Properties (Microsoft.Windows.SDK.BuildTools.Extras.props)
 
 | Property | Default | Description |
 |----------|---------|-------------|
@@ -103,21 +103,20 @@ samples/
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
 
-### Targets (Microsoft.WindowsAppSDK.RunSupport.targets)
+### Targets (Microsoft.Windows.SDK.BuildTools.Extras.targets)
 
 | Target | Description |
 |--------|-------------|
-| `_WinAppDetectPackagedApp` | Detects if project is a packaged WinAppSDK app |
 | `_WinAppValidateRunSupport` | Validates prerequisites (CLI exists, manifest exists) |
+| `_WinAppBuildRunArgs` | Builds CLI command arguments (shared by run targets) |
 | `_WinAppInterceptRun` | Overrides RunCommand to use CLI |
-| `RunPackagedWinAppSdkApp` | Direct target to run packaged app |
+| `RunPackagedApp` | Direct target to run packaged app |
 | `WinAppRunSupportInfo` | Diagnostic target showing all properties |
 
 ### Detection Logic
 
-The package detects a packaged WinUI app when:
-1. A manifest file exists: `Package.appxmanifest`, `appxmanifest.xml`, or `AppxManifest.xml`
-2. The project references `Microsoft.WindowsAppSDK` package
+The package detects a packaged app when:
+1. `WindowsPackageType` is **not** set to `None` (absence of the property means packaged)
 
 ## Build Scripts
 
@@ -232,8 +231,8 @@ The current implementation defaults to x64. For ARM64 machines, the targets corr
 The sample project imports the MSBuild targets directly:
 
 ```xml
-<Import Project="..\..\src\winapp-NuGet\build\Microsoft.WindowsAppSDK.RunSupport.props" />
-<Import Project="..\..\src\winapp-NuGet\build\Microsoft.WindowsAppSDK.RunSupport.targets" />
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.Extras.props" />
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.Extras.targets" />
 ```
 
 ### Diagnostic Commands
