@@ -53,11 +53,21 @@
     Also, there is a bug in C# DevKit where generated files in obj are not included during design-time builds, so we need to explicitly include them here.
     https://github.com/microsoft/vscode-dotnettools/issues/1018
   -->
-  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true'">
+  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
     <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
       <AutoGen>True</AutoGen>
       <Visible>False</Visible>
     </Compile>
+  </ItemGroup>
+
+  <!--
+    Temporary: Include this for non-WinUI projects as well, to ensure appxmanifest is included 
+    in the build output for the CLI to find to be able to run the app. We can remove this once we have a better solution for non-WinUI projects.
+  -->
+  <ItemGroup Condition="'$(UseWinUI)' != 'true'">
+    <Content Condition="Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')" Include="$(MSBuildProjectDirectory)\appxmanifest.xml">  
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!--
