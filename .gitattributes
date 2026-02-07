@@ -1,0 +1,14 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Generated LLM documentation - always use LF to avoid script regeneration issues
+docs/cli-schema.json text eol=lf
+docs/llm-context.md text eol=lf
+
+# Shell scripts should use LF
+*.sh text eol=lf
+
+# PowerShell and batch files can use CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

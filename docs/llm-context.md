@@ -290,4 +290,3 @@ winapp --cli-schema
 ```
 
 This outputs JSON that can be parsed by tools and LLMs. See [cli-schema.json](cli-schema.json).
-

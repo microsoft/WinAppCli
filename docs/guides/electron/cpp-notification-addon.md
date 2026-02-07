@@ -16,7 +16,7 @@ npx winapp node create-addon
 ```
 
 > [!NOTE]
-> This command might prompt your to install python of Visual Studio build tools if you don't already have them installed.
+> This command might prompt your to install Python or required Visual Studio tools if you don't already have them installed.
 
 This creates a `nativeWindowsAddon/` folder with:
 - `nativeWindowsAddon.cc` - Your C++ code that will call Windows APIs

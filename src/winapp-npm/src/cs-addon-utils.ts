@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { checkAndInstallDotnetSdk, checkAndInstallVisualStudioBuildTools } from './dependency-utils';
+import { checkAndInstallDotnetSdk, checkAndInstallVisualStudio } from './dependency-utils';
 
 export interface GenerateCsAddonOptions {
   name?: string;
@@ -112,7 +112,7 @@ export async function generateCsAddonFiles(options: GenerateCsAddonOptions = {})
     // Validate addon name (should be a valid C# namespace/class name)
     validateAddonName(name);
 
-    await checkAndInstallVisualStudioBuildTools(false); // Don't show verbose build tools info
+    await checkAndInstallVisualStudio(false); // Don't show verbose build tools info
     // We don't set needsTerminalRestart for VS installation because so far the tools that need it know how to find it.
 
     // Check if dotnet SDK is available and offer to install if missing

@@ -53,22 +53,16 @@ Now replace the contents of `Program.cs` with the following code. This code atte
 ```csharp
 using Windows.ApplicationModel;
 
-class Program
+try
 {
-    static void Main(string[] args)
-    {
-        try
-        {
-            var package = Package.Current;
-            var familyName = package.Id.FamilyName;
-            Console.WriteLine($"Package Family Name: {familyName}");
-        }
-        catch (InvalidOperationException)
-        {
-            // Thrown when app doesn't have package identity
-            Console.WriteLine("Not packaged");
-        }
-    }
+    var package = Package.Current;
+    var familyName = package.Id.FamilyName;
+    Console.WriteLine($"Package Family Name: {familyName}");
+}
+catch (InvalidOperationException)
+{
+    // Thrown when app doesn't have package identity
+    Console.WriteLine("Not packaged");
 }
 ```
 
