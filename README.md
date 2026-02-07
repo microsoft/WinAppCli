@@ -204,6 +204,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
+| [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
 ## 🤖 Using with AI Assistants and Agents
 
