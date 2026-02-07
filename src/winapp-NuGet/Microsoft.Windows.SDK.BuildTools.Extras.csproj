@@ -39,7 +39,6 @@
   <!-- Include MSBuild targets and props files -->
   <ItemGroup>
     <None Include="build\**\*" Pack="true" PackagePath="build" />
-    <None Include="buildMultiTargeting\**\*" Pack="true" PackagePath="buildMultiTargeting" />
   </ItemGroup>
 
   <!-- Include tools (CLI binaries) - these will be copied by the build script -->
