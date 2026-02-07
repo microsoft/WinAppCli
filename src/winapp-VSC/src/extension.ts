@@ -1,28 +1,28 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 
 const execAsync = promisify(exec);
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
-// Path to the winapp CLI executable - update this to point to the installed location
-const WINAPP_CLI_PATH = 'winapp';
-
 /**
  * Execute a winapp CLI command and show output in the terminal
  */
-async function runWinappCommand(command: string, cwd: string, showTerminal: boolean = true): Promise<string> {
+async function runWinappCommand(extensionPath: string, command: string, cwd: string, showTerminal: boolean = true): Promise<string> {
+	const cliPath = getWinappCliPath(extensionPath);
 	const terminal = vscode.window.createTerminal({
 		name: 'WinApp CLI',
-		cwd: cwd
+		cwd: cwd,
+		env: { WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE }
 	});
 
 	if (showTerminal) {
 		terminal.show();
 	}
 
-	terminal.sendText(`${WINAPP_CLI_PATH} ${command}`);
+	terminal.sendText(`"${cliPath}" ${command}`);
 	return '';
 }
 
@@ -68,6 +68,12 @@ async function selectFolder(title: string): Promise<string | undefined> {
 }
 
 class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+	private extensionPath: string;
+
+	constructor(extensionPath: string) {
+		this.extensionPath = extensionPath;
+	}
+
 	async resolveDebugConfiguration(
 		folder: vscode.WorkspaceFolder | undefined,
 		config: vscode.DebugConfiguration,
@@ -95,7 +101,7 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 
 		try {
 			// Build the command with mapped arguments
-			const cmdParts: string[] = ['D:\\WinAppCli\\src\\winapp-CLI\\WinApp.Cli\\bin\\Debug\\net10.0-windows\\win-arm64\\winapp.exe', 'run'];
+			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run'];
 
 			if (config.manifest) {
 				cmdParts.push('--manifest', `"${config.manifest}"`);
@@ -130,7 +136,10 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 					cwd = config.workingDirectory;
 				}
 
-				const { stdout, stderr } = await execAsync(command, { cwd });
+				const { stdout, stderr } = await execAsync(command, {
+					cwd,
+					env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE }
+				});
 
 				if (stderr) {
 					console.warn('winapp run stderr:', stderr);
@@ -170,7 +179,8 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const provider = new WinAppDebugConfigurationProvider();
+	const extensionPath = context.extensionPath;
+	const provider = new WinAppDebugConfigurationProvider(extensionPath);
 
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider(WINAPP_DEBUG_TYPE, provider)
@@ -194,7 +204,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` --setup-sdks ${sdkMode}`;
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -206,7 +216,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand('restore', workspacePath);
+			await runWinappCommand(extensionPath, 'restore', workspacePath);
 		})
 	);
 
@@ -228,7 +238,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` --setup-sdks ${sdkMode}`;
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -263,7 +273,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --self-contained';
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -275,7 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand('run', workspacePath);
+			await runWinappCommand(extensionPath, 'run', workspacePath);
 		})
 	);
 
@@ -297,7 +307,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` "${entrypoint}"`;
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -319,7 +329,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` --template ${template}`;
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -340,7 +350,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(`manifest update-assets "${imagePath}"`, workspacePath);
+			await runWinappCommand(extensionPath, `manifest update-assets "${imagePath}"`, workspacePath);
 		})
 	);
 
@@ -362,7 +372,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --install';
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -383,7 +393,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(`cert install "${certPath}"`, workspacePath);
+			await runWinappCommand(extensionPath, `cert install "${certPath}"`, workspacePath);
 		})
 	);
 
@@ -415,7 +425,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(`sign "${filePath}" --cert "${certPath}"`, workspacePath);
+			await runWinappCommand(extensionPath, `sign "${filePath}" --cert "${certPath}"`, workspacePath);
 		})
 	);
 
@@ -446,7 +456,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` ${args}`;
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 
@@ -468,7 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --global';
 			}
 
-			await runWinappCommand(command, workspacePath);
+			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
 }

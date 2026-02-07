@@ -4,9 +4,10 @@ This file provides focused, actionable information to help an AI coding agent be
 
 ## Big picture
 
-Two main components:
+Three main components:
 - **src/winapp-CLI** (C#/.NET): The native CLI implemented with System.CommandLine. Key files: `Program.cs`, `Commands/*.cs` (e.g., `InitCommand.cs`, `PackageCommand.cs`). Build with `scripts/build-cli.ps1`.
 - **src/winapp-npm** (Node): A thin Node wrapper/SDK and CLI (`cli.js`) that forwards most commands to the native CLI. Key helpers: `winapp-cli-utils.js`, `msix-utils.js`, `cpp-addon-utils.js`. Install with `npm install` inside `src/winapp-npm`.
+- **src/winapp-VSC** (VS Code Extension): A VS Code extension that bundles the native CLI and provides commands, debugging support, and UI integration. Bundles CLI binaries in `bin/win-x64` and `bin/win-arm64`.
 
 ## Developer workflows
 
@@ -24,9 +25,17 @@ dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -- <args>
 cd src/winapp-npm && npm run build              # builds C# CLI + copies to npm bin
 cd src/winapp-npm && npm run build-copy-only    # copies already-built Release binaries
 
+# Update VS Code extension after CLI changes
+cd src/winapp-VSC && npm run build-cli           # builds C# CLI + copies to extension bin
+cd src/winapp-VSC && npm run build-copy-only     # copies already-built Release binaries
+
 # Node package development
 cd src/winapp-npm && npm install
 node cli.js help
+
+# VS Code extension development
+cd src/winapp-VSC && npm install
+npm run compile
 
 # Regenerate LLM documentation after command changes
 .\scripts\generate-llm-docs.ps1
@@ -39,6 +48,7 @@ node cli.js help
 | CLI commands | `src/winapp-CLI/WinApp.Cli/Commands/*.cs` |
 | Services | `src/winapp-CLI/WinApp.Cli/Services/*.cs` |
 | Node CLI | `src/winapp-npm/cli.js`, `winapp-cli-utils.js` |
+| VS Code extension | `src/winapp-VSC/src/extension.ts`, `winapp-cli-utils.ts` |
 | Config example | `winapp.example.yaml` |
 | LLM docs | `docs/llm-context.md`, `docs/cli-schema.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
@@ -65,7 +75,7 @@ node cli.js help
 
 - **Adding a new CLI command**: Implement in C# under `Commands/`, update `src/winapp-npm/cli.js` if needed, then run `scripts/generate-llm-docs.ps1`.
 - **Changing command descriptions**: Edit the description string in the command's constructor. Run `scripts/generate-llm-docs.ps1` and commit updated docs.
-- **After C# CLI changes**: Run `cd src/winapp-npm && npm run build` to update npm package binaries.
+- **After C# CLI changes**: Run `cd src/winapp-npm && npm run build` and `cd src/winapp-VSC && npm run build-cli` to update npm package and VS Code extension binaries.
 - **Updating package versions**: Edit `winapp.example.yaml`.
 
 ## Integration points
