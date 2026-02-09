@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
@@ -10,7 +10,7 @@ namespace WinApp.Cli.Commands;
 
 internal class ToolCommand : Command
 {
-    public ToolCommand() : base("tool", "Run a build tool command with Windows SDK paths")
+    public ToolCommand() : base("tool", "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix")
     {
         Aliases.Add("run-buildtool");
         this.TreatUnmatchedTokensAsErrors = false;

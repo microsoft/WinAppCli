@@ -28,50 +28,81 @@
 </p>
 
 <h3 align="center">
-  <a href="#%EF%B8%8F-get-started">Get Started Guides</a>
+  <a href="#-why-package-identity">Why?</a>
+  <span> • </span>
+  <a href="#%EF%B8%8F-get-started">Get Started</a>
   <span> • </span>
   <a href="#-installation">Installation</a>
   <span> • </span>
   <a href="#-usage">Usage</a>
   <span> • </span>
-  <a href="./docs/usage.md">Documentation</a>
+  <a href="./docs/usage.md">Docs</a>
   <span> • </span>
-  <a href="#-try-the-windows-identity-app">GUI</a>
-  <span> • </span>
-  <a href="#-feedback">Feedback</a>
+  <a href="#-feedback-and-support">Feedback</a>
 </h3>
 <br/>
 
 The Windows App Development CLI (winapp CLI) is a single command-line interface for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework. This tool bridges the gap between cross-platform development and Windows-native capabilities.
 <br/><br/>
-Whether you're building with Electron, .NET/Win32, CMake, or Python, this CLI gives you access to:
+Whether you're building with .NET/Win32, CMake, Electron, or Rust, this CLI gives you access to:
 
 - **Modern Windows APIs** - [Windows App SDK](https://learn.microsoft.com/windows/apps/windows-app-sdk/) and Windows SDK with automatic setup and code generation
-- **App Identity** - Debug and test by adding app identity without full packaging in a snap
+- **Package Identity** - Debug and test by adding package identity without full packaging in a snap
 - **MSIX Packaging** - App packaging with signing and Store readiness
 - **Developer Tools** - Manifests, certificates, assets, and build integration
 
 Perfect for:
 
-- **Electron/cross-platform developers** wanting native Windows features or targeting Windows
-- **Developers testing and deploying** adding app identity for development or packaging for deployment
-- **CI/CD pipelines** automating Windows app builds
+- **Cross-platform developers using frameworks like Qt or Electron** wanting native Windows features or targeting Windows
+- **Developers who love their current tools** and want to build Windows apps from VS Code, or any other editor
+- **Developers crafting CI/CD pipelines** to automate building apps for Windows
+
+## 🤔 Why?
+
+Many powerful Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
+
+Our goal is to support developers wherever they are, with the tools and frameworks they already use. Based on feedback from developers shipping cross-platform apps on Windows, we built this CLI to streamline integrating with the Windows developer platform - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
+
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/images/before-after-winapp-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/images/before-after-winapp.png">
+    <img src="./docs/images/before-after-winapp.png" alt="Before: 12 manual steps to access Windows APIs. After: 4 winapp commands (init, create-addon, add-electron-debug-identity, pack)">
+  </picture>
+</p>
+<p align="center"><i>Without winapp CLI, setting up a project involves 12 manual steps—downloading SDKs, generating headers, creating manifests, and more. With the CLI, it's just 4 commands.</i></p>
+
+**Few examples of what package identity and MSIX packaging unlocks:**
+
+- [Interactive native notifications](https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart?tabs=cs) and notification management
+- [Integration with Windows Explorer, Taskbar, Share sheet](https://learn.microsoft.com/windows/apps/develop/windows-integration/integrate-sharesheet-packaged), and other shell surfaces
+- [Protocol handlers](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-your-application-in-different-ways) (`yourapp://` URIs)
+- [Web-to-app linking](https://learn.microsoft.com/windows/apps/develop/launch/web-to-app-linking) (`yoursite.com` opens your app)
+- [On-device AI](https://learn.microsoft.com/windows/ai/apis/) (Local LLM, Text and Image AI APIs)
+- [Custom CLI commands via AppExecutionAlias](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-your-application-in-different-ways)
+- [Controlled access to camera, microphone, location](https://learn.microsoft.com/windows/uwp/packaging/app-capability-declarations), and other devices (with user consent)
+- [Background tasks](https://learn.microsoft.com/windows/uwp/launch-resume/declare-background-tasks-in-the-application-manifest) (run when app is closed)
+- [File type associations](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#integrate-with-file-explorer) (open `.xyz` files with your app)
+- [Startup tasks](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions#start-an-executable-file-when-users-log-into-windows) (launch at Windows login)
+- [App services](https://learn.microsoft.com/windows/uwp/launch-resume/how-to-create-and-consume-an-app-service) (expose APIs to other apps)
+- [Clean install/uninstall & auto-updates](https://learn.microsoft.com/windows/msix/overview)
 
 ## ✏️ Get started
 
 Checkout our getting started guides for step by step instructions of how to setup your environment, generate manifests, assets, and certificate, how to debug APIs that require package identity, and how to MSIX package your app.
 
 <p>
-  <a href="/docs/electron-get-started.md">
-    <img src="https://img.shields.io/badge/Electron-Get%20Started-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Get Started with Electron">
-  </a>
-    <br />
   <a href="./docs/guides/dotnet.md">
     <img src="https://img.shields.io/badge/.NET/WPF/WinForms-Get%20Started-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Get Started with .NET">
   </a>
     <br />
   <a href="./docs/guides/cpp.md">
     <img src="https://img.shields.io/badge/C++-Get%20Started-00599C?style=for-the-badge&logo=cplusplus&logoColor=white" alt="Get Started with C++">
+  </a>
+    <br />
+  <a href="/docs/electron-get-started.md">
+    <img src="https://img.shields.io/badge/Electron-Get%20Started-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Get Started with Electron">
   </a>
     <br />
   <a href="./docs/guides/rust.md">
@@ -152,7 +183,6 @@ npx winapp --help
 - [`node create-addon`](./docs/usage.md#node-create-addon) - Generate native C# or C++ addons
 - [`node add-electron-debug-identity`](./docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 - [`node clear-electron-debug-identity`](./docs/usage.md#node-clear-electron-debug-identity) - Remove identity from Electron processes
-- [Windows AI Addon for Electron](https://github.com/microsoft/winapp-windows-ai) - The Windows AI Addon for Electron is a Node.js native addon that provides access to the [Windows AI APIs](https://learn.microsoft.com/en-us/windows/ai/apis/) directly from JavaScript.
 
 The full CLI usage can be found here: [Documentation](/docs/usage.md)
 
@@ -163,26 +193,50 @@ This repository includes samples demonstrating how to use the CLI with various f
 
 | Sample | Description |
 |--------|-------------|
-| [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
-| [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
 | [C++ App](/samples/cpp-app/README.md) | Native C++ Win32 application with CMake |
 | [.NET Console](/samples/dotnet-app/README.md) | .NET console application |
 | [WPF App](/samples/wpf-app/README.md) | WPF desktop application |
+| [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
+| [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 
-## 🔧 Feedback
+## 🤖 Using with AI Assistants and Agents
 
-- [File an issue, feature request or bug](https://github.com/microsoft/WinAppCli/issues): please ensure that you are not filing a duplicate issue
-- Send feedback to <windowsdevelopertoolkit@microsoft.com>: Do you love this tool? Are there features or fixes you want to see? Let us know!
+The winapp CLI is designed to work well with AI coding assistants like GitHub Copilot, Cursor, Claude, and other LLM-powered tools.
 
-We are actively working on improving Node and Python support. These features are experimental and we are aware of several issues with these app types.
+### Quick Start Prompt
 
-## 🧪 Try the Windows Identity App
+Copy and paste this into your AI coding assistant:
 
-This repository also contains an **experimental** app (GUI) that wraps the CLI and provides an intuitive, drag-and-drop experience. [See the docs](/docs/gui-usage.md) for more details. [Download the app here](https://github.com/microsoft/WinAppCli/releases/tag/v0.1.1-gui).
+```
+I'm working with winapp CLI - a CLI for generating and managing appxmanifest.xml, 
+image assets, test certificates, Windows (App) SDK projections, package identity, 
+and packaging for any app framework targeting Windows.
 
-## Support
+Please read and reference the official LLM context documentation:
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
+
+My specific task: [describe what you need help with]
+```
+
+### Resources for AI Assistants
+
+- **[LLM Context Guide](./docs/llm-context.md)** - Comprehensive command reference with workflows and prerequisites
+- **[CLI Schema (JSON)](./docs/cli-schema.json)** - Machine-readable command structure for tooling
+- **[Using with LLMs Guide](./docs/using-with-llms.md)** - Detailed prompts for GitHub Copilot, Cursor, Claude, and framework-specific templates
+
+### Programmatic Access
+
+Get the complete CLI structure as JSON for tooling or analysis:
+
+```bash
+winapp --cli-schema
+```
+
+## 🔧 Feedback and Support
+
+[File an issue, feature request or bug](https://github.com/microsoft/WinAppCli/issues): please ensure that you are not filing a duplicate issue
 
 Need help or have questions about the Windows App Development CLI? Visit our **[Support Guide](./SUPPORT.md)** for information about our issue templates and triage process.
 

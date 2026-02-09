@@ -45,6 +45,17 @@ winapp init --setup-sdks experimental
 winapp init ./my-project --use-defaults
 ```
 
+**Tip: Install SDKs after initial setup**
+
+If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
+
+```bash
+# Re-run init to install SDKs - preserves existing files (manifest, cert, etc.)
+winapp init --use-defaults --setup-sdks stable
+```
+
+Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions.
+
 ---
 
 ### restore
@@ -171,6 +182,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 - `--manifest <path>` - Path to AppxManifest.xml (default: `./appxmanifest.xml`)
 - `--no-install` - Don't install the package after creation
+- `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
 **What it does:**
 
@@ -456,6 +468,7 @@ npx winapp node add-electron-debug-identity [options]
 |--------|-------------|
 | `--manifest <path>` | Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory) |
 | `--no-install` | Do not install or modify dependencies; only configure the Electron debug identity |
+| `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` to the package name and application ID |
 | `--verbose` | Enable verbose output |
 
 **What it does:**

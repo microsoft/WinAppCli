@@ -6,6 +6,7 @@ import { callWinappCli } from './winapp-cli-utils';
 export interface MsixIdentityOptions {
   verbose?: boolean;
   noInstall?: boolean;
+  keepIdentity?: boolean;
   manifest?: string;
 }
 
@@ -74,7 +75,7 @@ export async function addMsixIdentityToExe(
 export async function addElectronDebugIdentity(
   options: MsixIdentityOptions = {}
 ): Promise<ElectronDebugIdentityResult> {
-  const { verbose = false, noInstall = false, manifest } = options;
+  const { verbose = false, noInstall = false, keepIdentity = false, manifest } = options;
 
   if (verbose) {
     console.log('🔐 Adding MSIX debug identity to Electron...');
@@ -170,6 +171,9 @@ export async function addElectronDebugIdentity(
     }
     if (noInstall) {
       args.push('--no-install');
+    }
+    if (keepIdentity) {
+      args.push('--keep-identity');
     }
     if (verbose) {
       args.push('--verbose');

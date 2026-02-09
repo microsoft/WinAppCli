@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using System.CommandLine;
@@ -64,6 +64,7 @@ internal static class CliSchema
     public record RootCommandDetails(
         string name,
         string version,
+        string schemaVersion,
         string? description,
         string[]? aliases,
         Dictionary<string, ArgumentDetails>? arguments,
@@ -95,9 +96,17 @@ internal static class CliSchema
         var options = CreateOptionsDictionary(command.Options);
         var subcommands = CreateSubcommandsDictionary(command.Subcommands);
 
+        // Use only major.minor.patch (3 components) to avoid build number churn in generated docs
+        var fullVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
+        var semanticVersion = $"{fullVersion.Major}.{fullVersion.Minor}.{fullVersion.Build}";
+
+        // Schema version tracks breaking changes to the JSON schema structure (not CLI version)
+        const string schemaVersion = "1.0";
+
         return new RootCommandDetails(
             name: command.Name,
-            version: System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!.ToString(),
+            version: semanticVersion,
+            schemaVersion: schemaVersion,
             description: command.Description?.ReplaceLineEndings("\n"),
             aliases: DetermineAliases(command.Aliases),
             arguments: arguments,

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
@@ -29,7 +29,7 @@ internal class ManifestUpdateAssetsCommand : Command
         ManifestOption.AcceptExistingOnly();
     }
 
-    public ManifestUpdateAssetsCommand() : base("update-assets", "Update image assets in AppxManifest.xml from a source image")
+    public ManifestUpdateAssetsCommand() : base("update-assets", "Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.")
     {
         Arguments.Add(ImageArgument);
         Options.Add(ManifestOption);

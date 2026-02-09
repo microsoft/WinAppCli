@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using System.CommandLine;
@@ -21,10 +21,10 @@ internal class WinAppRootCommand : RootCommand
 
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")
     {
-        Description = "Outputs the CLI command schema in JSON format",
+        Description = "Output the complete CLI command structure as JSON for tooling, scripting, and LLM integration. Includes all commands, options, arguments, and their descriptions.",
         Arity = ArgumentArity.Zero,
         Recursive = true,
-        Hidden = true,
+        Hidden = false,
         Action = new PrintCliSchemaAction()
     };
 
@@ -50,7 +50,7 @@ internal class WinAppRootCommand : RootCommand
         CertCommand certCommand,
         SignCommand signCommand,
         ToolCommand toolCommand,
-        McpCommand mcpCommand) : base("Setup Windows SDK and Windows App SDK for use in your app, create MSIX packages, generate manifests and certificates, and use build tools.")
+        McpCommand mcpCommand) : base("CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);

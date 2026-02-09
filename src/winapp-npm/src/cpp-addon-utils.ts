@@ -2,7 +2,10 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { checkAndInstallPython, checkAndInstallVisualStudioBuildTools } from './dependency-utils';
+import {
+  checkAndInstallPython,
+  checkAndInstallVisualStudio as checkAndInstallVisualStudioTools,
+} from './dependency-utils';
 
 export interface GenerateCppAddonOptions {
   name?: string;
@@ -34,8 +37,8 @@ export async function generateCppAddonFiles(options: GenerateCppAddonOptions = {
       needsTerminalRestart = true;
     }
 
-    // Check for Visual Studio Build Tools and offer to install if missing
-    await checkAndInstallVisualStudioBuildTools(false); // Don't show verbose VS info
+    // Check for Visual Studio Tools and offer to install if missing
+    await checkAndInstallVisualStudioTools(false); // Don't show verbose VS info
     // VS tools are typically found without PATH restart, so we don't set needsTerminalRestart for it
 
     if (verbose) {

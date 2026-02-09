@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using System.CommandLine;
@@ -37,7 +37,7 @@ internal class SignCommand : Command
         };
     }
 
-    public SignCommand() : base("sign", "Sign a file/package with a certificate")
+    public SignCommand() : base("sign", "Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.")
     {
         Arguments.Add(FilePathArgument);
         Arguments.Add(CertPathArgument);

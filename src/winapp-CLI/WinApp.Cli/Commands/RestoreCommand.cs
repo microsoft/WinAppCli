@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using System.CommandLine;
@@ -27,7 +27,7 @@ internal class RestoreCommand : Command
         ConfigDirOption.AcceptExistingOnly();
     }
 
-    public RestoreCommand() : base("restore", "Restore packages from winapp.yaml and ensure workspace is ready")
+    public RestoreCommand() : base("restore", "Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.")
     {
         Arguments.Add(BaseDirectoryArgument);
         Options.Add(ConfigDirOption);

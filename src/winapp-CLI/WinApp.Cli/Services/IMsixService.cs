@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using WinApp.Cli.ConsoleTasks;
@@ -28,6 +28,7 @@ internal interface IMsixService
         string? entryPointPath,
         FileInfo appxManifestPath,
         bool noInstall,
+        bool keepIdentity,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }
