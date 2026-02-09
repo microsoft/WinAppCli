@@ -13,7 +13,7 @@ For a complete step-by-step guide, see the [C++ Getting Started Guide](../../doc
 
 ## Prerequisites
 
-- Visual Studio Build Tools or Visual Studio with C++ development tools
+- Visual Studio Native Desktop workload or Visual Studio with C++ development tools
 - CMake 3.20 or later
 
 ## Building and Running

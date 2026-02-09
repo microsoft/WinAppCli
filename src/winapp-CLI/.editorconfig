@@ -19,7 +19,7 @@ indent_size = 4
 
 # C# Code Style Rules
 
-file_header_template = Copyright (c) Microsoft Corporation. All rights reserved.\nLicensed under the MIT License.
+file_header_template = Copyright (c) Microsoft Corporation and Contributors. All rights reserved.\nLicensed under the MIT License.
 dotnet_diagnostic.IDE0073.severity = warning
 
 # Async method naming
