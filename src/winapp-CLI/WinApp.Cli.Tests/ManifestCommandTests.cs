@@ -421,6 +421,75 @@ public class ManifestCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, debugExitCode, "Create debug identity should complete successfully");
+
+        // Verify the debug manifest has the .debug suffix by default
+        var debugManifestPath = Path.Combine(_testWinappDirectory.FullName, "debug", "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(debugManifestPath), "Debug manifest should be created");
+        var debugManifestContent = await File.ReadAllTextAsync(debugManifestPath, TestContext.CancellationToken);
+        Assert.Contains(".debug", debugManifestContent, "Debug manifest should contain .debug suffix in identity by default");
+    }
+
+    [TestMethod]
+    public async Task CreateDebugIdentityWithKeepIdentityShouldPreserveOriginalIdentity()
+    {
+        // Arrange - Create a test script (non-.exe to skip mt.exe embedding) and manifest
+        var scriptPath = Path.Combine(_tempDirectory.FullName, "TestApp.bat");
+        await File.WriteAllTextAsync(scriptPath, "@echo off", TestContext.CancellationToken);
+
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""MyTestPackage""
+            Publisher=""CN=TestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>Test Package</DisplayName>
+    <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+    <Description>Test package</Description>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""TestApp.bat"" EntryPoint=""TestApp.App"">
+      <uap:VisualElements DisplayName=""Test App"" Description=""Test application""
+                          BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+    </Application>
+  </Applications>
+</Package>";
+
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(manifestPath, manifestContent, TestContext.CancellationToken);
+
+        // Create minimal assets so the command doesn't fail
+        var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        PngHelper.CreateTestImage(Path.Combine(assetsDir, "Logo.png"));
+
+        // Act - Create debug identity with --keep-identity
+        var debugIdentityCommand = GetRequiredService<CreateDebugIdentityCommand>();
+        var debugArgs = new[]
+        {
+            scriptPath,
+            "--manifest", manifestPath,
+            "--no-install",
+            "--keep-identity"
+        };
+
+        var debugParseResult = debugIdentityCommand.Parse(debugArgs);
+        var debugExitCode = await debugParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, debugExitCode, "Create debug identity with --keep-identity should complete successfully");
+
+        // Verify the debug manifest preserves the original identity without .debug suffix
+        var debugManifestPath = Path.Combine(_testWinappDirectory.FullName, "debug", "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(debugManifestPath), "Debug manifest should be created");
+        var debugManifestContent = await File.ReadAllTextAsync(debugManifestPath, TestContext.CancellationToken);
+        Assert.Contains("Name=\"MyTestPackage\"", debugManifestContent, "Debug manifest should keep the original package name");
+        Assert.Contains("Id=\"TestApp\"", debugManifestContent, "Debug manifest should keep the original application ID");
+        Assert.DoesNotContain(".debug", debugManifestContent, "Debug manifest should NOT contain .debug suffix when --keep-identity is used");
     }
 
     [TestMethod]

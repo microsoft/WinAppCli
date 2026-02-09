@@ -61,6 +61,7 @@ Enable package identity for debugging without creating full MSIX. Required for t
 - `<entrypoint>` - Path to the .exe that will need to run with identity, or entrypoint script.
 
 **Options:**
+- `--keep-identity` - Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID.
 - `--manifest` - Path to the appxmanifest.xml
 - `--no-install` - Do not install the package after creation.
 - `--quiet` / `-q` - Suppress progress messages

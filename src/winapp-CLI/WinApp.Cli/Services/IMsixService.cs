@@ -28,6 +28,7 @@ internal interface IMsixService
         string? entryPointPath,
         FileInfo appxManifestPath,
         bool noInstall,
+        bool keepIdentity,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

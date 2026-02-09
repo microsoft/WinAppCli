@@ -273,7 +273,7 @@ internal partial class MsixService(
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
 
-    public async Task<MsixIdentityResult> AddMsixIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddMsixIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -329,6 +329,7 @@ internal partial class MsixService(
         var (debugManifestPath, debugIdentity) = await GenerateSparsePackageStructureAsync(
             appxManifestPath,
             entryPointPath,
+            keepIdentity,
             taskContext,
             cancellationToken);
 
@@ -1204,6 +1205,7 @@ internal partial class MsixService(
     public async Task<(FileInfo debugManifestPath, MsixIdentityResult debugIdentity)> GenerateSparsePackageStructureAsync(
         FileInfo originalManifestPath,
         string entryPointPath,
+        bool keepIdentity,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
@@ -1226,8 +1228,8 @@ internal partial class MsixService(
         var originalManifestContent = await File.ReadAllTextAsync(originalManifestPath.FullName, Encoding.UTF8, cancellationToken);
         var originalIdentity = ParseAppxManifestAsync(originalManifestContent);
 
-        // Step 3: Create debug identity with ".debug" suffix
-        var debugIdentity = CreateDebugIdentity(originalIdentity);
+        // Step 3: Create debug identity (optionally with ".debug" suffix)
+        var debugIdentity = keepIdentity ? originalIdentity : CreateDebugIdentity(originalIdentity);
 
         // Step 4: Modify manifest for sparse packaging and debug identity
         var debugManifestContent = await UpdateAppxManifestContentAsync(
