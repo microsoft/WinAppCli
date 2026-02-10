@@ -22,10 +22,10 @@ internal partial class MsixService(
     ICertificateService certificateService,
     IWorkspaceSetupService workspaceSetupService,
     IDevModeService devModeService,
-    IDotNetService dotNetService,
     INugetService nugetService,
     ILogger<MsixService> logger,
-    ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
+    ICurrentDirectoryProvider currentDirectoryProvider,
+    IDotNetService dotNetService) : IMsixService
 {
     [GeneratedRegex(@"PublicFolder\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex PublicFolderRegex();

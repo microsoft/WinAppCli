@@ -101,7 +101,7 @@ internal partial class RunCommand : Command
                             var fileInfo = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.AppxManifest"));
                             if (!fileInfo.Exists)
                             {
-                                throw new Exception("AppxManifest.xml not found in the build output or current directory. Use --manifest to specify the path.");
+                                throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path.");
                             }
                             manifest = fileInfo;
                             if (outputAppXDirectory == null)
@@ -112,7 +112,7 @@ internal partial class RunCommand : Command
                     }
                     else
                     {
-                        // No build and no manifest specified - try to find manifest in current directory
+                        // No manifest specified - try to find manifest in current directory
                         inputDirectory = currentDirectoryInfo;
 
                         manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "appxmanifest.xml"));
@@ -126,7 +126,7 @@ internal partial class RunCommand : Command
                         }
                         if (!manifest.Exists)
                         {
-                            throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path, or remove --no-build to build the project first.");
+                            throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path.");
                         }
                     }
 

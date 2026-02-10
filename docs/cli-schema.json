@@ -1039,19 +1039,6 @@
           "required": false,
           "recursive": false
         },
-        "--no-build": {
-          "description": "Skip the build step before launching",
-          "hidden": false,
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
         "--output-appx-directory": {
           "description": "Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.",
           "hidden": false,

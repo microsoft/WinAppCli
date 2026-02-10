@@ -165,7 +165,6 @@ Create debug identity and launch the packaged application. Returns the process I
 **Options:**
 - `--args` - Command-line arguments to pass to the application
 - `--manifest` - Path to the appxmanifest.xml
-- `--no-build` - Skip the build step before launching
 - `--output-appx-directory` - Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output

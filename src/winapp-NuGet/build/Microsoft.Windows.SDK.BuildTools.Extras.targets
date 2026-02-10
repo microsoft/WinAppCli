@@ -106,7 +106,7 @@
       <!-- Remove trailing backslash from paths to avoid escaping the closing quote -->
       <_WinAppManifestPathArg>$(WinAppManifestPath.TrimEnd('\'))</_WinAppManifestPathArg>
       <_WinAppLooseLayoutPathArg>$(WinAppLooseLayoutPath.TrimEnd('\'))</_WinAppLooseLayoutPathArg>
-      <_WinAppRunArgs>run --no-build</_WinAppRunArgs>
+      <_WinAppRunArgs>run</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>

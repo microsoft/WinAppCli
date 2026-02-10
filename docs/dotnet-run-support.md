@@ -44,7 +44,7 @@ _WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
 _WinAppInterceptRun (overrides RunCommand with CLI path)
     │
     ▼
-Run Target (invokes: winapp run --no-build --manifest ...)
+Run Target (invokes: winapp run --manifest ...)
     │
     ▼
 WinAppCLI
@@ -61,9 +61,6 @@ src/
 │   ├── Microsoft.Windows.SDK.BuildTools.Extras.csproj
 │   ├── README.md
 │   ├── build/
-│   │   ├── Microsoft.Windows.SDK.BuildTools.Extras.props
-│   │   └── Microsoft.Windows.SDK.BuildTools.Extras.targets
-│   ├── buildMultiTargeting/
 │   │   ├── Microsoft.Windows.SDK.BuildTools.Extras.props
 │   │   └── Microsoft.Windows.SDK.BuildTools.Extras.targets
 │   └── tools/                              # CLI binaries (copied by build script)
@@ -194,10 +191,8 @@ The CLI currently has NativeAOT compilation errors related to Newtonsoft.Json an
 - Related to reflection-heavy code in Newtonsoft.Json
 - Related to dynamic code generation in NuGet.Protocol
 
-**Resolution options:**
-- Switch to System.Text.Json (preferred for AOT)
-- Add TrimmerRootDescriptor entries for problematic types
-- Disable PublishAot for CLI when building for NuGet distribution
+**Resolution:**
+- Wait until https://github.com/NuGet/Home/issues/14408
 
 ### 2. Template Certificate Generation
 

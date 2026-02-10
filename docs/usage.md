@@ -271,7 +271,7 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 
 ### run
 
-Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command builds the project (unless --no-build is specified), creates a loose layout package, registers a debug identity, and launches the app.
+Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
 
 ```bash
 winapp run [options]
@@ -282,11 +282,9 @@ winapp run [options]
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect in build output or current directory)
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside manifest's directory)
 - `--args <string>` - Command-line arguments to pass to the application
-- `--no-build` - Skip the build step before launching
 
 **What it does:**
 
-- Builds the project (unless `--no-build` is specified)
 - Locates or generates the AppxManifest.xml
 - Creates and registers a debug identity using a loose layout package
 - Computes the Application User Model ID (AUMID)
@@ -296,11 +294,11 @@ winapp run [options]
 **Examples:**
 
 ```bash
-# Build, register debug identity, and launch app (auto-detect manifest)
+# Register debug identity, and launch app (auto-detect manifest)
 winapp run
 
-# Launch with custom manifest and arguments, skipping build
-winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value" --no-build
+# Launch with custom manifest and arguments
+winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Specify output directory for loose layout package
 winapp run --output-appx-directory ./AppXDebug
