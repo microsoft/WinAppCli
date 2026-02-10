@@ -114,13 +114,18 @@
                 "type": "string",
                 "description": "Working directory for the application"
               },
-              "manifest": {
+              "buildOutputManifest": {
                 "type": "string",
-                "description": "Path to the appxmanifest.xml"
+                "description": "Glob pattern to locate AppxManifest.xml in build output (used when 'manifest' is not set)",
+                "default": "**/AppxManifest.xml"
               },
               "args": {
                 "type": "string",
                 "description": "Command-line arguments to pass to the application"
+              },
+              "outputAppxDirectory": {
+                "type": "string",
+                "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the manifest's directory will be used."
               }
             }
           }
@@ -129,7 +134,8 @@
           {
             "type": "winapp",
             "request": "launch",
-            "name": "WinApp: Launch and Attach"
+            "name": "WinApp: Launch and Attach",
+            "buildOutputManifest": "**/AppxManifest.xml"
           }
         ],
         "configurationSnippets": [
@@ -140,7 +146,8 @@
               "type": "winapp",
               "request": "launch",
               "name": "WinApp: Launch and Attach",
-              "debuggerType": "coreclr"
+              "debuggerType": "coreclr",
+              "buildOutputManifest": "**/AppxManifest.xml"
             }
           }
         ]

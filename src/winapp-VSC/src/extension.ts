@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
@@ -99,26 +100,75 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 			return undefined;
 		}
 
+		return config;
+	}
+}
+
+class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
+	private extensionPath: string;
+
+	constructor(extensionPath: string) {
+		this.extensionPath = extensionPath;
+	}
+
+	async createDebugAdapterDescriptor(
+		session: vscode.DebugSession,
+		_executable: vscode.DebugAdapterExecutable | undefined
+	): Promise<vscode.DebugAdapterDescriptor> {
+		const config = session.configuration;
+		const folder = session.workspaceFolder;
+
+		if (!folder) {
+			throw new Error('No workspace folder open');
+		}
+
 		try {
+			// Search for AppxManifest.xml in build output using the glob pattern
+			const searchPattern = config.buildOutputManifest || '**/AppxManifest.xml';
+			const pattern = new vscode.RelativePattern(folder, searchPattern);
+			const allMatches = await vscode.workspace.findFiles(pattern, null, 20);
+
+			// Filter out manifests inside AppX folders (created by winapp run)
+			const matches = allMatches.filter(m => !m.fsPath.split(path.sep).includes('AppX'));
+
+			let manifest: string;
+			if (matches.length === 0) {
+				throw new Error(`No manifest found matching "${searchPattern}". Build your project first or update "buildOutputManifest" in launch.json.`);
+			} else if (matches.length === 1) {
+				manifest = matches[0].fsPath;
+			} else {
+				// Multiple manifests found — let the user pick
+				const items = matches.map(m => ({
+					label: path.relative(folder.uri.fsPath, m.fsPath),
+					fsPath: m.fsPath
+				}));
+				const picked = await vscode.window.showQuickPick(items, {
+					placeHolder: 'Multiple AppxManifest.xml files found — select one'
+				});
+				if (!picked) {
+					throw new Error('No manifest selected, cancelling debug session.');
+				}
+				manifest = picked.fsPath;
+			}
+
 			// Build the command with mapped arguments
 			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run'];
+			cmdParts.push('--manifest', `"${manifest}"`);
 
-			if (config.manifest) {
-				cmdParts.push('--manifest', `"${config.manifest}"`);
+			if (config.outputAppxDirectory) {
+				cmdParts.push('--output-appx-directory', `"${config.outputAppxDirectory}"`);
 			}
 
 			// Determine the debugger type based on config or default to coreclr
 			const debuggerType = config.debuggerType || 'coreclr';
 
+			let args = config.args || '';
 			if (debuggerType === 'node') {
-				if (!config.args) {
-					config.args = '';
-				}
-				config.args = '--inspect' + (config.port ? `=${config.port}` : '') + ' ' + config.args;
+				args = '--inspect' + (config.port ? `=${config.port}` : '') + ' ' + args;
 			}
 
-			if (config.args) {
-				cmdParts.push('--args', `"${config.args}"`);
+			if (args.trim()) {
+				cmdParts.push('--args', `"${args.trim()}"`);
 			}
 
 			const command = cmdParts.join(' ');
@@ -153,28 +203,64 @@ class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvi
 				return pid;
 			});
 
-			// define debugConfiguration using vscode.DebugConfiguration type
-			var debugConfiguration = {
+			// Build the attach debug configuration
+			const debugConfiguration: vscode.DebugConfiguration = {
 				type: debuggerType,
 				name: config.name || 'Attach to WinApp Package',
 				request: 'attach'
-			} as vscode.DebugConfiguration;
+			};
 
-			// if debuggerType is 'node', use port from config or default to 9229
 			if (debuggerType === 'node') {
 				debugConfiguration.port = config.port || 9229;
 			} else {
-				// for other debugger types, set processId in config
 				debugConfiguration.processId = processId;
 			}
-			// Start the child debug session and return undefined so VS Code doesn't try to start a debug adapter for 'winapp'
+
+			// Start the real debug session (coreclr/node attach)
 			await vscode.debug.startDebugging(folder, debugConfiguration);
-			return undefined;
+
+			// Return an inline no-op adapter — the real debugging happens in the child session above
+			return new vscode.DebugAdapterInlineImplementation(new NoOpDebugAdapter());
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`Failed to launch and attach: ${message}`);
-			return undefined;
+			throw error;
 		}
+	}
+}
+
+/**
+ * A minimal no-op debug adapter. The winapp debug type doesn't need a real adapter
+ * since we delegate to a child debug session (coreclr/node).
+ */
+class NoOpDebugAdapter implements vscode.DebugAdapter {
+	private sendMessageEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
+	readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage> = this.sendMessageEmitter.event;
+
+	handleMessage(message: vscode.DebugProtocolMessage): void {
+		// Respond to the initialize request so VS Code doesn't hang
+		const msg = message as any;
+		if (msg.type === 'request' && msg.command === 'initialize') {
+			this.sendMessageEmitter.fire({
+				type: 'response',
+				request_seq: msg.seq,
+				success: true,
+				command: msg.command,
+				seq: 0
+			} as any);
+		} else if (msg.type === 'request' && msg.command === 'disconnect') {
+			this.sendMessageEmitter.fire({
+				type: 'response',
+				request_seq: msg.seq,
+				success: true,
+				command: msg.command,
+				seq: 0
+			} as any);
+		}
+	}
+
+	dispose(): void {
+		this.sendMessageEmitter.dispose();
 	}
 }
 
@@ -184,6 +270,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider(WINAPP_DEBUG_TYPE, provider)
+	);
+
+	const factory = new WinAppDebugAdapterFactory(extensionPath);
+	context.subscriptions.push(
+		vscode.debug.registerDebugAdapterDescriptorFactory(WINAPP_DEBUG_TYPE, factory)
 	);
 
 	// Register winapp.init command
