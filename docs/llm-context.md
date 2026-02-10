@@ -125,6 +125,19 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 - `--manifest` - Path to AppxManifest.xml file (default: search current directory)
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
+### `winapp new`
+
+Create a new WinUI 3 project or add a component to an existing project. Scaffolds from templates with interactive prompts for template type, name, and MVVM support. Auto-installs required templates if needed.
+
+**Arguments:**
+- `<template>` - Template short name (winui, winui-blazor, winuilib, winui-page, winui-window, winui-usercontrol)
+
+**Options:**
+- `--name` / `-n` - Name for the new project or item
+- `--output` / `-o` - Parent directory for project output (defaults to current directory)
+- `--quiet` / `-q` - Suppress progress messages
+- `--use-mvvm` / `-mvvm` - Use the MVVM pattern (skip interactive prompt)
+- `--verbose` / `-v` - Enable verbose output
 ### `winapp package`
 
 Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx

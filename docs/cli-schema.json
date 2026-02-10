@@ -769,6 +769,103 @@
         }
       }
     },
+    "new": {
+      "description": "Create a new WinUI 3 project or add a component to an existing project. Scaffolds from templates with interactive prompts for template type, name, and MVVM support. Auto-installs required templates if needed.",
+      "hidden": false,
+      "arguments": {
+        "template": {
+          "description": "Template short name (winui, winui-blazor, winuilib, winui-page, winui-window, winui-usercontrol)",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--name": {
+          "description": "Name for the new project or item",
+          "hidden": false,
+          "aliases": [
+            "-n"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--output": {
+          "description": "Parent directory for project output (defaults to current directory)",
+          "hidden": false,
+          "aliases": [
+            "-o"
+          ],
+          "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--use-mvvm": {
+          "description": "Use the MVVM pattern (skip interactive prompt)",
+          "hidden": false,
+          "aliases": [
+            "-mvvm"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "package": {
       "description": "Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx",
       "hidden": false,
