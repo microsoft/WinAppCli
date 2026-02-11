@@ -57,7 +57,7 @@
       "type": "parameter",
       "description": "The version of the BuildTools.Extras package to use.",
       "datatype": "string",
-      "defaultValue": "0.1.11-prerelease.29",
+      "defaultValue": "0.1.11-prerelease.27",
       "replaces": "EXTRASVERSION"
     },
     "packageGuid": {

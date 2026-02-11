@@ -718,7 +718,8 @@ internal class WorkspaceSetupService(
                     var packages = new (string Name, bool Required)[]
                     {
                         (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
-                        (DotNetService.WINAPP_SDK_NUGET_PACKAGE, true)
+                        (DotNetService.WINAPP_SDK_NUGET_PACKAGE, true),
+                        (DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, false)
                     };
 
                     foreach (var (packageName, required) in packages)
