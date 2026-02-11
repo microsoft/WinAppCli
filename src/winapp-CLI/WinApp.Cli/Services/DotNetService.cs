@@ -183,12 +183,12 @@ internal partial class DotNetService : IDotNetService
                 // Find the closing > of the <PropertyGroup> tag
                 var closeTag = content.IndexOf('>', propGroupIdx);
                 if (closeTag >= 0)
-                {
+{
                     var insertPos = closeTag + 1;
                     content = content[..insertPos]
                         + Environment.NewLine + $"    <TargetFramework>{newTargetFramework}</TargetFramework>"
                         + content[insertPos..];
-                }
+}
             }
         }
 
@@ -196,7 +196,7 @@ internal partial class DotNetService : IDotNetService
     }
 
     public async Task AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string version, CancellationToken cancellationToken = default)
-    {
+{
         var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\" --version \"{version}\"";
         var (exitCode, output, error) = await RunDotnetCommandAsync(csprojPath.Directory!, args, cancellationToken);
         
@@ -269,18 +269,18 @@ internal partial class DotNetService : IDotNetService
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
         {
             return null;
-        }
+    }
 
         try
         {
             return JsonSerializer.Deserialize(output, DotNetServiceJsonContext.Default.DotNetPackageListJson);
         }
         catch (JsonException)
-        {
+    {
             return null;
         }
     }
-}
+    }
 
 [JsonSerializable(typeof(DotNetPackageListJson))]
 [JsonSourceGenerationOptions(

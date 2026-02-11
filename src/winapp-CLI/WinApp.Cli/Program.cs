@@ -54,7 +54,7 @@ internal static class Program
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
         var services = new ServiceCollection()
-            .ConfigureServices(Console.Out)
+            .ConfigureServices()
             .ConfigureCommands()
             .AddLogging(b =>
             {
