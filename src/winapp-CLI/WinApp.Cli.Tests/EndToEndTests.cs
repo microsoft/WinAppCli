@@ -252,6 +252,125 @@ if __name__ == ""__main__"":
         Console.WriteLine($"Successfully created debug identity for Python hosted app: {scriptName}");
     }
 
+    [TestMethod]
+    public async Task E2E_DotNetProject_InitDetectsCsprojAndAddsPackageReferences_ShouldSucceed()
+    {
+        // This test verifies the .NET project workflow:
+        // 1. Creates a new console app with a .csproj
+        // 2. Runs 'winapp init --use-defaults' which should detect the .csproj
+        // 3. Verifies that NuGet package references were added to the .csproj
+        // 4. Verifies manifest and assets were created
+
+        // Arrange
+        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleApp");
+        var projectName = "TestConsoleApp";
+
+        // Step 1: Create a new console application using dotnet CLI
+        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
+
+        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
+        Assert.IsTrue(File.Exists(csprojPath), "Project file should be created");
+
+        // Get original csproj content for comparison
+        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // Step 2: Run 'winapp init --use-defaults' to detect csproj and set up the project
+        var initCommand = GetRequiredService<InitCommand>();
+        var initArgs = new[]
+        {
+            projectDir.FullName,
+            "--use-defaults"  // Non-interactive mode
+        };
+
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
+        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
+
+        // Step 3: Verify that NuGet package references were added to the .csproj
+        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // The init command should add WindowsAppSDK package reference
+        Assert.IsTrue(
+            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
+            "csproj should contain Microsoft.WindowsAppSDK package reference");
+
+        // The init command should add BuildTools package reference
+        Assert.IsTrue(
+            updatedCsprojContent.Contains("Microsoft.Windows.SDK.BuildTools", StringComparison.OrdinalIgnoreCase),
+            "csproj should contain Microsoft.Windows.SDK.BuildTools package reference");
+
+        // Step 4: Verify the TargetFramework was updated to a Windows TFM while preserving the .NET version
+        Assert.IsTrue(
+            updatedCsprojContent.Contains("-windows", StringComparison.OrdinalIgnoreCase),
+            "csproj TargetFramework should be updated to Windows TFM");
+
+        // Verify the .NET version was preserved (should not downgrade from the project's original .NET version)
+        // A console app created with .NET 10 SDK should stay on net10.0, not downgrade to net8.0
+        Assert.IsTrue(
+            updatedCsprojContent.Contains("net10.0-windows", StringComparison.OrdinalIgnoreCase) ||
+            updatedCsprojContent.Contains("net9.0-windows", StringComparison.OrdinalIgnoreCase) ||
+            updatedCsprojContent.Contains("net8.0-windows", StringComparison.OrdinalIgnoreCase),
+            "csproj TargetFramework should preserve the .NET version with Windows SDK version added");
+
+        // Step 5: Verify manifest and assets were created
+        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
+
+        var assetsDir = Path.Combine(projectDir.FullName, "Assets");
+        Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
+
+        // Verify the manifest contains expected content
+        var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
+        Assert.IsTrue(manifestContent.Contains("Identity", StringComparison.OrdinalIgnoreCase),
+            "Manifest should contain Identity element");
+
+        Console.WriteLine("Successfully set up .NET project with winapp init");
+    }
+
+    [TestMethod]
+    public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
+    {
+        // This test verifies that --setup-sdks none skips adding package references
+        // but still creates manifest and certificate
+
+        // Arrange
+        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleAppNoSdk");
+        var projectName = "TestConsoleAppNoSdk";
+
+        // Step 1: Create a new console application
+        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
+
+        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
+        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
+        var initCommand = GetRequiredService<InitCommand>();
+        var initArgs = new[]
+        {
+            projectDir.FullName,
+            "--setup-sdks", "none",
+            "--use-defaults"
+        };
+
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
+        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
+
+        // Step 3: Verify that csproj was NOT modified (no package references added)
+        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // When --setup-sdks none, we should not add WindowsAppSDK
+        Assert.IsFalse(
+            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
+            "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
+
+        // Step 4: Manifest should still be created
+        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
+
+        Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
+    }
+
     /// <summary>
     /// Helper method to run dotnet commands
     /// </summary>

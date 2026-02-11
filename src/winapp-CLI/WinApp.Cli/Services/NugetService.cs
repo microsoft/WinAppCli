@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Xml;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
@@ -175,6 +176,52 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
         }
 
         return packages;
+    }
+
+    /// <inheritdoc />
+    public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Fetch the .nuspec from NuGet flat container API
+        var id = packageName.ToLowerInvariant();
+        var ver = version.ToLowerInvariant();
+        var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
+
+        using var resp = await Http.GetAsync(nuspecUrl, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return dependencies;
+        }
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        var doc = new XmlDocument();
+        doc.Load(stream);
+
+        // The nuspec uses a default namespace; we need a namespace manager
+        var nsMgr = new XmlNamespaceManager(doc.NameTable);
+        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
+        if (!string.IsNullOrEmpty(ns))
+        {
+            nsMgr.AddNamespace("ns", ns);
+        }
+
+        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
+        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
+        if (depNodes != null)
+        {
+            foreach (XmlNode node in depNodes)
+            {
+                var depId = node.Attributes?["id"]?.Value;
+                var depVersion = node.Attributes?["version"]?.Value;
+                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                {
+                    dependencies.TryAdd(depId, depVersion);
+                }
+            }
+        }
+
+        return dependencies;
     }
 
     private static string Quote(string path) => $"\"{path}\"";

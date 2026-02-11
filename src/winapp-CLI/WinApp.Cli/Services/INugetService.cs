@@ -10,4 +10,10 @@ internal interface INugetService
     Task EnsureNugetExeAsync(DirectoryInfo winappDir, CancellationToken cancellationToken = default);
     Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default);
     Task<Dictionary<string, string>> InstallPackageAsync(DirectoryInfo globalWinappDir, string package, string version, DirectoryInfo outputDir, TaskContext taskContext, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Queries the NuGet v3 flat container API for the dependencies of a specific package version.
+    /// Returns a dictionary mapping dependency package ID to its version (or version range).
+    /// </summary>
+    Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default);
 }

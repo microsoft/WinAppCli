@@ -83,7 +83,7 @@ internal class PromptConfirmationTask : GroupableTask<bool>
         InProgressMessage = FormatPromptMessage(PromptText, _state, _typedInput);
         if (_state != PromptState.WaitingForInput)
         {
-            IsCompleted = true;
+            SuccessfullyCompleted = true;
             CompletedMessage = _state == PromptState.Confirmed;
         }
         _onUpdate?.Invoke();

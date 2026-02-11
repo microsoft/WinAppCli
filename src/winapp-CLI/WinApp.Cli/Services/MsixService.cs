@@ -23,6 +23,8 @@ internal partial class MsixService(
     IPackageCacheService packageCacheService,
     IWorkspaceSetupService workspaceSetupService,
     IDevModeService devModeService,
+    IDotNetService dotNetService,
+    INugetService nugetService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
@@ -885,7 +887,7 @@ internal partial class MsixService(
                 outAppManifestPath: tempManifestPath,
                 cancellationToken: cancellationToken);
 
-            (var cachedPackages, var mainVersion) = await GetCachedPackagesAsync(taskContext, cancellationToken);
+            (var cachedPackages, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
             if (cachedPackages == null || cachedPackages.Count == 0)
             {
                 throw new InvalidOperationException("No cached Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
@@ -1471,7 +1473,7 @@ $1");
 
     private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(TaskContext taskContext, CancellationToken cancellationToken)
     {
-        (var cachedPackages, var mainVersion) = await GetCachedPackagesAsync(taskContext, cancellationToken);
+        (var cachedPackages, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
         if (cachedPackages == null || mainVersion == null)
         {
             return null;
@@ -1513,36 +1515,71 @@ $1");
         return msixDir;
     }
 
-    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetCachedPackagesAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    [GeneratedRegex(@"[\[\]\(\)]")]
+    private static partial Regex BracketsAndParenthesesRegex();
+
+    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(TaskContext taskContext, CancellationToken cancellationToken)
     {
-        // Load the locked config to get the actual package versions
-        if (!configService.Exists())
+        // Path 1: Try winapp.yaml (C++ / native projects)
+        if (configService.Exists())
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} No winapp.yaml found, cannot determine locked Windows App SDK version");
-            return (null, null);
+            var config = configService.Load();
+            var mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
+            if (!string.IsNullOrEmpty(mainVersion))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package in winapp.yaml: v{mainVersion}");
+                try
+                {
+                    return (await packageCacheService.GetCachedPackageAsync(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion, taskContext, cancellationToken), mainVersion);
+                }
+                catch (KeyNotFoundException)
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} {BuildToolsService.WINAPP_SDK_PACKAGE} v{mainVersion} not found in package cache");
+                }
+            }
         }
 
-        var config = configService.Load();
-
-        // Get the main Windows App SDK version from config
-        var mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
-        if (string.IsNullOrEmpty(mainVersion))
+        // Path 2: Try .csproj via `dotnet list package --format json`
+        var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
+        var csproj = dotNetService.FindCsproj(cwd);
+        if (csproj != null)
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} No ${BuildToolsService.WINAPP_SDK_PACKAGE} package found in winapp.yaml");
-            return (null, null);
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Found .csproj: {csproj.Name}, querying NuGet package list...");
+            var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
+
+            var allPackages = packageList?.Projects?
+                .SelectMany(p => p.Frameworks ?? [])
+                .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+            var winAppSdkPkg = allPackages?
+                .FirstOrDefault(p => string.Equals(p.Id, BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase));
+
+            if (winAppSdkPkg != null && !string.IsNullOrEmpty(winAppSdkPkg.ResolvedVersion))
+            {
+                var mainVersion = winAppSdkPkg.ResolvedVersion;
+                taskContext.AddDebugMessage($"{UiSymbols.Package} Found {BuildToolsService.WINAPP_SDK_PACKAGE} v{mainVersion} in .csproj");
+
+                // Query NuGet API for the dependency tree of this package
+                var deps = await nugetService.GetPackageDependenciesAsync(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion, cancellationToken);
+
+                deps = deps.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp =>
+                    {
+                        var version = kvp.Value;
+                        // Remove any brackets or parentheses from the version string
+                        var cleanedVersion = BracketsAndParenthesesRegex().Replace(version, "");
+                        return cleanedVersion;
+                    });
+
+                // Include the main package itself in the result
+                deps.TryAdd(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion);
+
+                return (deps, mainVersion);
+            }
         }
 
-        taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package: v{mainVersion}");
-        try
-        {
-            // Use PackageCacheService to find the runtime package that was installed with the main package
-            return (await packageCacheService.GetCachedPackageAsync(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion, taskContext, cancellationToken), mainVersion);
-        }
-        catch (KeyNotFoundException)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} {BuildToolsService.WINAPP_SDK_PACKAGE} v{mainVersion} not found in package cache");
-        }
-
+        taskContext.AddDebugMessage($"{UiSymbols.Warning} No winapp.yaml or .csproj with {BuildToolsService.WINAPP_SDK_PACKAGE} found");
         return (null, null);
     }
 
