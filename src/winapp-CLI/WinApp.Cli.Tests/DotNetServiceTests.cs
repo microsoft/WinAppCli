@@ -402,7 +402,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework(null);
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -412,7 +412,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework("");
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -422,14 +422,14 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework("   ");
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
     public void GetRecommendedTargetFramework_AlreadySupported_ReturnsSame()
     {
         // Arrange - already a fully supported TFM
-        var input = "net8.0-windows10.0.19041.0";
+        var input = "net8.0-windows10.0.26100.0";
 
         // Act
         var result = _dotNetService.GetRecommendedTargetFramework(input);
@@ -448,7 +448,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework(input);
 
         // Assert
-        Assert.AreEqual("net8.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net8.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -461,7 +461,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework(input);
 
         // Assert
-        Assert.AreEqual("net9.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net9.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -474,20 +474,20 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework(input);
 
         // Assert
-        Assert.AreEqual("net8.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net8.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
     public void GetRecommendedTargetFramework_OldNetVersion_ReturnsDefault()
     {
         // Arrange - .NET version below minimum (6.0)
-        var input = "net5.0-windows10.0.19041.0";
+        var input = "net5.0-windows10.0.26100.0";
 
         // Act
         var result = _dotNetService.GetRecommendedTargetFramework(input);
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -500,7 +500,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework(input);
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -510,7 +510,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework("invalid-tfm");
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     [TestMethod]
@@ -520,7 +520,7 @@ public class DotNetServiceTests : BaseCommandTests
         var result = _dotNetService.GetRecommendedTargetFramework("netstandard2.0");
 
         // Assert
-        Assert.AreEqual("net10.0-windows10.0.19041.0", result);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
     }
 
     #endregion
