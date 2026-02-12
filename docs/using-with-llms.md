@@ -211,6 +211,29 @@ My project: [describe your .NET project]
 3. `winapp create-debug-identity YourApp.exe` - For testing APIs requiring identity
 4. `winapp pack bin\Release\net8.0-windows --cert devcert.pfx` - Package as MSIX
 
+### For Flutter Projects
+
+```
+I'm building a Flutter Windows app and need winapp CLI for:
+- [ ] Package identity for Windows APIs
+- [ ] MSIX packaging
+- [ ] Certificate generation and signing
+
+Reference the LLM-optimized docs:
+https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
+
+Flutter guide:
+https://github.com/microsoft/WinAppCli/blob/main/docs/guides/flutter.md
+
+My project: [describe your Flutter project]
+```
+
+**Key workflow for Flutter:**
+1. `winapp init --setup-sdks stable` - Sets up manifests, certs, and SDK headers
+2. `flutter build windows` - Build your app normally
+3. `winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe` - Test with identity
+4. `winapp pack .\dist --cert .\devcert.pfx` - Package as MSIX
+
 ### For C++ Projects
 
 ```
