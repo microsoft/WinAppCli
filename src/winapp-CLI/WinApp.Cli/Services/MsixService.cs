@@ -887,7 +887,7 @@ internal partial class MsixService(
                 outAppManifestPath: tempManifestPath,
                 cancellationToken: cancellationToken);
 
-            (var cachedPackages, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
+            var (cachedPackages, _) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
             if (cachedPackages == null || cachedPackages.Count == 0)
             {
                 throw new InvalidOperationException("No cached Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");

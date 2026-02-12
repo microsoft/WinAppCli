@@ -207,16 +207,47 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
         }
 
         var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
-        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
-        if (depNodes != null)
+
+        // Dependencies are declared under /package/metadata/dependencies.
+        // Prefer ungrouped dependencies; if none exist, fall back to a single group (if present).
+        var dependenciesNode = doc.SelectSingleNode($"/{prefix}package/{prefix}metadata/{prefix}dependencies", nsMgr);
+        if (dependenciesNode != null)
         {
-            foreach (XmlNode node in depNodes)
+            // First, collect ungrouped dependencies (direct children of <dependencies>).
+            var directDepNodes = dependenciesNode.SelectNodes($"{prefix}dependency", nsMgr);
+            if (directDepNodes != null && directDepNodes.Count > 0)
             {
-                var depId = node.Attributes?["id"]?.Value;
-                var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                foreach (XmlNode node in directDepNodes)
                 {
-                    dependencies.TryAdd(depId, depVersion);
+                    var depId = node.Attributes?["id"]?.Value;
+                    var depVersion = node.Attributes?["version"]?.Value;
+                    if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                    {
+                        dependencies.TryAdd(depId, depVersion);
+                    }
+                }
+            }
+            else
+            {
+                // If there are no ungrouped dependencies, and there is exactly one group,
+                // use that group's dependencies to avoid mixing target frameworks.
+                var groupNodes = dependenciesNode.SelectNodes($"{prefix}group", nsMgr);
+                if (groupNodes != null && groupNodes.Count == 1)
+                {
+                    var groupNode = groupNodes[0];
+                    var groupedDeps = groupNode.SelectNodes($"{prefix}dependency", nsMgr);
+                    if (groupedDeps != null)
+                    {
+                        foreach (XmlNode node in groupedDeps)
+                        {
+                            var depId = node.Attributes?["id"]?.Value;
+                            var depVersion = node.Attributes?["version"]?.Value;
+                            if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                            {
+                                dependencies.TryAdd(depId, depVersion);
+                            }
+                        }
+                    }
                 }
             }
         }
