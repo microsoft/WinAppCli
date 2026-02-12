@@ -6,4 +6,5 @@ namespace WinApp.Cli.Services;
 internal interface IMSStoreCLIService
 {
     Task EnsureMSStoreCLIAvailableAsync(CancellationToken cancellationToken = default);
+    string GetMSStoreCLIPath();
 }

@@ -25,12 +25,11 @@ internal class MSStoreCommand : Command
 
             try
             {
-                // Ensure the build tool is available, installing BuildTools if necessary
                 await msStoreCLIService.EnsureMSStoreCLIAvailableAsync(cancellationToken: cancellationToken);
 
                 var processStartInfo = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "msstore",
+                    FileName = msStoreCLIService.GetMSStoreCLIPath(),
                     Arguments = string.Join(" ", msstoreArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)),
                     RedirectStandardInput = false,
                     RedirectStandardOutput = false,
