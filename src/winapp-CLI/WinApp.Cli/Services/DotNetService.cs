@@ -23,7 +23,7 @@ internal partial class DotNetService : IDotNetService
     /// <summary>
     /// Recommended TargetFramework for new WinAppSDK projects
     /// </summary>
-    private const string RecommendedTfm = "net10.0-windows10.0.19041.0";
+    private const string RecommendedTfm = "net10.0-windows10.0.26100.0";
 
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
@@ -42,15 +42,17 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFramework>(.*?)</TargetFramework>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworkElementRegex();
 
-    public FileInfo? FindCsproj(DirectoryInfo directory)
+    [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
+    private static partial Regex TargetFrameworksElementRegex();
+
+    public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
         if (!directory.Exists)
         {
-            return null;
+            return [];
         }
 
-        var csprojFiles = directory.GetFiles("*.csproj", SearchOption.TopDirectoryOnly);
-        return csprojFiles.Length > 0 ? csprojFiles[0] : null;
+        return directory.GetFiles("*.csproj", SearchOption.TopDirectoryOnly);
     }
 
     public string? GetTargetFramework(FileInfo csprojPath)
@@ -61,8 +63,36 @@ internal partial class DotNetService : IDotNetService
         }
 
         var content = File.ReadAllText(csprojPath.FullName);
+
+        // Check singular <TargetFramework> first
         var match = TargetFrameworkElementRegex().Match(content);
-        return match.Success ? match.Groups[1].Value.Trim() : null;
+        if (match.Success)
+        {
+            return match.Groups[1].Value.Trim();
+        }
+
+        // Fall back to <TargetFrameworks> — return the first TFM from the semicolon-separated list
+        var pluralMatch = TargetFrameworksElementRegex().Match(content);
+        if (pluralMatch.Success)
+        {
+            var first = pluralMatch.Groups[1].Value
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            return first;
+        }
+
+        return null;
+    }
+
+    public bool IsMultiTargeted(FileInfo csprojPath)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = File.ReadAllText(csprojPath.FullName);
+        return TargetFrameworksElementRegex().IsMatch(content);
     }
 
     public bool IsTargetFrameworkSupported(string targetFramework)
@@ -101,7 +131,7 @@ internal partial class DotNetService : IDotNetService
     public string GetRecommendedTargetFramework(string? currentTargetFramework = null)
     {
         // Default Windows SDK version to use
-        const string defaultWindowsSdkVersion = "10.0.19041.0";
+        const string defaultWindowsSdkVersion = "10.0.26100.0";
 
         if (string.IsNullOrWhiteSpace(currentTargetFramework))
         {
@@ -112,7 +142,7 @@ internal partial class DotNetService : IDotNetService
         var windowsTfmMatch = WindowsTfmRegex().Match(currentTargetFramework);
         if (windowsTfmMatch.Success)
         {
-            // Already a Windows TFM (e.g., net10.0-windows10.0.19041.0)
+            // Already a Windows TFM (e.g., net10.0-windows10.0.26100.0)
             var netVersion = windowsTfmMatch.Groups[1].Value;
             var windowsVersion = windowsTfmMatch.Groups[2].Value;
 

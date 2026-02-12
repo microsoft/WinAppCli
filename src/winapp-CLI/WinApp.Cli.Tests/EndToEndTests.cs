@@ -272,8 +272,6 @@ if __name__ == ""__main__"":
         var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
         Assert.IsTrue(File.Exists(csprojPath), "Project file should be created");
 
-        // Get original csproj content for comparison
-        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
         // Step 2: Run 'winapp init --use-defaults' to detect csproj and set up the project
         var initCommand = GetRequiredService<InitCommand>();
@@ -342,7 +340,7 @@ if __name__ == ""__main__"":
         Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
 
         var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
-        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
 
         // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
         var initCommand = GetRequiredService<InitCommand>();

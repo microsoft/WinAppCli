@@ -1635,7 +1635,8 @@ $1");
         {
             // Path 2: Try .csproj via `dotnet list package --format json`
             var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
-            var csproj = dotNetService.FindCsproj(cwd);
+            var csprojFiles = dotNetService.FindCsproj(cwd);
+            var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
             if (csproj != null)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Found .csproj: {csproj.Name}, querying NuGet package list...");

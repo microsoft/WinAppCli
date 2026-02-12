@@ -57,18 +57,18 @@ internal class WorkspaceSetupService(
         // Detect .NET project (.csproj) in the base directory
         if (!options.RequireExistingConfig)
         {
-            var csprojFile = dotNetService.FindCsproj(options.BaseDirectory);
-            if (csprojFile != null)
+            var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
+            if (csprojFiles.Count > 0)
             {
-                logger.LogDebug("Detected .NET project: {CsprojFile}", csprojFile.Name);
-                return await SetupDotNetProjectAsync(options, csprojFile, cancellationToken);
+                logger.LogDebug("Detected {Count} .NET project(s) in {BaseDirectory}", csprojFiles.Count, options.BaseDirectory);
+                return await SetupDotNetProjectAsync(options, csprojFiles, cancellationToken);
             }
         }
-        else if (dotNetService.FindCsproj(options.BaseDirectory) != null && !configService.Exists())
+        else if (dotNetService.FindCsproj(options.BaseDirectory).Count > 0 && !configService.Exists())
         {
             // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
-            logger.LogInformation(".NET project detected. Use 'dotnet restore' to restore NuGet packages for .NET projects.");
-            return 0;
+            logger.LogError(".NET project detected, but no winapp.yaml configuration file was found. The 'winapp restore' command is not supported for .NET projects without a winapp.yaml. Please run 'dotnet restore' to restore NuGet packages for this project.");
+            return 1;
         }
 
         bool hadExistingConfig = default;
@@ -491,53 +491,8 @@ internal class WorkspaceSetupService(
                     }, cancellationToken);
                 }
 
-                bool addedCertToGitignore = false;
-
                 // Step 8: Generate development certificate (unless --no-cert is specified)
-                if (!options.NoCert)
-                {
-                    if (shouldGenerateCert)
-                    {
-                        await taskContext.AddSubTaskAsync("Generating development certificate", async (taskContext, cancellationToken) =>
-                        {
-                            var result = await certificateService.GenerateDevCertificateWithInferenceAsync(
-                                outputPath: certPath,
-                                taskContext: taskContext,
-                                explicitPublisher: null,
-                                manifestPath: null,
-                                password: "password",
-                                validDays: 365,
-                                updateGitignore: !options.NoGitignore,
-                                install: false,
-                                cancellationToken: cancellationToken);
-
-                            if (result?.UpdatedGitignore == true)
-                            {
-                                addedCertToGitignore = true;
-                            }
-
-                            if (result == null || !result.CertificatePath.Exists)
-                            {
-                                return (1, "Development certificate generation failed.");
-                            }
-
-                            return (0, $"Development certificate created: [underline]{certPath.Name}[/]");
-
-                        }, cancellationToken);
-                    }
-                    else
-                    {
-                        // Should not generate cert
-                        if (certPath.Exists)
-                        {
-                            taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate already exists → {certPath.FullName}");
-                        }
-                        else
-                        {
-                            taskContext.AddStatusMessage($"{UiSymbols.Skip} Development certificate generation skipped");
-                        }
-                    }
-                }
+                var addedCertToGitignore = await SetupCertSubTaskAsync(options, shouldGenerateCert, taskContext, cancellationToken);
 
                 bool showedGitignoreMessage = false;
                 if (!options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && !options.NoGitignore && localWinappDir?.Parent != null)
@@ -631,9 +586,34 @@ internal class WorkspaceSetupService(
     /// Validates/updates TargetFramework, adds NuGet PackageReferences, generates manifest and cert.
     /// Does NOT create winapp.yaml or download C++ projections.
     /// </summary>
-    private async Task<int> SetupDotNetProjectAsync(WorkspaceSetupOptions options, FileInfo csprojFile, CancellationToken cancellationToken)
+    private async Task<int> SetupDotNetProjectAsync(WorkspaceSetupOptions options, IReadOnlyList<FileInfo> csprojFiles, CancellationToken cancellationToken)
     {
+        FileInfo csprojFile;
+        if (csprojFiles.Count == 1)
+        {
+            csprojFile = csprojFiles[0];
+        }
+        else
+        {
+            // Multiple .csproj files found — ask the user which one to use
+            var choices = csprojFiles.Select(f => f.Name).ToArray();
+            var selected = await ansiConsole.PromptAsync(
+                new SelectionPrompt<string>()
+                    .Title("Multiple .csproj files found. Which project should be configured?")
+                    .AddChoices(choices),
+                cancellationToken);
+            csprojFile = csprojFiles.First(f => f.Name == selected);
+        }
+
         logger.LogDebug(".NET project setup for {CsprojFile}", csprojFile.FullName);
+
+        // Prompt for manifest and cert generation (same order as non-dotnet path)
+        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
+        var manifestGenerationInfo = shouldGenerateManifest
+            ? await PromptForManifestInfoAsync(options, cancellationToken)
+            : null;
+
+        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
 
         // Prompt for SDK install mode if not specified
         if (!options.ConfigOnly && options.SdkInstallMode == null)
@@ -648,15 +628,24 @@ internal class WorkspaceSetupService(
             }
         }
 
+        // Prompt for developer mode
+        var shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
+
         if (options.SdkInstallMode == SdkInstallMode.None)
         {
             logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
 
-            // Still do manifest + cert even when skipping SDKs
-            return await SetupDotNetManifestAndCertAsync(options, cancellationToken);
+            // Still do manifest + cert even when skipping SDKs (using answers from above)
+            return await SetupDotNetManifestAndCertAsync(options, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, cancellationToken);
         }
 
         // Validate TargetFramework
+        if (dotNetService.IsMultiTargeted(csprojFile))
+        {
+            logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
+            return 1;
+        }
+
         var currentTfm = dotNetService.GetTargetFramework(csprojFile);
         logger.LogDebug("Current TargetFramework: {Tfm}", currentTfm ?? "(not set)");
 
@@ -668,11 +657,9 @@ internal class WorkspaceSetupService(
             if (!options.UseDefaults)
             {
                 var currentDisplay = currentTfm ?? "(not set)";
-                ansiConsole.MarkupLine($"[yellow]Current TargetFramework '{Markup.Escape(currentDisplay)}' is not supported for Windows App SDK.[/]");
-                ansiConsole.MarkupLine($"Recommended: [green]{recommendedTfm}[/]");
 
                 var shouldUpdate = await ansiConsole.PromptAsync(
-                    new ConfirmationPrompt($"Update TargetFramework to '{recommendedTfm}'?"),
+                    new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\" (Required)?"),
                     cancellationToken);
 
                 if (!shouldUpdate)
@@ -681,22 +668,20 @@ internal class WorkspaceSetupService(
                     return 1;
                 }
             }
+            else
+            {
+                var currentDisplay = currentTfm ?? "(not set)";
+                logger.LogWarning(
+                    "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
+                    currentDisplay,
+                    recommendedTfm);
+                logger.LogInformation("Automatically updating TargetFramework from {CurrentTfm} to {RecommendedTfm} because --use-defaults was specified.", Markup.Escape(currentDisplay), recommendedTfm);
+            }
         }
         else
         {
             logger.LogDebug("{UISymbol} TargetFramework '{Tfm}' is supported", UiSymbols.Check, currentTfm);
         }
-
-        // Prompt for developer mode
-        var shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
-
-        // Prompt for manifest and cert generation
-        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
-        var manifestGenerationInfo = shouldGenerateManifest
-            ? await PromptForManifestInfoAsync(options, cancellationToken)
-            : null;
-
-        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
 
         // Get latest WinAppSDK version
         var sdkInstallMode = options.SdkInstallMode ?? SdkInstallMode.Stable;
@@ -811,19 +796,8 @@ internal class WorkspaceSetupService(
     /// <summary>
     /// Generates manifest and certificate for .NET project setup (when SDK installation is skipped)
     /// </summary>
-    private async Task<int> SetupDotNetManifestAndCertAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    private async Task<int> SetupDotNetManifestAndCertAsync(WorkspaceSetupOptions options, bool shouldGenerateManifest, ManifestGenerationInfo? manifestGenerationInfo, bool shouldGenerateCert, CancellationToken cancellationToken)
     {
-        // Prompt for manifest and cert generation
-        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
-        ManifestGenerationInfo? manifestGenerationInfo = null;
-        if (shouldGenerateManifest)
-        {
-            manifestGenerationInfo = await manifestService.PromptForManifestInfoAsync(
-                options.BaseDirectory, null, null, "1.0.0.0", "Windows Application", null, options.UseDefaults, cancellationToken);
-        }
-
-        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
-
         return await statusService.ExecuteWithStatusAsync("Setting up .NET project", async (taskContext, cancellationToken) =>
         {
             try
@@ -875,9 +849,10 @@ internal class WorkspaceSetupService(
         }, cancellationToken);
     }
 
-    private async Task SetupCertSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateCert, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<bool> SetupCertSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateCert, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var certPath = new FileInfo(Path.Combine(options.BaseDirectory.FullName, CertificateService.DefaultCertFileName));
+        var addedCertToGitignore = false;
 
         if (!options.NoCert && shouldGenerateCert)
         {
@@ -894,6 +869,11 @@ internal class WorkspaceSetupService(
                     install: false,
                     cancellationToken: cancellationToken);
 
+                if (result?.UpdatedGitignore == true)
+                {
+                    addedCertToGitignore = true;
+                }
+
                 if (result == null || !result.CertificatePath.Exists)
                 {
                     return (1, "Development certificate generation failed.");
@@ -906,6 +886,12 @@ internal class WorkspaceSetupService(
         {
             taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate already exists → {certPath.FullName}");
         }
+        else if (!options.NoCert)
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Skip} Development certificate generation skipped");
+        }
+
+        return addedCertToGitignore;
     }
 
     private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldGenerateCert, bool ShouldEnableDeveloperMode)> InitializeConfigurationAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
@@ -1405,7 +1391,7 @@ if ($toInstall.Count -gt 0) {{
 
         // Detect project type: check if there's a .csproj in the current directory
         var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
-        var isDotNetProject = dotNetService.FindCsproj(cwd) != null;
+        var isDotNetProject = dotNetService.FindCsproj(cwd).Count > 0;
 
         if (isDotNetProject)
         {
