@@ -491,53 +491,8 @@ internal class WorkspaceSetupService(
                     }, cancellationToken);
                 }
 
-                bool addedCertToGitignore = false;
-
                 // Step 8: Generate development certificate (unless --no-cert is specified)
-                if (!options.NoCert)
-                {
-                    if (shouldGenerateCert)
-                    {
-                        await taskContext.AddSubTaskAsync("Generating development certificate", async (taskContext, cancellationToken) =>
-                        {
-                            var result = await certificateService.GenerateDevCertificateWithInferenceAsync(
-                                outputPath: certPath,
-                                taskContext: taskContext,
-                                explicitPublisher: null,
-                                manifestPath: null,
-                                password: "password",
-                                validDays: 365,
-                                updateGitignore: !options.NoGitignore,
-                                install: false,
-                                cancellationToken: cancellationToken);
-
-                            if (result?.UpdatedGitignore == true)
-                            {
-                                addedCertToGitignore = true;
-                            }
-
-                            if (result == null || !result.CertificatePath.Exists)
-                            {
-                                return (1, "Development certificate generation failed.");
-                            }
-
-                            return (0, $"Development certificate created: [underline]{certPath.Name}[/]");
-
-                        }, cancellationToken);
-                    }
-                    else
-                    {
-                        // Should not generate cert
-                        if (certPath.Exists)
-                        {
-                            taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate already exists → {certPath.FullName}");
-                        }
-                        else
-                        {
-                            taskContext.AddStatusMessage($"{UiSymbols.Skip} Development certificate generation skipped");
-                        }
-                    }
-                }
+                var addedCertToGitignore = await SetupCertSubTaskAsync(options, shouldGenerateCert, taskContext, cancellationToken);
 
                 bool showedGitignoreMessage = false;
                 if (!options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && !options.NoGitignore && localWinappDir?.Parent != null)
@@ -702,11 +657,9 @@ internal class WorkspaceSetupService(
             if (!options.UseDefaults)
             {
                 var currentDisplay = currentTfm ?? "(not set)";
-                ansiConsole.MarkupLine($"[yellow]Current TargetFramework '{Markup.Escape(currentDisplay)}' is not supported for Windows App SDK.[/]");
-                ansiConsole.MarkupLine($"Recommended: [green]{recommendedTfm}[/]");
 
                 var shouldUpdate = await ansiConsole.PromptAsync(
-                    new ConfirmationPrompt($"Update TargetFramework to '{recommendedTfm}'?"),
+                    new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\" (Required)?"),
                     cancellationToken);
 
                 if (!shouldUpdate)
@@ -722,10 +675,7 @@ internal class WorkspaceSetupService(
                     "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
                     currentDisplay,
                     recommendedTfm);
-                ansiConsole.MarkupLine(
-                    $"[yellow]Current TargetFramework '{Markup.Escape(currentDisplay)}' is not supported for Windows App SDK.[/]");
-                ansiConsole.MarkupLine(
-                    $"[yellow]Automatically updating TargetFramework to [green]{recommendedTfm}[/] because --use-defaults was specified.[/]");
+                logger.LogInformation("Automatically updating TargetFramework from {CurrentTfm} to {RecommendedTfm} because --use-defaults was specified.", Markup.Escape(currentDisplay), recommendedTfm);
             }
         }
         else
@@ -898,9 +848,10 @@ internal class WorkspaceSetupService(
         }, cancellationToken);
     }
 
-    private async Task SetupCertSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateCert, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<bool> SetupCertSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateCert, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var certPath = new FileInfo(Path.Combine(options.BaseDirectory.FullName, CertificateService.DefaultCertFileName));
+        var addedCertToGitignore = false;
 
         if (!options.NoCert && shouldGenerateCert)
         {
@@ -917,6 +868,11 @@ internal class WorkspaceSetupService(
                     install: false,
                     cancellationToken: cancellationToken);
 
+                if (result?.UpdatedGitignore == true)
+                {
+                    addedCertToGitignore = true;
+                }
+
                 if (result == null || !result.CertificatePath.Exists)
                 {
                     return (1, "Development certificate generation failed.");
@@ -929,6 +885,12 @@ internal class WorkspaceSetupService(
         {
             taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate already exists → {certPath.FullName}");
         }
+        else if (!options.NoCert)
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Skip} Development certificate generation skipped");
+        }
+
+        return addedCertToGitignore;
     }
 
     private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldGenerateCert, bool ShouldEnableDeveloperMode)> InitializeConfigurationAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)

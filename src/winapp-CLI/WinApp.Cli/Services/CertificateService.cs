@@ -84,6 +84,8 @@ internal partial class CertificateService(
 
             taskContext.AddDebugMessage($"Certificate generated: {outputPath}");
 
+            outputPath.Refresh();
+
             return new CertificateResult(
                 CertificatePath: outputPath,
                 Password: password,
