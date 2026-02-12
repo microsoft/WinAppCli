@@ -50,7 +50,7 @@ winapp init
 # Initialize with experimental packages
 winapp init --setup-sdks experimental
 
-# Initialize specific directory without promts
+# Initialize specific directory without prompts
 winapp init ./my-project --use-defaults
 
 # Initialize a .NET project (auto-detected from .csproj)

@@ -67,8 +67,8 @@ internal class WorkspaceSetupService(
         else if (dotNetService.FindCsproj(options.BaseDirectory).Count > 0 && !configService.Exists())
         {
             // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
-            logger.LogInformation(".NET project detected. Use 'dotnet restore' to restore NuGet packages for .NET projects.");
-            return 0;
+            logger.LogError(".NET project detected, but no winapp.yaml configuration file was found. The 'winapp restore' command is not supported for .NET projects without a winapp.yaml. Please run 'dotnet restore' to restore NuGet packages for this project.");
+            return 1;
         }
 
         bool hadExistingConfig = default;

@@ -272,8 +272,6 @@ if __name__ == ""__main__"":
         var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
         Assert.IsTrue(File.Exists(csprojPath), "Project file should be created");
 
-        // Get original csproj content for comparison
-        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
         // Step 2: Run 'winapp init --use-defaults' to detect csproj and set up the project
         var initCommand = GetRequiredService<InitCommand>();
