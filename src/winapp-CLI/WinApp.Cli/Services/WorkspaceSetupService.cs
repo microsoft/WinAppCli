@@ -635,6 +635,14 @@ internal class WorkspaceSetupService(
     {
         logger.LogDebug(".NET project setup for {CsprojFile}", csprojFile.FullName);
 
+        // Prompt for manifest and cert generation (same order as non-dotnet path)
+        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
+        var manifestGenerationInfo = shouldGenerateManifest
+            ? await PromptForManifestInfoAsync(options, cancellationToken)
+            : null;
+
+        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
+
         // Prompt for SDK install mode if not specified
         if (!options.ConfigOnly && options.SdkInstallMode == null)
         {
@@ -648,12 +656,15 @@ internal class WorkspaceSetupService(
             }
         }
 
+        // Prompt for developer mode
+        var shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
+
         if (options.SdkInstallMode == SdkInstallMode.None)
         {
             logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
 
-            // Still do manifest + cert even when skipping SDKs
-            return await SetupDotNetManifestAndCertAsync(options, cancellationToken);
+            // Still do manifest + cert even when skipping SDKs (using answers from above)
+            return await SetupDotNetManifestAndCertAsync(options, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, cancellationToken);
         }
 
         // Validate TargetFramework
@@ -686,17 +697,6 @@ internal class WorkspaceSetupService(
         {
             logger.LogDebug("{UISymbol} TargetFramework '{Tfm}' is supported", UiSymbols.Check, currentTfm);
         }
-
-        // Prompt for developer mode
-        var shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
-
-        // Prompt for manifest and cert generation
-        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
-        var manifestGenerationInfo = shouldGenerateManifest
-            ? await PromptForManifestInfoAsync(options, cancellationToken)
-            : null;
-
-        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
 
         // Get latest WinAppSDK version
         var sdkInstallMode = options.SdkInstallMode ?? SdkInstallMode.Stable;
@@ -810,19 +810,8 @@ internal class WorkspaceSetupService(
     /// <summary>
     /// Generates manifest and certificate for .NET project setup (when SDK installation is skipped)
     /// </summary>
-    private async Task<int> SetupDotNetManifestAndCertAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    private async Task<int> SetupDotNetManifestAndCertAsync(WorkspaceSetupOptions options, bool shouldGenerateManifest, ManifestGenerationInfo? manifestGenerationInfo, bool shouldGenerateCert, CancellationToken cancellationToken)
     {
-        // Prompt for manifest and cert generation
-        var shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
-        ManifestGenerationInfo? manifestGenerationInfo = null;
-        if (shouldGenerateManifest)
-        {
-            manifestGenerationInfo = await manifestService.PromptForManifestInfoAsync(
-                options.BaseDirectory, null, null, "1.0.0.0", "Windows Application", null, options.UseDefaults, cancellationToken);
-        }
-
-        var shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
-
         return await statusService.ExecuteWithStatusAsync("Setting up .NET project", async (taskContext, cancellationToken) =>
         {
             try
