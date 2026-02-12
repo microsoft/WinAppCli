@@ -57,14 +57,14 @@ internal class WorkspaceSetupService(
         // Detect .NET project (.csproj) in the base directory
         if (!options.RequireExistingConfig)
         {
-            var csprojFile = dotNetService.FindCsproj(options.BaseDirectory);
-            if (csprojFile != null)
+            var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
+            if (csprojFiles.Count > 0)
             {
-                logger.LogDebug("Detected .NET project: {CsprojFile}", csprojFile.Name);
-                return await SetupDotNetProjectAsync(options, csprojFile, cancellationToken);
+                logger.LogDebug("Detected {Count} .NET project(s) in {BaseDirectory}", csprojFiles.Count, options.BaseDirectory);
+                return await SetupDotNetProjectAsync(options, csprojFiles, cancellationToken);
             }
         }
-        else if (dotNetService.FindCsproj(options.BaseDirectory) != null && !configService.Exists())
+        else if (dotNetService.FindCsproj(options.BaseDirectory).Count > 0 && !configService.Exists())
         {
             // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
             logger.LogInformation(".NET project detected. Use 'dotnet restore' to restore NuGet packages for .NET projects.");
@@ -631,8 +631,25 @@ internal class WorkspaceSetupService(
     /// Validates/updates TargetFramework, adds NuGet PackageReferences, generates manifest and cert.
     /// Does NOT create winapp.yaml or download C++ projections.
     /// </summary>
-    private async Task<int> SetupDotNetProjectAsync(WorkspaceSetupOptions options, FileInfo csprojFile, CancellationToken cancellationToken)
+    private async Task<int> SetupDotNetProjectAsync(WorkspaceSetupOptions options, IReadOnlyList<FileInfo> csprojFiles, CancellationToken cancellationToken)
     {
+        FileInfo csprojFile;
+        if (csprojFiles.Count == 1)
+        {
+            csprojFile = csprojFiles[0];
+        }
+        else
+        {
+            // Multiple .csproj files found — ask the user which one to use
+            var choices = csprojFiles.Select(f => f.Name).ToArray();
+            var selected = await ansiConsole.PromptAsync(
+                new SelectionPrompt<string>()
+                    .Title("Multiple .csproj files found. Which project should be configured?")
+                    .AddChoices(choices),
+                cancellationToken);
+            csprojFile = csprojFiles.First(f => f.Name == selected);
+        }
+
         logger.LogDebug(".NET project setup for {CsprojFile}", csprojFile.FullName);
 
         // Prompt for manifest and cert generation (same order as non-dotnet path)
@@ -668,6 +685,12 @@ internal class WorkspaceSetupService(
         }
 
         // Validate TargetFramework
+        if (dotNetService.IsMultiTargeted(csprojFile))
+        {
+            logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
+            return 1;
+        }
+
         var currentTfm = dotNetService.GetTargetFramework(csprojFile);
         logger.LogDebug("Current TargetFramework: {Tfm}", currentTfm ?? "(not set)");
 
@@ -1393,7 +1416,7 @@ if ($toInstall.Count -gt 0) {{
 
         // Detect project type: check if there's a .csproj in the current directory
         var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
-        var isDotNetProject = dotNetService.FindCsproj(cwd) != null;
+        var isDotNetProject = dotNetService.FindCsproj(cwd).Count > 0;
 
         if (isDotNetProject)
         {

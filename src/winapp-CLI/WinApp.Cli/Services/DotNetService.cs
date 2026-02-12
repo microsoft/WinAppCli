@@ -40,15 +40,17 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFramework>(.*?)</TargetFramework>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworkElementRegex();
 
-    public FileInfo? FindCsproj(DirectoryInfo directory)
+    [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
+    private static partial Regex TargetFrameworksElementRegex();
+
+    public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
         if (!directory.Exists)
         {
-            return null;
+            return [];
         }
 
-        var csprojFiles = directory.GetFiles("*.csproj", SearchOption.TopDirectoryOnly);
-        return csprojFiles.Length > 0 ? csprojFiles[0] : null;
+        return directory.GetFiles("*.csproj", SearchOption.TopDirectoryOnly);
     }
 
     public string? GetTargetFramework(FileInfo csprojPath)
@@ -59,8 +61,36 @@ internal partial class DotNetService : IDotNetService
         }
 
         var content = File.ReadAllText(csprojPath.FullName);
+
+        // Check singular <TargetFramework> first
         var match = TargetFrameworkElementRegex().Match(content);
-        return match.Success ? match.Groups[1].Value.Trim() : null;
+        if (match.Success)
+        {
+            return match.Groups[1].Value.Trim();
+        }
+
+        // Fall back to <TargetFrameworks> — return the first TFM from the semicolon-separated list
+        var pluralMatch = TargetFrameworksElementRegex().Match(content);
+        if (pluralMatch.Success)
+        {
+            var first = pluralMatch.Groups[1].Value
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            return first;
+        }
+
+        return null;
+    }
+
+    public bool IsMultiTargeted(FileInfo csprojPath)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = File.ReadAllText(csprojPath.FullName);
+        return TargetFrameworksElementRegex().IsMatch(content);
     }
 
     public bool IsTargetFrameworkSupported(string targetFramework)

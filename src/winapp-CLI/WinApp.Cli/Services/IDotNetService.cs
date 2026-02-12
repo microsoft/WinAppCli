@@ -11,15 +11,21 @@ namespace WinApp.Cli.Services;
 internal interface IDotNetService
 {
     /// <summary>
-    /// Finds a .csproj file in the specified directory (non-recursive)
+    /// Finds all .csproj files in the specified directory (non-recursive)
     /// </summary>
-    /// <returns>The FileInfo for the .csproj, or null if none found</returns>
-    FileInfo? FindCsproj(DirectoryInfo directory);
+    /// <returns>A list of .csproj files found, empty if none</returns>
+    IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory);
 
     /// <summary>
-    /// Gets the TargetFramework value from a .csproj file
+    /// Gets the TargetFramework value from a .csproj file.
+    /// If the project uses <TargetFrameworks> (plural/multi-targeting), returns the first TFM.
     /// </summary>
     string? GetTargetFramework(FileInfo csprojPath);
+
+    /// <summary>
+    /// Checks whether a .csproj file uses <TargetFrameworks> (plural) for multi-targeting.
+    /// </summary>
+    bool IsMultiTargeted(FileInfo csprojPath);
 
     /// <summary>
     /// Checks whether the TargetFramework includes a Windows TFM that supports WinAppSDK
