@@ -419,7 +419,7 @@ internal class WorkspaceSetupService(
                                 }
                                 else if (installedCount == 0)
                                 {
-                                    return (0, "Windows App SDK Runtime ([underline]{version}[/]) already installed");
+                                    return (0, $"Windows App SDK Runtime ([underline]{version}[/]) already installed");
                                 }
 
                                 return (0, $"WinAppSDK Runtime installed: [underline]{version}[/]");

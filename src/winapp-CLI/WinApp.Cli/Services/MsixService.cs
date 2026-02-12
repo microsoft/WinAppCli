@@ -1622,9 +1622,6 @@ $1");
         return msixDir;
     }
 
-    [GeneratedRegex(@"[\[\]\(\)]")]
-    private static partial Regex BracketsAndParenthesesRegex();
-
     private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? mainVersion = null;
@@ -1668,16 +1665,6 @@ $1");
         {
             // Query NuGet API for the dependency tree of this package
             var deps = await nugetService.GetPackageDependenciesAsync(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion, cancellationToken);
-
-            deps = deps.ToDictionary(
-                kvp => kvp.Key,
-                kvp =>
-                {
-                    var version = kvp.Value;
-                    // Remove any brackets or parentheses from the version string
-                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(version, "");
-                    return cleanedVersion;
-                });
 
             // Include the main package itself in the result
             deps.TryAdd(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion);
