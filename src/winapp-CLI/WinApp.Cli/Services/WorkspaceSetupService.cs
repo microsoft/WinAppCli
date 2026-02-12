@@ -715,6 +715,18 @@ internal class WorkspaceSetupService(
                     return 1;
                 }
             }
+            else
+            {
+                var currentDisplay = currentTfm ?? "(not set)";
+                logger.LogWarning(
+                    "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
+                    currentDisplay,
+                    recommendedTfm);
+                ansiConsole.MarkupLine(
+                    $"[yellow]Current TargetFramework '{Markup.Escape(currentDisplay)}' is not supported for Windows App SDK.[/]");
+                ansiConsole.MarkupLine(
+                    $"[yellow]Automatically updating TargetFramework to [green]{recommendedTfm}[/] because --use-defaults was specified.[/]");
+            }
         }
         else
         {

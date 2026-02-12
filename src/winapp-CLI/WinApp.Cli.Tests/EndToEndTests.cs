@@ -342,7 +342,7 @@ if __name__ == ""__main__"":
         Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
 
         var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
-        var originalCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
 
         // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
         var initCommand = GetRequiredService<InitCommand>();
