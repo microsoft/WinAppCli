@@ -185,13 +185,23 @@ try
         $TemplateJsonPath = Join-Path $TemplatesProjectPath "templates\winui\.template.config\template.json"
         Write-Host "[TEMPLATE] Updating ExtrasVersion in template.json to $Version..." -ForegroundColor Blue
         
+        # Backup original template.json before modifying
+        Copy-Item $TemplateJsonPath "$TemplateJsonPath.backup" -Force
+        
         $TemplateJson = Get-Content $TemplateJsonPath -Raw | ConvertFrom-Json
         $TemplateJson.symbols.ExtrasVersion.defaultValue = $Version
         $TemplateJson | ConvertTo-Json -Depth 10 | Set-Content $TemplateJsonPath -Encoding UTF8
         
         dotnet pack $TemplatesCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
+        $PackResult = $LASTEXITCODE
         
-        if ($LASTEXITCODE -ne 0) {
+        # Restore original template.json
+        Write-Host "[TEMPLATE] Restoring original template.json..." -ForegroundColor Blue
+        if (Test-Path "$TemplateJsonPath.backup") {
+            Move-Item "$TemplateJsonPath.backup" $TemplateJsonPath -Force
+        }
+        
+        if ($PackResult -ne 0) {
             Write-Error "Failed to create Microsoft.WindowsAppSDK.Templates NuGet package"
             exit 1
         }
