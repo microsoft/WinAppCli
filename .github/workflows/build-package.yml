@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write  # Required for creating releases
+  pull-requests: write  # Required for binary size report comments
 
 jobs:
   build-and-package:
@@ -85,6 +86,159 @@ jobs:
         name: msix-packages
         path: artifacts/msix-packages/*.msix
         if-no-files-found: error
+
+    # --- Binary size tracking ---
+    # Restore baseline sizes from the last main build (for PR comparison)
+    - name: Restore size baseline
+      if: github.event_name == 'pull_request'
+      id: size-baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: size-baseline
+        key: binary-size-baseline-no-exact-match
+        restore-keys: binary-size-main-
+
+    - name: Measure artifact sizes
+      shell: pwsh
+      run: |
+        $sizes = @{}
+
+        $x64Exe = Get-Item "artifacts/cli/win-x64/winapp.exe" -ErrorAction SilentlyContinue
+        $arm64Exe = Get-Item "artifacts/cli/win-arm64/winapp.exe" -ErrorAction SilentlyContinue
+        $npmPkg = Get-ChildItem "artifacts/*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixX64 = Get-ChildItem "artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixArm64 = Get-ChildItem "artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if ($x64Exe) { $sizes["cli-win-x64"] = $x64Exe.Length }
+        if ($arm64Exe) { $sizes["cli-win-arm64"] = $arm64Exe.Length }
+        if ($npmPkg) { $sizes["npm-package"] = $npmPkg.Length }
+        if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
+        if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
+
+        $sizes | ConvertTo-Json | Set-Content "artifacts/binary-sizes.json"
+
+        Write-Host "Current artifact sizes:"
+        $sizes.GetEnumerator() | Sort-Object Key | ForEach-Object {
+          Write-Host "  $($_.Key): $([math]::Round($_.Value / 1MB, 2)) MB ($($_.Value) bytes)"
+        }
+
+    # On main, save current sizes as the baseline for future PRs
+    - name: Save size baseline
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path "size-baseline" -Force | Out-Null
+        Copy-Item "artifacts/binary-sizes.json" "size-baseline/sizes.json"
+
+    - name: Cache size baseline
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: size-baseline
+        key: binary-size-main-${{ github.sha }}
+
+    # On PRs, compare against baseline and post a comment
+    - name: Report binary size changes
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+
+          const current = JSON.parse(fs.readFileSync('artifacts/binary-sizes.json', 'utf8'));
+
+          let baseline = {};
+          let hasBaseline = false;
+          try {
+            baseline = JSON.parse(fs.readFileSync('size-baseline/sizes.json', 'utf8'));
+            hasBaseline = true;
+          } catch (e) {
+            core.info('No baseline found (first run or cache expired). Reporting absolute sizes.');
+          }
+
+          function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            if (mb >= 1) return `${mb.toFixed(2)} MB`;
+            const kb = bytes / 1024;
+            return `${kb.toFixed(1)} KB`;
+          }
+
+          function formatDelta(curr, base) {
+            const delta = curr - base;
+            const pct = base > 0 ? ((delta / base) * 100).toFixed(2) : 'N/A';
+            const sign = delta > 0 ? '+' : '';
+            let icon = ':white_check_mark:';
+            if (delta > 0) icon = ':chart_with_upwards_trend:';
+            else if (delta < 0) icon = ':chart_with_downwards_trend:';
+            return `${icon} ${sign}${formatBytes(delta)} (${sign}${pct}%)`;
+          }
+
+          const labels = {
+            'cli-win-x64': 'CLI (x64)',
+            'cli-win-arm64': 'CLI (ARM64)',
+            'npm-package': 'NPM Package',
+            'msix-x64': 'MSIX (x64)',
+            'msix-arm64': 'MSIX (ARM64)',
+          };
+
+          let body = '## Binary Size Report\n\n';
+
+          if (hasBaseline) {
+            body += '| Artifact | Baseline | Current | Delta |\n';
+            body += '|----------|----------|---------|-------|\n';
+
+            const allKeys = [...new Set([...Object.keys(baseline), ...Object.keys(current)])].sort();
+            for (const key of allKeys) {
+              const label = labels[key] || key;
+              const baseSize = baseline[key] || 0;
+              const currSize = current[key] || 0;
+              if (currSize === 0 && baseSize === 0) continue;
+
+              const baseStr = baseSize > 0 ? formatBytes(baseSize) : 'N/A';
+              const currStr = currSize > 0 ? formatBytes(currSize) : 'N/A';
+              const deltaStr = (baseSize > 0 && currSize > 0)
+                ? formatDelta(currSize, baseSize)
+                : 'N/A';
+              body += `| ${label} | ${baseStr} | ${currStr} | ${deltaStr} |\n`;
+            }
+          } else {
+            body += '> **Note:** No baseline found (first run after enabling size tracking). Showing absolute sizes only.\n\n';
+            body += '| Artifact | Size |\n';
+            body += '|----------|------|\n';
+            for (const [key, size] of Object.entries(current).sort()) {
+              const label = labels[key] || key;
+              body += `| ${label} | ${formatBytes(size)} |\n`;
+            }
+          }
+
+          body += '\n<!-- binary-size-report -->';
+
+          // Find and update existing comment to avoid spam
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const existing = comments.find(c => c.body && c.body.includes('<!-- binary-size-report -->'));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+            core.info(`Updated existing comment ${existing.id}`);
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+            core.info('Created new size report comment');
+          }
 
   # E2E test for Electron workflow - runs after build completes
   e2e-test:
