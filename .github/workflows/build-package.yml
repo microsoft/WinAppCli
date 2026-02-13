@@ -89,9 +89,11 @@ jobs:
 
     # --- Build quality metrics ---
     - name: Collect build metrics
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/collect-metrics
 
     - name: Report build metrics
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/report-metrics
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}

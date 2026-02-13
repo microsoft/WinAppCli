@@ -28,7 +28,7 @@ runs:
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path "metrics-baseline" -Force | Out-Null
-        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json"
+        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/build-warnings.json" "metrics-baseline/warnings.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "metrics-baseline/tests.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
@@ -51,7 +51,8 @@ runs:
           const artifactsPath = '${{ inputs.artifacts-path }}';
 
           // --- Load current metrics ---
-          const current = JSON.parse(fs.readFileSync(`${artifactsPath}/binary-sizes.json`, 'utf8'));
+          let current = {};
+          try { current = JSON.parse(fs.readFileSync(`${artifactsPath}/binary-sizes.json`, 'utf8')); } catch {}
 
           let warnings = { total: 0, trimming: 0, codeAnalysis: 0, other: 0 };
           try { warnings = JSON.parse(fs.readFileSync(`${artifactsPath}/build-warnings.json`, 'utf8')); } catch {}
