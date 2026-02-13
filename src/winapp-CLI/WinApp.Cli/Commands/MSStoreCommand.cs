@@ -21,8 +21,6 @@ internal class MSStoreCommand : Command
         {
             var args = parseResult.UnmatchedTokens.ToArray();
 
-            var msstoreArgs = args.ToArray();
-
             try
             {
                 await msStoreCLIService.EnsureMSStoreCLIAvailableAsync(cancellationToken: cancellationToken);
@@ -30,7 +28,7 @@ internal class MSStoreCommand : Command
                 var processStartInfo = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = msStoreCLIService.GetMSStoreCLIPath(),
-                    Arguments = string.Join(" ", msstoreArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)),
+                    Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)),
                     RedirectStandardInput = false,
                     RedirectStandardOutput = false,
                     RedirectStandardError = false,

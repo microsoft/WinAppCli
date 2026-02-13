@@ -1100,41 +1100,7 @@
     },
     "store": {
       "description": "Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI (https://aka.ms/msstoredevcli).",
-      "hidden": false,
-      "options": {
-        "--quiet": {
-          "description": "Suppress progress messages",
-          "hidden": false,
-          "aliases": [
-            "-q"
-          ],
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
-        "--verbose": {
-          "description": "Enable verbose output",
-          "hidden": false,
-          "aliases": [
-            "-v"
-          ],
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        }
-      }
+      "hidden": false
     },
     "tool": {
       "description": "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix",
