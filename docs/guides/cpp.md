@@ -129,7 +129,7 @@ You should see the output "Not packaged". This confirms that the standard execut
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, development certificate, and optionally Windows App SDK headers for C++ development.
+The `winapp init` command sets up everything you need in one go: app manifest, assets, and optionally Windows App SDK headers for C++ development.
 
 Run the following command and follow the prompts:
 
@@ -146,7 +146,6 @@ When prompted:
 
 This command will:
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
-- Generate a development certificate (`devcert.pfx`) for signing
 - Create a `.winapp` folder with Windows App SDK headers and libraries
 - Create a `winapp.yaml` configuration file for pinning sdk versions
 
@@ -459,9 +458,17 @@ Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if i
 </Package>
 ```
 
+### Generate a Development Certificate
+
+Before packaging, you need a development certificate for signing. Generate one if you haven't already:
+
+```powershell
+winapp cert generate --if-exists skip
+```
+
 ### Sign and Pack
 
-Since `winapp init` already generated the development certificate, you can proceed directly to packaging:
+Now you can package and sign:
 
 ```powershell
 # package and sign the app with the generated certificate
