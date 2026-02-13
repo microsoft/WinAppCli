@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
 using System.Xml;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
 [TestClass]
-public class NugetServiceTests : BaseCommandTests
+public partial class NugetServiceTests : BaseCommandTests
 {
     private INugetService _nugetService = null!;
 
@@ -250,7 +251,7 @@ public class NugetServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void ParseNuspecDependencies_WithVersionRanges_PreservesVersionRanges()
+    public void ParseNuspecDependencies_WithVersionRanges_RemovesBrackets()
     {
         // Arrange - nuspec with version ranges
         var nuspecXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -272,12 +273,12 @@ public class NugetServiceTests : BaseCommandTests
         // Act
         var result = ParseNuspecDependenciesFromXml(nuspecXml);
 
-        // Assert
+        // Assert - brackets and parentheses should be stripped
         Assert.HasCount(4, result);
         Assert.AreEqual("1.0.0", result["ExactVersion"]);
-        Assert.AreEqual("[1.0.0, )", result["MinVersion"]);
-        Assert.AreEqual("[1.0.0, 2.0.0)", result["RangeVersion"]);
-        Assert.AreEqual("(, 2.0.0]", result["MaxVersion"]);
+        Assert.AreEqual("1.0.0, ", result["MinVersion"]);
+        Assert.AreEqual("1.0.0, 2.0.0", result["RangeVersion"]);
+        Assert.AreEqual(", 2.0.0", result["MaxVersion"]);
     }
 
     [TestMethod]
@@ -520,13 +521,17 @@ public class NugetServiceTests : BaseCommandTests
                 var depVersion = node.Attributes?["version"]?.Value;
                 if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
                 {
-                    dependencies.TryAdd(depId, depVersion);
+                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
+                    dependencies.TryAdd(depId, cleanedVersion);
                 }
             }
         }
 
         return dependencies;
     }
+
+    [GeneratedRegex(@"[\[\]\(\)]")]
+    private static partial Regex BracketsAndParenthesesRegex();
 
     #endregion
 }

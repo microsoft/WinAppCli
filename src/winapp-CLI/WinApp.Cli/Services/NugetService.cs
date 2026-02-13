@@ -3,13 +3,14 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
-internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) : INugetService
+internal partial class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) : INugetService
 {
     private static readonly HttpClient Http = new();
     private const string NugetExeUrl = "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe";
@@ -178,6 +179,9 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
         return packages;
     }
 
+    [GeneratedRegex(@"[\[\]\(\)]")]
+    private static partial Regex BracketsAndParenthesesRegex();
+
     /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
@@ -216,7 +220,9 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
                 var depVersion = node.Attributes?["version"]?.Value;
                 if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
                 {
-                    dependencies.TryAdd(depId, depVersion);
+                    // Remove any brackets or parentheses from the version string
+                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
+                    dependencies.TryAdd(depId, cleanedVersion);
                 }
             }
         }
