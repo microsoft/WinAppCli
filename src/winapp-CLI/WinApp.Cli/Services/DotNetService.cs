@@ -215,21 +215,29 @@ internal partial class DotNetService : IDotNetService
                 // Find the closing > of the <PropertyGroup> tag
                 var closeTag = content.IndexOf('>', propGroupIdx);
                 if (closeTag >= 0)
-{
+                {
                     var insertPos = closeTag + 1;
                     content = content[..insertPos]
                         + Environment.NewLine + $"    <TargetFramework>{newTargetFramework}</TargetFramework>"
                         + content[insertPos..];
-}
+                }
             }
         }
 
         File.WriteAllText(csprojPath.FullName, content);
     }
 
-    public async Task AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string version, CancellationToken cancellationToken = default)
-{
-        var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\" --version \"{version}\"";
+    public async Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
+    {
+        var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\"";
+        if (version != null)
+        {
+            args += $" --version \"{version}\"";
+        }
+        else
+        {
+            args += " --prerelease";
+        }
         var (exitCode, output, error) = await RunDotnetCommandAsync(csprojPath.Directory!, args, cancellationToken);
 
         if (exitCode != 0)
@@ -238,6 +246,15 @@ internal partial class DotNetService : IDotNetService
             throw new InvalidOperationException(
                 $"Failed to add package {packageName} {version} (exit code {exitCode}): {message}");
         }
+
+        var pattern = $@"PackageReference for package '{Regex.Escape(packageName)}' version '([\d\.\-a-zA-Z]+)' (?:added to|updated in) file";
+        var match = Regex.Match(output, pattern);
+        if (match.Success && match.Groups.Count > 1)
+        {
+            return match.Groups[1].Value;
+        }
+
+        return version ?? "latest";
     }
 
     /// <inheritdoc />
@@ -301,18 +318,18 @@ internal partial class DotNetService : IDotNetService
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
         {
             return null;
-    }
+        }
 
         try
         {
             return JsonSerializer.Deserialize(output, DotNetServiceJsonContext.Default.DotNetPackageListJson);
         }
         catch (JsonException)
-    {
+        {
             return null;
         }
     }
-    }
+}
 
 [JsonSerializable(typeof(DotNetPackageListJson))]
 [JsonSourceGenerationOptions(

@@ -326,19 +326,35 @@ internal class WorkspaceSetupService(
                         var packages = new (string Name, bool Required)[]
                         {
                             (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
-                            (DotNetService.WINAPP_SDK_NUGET_PACKAGE, true)
+                            (DotNetService.WINAPP_SDK_NUGET_PACKAGE, true),
+                            (DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, false)
                         };
 
                         foreach (var (packageName, required) in packages)
                         {
                             taskContext.UpdateSubStatus($"Querying latest {packageName} version");
+                            string? version = null;
                             try
                             {
-                                var version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken: cancellationToken);
-                                taskContext.AddDebugMessage($"{UiSymbols.Package} {packageName} → {version}");
-                                usedVersions[packageName] = version;
+                                version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken: cancellationToken);
+                                if (version != null)
+                                {
+                                    taskContext.AddDebugMessage($"{UiSymbols.Package} {packageName} → {version}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                taskContext.AddDebugMessage($"{UiSymbols.Note} Could not get version for {packageName}: {ex.Message}");
+                                if (required)
+                                {
+                                    return (1, $"Failed to get version for {packageName}");
+                                }
+                            }
 
-                                await dotNetService.AddOrUpdatePackageReferenceAsync(csprojFile, packageName, version, cancellationToken);
+                            try
+                            {
+                                version = await dotNetService.AddOrUpdatePackageReferenceAsync(csprojFile, packageName, version, cancellationToken);
+                                usedVersions[packageName] = version;
                                 taskContext.AddStatusMessage($"{UiSymbols.Check} Added {packageName} {version}");
                             }
                             catch (Exception ex)

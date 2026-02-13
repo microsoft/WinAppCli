@@ -428,15 +428,19 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             "Should query for BuildTools package version");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK package version");
+        Assert.Contains(DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
+            "Should query for WindowsAppSDK BuildTools Extras package version");
 
         // Verify that the correct NuGet packages were added to the project
-        Assert.HasCount(2, _fakeDotNetService.AddedPackages, "Should add exactly 2 NuGet packages");
+        Assert.HasCount(3, _fakeDotNetService.AddedPackages, "Should add exactly 3 NuGet packages");
 
         var addedNames = _fakeDotNetService.AddedPackages.Select(p => p.PackageName).ToList();
         Assert.Contains(BuildToolsService.BUILD_TOOLS_PACKAGE, addedNames,
             "Should add BuildTools as PackageReference");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, addedNames,
             "Should add WindowsAppSDK as PackageReference");
+        Assert.Contains(DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, addedNames,
+            "Should add WindowsAppSDK BuildTools Extras as PackageReference");
 
         // Verify the version used matches what the fake NuGet service returned
         foreach (var (_, _, version) in _fakeDotNetService.AddedPackages)

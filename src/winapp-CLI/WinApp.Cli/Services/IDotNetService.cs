@@ -49,7 +49,8 @@ internal interface IDotNetService
     /// <summary>
     /// Adds or updates a NuGet PackageReference using the dotnet CLI.
     /// </summary>
-    Task AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string version, CancellationToken cancellationToken = default);
+    /// <returns>The version that was added/updated</returns>
+    Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs an arbitrary dotnet CLI command in the given working directory.

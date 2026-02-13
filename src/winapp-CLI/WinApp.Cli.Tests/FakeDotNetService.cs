@@ -18,7 +18,7 @@ internal class FakeDotNetService : IDotNetService
     /// <summary>
     /// Tracks packages added via AddOrUpdatePackageReferenceAsync
     /// </summary>
-    public List<(string CsprojPath, string PackageName, string Version)> AddedPackages { get; } = [];
+    public List<(string CsprojPath, string PackageName, string? Version)> AddedPackages { get; } = [];
 
     // Delegate file-based operations to real implementation
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory) => _real.FindCsproj(directory);
@@ -29,10 +29,10 @@ internal class FakeDotNetService : IDotNetService
     public void SetTargetFramework(FileInfo csprojPath, string newTargetFramework) => _real.SetTargetFramework(csprojPath, newTargetFramework);
 
     // Fake CLI-based operations
-    public Task AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string version, CancellationToken cancellationToken = default)
+    public Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
     {
         AddedPackages.Add((csprojPath.FullName, packageName, version));
-        return Task.CompletedTask;
+        return Task.FromResult(version ?? "1.0.0");
     }
 
     public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, string arguments, CancellationToken cancellationToken = default)
