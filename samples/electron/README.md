@@ -63,12 +63,13 @@ Before running the sample, ensure the npm package has been built:
 Then run `npm install` to install all dependencies. The sample has a `postinstall` script that sets up the project with the CLI:
 
 ```json
-"postinstall": "winapp restore && winapp node add-electron-debug-identity"
+"postinstall": "winapp restore && winapp cert generate --if-exists skip && winapp node add-electron-debug-identity"
 ```
 
-This script runs two winapp commands:
+This script runs three winapp commands:
 
 - **`winapp restore`** - Restores all NuGet packages and makes the Windows SDKs available to the app
+- **`winapp cert generate`** - Generates a dev certificate for signing the MSIX. The command uses the `appxmanifest.xml` in the root for the publisher name to ensure the package can be signed
 - **`winapp node add-electron-debug-identity`** - Adds debug identity to the Electron process so you can debug APIs that require identity
 
 ## Testing Debug Identity
