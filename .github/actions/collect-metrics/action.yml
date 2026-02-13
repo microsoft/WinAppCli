@@ -41,7 +41,10 @@ runs:
       shell: pwsh
       run: |
         # Re-run build (incremental, near-instant) to capture warning output
-        $output = dotnet build "${{ inputs.solution-path }}" -c Release --no-incremental:false 2>&1 | Out-String
+        # We only care about the warnings in stdout, not the exit code
+        $output = dotnet build "${{ inputs.solution-path }}" -c Release 2>&1 | Out-String
+        # Ignore build exit code — we're just scraping warnings from the output
+        $global:LASTEXITCODE = 0
         $warningLines = ($output -split "`n") | Where-Object { $_ -match ': warning [A-Z]{2,}\d+:' }
         $warningCount = ($warningLines | Measure-Object).Count
 
