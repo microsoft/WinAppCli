@@ -1,0 +1,142 @@
+name: Collect Build Metrics
+description: Measure artifact sizes, build warnings, test results, and CLI startup time
+
+inputs:
+  solution-path:
+    description: Path to the .NET solution file
+    default: src/winapp-CLI/winapp.sln
+  artifacts-path:
+    description: Path to the artifacts directory
+    default: artifacts
+
+runs:
+  using: composite
+  steps:
+    - name: Measure artifact sizes
+      shell: pwsh
+      run: |
+        $artifacts = "${{ inputs.artifacts-path }}"
+        $sizes = @{}
+
+        $x64Exe = Get-Item "$artifacts/cli/win-x64/winapp.exe" -ErrorAction SilentlyContinue
+        $arm64Exe = Get-Item "$artifacts/cli/win-arm64/winapp.exe" -ErrorAction SilentlyContinue
+        $npmPkg = Get-ChildItem "$artifacts/*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixX64 = Get-ChildItem "$artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixArm64 = Get-ChildItem "$artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if ($x64Exe) { $sizes["cli-win-x64"] = $x64Exe.Length }
+        if ($arm64Exe) { $sizes["cli-win-arm64"] = $arm64Exe.Length }
+        if ($npmPkg) { $sizes["npm-package"] = $npmPkg.Length }
+        if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
+        if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
+
+        $sizes | ConvertTo-Json | Set-Content "$artifacts/binary-sizes.json"
+
+        Write-Host "Current artifact sizes:"
+        $sizes.GetEnumerator() | Sort-Object Key | ForEach-Object {
+          Write-Host "  $($_.Key): $([math]::Round($_.Value / 1MB, 2)) MB ($($_.Value) bytes)"
+        }
+
+    - name: Count build warnings
+      shell: pwsh
+      run: |
+        # Re-run build (incremental, near-instant) to capture warning output
+        # We only care about the warnings in stdout, not the exit code
+        $output = dotnet build "${{ inputs.solution-path }}" -c Release 2>&1 | Out-String
+        # Ignore build exit code — we're just scraping warnings from the output
+        $global:LASTEXITCODE = 0
+        $warningLines = ($output -split "`n") | Where-Object { $_ -match ': warning [A-Z]{2,}\d+:' }
+        $warningCount = ($warningLines | Measure-Object).Count
+
+        # Categorize warnings
+        $trimWarnings = ($warningLines | Where-Object { $_ -match ': warning IL\d+:' } | Measure-Object).Count
+        $codeAnalysis = ($warningLines | Where-Object { $_ -match ': warning CA\d+:' } | Measure-Object).Count
+        $otherWarnings = $warningCount - $trimWarnings - $codeAnalysis
+
+        $warnings = @{
+          total = $warningCount
+          trimming = $trimWarnings
+          codeAnalysis = $codeAnalysis
+          other = $otherWarnings
+        }
+
+        $warnings | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/build-warnings.json"
+
+        Write-Host "Build warnings: $warningCount total ($trimWarnings trimming/AOT, $codeAnalysis code analysis, $otherWarnings other)"
+        if ($warningLines) {
+          Write-Host "`nWarning details:"
+          $warningLines | ForEach-Object { Write-Host "  $_" }
+        }
+
+    - name: Parse test results
+      shell: pwsh
+      run: |
+        $trxFiles = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/*.trx" -ErrorAction SilentlyContinue
+        $totalTests = 0; $passed = 0; $failed = 0; $skipped = 0; $durationMs = 0
+
+        foreach ($trx in $trxFiles) {
+          [xml]$xml = Get-Content $trx.FullName
+          $ns = @{ t = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010" }
+
+          $counters = $xml | Select-Xml "//t:ResultSummary/t:Counters" -Namespace $ns | Select-Object -First 1
+          if ($counters) {
+            $totalTests += [int]$counters.Node.total
+            $passed += [int]$counters.Node.passed
+            $failed += [int]$counters.Node.failed
+            $skipped += [int]$counters.Node.total - [int]$counters.Node.executed
+          }
+
+          $times = $xml | Select-Xml "//t:Times" -Namespace $ns | Select-Object -First 1
+          if ($times -and $times.Node.finish -and $times.Node.start) {
+            $start = [DateTime]::Parse($times.Node.start)
+            $finish = [DateTime]::Parse($times.Node.finish)
+            $durationMs += ($finish - $start).TotalMilliseconds
+          }
+        }
+
+        $testSummary = @{
+          total = $totalTests
+          passed = $passed
+          failed = $failed
+          skipped = $skipped
+          durationMs = [math]::Round($durationMs)
+        }
+
+        $testSummary | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/test-summary.json"
+
+        $durationSec = [math]::Round($durationMs / 1000, 1)
+        Write-Host "Tests: $totalTests total, $passed passed, $failed failed, $skipped skipped in ${durationSec}s"
+
+    - name: Measure CLI startup time
+      shell: pwsh
+      run: |
+        $exe = "${{ inputs.artifacts-path }}/cli/win-x64/winapp.exe"
+        if (-not (Test-Path $exe)) {
+          Write-Warning "CLI binary not found, skipping startup benchmark"
+          @{ medianMs = 0; samples = @() } | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/startup-time.json"
+          exit 0
+        }
+
+        $times = @()
+        # Warm-up run (prime filesystem cache)
+        & $exe --version 2>&1 | Out-Null
+
+        # 5 timed runs
+        for ($i = 0; $i -lt 5; $i++) {
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          & $exe --version 2>&1 | Out-Null
+          $sw.Stop()
+          $times += $sw.ElapsedMilliseconds
+        }
+
+        $sorted = $times | Sort-Object
+        $median = $sorted[[math]::Floor($sorted.Count / 2)]
+
+        $startup = @{
+          medianMs = $median
+          samples = $times
+        }
+
+        $startup | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/startup-time.json"
+
+        Write-Host "CLI startup time (--version): ${median}ms median (samples: $($times -join ', ')ms)"
