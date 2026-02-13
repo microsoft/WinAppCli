@@ -14,6 +14,7 @@ internal class CreateDebugIdentityCommand : Command
     public static Argument<FileInfo> EntryPointArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> NoInstallOption { get; }
+    public static Option<bool> KeepIdentityOption { get; }
 
     static CreateDebugIdentityCommand()
     {
@@ -32,6 +33,10 @@ internal class CreateDebugIdentityCommand : Command
         {
             Description = "Do not install the package after creation."
         };
+        KeepIdentityOption = new Option<bool>("--keep-identity")
+        {
+            Description = "Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID."
+        };
     }
 
     public CreateDebugIdentityCommand() : base("create-debug-identity", "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.")
@@ -39,6 +44,7 @@ internal class CreateDebugIdentityCommand : Command
         Arguments.Add(EntryPointArgument);
         Options.Add(ManifestOption);
         Options.Add(NoInstallOption);
+        Options.Add(KeepIdentityOption);
     }
 
     public class Handler(IMsixService msixService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, ILogger<CreateDebugIdentityCommand> logger) : AsynchronousCommandLineAction
@@ -48,6 +54,7 @@ internal class CreateDebugIdentityCommand : Command
             var entryPointPath = parseResult.GetValue(EntryPointArgument);
             var manifest = parseResult.GetValue(ManifestOption) ?? new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "appxmanifest.xml"));
             var noInstall = parseResult.GetValue(NoInstallOption);
+            var keepIdentity = parseResult.GetValue(KeepIdentityOption);
 
             if (entryPointPath != null && !entryPointPath.Exists)
             {
@@ -59,7 +66,7 @@ internal class CreateDebugIdentityCommand : Command
             {
                 try
                 {
-                    var result = await msixService.AddMsixIdentityAsync(entryPointPath?.ToString(), manifest, noInstall, taskContext, cancellationToken);
+                    var result = await msixService.AddMsixIdentityAsync(entryPointPath?.ToString(), manifest, noInstall, keepIdentity, taskContext, cancellationToken);
 
                     taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.PackageName}");
                     taskContext.AddStatusMessage($"{UiSymbols.User} Publisher: {result.Publisher}");

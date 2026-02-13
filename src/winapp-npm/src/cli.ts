@@ -344,6 +344,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
   const options = parseArgs(args, {
     verbose: false,
     'no-install': false,
+    'keep-identity': false,
     manifest: undefined,
   });
 
@@ -365,6 +366,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
       '  --manifest <path>     Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory)'
     );
     console.log('  --no-install          Do not install the package after creation (will require manual registration)');
+    console.log('  --keep-identity       Keep the manifest identity as-is, without appending .debug suffix');
     console.log('  --verbose             Enable verbose output (default: false)');
     console.log('  --help                Show this help');
     console.log('');
@@ -377,6 +379,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     await addElectronDebugIdentity({
       verbose: options.verbose as boolean,
       noInstall: options['no-install'] as boolean,
+      keepIdentity: options['keep-identity'] as boolean,
       manifest: options.manifest as string | undefined,
     });
 

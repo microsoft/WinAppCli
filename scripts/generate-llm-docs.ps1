@@ -57,7 +57,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Join array lines into single string with LF line endings (CLI outputs pretty-printed JSON)
-$SchemaJson = $SchemaJsonLines -join "`n"
+# Ensure exactly one trailing newline for consistency
+$SchemaJson = ($SchemaJsonLines -join "`n").TrimEnd() + "`n"
 
 # Save schema JSON with consistent LF line endings
 [System.IO.File]::WriteAllText($SchemaOutputPath, $SchemaJson, [System.Text.UTF8Encoding]::new($false))
@@ -186,8 +187,11 @@ if (Test-Path $FooterPath) {
     Write-Warning "Footer file not found: $FooterPath"
 }
 
-# Save llm-context.md
-$LlmContext | Set-Content $LlmContextPath -Encoding UTF8
+# Save llm-context.md with consistent LF line endings (same as cli-schema.json)
+# Normalize CRLF to LF and ensure exactly one trailing newline
+$LlmContext = $LlmContext -replace "`r`n", "`n"
+$LlmContext = $LlmContext.TrimEnd() + "`n"
+[System.IO.File]::WriteAllText($LlmContextPath, $LlmContext, [System.Text.UTF8Encoding]::new($false))
 Write-Host "[DOCS] Saved: $LlmContextPath" -ForegroundColor Green
 
 Write-Host "[DOCS] LLM documentation generated successfully!" -ForegroundColor Green

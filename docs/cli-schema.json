@@ -276,6 +276,19 @@
         }
       },
       "options": {
+        "--keep-identity": {
+          "description": "Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--manifest": {
           "description": "Path to the appxmanifest.xml",
           "hidden": false,
