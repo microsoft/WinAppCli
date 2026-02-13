@@ -710,8 +710,6 @@ internal partial class MsixService(
 
         // Update manifest content to ensure it's either referencing Windows App SDK or is self-contained
         manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, taskContext, cancellationToken);
-        var updatedManifestPath = Path.Combine(inputFolder.FullName, "appxmanifest.xml");
-        await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(finalPackageName) || string.IsNullOrWhiteSpace(extractedPublisher))
         {
@@ -736,7 +734,6 @@ internal partial class MsixService(
         }
 
         var executableMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-        FileInfo? executablePath = executableMatch.Success ? new FileInfo(Path.Combine(inputFolder.FullName, executableMatch.Groups[1].Value)) : null;
 
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
@@ -768,28 +765,44 @@ internal partial class MsixService(
             outputFolder.Create();
         }
 
-        // If manifest is outside input folder, copy it and any related assets into input folder
-        if (!inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
-            .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
-        {
-            await CopyAllAssetsAsync(resolvedManifestPath, inputFolder, taskContext, cancellationToken);
-        }
+        // Create a temporary staging directory so we never modify the original input folder.
+        // All packaging operations (manifest updates, asset copies, PRI generation, self-contained
+        // runtime bundling) happen in this staging copy. The original target folder stays untouched.
+        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winapp-package-{Guid.NewGuid():N}"));
+        stagingDir.Create();
 
-        taskContext.AddDebugMessage($"Creating MSIX package from: {inputFolder.FullName}");
-        taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Created staging directory: {stagingDir.FullName}");
 
-        List<FileInfo> tempFiles = [];
         try
         {
+            // Copy input folder contents to staging directory
+            CopyDirectoryRecursive(inputFolder, stagingDir);
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
+
+            // Write the updated manifest into the staging directory
+            var updatedManifestPath = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
+            await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
+
+            // Resolve executable path relative to the staging directory
+            FileInfo? executablePath = executableMatch.Success ? new FileInfo(Path.Combine(stagingDir.FullName, executableMatch.Groups[1].Value)) : null;
+
+            // If manifest is outside input folder, copy its referenced assets into the staging directory
+            if (!inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
+                .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            {
+                await CopyAllAssetsAsync(resolvedManifestPath, stagingDir, taskContext, cancellationToken);
+            }
+
+            taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
+            taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
+
             // Generate PRI files if not skipped
             if (!skipPri)
             {
                 taskContext.AddDebugMessage("Generating PRI configuration and files...");
 
-                FileInfo priConfigFilePath = await CreatePriConfigAsync(inputFolder, taskContext, cancellationToken: cancellationToken);
-                tempFiles.Add(priConfigFilePath);
-                var resourceFiles = await GeneratePriFileAsync(inputFolder, taskContext, cancellationToken: cancellationToken);
-                tempFiles.AddRange(resourceFiles);
+                await CreatePriConfigAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
+                var resourceFiles = await GeneratePriFileAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
                 if (resourceFiles.Count > 0 && logger.IsEnabled(LogLevel.Debug))
                 {
                     taskContext.AddDebugMessage($"Resource files included in PRI:");
@@ -809,7 +822,7 @@ internal partial class MsixService(
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Preparing self-contained Windows App SDK runtime...");
 
-                var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(inputFolder, taskContext, cancellationToken);
+                var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, taskContext, cancellationToken);
 
                 // Add WindowsAppSDK.manifest to existing manifest
                 var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
@@ -817,7 +830,7 @@ internal partial class MsixService(
                 await EmbedWindowsAppSDKManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
             }
 
-            await CreateMsixPackageFromFolderAsync(inputFolder, outputMsixPath, taskContext, cancellationToken);
+            await CreateMsixPackageFromFolderAsync(stagingDir, outputMsixPath, taskContext, cancellationToken);
 
             // Handle certificate generation and signing
             if (autoSign)
@@ -831,24 +844,18 @@ internal partial class MsixService(
         }
         finally
         {
-            // Clean up temporary PRI files
-            if (!skipPri)
+            // Clean up the staging directory
+            try
             {
-                foreach (var file in tempFiles)
+                if (stagingDir.Exists)
                 {
-                    try
-                    {
-                        file.Refresh();
-                        if (file.Exists)
-                        {
-                            file.Delete();
-                        }
-                    }
-                    catch
-                    {
-                        taskContext.AddDebugMessage($"Could not clean up {file}");
-                    }
+                    stagingDir.Delete(recursive: true);
+                    taskContext.AddDebugMessage($"{UiSymbols.Note} Cleaned up staging directory");
                 }
+            }
+            catch
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up staging directory: {stagingDir.FullName}");
             }
         }
 
@@ -1169,6 +1176,25 @@ internal partial class MsixService(
         catch
         {
             // Ignore cleanup failures
+        }
+    }
+
+    /// <summary>
+    /// Recursively copies all files and subdirectories from source to destination.
+    /// </summary>
+    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo destination)
+    {
+        destination.Create();
+
+        foreach (var file in source.EnumerateFiles())
+        {
+            file.CopyTo(Path.Combine(destination.FullName, file.Name), overwrite: true);
+        }
+
+        foreach (var subDir in source.EnumerateDirectories())
+        {
+            var destSubDir = new DirectoryInfo(Path.Combine(destination.FullName, subDir.Name));
+            CopyDirectoryRecursive(subDir, destSubDir);
         }
     }
 

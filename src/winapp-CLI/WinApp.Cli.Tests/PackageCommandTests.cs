@@ -333,6 +333,9 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsTrue(File.Exists(externalManifestPath), "External manifest should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "Logo.png")), "External Logo.png should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "StoreLogo.png")), "External StoreLogo.png should still exist");
+
+        // Verify the input folder was not polluted with a manifest copy
+        Assert.IsFalse(File.Exists(Path.Combine(packageDir, "AppxManifest.xml")), "Input folder should not contain AppxManifest.xml after packaging");
     }
 
     [TestMethod]
