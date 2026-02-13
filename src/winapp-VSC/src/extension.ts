@@ -3,6 +3,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { glob } from 'glob';
 
 const execAsync = promisify(exec);
 
@@ -123,24 +124,27 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 		}
 
 		try {
-			// Search for AppxManifest.xml in build output using the glob pattern
-			const searchPattern = config.buildOutputManifest || '**/AppxManifest.xml';
-			const pattern = new vscode.RelativePattern(folder, searchPattern);
-			const allMatches = await vscode.workspace.findFiles(pattern, null, 20);
+			// Search for AppxManifest.xml in build output using glob (bypasses .gitignore)
+			const searchPattern = config.buildOutputManifest || '**/*/AppxManifest.xml';
+			const allMatches = await glob(searchPattern, {
+				cwd: folder.uri.fsPath,
+				absolute: true,
+				nocase: true
+			});
 
 			// Filter out manifests inside AppX folders (created by winapp run)
-			const matches = allMatches.filter(m => !m.fsPath.split(path.sep).includes('AppX'));
+			const matches = allMatches.filter(m => !m.split(path.sep).includes('AppX'));
 
 			let manifest: string;
 			if (matches.length === 0) {
 				throw new Error(`No manifest found matching "${searchPattern}". Build your project first or update "buildOutputManifest" in launch.json.`);
 			} else if (matches.length === 1) {
-				manifest = matches[0].fsPath;
+				manifest = matches[0];
 			} else {
 				// Multiple manifests found — let the user pick
 				const items = matches.map(m => ({
-					label: path.relative(folder.uri.fsPath, m.fsPath),
-					fsPath: m.fsPath
+					label: path.relative(folder.uri.fsPath, m),
+					fsPath: m
 				}));
 				const picked = await vscode.window.showQuickPick(items, {
 					placeHolder: 'Multiple AppxManifest.xml files found — select one'
