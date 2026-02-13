@@ -73,9 +73,9 @@ internal static class BannerHelper
     {
         var useColor = UseEmoji; // Same check - modern terminals support both
         var version = GetVersionString();
-        
+
         Console.WriteLine();
-        
+
         if (useColor)
         {
             DisplayColorBanner(version);
@@ -84,21 +84,21 @@ internal static class BannerHelper
         {
             DisplayPlainBanner(version);
         }
-        
+
         Console.WriteLine();
     }
 
     private static void DisplayColorBanner(string version)
     {
         var titleLines = TitleBlockArt;
-        
+
         // Display each line with a gradient color
         for (int i = 0; i < titleLines.Length; i++)
         {
             var color = GradientColors[i % GradientColors.Length];
             Console.WriteLine($"  {color}{titleLines[i]}{ResetColor}");
         }
-        
+
         Console.WriteLine();
         Console.WriteLine($"  \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
     }
@@ -109,7 +109,7 @@ internal static class BannerHelper
         {
             Console.WriteLine($"  {line}");
         }
-        
+
         Console.WriteLine();
         Console.WriteLine($"  Windows App Development CLI - Version {version}");
     }
@@ -120,7 +120,7 @@ internal static class BannerHelper
     private static string GetVersionString()
     {
         var assembly = Assembly.GetExecutingAssembly();
-        
+
         // Try to get informational version first (includes git info if available)
         var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrEmpty(infoVersion))
@@ -129,7 +129,7 @@ internal static class BannerHelper
             var plusIndex = infoVersion.IndexOf('+');
             return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
         }
-        
+
         // Fall back to assembly version
         var version = assembly.GetName().Version;
         return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.0.0";

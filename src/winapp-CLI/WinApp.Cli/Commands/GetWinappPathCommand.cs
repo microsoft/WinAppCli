@@ -36,7 +36,7 @@ internal class GetWinappPathCommand : Command
             {
                 DirectoryInfo winappDir;
                 string directoryType;
-                
+
                 if (global)
                 {
                     // Get the global .winapp directory
@@ -49,7 +49,7 @@ internal class GetWinappPathCommand : Command
                     winappDir = winappDirectoryService.GetLocalWinappDirectory();
                     directoryType = "Local";
                 }
-                
+
                 // For global directories, check if they exist
                 if (global && !winappDir.Exists)
                 {

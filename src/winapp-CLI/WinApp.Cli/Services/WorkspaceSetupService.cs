@@ -307,7 +307,7 @@ internal class WorkspaceSetupService(
                 }
 
                 Dictionary<string, string>? usedVersions = null;
-                DirectoryInfo? pkgsDir = null;
+                DirectoryInfo? nugetCacheDir = null;
                 (int, string) partialResult;
                 var sdkInstallMode = options.SdkInstallMode ?? SdkInstallMode.Stable;
 
@@ -370,7 +370,7 @@ internal class WorkspaceSetupService(
                     }
 
                     // Create all standard workspace directories for full setup/restore
-                    pkgsDir = globalWinappDir.CreateSubdirectory("packages");
+                    nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
                     var includeOut = localWinappDir.CreateSubdirectory("include");
                     var libRoot = localWinappDir.CreateSubdirectory("lib");
                     var binRoot = localWinappDir.CreateSubdirectory("bin");
@@ -408,7 +408,7 @@ internal class WorkspaceSetupService(
                         }
 
                         // Step 5: Run cppwinrt and set up projections
-                        var cppWinrtExe = cppWinrtService.FindCppWinrtExe(pkgsDir, usedVersions);
+                        var cppWinrtExe = cppWinrtService.FindCppWinrtExe(nugetCacheDir, usedVersions);
                         if (cppWinrtExe is null)
                         {
                             return (1, "cppwinrt.exe not found in installed packages.");
@@ -418,16 +418,16 @@ internal class WorkspaceSetupService(
 
                         // Copy headers, libs, runtimes
                         taskContext.UpdateSubStatus("Copying headers");
-                        packageLayoutService.CopyIncludesFromPackages(pkgsDir, includeOut);
+                        packageLayoutService.CopyIncludesFromPackages(nugetCacheDir, includeOut, usedVersions);
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Headers ready → {includeOut}");
 
                         taskContext.UpdateSubStatus("Copying import libraries");
-                        packageLayoutService.CopyLibsAllArch(pkgsDir, libRoot);
+                        packageLayoutService.CopyLibsAllArch(nugetCacheDir, libRoot, usedVersions);
                         var libArchs = libRoot.Exists ? string.Join(", ", libRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
                         taskContext.AddDebugMessage($"{UiSymbols.Books} Import libs ready for archs: {libArchs}");
 
                         taskContext.UpdateSubStatus("Copying runtime binaries");
-                        packageLayoutService.CopyRuntimesAllArch(pkgsDir, binRoot);
+                        packageLayoutService.CopyRuntimesAllArch(nugetCacheDir, binRoot, usedVersions);
                         var binArchs = binRoot.Exists ? string.Join(", ", binRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Runtime binaries ready for archs: {binArchs}");
 
@@ -436,8 +436,8 @@ internal class WorkspaceSetupService(
                         {
                             if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var wasdkVersion))
                             {
-                                var pkgDir = Path.Combine(pkgsDir.FullName, $"{BuildToolsService.WINAPP_SDK_PACKAGE}.{wasdkVersion}");
-                                var licenseSrc = Path.Combine(pkgDir, "license.txt");
+                                var pkgDir = nugetService.GetNuGetPackageDir(BuildToolsService.WINAPP_SDK_PACKAGE, wasdkVersion);
+                                var licenseSrc = Path.Combine(pkgDir.FullName, "license.txt");
                                 if (File.Exists(licenseSrc))
                                 {
                                     var shareDir = Path.Combine(localWinappDir.FullName, "share", BuildToolsService.WINAPP_SDK_PACKAGE);
@@ -455,7 +455,7 @@ internal class WorkspaceSetupService(
 
                         // Collect winmd inputs and run cppwinrt
                         taskContext.UpdateSubStatus("Searching for .winmd metadata");
-                        var winmds = packageLayoutService.FindWinmds(pkgsDir, usedVersions).ToList();
+                        var winmds = packageLayoutService.FindWinmds(nugetCacheDir, usedVersions).ToList();
                         taskContext.AddDebugMessage($"{UiSymbols.Search} Found {winmds.Count} .winmd");
                         if (winmds.Count == 0)
                         {
@@ -1275,140 +1275,8 @@ if ($toInstall.Count -gt 0) {{
     /// <returns>The path to the MSIX directory, or null if not found</returns>
     public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
     {
-        var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
-        var pkgsDir = new DirectoryInfo(Path.Combine(globalWinappDir.FullName, "packages"));
-
-        // Detect project type: check if there's a .csproj in the current directory
-        var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
-        var isDotNetProject = dotNetService.FindCsproj(cwd).Count > 0;
-
-        if (isDotNetProject)
-        {
-            // .NET project: search NuGet cache first, then fall back to .winapp/packages
-            var nugetCacheDir = GetNuGetGlobalPackagesDir();
-            if (nugetCacheDir != null && nugetCacheDir.Exists)
-            {
-                var result = FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-
-            // Fallback to .winapp/packages
-            if (pkgsDir.Exists)
-            {
-                var result = FindMsixDirectoryInPackagesDir(pkgsDir, usedVersions);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-        }
-        else
-        {
-            // Native/C++ project: search .winapp/packages first, then fall back to NuGet cache
-            if (pkgsDir.Exists)
-            {
-                var result = FindMsixDirectoryInPackagesDir(pkgsDir, usedVersions);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-
-            // Fallback to NuGet cache
-            var nugetCacheDir = GetNuGetGlobalPackagesDir();
-            if (nugetCacheDir != null && nugetCacheDir.Exists)
-            {
-                var result = FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Returns the NuGet global packages directory (typically ~/.nuget/packages/).
-    /// </summary>
-    private static DirectoryInfo? GetNuGetGlobalPackagesDir()
-    {
-        // NUGET_PACKAGES env var takes priority
-        var envPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
-        if (!string.IsNullOrEmpty(envPath) && Directory.Exists(envPath))
-        {
-            return new DirectoryInfo(envPath);
-        }
-
-        // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrEmpty(userProfile))
-        {
-            return null;
-        }
-
-        var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
-        return nugetDir.Exists ? nugetDir : null;
-    }
-
-    /// <summary>
-    /// Searches the .winapp/packages directory (using PackageName.Version folder naming convention).
-    /// </summary>
-    private static DirectoryInfo? FindMsixDirectoryInPackagesDir(DirectoryInfo pkgsDir, Dictionary<string, string>? usedVersions)
-    {
-        // If we have specific versions from package installation, use those first
-        if (usedVersions != null)
-        {
-            // First try Microsoft.WindowsAppSDK.Runtime package (WinAppSDK 1.8+)
-            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, out var wasdkRuntimeVersion))
-            {
-                var msixDir = TryGetMsixDirectory(pkgsDir, $"{BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE}.{wasdkRuntimeVersion}");
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-
-            // Fallback: check if runtime is included in the main WindowsAppSDK package (for older versions)
-            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var wasdkVersion))
-            {
-                var msixDir = TryGetMsixDirectory(pkgsDir, $"{BuildToolsService.WINAPP_SDK_PACKAGE}.{wasdkVersion}");
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-        }
-
-        // General scan approach: Look for Microsoft.WindowsAppSDK.Runtime packages first (WinAppSDK 1.8+)
-        var runtimePackages = pkgsDir.GetDirectories($"{BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE}.*");
-        foreach (var runtimePkg in runtimePackages.OrderByDescending(p => ExtractVersionFromPackageName(p.Name), new VersionStringComparer()))
-        {
-            var msixDir = TryGetMsixDirectoryFromPath(runtimePkg);
-            if (msixDir != null)
-            {
-                return msixDir;
-            }
-        }
-
-        // Fallback: check if runtime is included in the main WindowsAppSDK package (for older versions)
-        var mainPackages = pkgsDir.GetDirectories($"{BuildToolsService.WINAPP_SDK_PACKAGE}.*")
-            .Where(p => !p.Name.Contains("Runtime", StringComparison.OrdinalIgnoreCase));
-
-        foreach (var mainPkg in mainPackages.OrderByDescending(p => ExtractVersionFromPackageName(p.Name), new VersionStringComparer()))
-        {
-            var msixDir = TryGetMsixDirectoryFromPath(mainPkg);
-            if (msixDir != null)
-            {
-                return msixDir;
-            }
-        }
-
-        return null;
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+        return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
     }
 
     /// <summary>
@@ -1481,18 +1349,6 @@ if ($toInstall.Count -gt 0) {{
     }
 
     /// <summary>
-    /// Helper method to check if an MSIX directory exists for a given package directory name
-    /// </summary>
-    /// <param name="pkgsDir">The packages directory</param>
-    /// <param name="packageDirName">The package directory name</param>
-    /// <returns>The MSIX directory path if it exists, null otherwise</returns>
-    private static DirectoryInfo? TryGetMsixDirectory(DirectoryInfo pkgsDir, string packageDirName)
-    {
-        var pkgDir = new DirectoryInfo(Path.Combine(pkgsDir.FullName, packageDirName));
-        return TryGetMsixDirectoryFromPath(pkgDir);
-    }
-
-    /// <summary>
     /// Helper method to check if an MSIX directory exists for a given package path
     /// </summary>
     /// <param name="packagePath">The full path to the package directory</param>
@@ -1501,43 +1357,6 @@ if ($toInstall.Count -gt 0) {{
     {
         var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
         return msixDir.Exists ? msixDir : null;
-    }
-
-    /// <summary>
-    /// Extract version string from package folder name for sorting
-    /// Handles prerelease tags like "-experimental1"
-    /// </summary>
-    /// <param name="packageFolderName">Package folder name like "Microsoft.WindowsAppSDK.Runtime.2.0.250930001-experimental1"</param>
-    /// <returns>Version string for comparison (e.g., "2.0.250930001-experimental1")</returns>
-    private static string ExtractVersionFromPackageName(string packageFolderName)
-    {
-        // Find the last occurrence of the package name prefix
-        // For "Microsoft.WindowsAppSDK.Runtime.2.0.250930001-experimental1", we want "2.0.250930001-experimental1"
-
-        var parts = packageFolderName.Split('.');
-        if (parts.Length < 2)
-        {
-            return "0.0.0.0";
-        }
-
-        // Find where the version starts (first part that starts with a digit or contains a digit followed by a hyphen)
-        var versionStartIndex = -1;
-        for (int i = 0; i < parts.Length; i++)
-        {
-            if (parts[i].Length > 0 && char.IsDigit(parts[i][0]))
-            {
-                versionStartIndex = i;
-                break;
-            }
-        }
-
-        if (versionStartIndex == -1)
-        {
-            return "0.0.0.0";
-        }
-
-        // Join all parts from the version start, preserving hyphens for prerelease tags
-        return string.Join(".", parts.Skip(versionStartIndex));
     }
 
     /// <summary>

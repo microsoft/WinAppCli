@@ -6,7 +6,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
-public class WinappDirectoryServiceTests :  BaseCommandTests
+public class WinappDirectoryServiceTests : BaseCommandTests
 {
     public WinappDirectoryServiceTests()
         : base(configPaths: false)
@@ -77,7 +77,7 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
     {
         // Store original environment variable value to restore later
         var originalValue = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
-        
+
         // Arrange - Create a test directory for environment variable
         var envTestDirectory = _tempDirectory.CreateSubdirectory("env-test-winapp");
 
@@ -89,7 +89,7 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
             // Act - Create fresh instance to test environment variable behavior
             var directoryService = GetRequiredService<IWinappDirectoryService>();
             var result = directoryService.GetGlobalWinappDirectory();
-            
+
             // Assert
             Assert.AreEqual(envTestDirectory.FullName, result?.FullName, "Should return environment variable path when set");
         }
@@ -106,7 +106,7 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
     {
         // Store original environment variable value to restore later
         var originalValue = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
-        
+
         // Arrange - Create test directories
         var envTestDirectory = _tempDirectory.CreateSubdirectory("env-winapp");
         var overrideTestDirectory = _tempDirectory.CreateSubdirectory("override-winapp");
@@ -115,12 +115,12 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
         {
             // Set environment variable
             Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", envTestDirectory.FullName);
-            
+
             // Act - Create instance and set override (should take precedence)
             var directoryService = GetRequiredService<IWinappDirectoryService>();
             directoryService.SetCacheDirectoryForTesting(overrideTestDirectory);
             var result = directoryService.GetGlobalWinappDirectory();
-            
+
             // Assert
             Assert.AreEqual(overrideTestDirectory.FullName, result?.FullName, "Instance override should take precedence over environment variable");
         }
@@ -183,7 +183,7 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
         // Arrange - Create a .winapp directory and winapp.yaml in the same location
         var topDir = _tempDirectory.CreateSubdirectory("topDir");
         var topWinAppDir = topDir.CreateSubdirectory(".winapp");
-        
+
         var appDir = topDir.CreateSubdirectory("appDir");
         var localWinappDir = appDir.CreateSubdirectory(".winapp");
         var winappYamlPath = Path.Combine(appDir.FullName, "winapp.yaml");
@@ -200,7 +200,7 @@ public class WinappDirectoryServiceTests :  BaseCommandTests
         var result = directoryService.GetLocalWinappDirectory(subDir);
 
         // Assert - Should find the topDir .winapp because we skip the appDir/.winapp since it's set as global cache dir
-        Assert.AreEqual(topWinAppDir.FullName, result.FullName, 
+        Assert.AreEqual(topWinAppDir.FullName, result.FullName,
             "Should return the top .winapp directory when local and global are the same");
     }
 }

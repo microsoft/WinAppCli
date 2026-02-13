@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
 using System.Xml;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
 [TestClass]
-public class NugetServiceTests : BaseCommandTests
+public partial class NugetServiceTests : BaseCommandTests
 {
     private INugetService _nugetService = null!;
 
@@ -32,7 +33,7 @@ public class NugetServiceTests : BaseCommandTests
         // Assert
         Assert.IsNotNull(result);
         Assert.IsNotEmpty(result, "Should have at least one dependency");
-        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"), 
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"),
             "Should contain Microsoft.Extensions.Logging.Abstractions dependency");
     }
 
@@ -116,6 +117,28 @@ public class NugetServiceTests : BaseCommandTests
         // Assert
         Assert.IsNotNull(result);
         Assert.IsNotEmpty(result, "Should have dependencies regardless of package name casing");
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_ReturnsTransitiveDependencies()
+    {
+        // Arrange - Microsoft.Extensions.Logging 8.0.0 depends on
+        // Microsoft.Extensions.DependencyInjection.Abstractions (direct dep),
+        // and Microsoft.Extensions.Logging.Abstractions which itself depends on
+        // Microsoft.Extensions.DependencyInjection.Abstractions (transitive).
+        // We verify that a dependency of a dependency is included.
+        var packageName = "Microsoft.Extensions.Logging";
+        var version = "8.0.0";
+
+        // Act
+        var result = await _nugetService.GetPackageDependenciesAsync(packageName, version, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.DependencyInjection.Abstractions"),
+            "Should contain transitive dependency Microsoft.Extensions.DependencyInjection.Abstractions");
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"),
+            "Should contain direct dependency Microsoft.Extensions.Logging.Abstractions");
     }
 
     #endregion
@@ -250,7 +273,7 @@ public class NugetServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void ParseNuspecDependencies_WithVersionRanges_PreservesVersionRanges()
+    public void ParseNuspecDependencies_WithVersionRanges_RemovesBrackets()
     {
         // Arrange - nuspec with version ranges
         var nuspecXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -272,12 +295,12 @@ public class NugetServiceTests : BaseCommandTests
         // Act
         var result = ParseNuspecDependenciesFromXml(nuspecXml);
 
-        // Assert
+        // Assert - brackets and parentheses should be stripped
         Assert.HasCount(4, result);
         Assert.AreEqual("1.0.0", result["ExactVersion"]);
-        Assert.AreEqual("[1.0.0, )", result["MinVersion"]);
-        Assert.AreEqual("[1.0.0, 2.0.0)", result["RangeVersion"]);
-        Assert.AreEqual("(, 2.0.0]", result["MaxVersion"]);
+        Assert.AreEqual("1.0.0, ", result["MinVersion"]);
+        Assert.AreEqual("1.0.0, 2.0.0", result["RangeVersion"]);
+        Assert.AreEqual(", 2.0.0", result["MaxVersion"]);
     }
 
     [TestMethod]
@@ -520,13 +543,17 @@ public class NugetServiceTests : BaseCommandTests
                 var depVersion = node.Attributes?["version"]?.Value;
                 if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
                 {
-                    dependencies.TryAdd(depId, depVersion);
+                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
+                    dependencies.TryAdd(depId, cleanedVersion);
                 }
             }
         }
 
         return dependencies;
     }
+
+    [GeneratedRegex(@"[\[\]\(\)]")]
+    private static partial Regex BracketsAndParenthesesRegex();
 
     #endregion
 }

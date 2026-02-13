@@ -76,6 +76,13 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
             var directoryService = GetRequiredService<IWinappDirectoryService>();
             _testCacheDirectory = _tempDirectory.CreateSubdirectory(".winappcache");
             directoryService.SetCacheDirectoryForTesting(_testCacheDirectory);
+
+            // Wire up test cache directory for FakeNugetService if present
+            if (GetRequiredService<INugetService>() is FakeNugetService fakeNuget)
+            {
+                fakeNuget.CacheDirectory = _testCacheDirectory;
+            }
+
             _buildToolsService = GetRequiredService<IBuildToolsService>();
         }
     }

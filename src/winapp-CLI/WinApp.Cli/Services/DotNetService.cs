@@ -231,7 +231,7 @@ internal partial class DotNetService : IDotNetService
 {
         var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\" --version \"{version}\"";
         var (exitCode, output, error) = await RunDotnetCommandAsync(csprojPath.Directory!, args, cancellationToken);
-        
+
         if (exitCode != 0)
         {
             var message = !string.IsNullOrWhiteSpace(error) ? error.Trim() : output.Trim();

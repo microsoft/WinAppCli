@@ -18,7 +18,8 @@ internal sealed class CppWinrtService(ILogger<CppWinrtService> logger) : ICppWin
             return null;
         }
 
-        var baseDir = Path.Combine(packagesDir.FullName, $"{pkgName}.{v}");
+        // NuGet global cache layout: {cache}/lowercase-id/version/
+        var baseDir = Path.Combine(packagesDir.FullName, pkgName.ToLowerInvariant(), v);
         var exe = new FileInfo(Path.Combine(baseDir, "bin", "cppwinrt.exe"));
         return exe.Exists ? exe : null;
     }

@@ -14,12 +14,12 @@ internal class FakeNugetService : INugetService
 {
     public string DefaultVersion { get; set; } = "1.6.0";
     public List<string> QueriedPackages { get; } = [];
-    public List<(string Package, string Version, DirectoryInfo OutputDir)> InstalledPackages { get; } = [];
+    public List<(string Package, string Version)> InstalledPackages { get; } = [];
 
-    public Task EnsureNugetExeAsync(DirectoryInfo winappDir, CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
+    /// <summary>
+    /// Set this to the test cache directory to enable NuGet cache path resolution in tests.
+    /// </summary>
+    public DirectoryInfo? CacheDirectory { get; set; }
 
     public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
     {
@@ -27,14 +27,34 @@ internal class FakeNugetService : INugetService
         return Task.FromResult(DefaultVersion);
     }
 
-    public Task<Dictionary<string, string>> InstallPackageAsync(DirectoryInfo globalWinappDir, string package, string version, DirectoryInfo outputDir, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
-        InstalledPackages.Add((package, version, outputDir));
+        InstalledPackages.Add((package, version));
         return Task.FromResult(new Dictionary<string, string> { [package] = version });
     }
 
     public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(new Dictionary<string, string>());
+    }
+
+    public DirectoryInfo GetNuGetGlobalPackagesDir()
+    {
+        if (CacheDirectory == null)
+        {
+            throw new InvalidOperationException("FakeNugetService.CacheDirectory must be set before calling GetNuGetGlobalPackagesDir");
+        }
+        var dir = new DirectoryInfo(Path.Combine(CacheDirectory.FullName, "packages"));
+        if (!dir.Exists)
+        {
+            dir.Create();
+        }
+        return dir;
+    }
+
+    public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
+    {
+        var cache = GetNuGetGlobalPackagesDir();
+        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
     }
 }
