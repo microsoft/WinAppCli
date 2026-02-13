@@ -917,16 +917,11 @@ internal partial class MsixService(
 
     private IEnumerable<FileInfo> GetComponents(Dictionary<string, string> packageDependencies)
     {
-        var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
-        var packagesDir = Path.Combine(globalWinappDir.FullName, "packages");
-        if (!Directory.Exists(packagesDir))
-        {
-            throw new DirectoryNotFoundException($"Packages directory not found: {packagesDir}");
-        }
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
 
-        // Find the packages directory
+        // Find appx fragments in the NuGet global cache (lowercase-id/version/ layout)
         var appxFragments = packageDependencies
-            .Select(package => new FileInfo(Path.Combine(packagesDir, $"{package.Key}.{package.Value}", "runtimes-framework", "package.appxfragment")))
+            .Select(package => new FileInfo(Path.Combine(nugetCacheDir.FullName, package.Key.ToLowerInvariant(), package.Value, "runtimes-framework", "package.appxfragment")))
             .Where(f => f.Exists);
         return appxFragments;
     }

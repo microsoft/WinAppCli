@@ -59,7 +59,7 @@ internal class GroupableTask<T> : GroupableTask
                 SuccessfullyCompleted = true;
             }
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
             SuccessfullyCompleted = false;
             Debug.WriteLine(ex);

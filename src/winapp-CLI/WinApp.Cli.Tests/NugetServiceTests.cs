@@ -33,7 +33,7 @@ public partial class NugetServiceTests : BaseCommandTests
         // Assert
         Assert.IsNotNull(result);
         Assert.IsNotEmpty(result, "Should have at least one dependency");
-        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"), 
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"),
             "Should contain Microsoft.Extensions.Logging.Abstractions dependency");
     }
 

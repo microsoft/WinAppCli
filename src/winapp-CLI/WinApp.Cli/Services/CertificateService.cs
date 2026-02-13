@@ -238,7 +238,7 @@ internal partial class CertificateService(
                 {
                     throw new InvalidOperationException($"Failed to sign file: {record.FormatDescription()}", ex);
                 }
-                
+
                 await Task.Delay(pollingInterval, cancellationToken);
             }
 

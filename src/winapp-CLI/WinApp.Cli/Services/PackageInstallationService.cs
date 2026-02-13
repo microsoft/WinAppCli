@@ -23,8 +23,6 @@ internal sealed class PackageInstallationService(
         {
             rootDirectory.Create();
         }
-
-        var packagesDir = rootDirectory.CreateSubdirectory("packages");
     }
 
     /// <summary>
@@ -44,20 +42,15 @@ internal sealed class PackageInstallationService(
         SdkInstallMode sdkInstallMode = SdkInstallMode.Stable,
         CancellationToken cancellationToken = default)
     {
-        var packagesDir = new DirectoryInfo(Path.Combine(rootDirectory.FullName, "packages"));
-
-        // Ensure nuget.exe is available
-        await nugetService.EnsureNugetExeAsync(rootDirectory, cancellationToken);
-
         // Get version if not specified
         if (version == null)
         {
             version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
         }
 
-        // Check if already installed
-        var expectedFolder = Path.Combine(packagesDir.FullName, $"{packageName}.{version}");
-        if (Directory.Exists(expectedFolder))
+        // Check if already installed in NuGet global cache
+        var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
+        if (packageDir.Exists)
         {
             taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
             return version;
@@ -66,7 +59,7 @@ internal sealed class PackageInstallationService(
         // Install the package
         taskContext.AddStatusMessage($"{UiSymbols.Package} Installing {packageName} {version}...");
 
-        await nugetService.InstallPackageAsync(rootDirectory, packageName, version, packagesDir, taskContext, cancellationToken);
+        await nugetService.InstallPackageAsync(packageName, version, taskContext, cancellationToken);
         return version;
     }
 
@@ -87,12 +80,7 @@ internal sealed class PackageInstallationService(
         bool ignoreConfig = false,
         CancellationToken cancellationToken = default)
     {
-        var packagesDir = new DirectoryInfo(Path.Combine(rootDirectory.FullName, "packages"));
         var allInstalledVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        // Ensure nuget.exe is available once for all packages
-        taskContext.AddDebugMessage($"{UiSymbols.Wrench} Ensuring nuget.exe is available...");
-        await nugetService.EnsureNugetExeAsync(rootDirectory, cancellationToken);
 
         // Load pinned config if available
         WinappConfig? pinnedConfig = null;
@@ -122,12 +110,12 @@ internal sealed class PackageInstallationService(
                 version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
             }
 
-            // Check if already installed
-            var expectedFolder = Path.Combine(packagesDir.FullName, $"{packageName}.{version}");
-            if (Directory.Exists(expectedFolder))
+            // Check if already installed in NuGet global cache
+            var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
+            if (packageDir.Exists)
             {
                 taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
-                
+
                 // Add the main package to installed versions
                 allInstalledVersions[packageName] = version;
 
@@ -137,16 +125,20 @@ internal sealed class PackageInstallationService(
                     var cachedPackages = await nugetService.GetPackageDependenciesAsync(packageName, version, cancellationToken);
                     foreach (var (packageId, packageVersion) in cachedPackages)
                     {
-                        if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
+                        var depVersion = NugetService.ParseMinimumVersion(packageVersion);
+                        if (!string.IsNullOrEmpty(depVersion))
                         {
-                            if (NugetService.CompareVersions(packageVersion, existingVersion) > 0)
+                            if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
                             {
-                                allInstalledVersions[packageId] = packageVersion;
+                                if (NugetService.CompareVersions(depVersion, existingVersion) > 0)
+                                {
+                                    allInstalledVersions[packageId] = depVersion;
+                                }
                             }
-                        }
-                        else
-                        {
-                            allInstalledVersions[packageId] = packageVersion;
+                            else
+                            {
+                                allInstalledVersions[packageId] = depVersion;
+                            }
                         }
                     }
                 }
@@ -154,14 +146,14 @@ internal sealed class PackageInstallationService(
                 {
                     // Package not in cache yet, that's okay - just continue with main package
                 }
-                
+
                 continue;
             }
 
             // Install the package
             taskContext.AddStatusMessage($"{UiSymbols.Bullet} {packageName} {version}");
 
-            var installedVersions = await nugetService.InstallPackageAsync(rootDirectory, packageName, version, packagesDir, taskContext, cancellationToken);
+            var installedVersions = await nugetService.InstallPackageAsync(packageName, version, taskContext, cancellationToken);
             foreach (var (pkg, ver) in installedVersions)
             {
                 if (allInstalledVersions.TryGetValue(pkg, out var existingVersion))

@@ -39,7 +39,7 @@ public class EndToEndTests : BaseCommandTests
         // Step 1: Create a new WinForms application
         var createResult = await RunDotnetCommandAsync(projectDir, $"new winforms -n {projectName} -o .");
         Assert.AreEqual(0, createResult.ExitCode, $"Failed to create WinForms app: {createResult.Output}");
-        Assert.IsTrue(File.Exists(Path.Combine(projectDir.FullName, $"{projectName}.csproj")), 
+        Assert.IsTrue(File.Exists(Path.Combine(projectDir.FullName, $"{projectName}.csproj")),
             "Project file should be created");
 
         // Step 2: Build the application
@@ -49,7 +49,7 @@ public class EndToEndTests : BaseCommandTests
         // Verify the build output exists
         var binFolder = new DirectoryInfo(Path.Combine(projectDir.FullName, "bin", "Release"));
         Assert.IsTrue(binFolder.Exists, "Build output directory should exist");
-        
+
         // Find the target framework folder (e.g., net10.0-windows)
         var targetFrameworkFolder = binFolder.GetDirectories("net*-windows").FirstOrDefault();
         Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
@@ -102,11 +102,11 @@ public class EndToEndTests : BaseCommandTests
         using var archive = await ZipFile.OpenReadAsync(packageOutputPath, TestContext.CancellationToken);
         var entries = archive.Entries.Select(e => e.FullName).ToList();
 
-        Assert.IsTrue(entries.Any(e => e.EndsWith("AppxManifest.xml", StringComparison.OrdinalIgnoreCase)), 
+        Assert.IsTrue(entries.Any(e => e.EndsWith("AppxManifest.xml", StringComparison.OrdinalIgnoreCase)),
             "MSIX should contain AppxManifest.xml");
-        Assert.IsTrue(entries.Any(e => e.EndsWith($"{projectName}.exe", StringComparison.OrdinalIgnoreCase)), 
+        Assert.IsTrue(entries.Any(e => e.EndsWith($"{projectName}.exe", StringComparison.OrdinalIgnoreCase)),
             $"MSIX should contain {projectName}.exe");
-        Assert.IsTrue(entries.Any(e => e.Contains("Assets/", StringComparison.OrdinalIgnoreCase)), 
+        Assert.IsTrue(entries.Any(e => e.Contains("Assets/", StringComparison.OrdinalIgnoreCase)),
             "MSIX should contain Assets folder");
     }
 
@@ -153,13 +153,13 @@ public class EndToEndTests : BaseCommandTests
         // Verify custom options were applied
         var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
-        
+
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
-        Assert.IsTrue(manifestContent.Contains("Id=\"net10.A0Windows\"", StringComparison.OrdinalIgnoreCase), 
+        Assert.IsTrue(manifestContent.Contains("Id=\"net10.A0Windows\"", StringComparison.OrdinalIgnoreCase),
             "Manifest should contain custom package name");
-        Assert.IsTrue(manifestContent.Contains("CN=TestPublisher", StringComparison.Ordinal), 
+        Assert.IsTrue(manifestContent.Contains("CN=TestPublisher", StringComparison.Ordinal),
             "Manifest should contain custom publisher");
-        Assert.IsTrue(manifestContent.Contains("2.5.0.0", StringComparison.Ordinal), 
+        Assert.IsTrue(manifestContent.Contains("2.5.0.0", StringComparison.Ordinal),
             "Manifest should contain custom version");
 
         // Step 4: Package the application
@@ -227,7 +227,7 @@ if __name__ == ""__main__"":
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
-        Assert.IsTrue(manifestContent.Contains("Python314", StringComparison.OrdinalIgnoreCase) || 
+        Assert.IsTrue(manifestContent.Contains("Python314", StringComparison.OrdinalIgnoreCase) ||
                       manifestContent.Contains("Python", StringComparison.OrdinalIgnoreCase),
             "Manifest should contain Python runtime dependency");
         Assert.IsTrue(manifestContent.Contains(scriptName, StringComparison.OrdinalIgnoreCase),
@@ -373,7 +373,7 @@ if __name__ == ""__main__"":
     /// Helper method to run dotnet commands
     /// </summary>
     private static async Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
-        DirectoryInfo workingDirectory, 
+        DirectoryInfo workingDirectory,
         string arguments)
     {
         var processStartInfo = new System.Diagnostics.ProcessStartInfo
@@ -388,7 +388,7 @@ if __name__ == ""__main__"":
         };
 
         using var process = new System.Diagnostics.Process { StartInfo = processStartInfo };
-        
+
         var outputBuilder = new System.Text.StringBuilder();
         var errorBuilder = new System.Text.StringBuilder();
 

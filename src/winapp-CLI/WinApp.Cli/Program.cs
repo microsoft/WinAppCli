@@ -27,7 +27,7 @@ internal static class Program
         {
             // ignore
         }
-        
+
         var minimumLogLevel = LogLevel.Information;
         bool quiet = false;
         bool verbose = false;
