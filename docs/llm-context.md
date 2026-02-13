@@ -76,7 +76,7 @@ Print the path to the .winapp directory. Use --global for the shared cache locat
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 **Arguments:**
 - `<base-directory>` - Base/root directory for the winapp workspace, for consumption or installation.
@@ -85,7 +85,6 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 - `--config-dir` - Directory to read/store configuration (default: current directory)
 - `--config-only` - Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps.
 - `--ignore-config` / `--no-config` - Don't use configuration file for version management
-- `--no-cert` - Skip development certificate generation
 - `--no-gitignore` - Don't update .gitignore file
 - `--quiet` / `-q` - Suppress progress messages
 - `--setup-sdks` - SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)
