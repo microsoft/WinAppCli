@@ -455,7 +455,7 @@ internal class WorkspaceSetupService(
                             return partialResult;
                         }
 
-                        return (0, "SDK and WASDK packages downloaded and C++ headers generated in [underline].winapp[/]");
+                        return (0, "SDK and Windows App SDK packages downloaded and C++ headers generated in [underline].winapp[/]");
                     }, cancellationToken);
 
                     if (partialResult.Item1 != 0)
@@ -469,10 +469,10 @@ internal class WorkspaceSetupService(
                     }
                 }
 
-                // Install WinAppSDK Runtime (shared: both .NET and native paths)
+                // Install Windows App SDK Runtime (shared: both .NET and native paths)
                 if (options.SdkInstallMode != SdkInstallMode.None)
                 {
-                    await taskContext.AddSubTaskAsync("Installing WinAppSDK Runtime", async (taskContext, cancellationToken) =>
+                    await taskContext.AddSubTaskAsync("Installing Windows App SDK Runtime", async (taskContext, cancellationToken) =>
                     {
                         try
                         {
@@ -501,8 +501,8 @@ internal class WorkspaceSetupService(
                                 }
 
                                 return (0, version != null
-                                    ? $"WinAppSDK Runtime installed: [underline]{version}[/]"
-                                    : "WinAppSDK Runtime installed");
+                                    ? $"Windows App SDK Runtime installed: [underline]{version}[/]"
+                                    : "Windows App SDK Runtime installed");
                             }
                             else
                             {
@@ -852,8 +852,12 @@ internal class WorkspaceSetupService(
                 {
                     var currentDisplay = currentTfm ?? "(not set)";
 
+                    var promptSuffix = options.SdkInstallMode != SdkInstallMode.None
+                        ? " (Required for Windows App SDK)"
+                        : "";
+
                     var shouldUpdate = await ansiConsole.PromptAsync(
-                        new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\" (Required for WinAppSDK)?"),
+                        new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\"{promptSuffix}?"),
                         cancellationToken);
 
                     if (!shouldUpdate)
@@ -987,11 +991,11 @@ internal class WorkspaceSetupService(
                 {
                     var parts = versionTasks
                         .Where(v => v.Mode == mode)
-                        .Select(v => $"{(v.Package == BuildToolsService.CPP_SDK_PACKAGE ? "Windows SDK" : "WinAppSDK")} [green]{v.Task.Result}[/]");
+                        .Select(v => $"{(v.Package == BuildToolsService.CPP_SDK_PACKAGE ? "Windows SDK" : "Windows App SDK")} [green]{v.Task.Result}[/]");
                     return string.Join(", ", parts);
                 });
 
-            var label = isDotNetProject ? "WinAppSDK" : "SDKs";
+            var label = isDotNetProject ? "Windows App SDK" : "SDKs";
             string[] sdkChoices = [
                 $"Setup Stable {label} ({versionsByMode[SdkInstallMode.Stable]})",
                 $"Setup Preview {label} ({versionsByMode[SdkInstallMode.Preview]})",
@@ -1278,7 +1282,7 @@ if ($toInstall.Count -gt 0) {{
     {
         if (usedVersions != null)
         {
-            // Try runtime package first (WinAppSDK 1.8+)
+            // Try runtime package first (Windows App SDK 1.8+)
             if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, out var runtimeVersion))
             {
                 var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, runtimeVersion);
