@@ -704,4 +704,47 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
     }
 
     #endregion
+
+    #region SDK None with TFM update tests
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_NoSdks_StillUpdatesTfm()
+    {
+        // When the user selects SdkInstallMode.None but has an unsupported TFM,
+        // the TFM should still be updated (with --use-defaults) and setup should succeed.
+
+        // Arrange - Create a .csproj with an unsupported TFM (no -windows)
+        var csproj = await CreateCsprojAsync(_tempDirectory, "TestApp", "net8.0");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            NoCert = true,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully even with SdkInstallMode.None");
+
+        // Verify TFM was still updated in the csproj file
+        var updatedContent = await File.ReadAllTextAsync(csproj.FullName);
+        Assert.Contains("-windows", updatedContent,
+            "TFM should be updated to include -windows even when SDK installation is skipped");
+        Assert.DoesNotContain(">net8.0<", updatedContent,
+            "Original unsupported TFM should be replaced");
+
+        // Verify no NuGet packages were added (SdkInstallMode.None skips package installation)
+        Assert.IsEmpty(_fakeDotNetService.AddedPackages,
+            "With SdkInstallMode.None, no packages should be added");
+    }
+
+    #endregion
 }

@@ -83,8 +83,9 @@ internal class WorkspaceSetupService(
         ManifestGenerationInfo? manifestGenerationInfo;
         bool shouldGenerateCert;
         bool shouldEnableDeveloperMode;
+        string? recommendedTfm;
 
-        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode) = await InitializeConfigurationAsync(options, cancellationToken);
+        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm) = await InitializeConfigurationAsync(options, isDotNetProject, csprojFile, cancellationToken);
         if (initializationResult != 0)
         {
             return initializationResult;
@@ -159,53 +160,6 @@ internal class WorkspaceSetupService(
 
             logger.LogInformation("Configuration-only operation completed");
             return 0;
-        }
-
-        // .NET: Validate TargetFramework (interactive — must happen before status block)
-        string? recommendedTfm = null;
-        if (isDotNetProject && options.SdkInstallMode != SdkInstallMode.None && csprojFile != null)
-        {
-            if (dotNetService.IsMultiTargeted(csprojFile))
-            {
-                logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
-                return 1;
-            }
-
-            var currentTfm = dotNetService.GetTargetFramework(csprojFile);
-            logger.LogDebug("Current TargetFramework: {Tfm}", currentTfm ?? "(not set)");
-
-            if (currentTfm == null || !dotNetService.IsTargetFrameworkSupported(currentTfm))
-            {
-                recommendedTfm = dotNetService.GetRecommendedTargetFramework(currentTfm);
-
-                if (!options.UseDefaults)
-                {
-                    var currentDisplay = currentTfm ?? "(not set)";
-
-                    var shouldUpdate = await ansiConsole.PromptAsync(
-                        new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\" (Required)?"),
-                        cancellationToken);
-
-                    if (!shouldUpdate)
-                    {
-                        logger.LogError("TargetFramework '{Tfm}' is not supported for Windows App SDK. Cannot continue.", currentDisplay);
-                        return 1;
-                    }
-                }
-                else
-                {
-                    var currentDisplay = currentTfm ?? "(not set)";
-                    logger.LogWarning(
-                        "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
-                        currentDisplay,
-                        recommendedTfm);
-                    logger.LogInformation("Automatically updating TargetFramework from {CurrentTfm} to {RecommendedTfm} because --use-defaults was specified.", Markup.Escape(currentDisplay), recommendedTfm);
-                }
-            }
-            else
-            {
-                logger.LogDebug("{UISymbol} TargetFramework '{Tfm}' is supported", UiSymbols.Check, currentTfm);
-            }
         }
 
         // Initialize workspace directories (native/C++ projects only)
@@ -311,15 +265,16 @@ internal class WorkspaceSetupService(
                 (int, string) partialResult;
                 var sdkInstallMode = options.SdkInstallMode ?? SdkInstallMode.Stable;
 
-                // .NET-specific: Update TargetFramework + add NuGet package references
+                // .NET-specific: Update TargetFramework if needed (independent of SDK install mode)
+                if (isDotNetProject && csprojFile != null && recommendedTfm != null)
+                {
+                    dotNetService.SetTargetFramework(csprojFile, recommendedTfm);
+                    taskContext.AddStatusMessage($"{UiSymbols.Check} Updated TargetFramework to {recommendedTfm}");
+                }
+
+                // .NET-specific: Add NuGet package references
                 if (isDotNetProject && options.SdkInstallMode != SdkInstallMode.None && csprojFile != null)
                 {
-                    if (recommendedTfm != null)
-                    {
-                        dotNetService.SetTargetFramework(csprojFile, recommendedTfm);
-                        taskContext.AddStatusMessage($"{UiSymbols.Check} Updated TargetFramework to {recommendedTfm}");
-                    }
-
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
                         usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -783,7 +738,7 @@ internal class WorkspaceSetupService(
         return addedCertToGitignore;
     }
 
-    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldGenerateCert, bool ShouldEnableDeveloperMode)> InitializeConfigurationAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldGenerateCert, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
     {
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null && options.UseDefaults)
         {
@@ -795,6 +750,7 @@ internal class WorkspaceSetupService(
         bool shouldGenerateManifest = true;
         bool shouldGenerateCert = !options.NoCert;
         bool shouldEnableDeveloperMode = false;
+        string? recommendedTfm = null;
         ManifestGenerationInfo? manifestGenerationInfo = null;
         WinappConfig? config = null;
 
@@ -803,7 +759,7 @@ internal class WorkspaceSetupService(
         {
             logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
             logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode);
+            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
         }
 
         // Step 2: Load or prepare configuration
@@ -815,7 +771,7 @@ internal class WorkspaceSetupService(
             {
                 logger.LogInformation("{UISymbol} winapp.yaml found but contains no packages. Nothing to restore.", UiSymbols.Note);
                 shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
-                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode);
+                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
             }
 
             var operation = options.RequireExistingConfig ? "Found" : "Found existing";
@@ -848,7 +804,7 @@ internal class WorkspaceSetupService(
                     }
                     else
                     {
-                        await AskSdkInstallModeAsync(options, cancellationToken);
+                        await AskSdkInstallModeAsync(options, isDotNetProject, cancellationToken);
                     }
                 }
             }
@@ -868,7 +824,7 @@ internal class WorkspaceSetupService(
             }
             shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
 
-            await AskSdkInstallModeAsync(options, cancellationToken);
+            await AskSdkInstallModeAsync(options, isDotNetProject, cancellationToken);
             if (options.SdkInstallMode != SdkInstallMode.None)
             {
                 config = new WinappConfig();
@@ -876,11 +832,61 @@ internal class WorkspaceSetupService(
             }
         }
 
+        // .NET: Validate TargetFramework (interactive)
+        if (isDotNetProject && csprojFile != null)
+        {
+            if (dotNetService.IsMultiTargeted(csprojFile))
+            {
+                logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
+                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+            }
+
+            var currentTfm = dotNetService.GetTargetFramework(csprojFile);
+            logger.LogDebug("Current TargetFramework: {Tfm}", currentTfm ?? "(not set)");
+
+            if (currentTfm == null || !dotNetService.IsTargetFrameworkSupported(currentTfm))
+            {
+                recommendedTfm = dotNetService.GetRecommendedTargetFramework(currentTfm);
+
+                if (!options.UseDefaults)
+                {
+                    var currentDisplay = currentTfm ?? "(not set)";
+
+                    var shouldUpdate = await ansiConsole.PromptAsync(
+                        new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\" (Required for WinAppSDK)?"),
+                        cancellationToken);
+
+                    if (!shouldUpdate)
+                    {
+                        if (options.SdkInstallMode != SdkInstallMode.None)
+                        {
+                            logger.LogError("TargetFramework '{Tfm}' is not supported for Windows App SDK. Cannot continue.", currentDisplay);
+                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+                        }
+
+                        // Not installing SDKs, so TFM update is not required — skip it
+                        recommendedTfm = null;
+                    }
+                }
+                else
+                {
+                    var currentDisplay = currentTfm ?? "(not set)";
+                    logger.LogWarning(
+                        "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
+                        currentDisplay,
+                        recommendedTfm);
+                    logger.LogInformation("Automatically updating TargetFramework from {CurrentTfm} to {RecommendedTfm} because --use-defaults was specified.", Markup.Escape(currentDisplay), recommendedTfm);
+                }
+            }
+            else
+            {
+                logger.LogDebug("{UISymbol} TargetFramework '{Tfm}' is supported", UiSymbols.Check, currentTfm);
+            }
+        }
+
         shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
 
-        ansiConsole.WriteLine();
-
-        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode);
+        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
     }
 
     private async Task<ManifestGenerationInfo?> PromptForManifestInfoAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
@@ -957,57 +963,43 @@ internal class WorkspaceSetupService(
         return !options.NoCert;
     }
 
-    private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, bool isDotNetProject, CancellationToken cancellationToken)
     {
         // For init (not restore), prompt for SDK installation choice if not specified
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null)
         {
-            var winSdkStableVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.CPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Stable,
-                        cancellationToken: cancellationToken);
-            var winAppSdkStableVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.WINAPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Stable,
-                        cancellationToken: cancellationToken);
-            var winSdkPreviewVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.CPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Preview,
-                        cancellationToken: cancellationToken);
-            var winAppSdkPreviewVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.WINAPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Preview,
-                        cancellationToken: cancellationToken);
-            var winSdkExperimentalVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.CPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Experimental,
-                        cancellationToken: cancellationToken);
-            var winAppSdkExperimentalVersionTask = nugetService.GetLatestVersionAsync(
-                        BuildToolsService.WINAPP_SDK_PACKAGE,
-                        sdkInstallMode: SdkInstallMode.Experimental,
-                        cancellationToken: cancellationToken);
-            await Task.WhenAll(
-                winSdkStableVersionTask,
-                winAppSdkStableVersionTask,
-                winSdkPreviewVersionTask,
-                winAppSdkPreviewVersionTask,
-                winSdkExperimentalVersionTask,
-                winAppSdkExperimentalVersionTask);
-            var winSdkStableVersion = await winSdkStableVersionTask;
-            var winAppSdkStableVersion = await winAppSdkStableVersionTask;
-            var winSdkPreviewVersion = await winSdkPreviewVersionTask;
-            var winAppSdkPreviewVersion = await winAppSdkPreviewVersionTask;
-            var winSdkExperimentalVersion = await winSdkExperimentalVersionTask;
-            var winAppSdkExperimentalVersion = await winAppSdkExperimentalVersionTask;
+            // Determine which packages to show versions for
+            var packages = isDotNetProject
+                ? [BuildToolsService.WINAPP_SDK_PACKAGE]
+                : new[] { BuildToolsService.CPP_SDK_PACKAGE, BuildToolsService.WINAPP_SDK_PACKAGE };
 
+            // Fetch versions for all modes in parallel
+            var modes = new[] { SdkInstallMode.Stable, SdkInstallMode.Preview, SdkInstallMode.Experimental };
+            var versionTasks = modes
+                .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: nugetService.GetLatestVersionAsync(pkg, sdkInstallMode: mode, cancellationToken: cancellationToken))))
+                .ToList();
+            await Task.WhenAll(versionTasks.Select(v => v.Task));
+
+            // Build a lookup: (mode) → version label
+            var versionsByMode = modes.ToDictionary(
+                mode => mode,
+                mode =>
+                {
+                    var parts = versionTasks
+                        .Where(v => v.Mode == mode)
+                        .Select(v => $"{(v.Package == BuildToolsService.CPP_SDK_PACKAGE ? "Windows SDK" : "WinAppSDK")} [green]{v.Task.Result}[/]");
+                    return string.Join(", ", parts);
+                });
+
+            var label = isDotNetProject ? "WinAppSDK" : "SDKs";
             string[] sdkChoices = [
-                $"Setup Stable SDKs (Windows SDK [green]{winSdkStableVersion}[/], WinAppSDK [green]{winAppSdkStableVersion}[/])",
-                $"Setup Preview SDKs (Windows SDK [green]{winSdkPreviewVersion}[/], WinAppSDK [green]{winAppSdkPreviewVersion}[/])",
-                $"Setup Experimental SDKs (Windows SDK [green]{winSdkExperimentalVersion}[/], WinAppSDK [green]{winAppSdkExperimentalVersion}[/])",
-                "Do not setup SDKs"
+                $"Setup Stable {label} ({versionsByMode[SdkInstallMode.Stable]})",
+                $"Setup Preview {label} ({versionsByMode[SdkInstallMode.Preview]})",
+                $"Setup Experimental {label} ({versionsByMode[SdkInstallMode.Experimental]})",
+                $"Do not setup {label}"
             ];
 
-            ansiConsole.WriteLine("Select SDK setup option:");
+            ansiConsole.WriteLine($"Select {label} setup option:");
             var sdkPrompt = new SelectionPrompt<string>()
                 .AddChoices(sdkChoices);
 
@@ -1031,11 +1023,11 @@ internal class WorkspaceSetupService(
             else
             {
                 options.SdkInstallMode = SdkInstallMode.None;
-                logger.LogInformation("Setup SDKs: Do not setup SDKs");
+                logger.LogInformation("Setup {Label}: Do not setup {Label}", label, label);
                 return;
             }
 
-            ansiConsole.MarkupLine($"Setup SDKs: [underline]{Markup.Remove(sdkChoice["Setup ".Length..])}[/]");
+            ansiConsole.MarkupLine($"Setup {label}: [underline]{Markup.Remove(sdkChoice["Setup ".Length..])}[/]");
         }
     }
 
