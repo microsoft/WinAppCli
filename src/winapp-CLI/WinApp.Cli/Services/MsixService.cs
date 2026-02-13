@@ -1553,7 +1553,7 @@ $1");
 
         if (string.IsNullOrEmpty(mainVersion))
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} No ${BuildToolsService.WINAPP_SDK_PACKAGE} package found in winapp.yaml");
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} No {BuildToolsService.WINAPP_SDK_PACKAGE} package found in winapp.yaml");
             return (null, null);
         }
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package: v{mainVersion}");

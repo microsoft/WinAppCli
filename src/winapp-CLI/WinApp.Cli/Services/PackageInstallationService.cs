@@ -139,7 +139,7 @@ internal sealed class PackageInstallationService(
                     {
                         if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
                         {
-                            if (NugetService.CompareVersions(packageId, existingVersion) > 0)
+                            if (NugetService.CompareVersions(packageVersion, existingVersion) > 0)
                             {
                                 allInstalledVersions[packageId] = packageVersion;
                             }
