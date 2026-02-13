@@ -429,7 +429,7 @@
           "recursive": false
         },
         "--config-only": {
-          "description": "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps.",
+          "description": "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, and other workspace setup steps.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,

@@ -297,9 +297,9 @@ The `.winapp/include` directory contains all the necessary headers for Windows A
 
 For more advanced Windows App SDK usage, check out the [Windows App SDK documentation](https://learn.microsoft.com/windows/apps/windows-app-sdk/).
 
-## 7. Restore headers and certificate when needed
+## 7. Restore headers when needed
 
-The `.winapp` folder and `devcert.pfx` are automatically added to `.gitignore` by `winapp init`, so they won't be checked into source control. When others clone your project, they'll need to restore these files before building.
+The `.winapp` folder is automatically added to `.gitignore` by `winapp init`, so it won't be checked into source control. When others clone your project, they'll need to restore these files before building.
 
 ### Manual Setup
 

@@ -49,7 +49,7 @@ internal class InitCommand : Command
         };
         ConfigOnlyOption = new Option<bool>("--config-only")
         {
-            Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps."
+            Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, and other workspace setup steps."
         };
     }
 
