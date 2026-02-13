@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,6 +16,16 @@ internal partial class NugetService(ICurrentDirectoryProvider currentDirectoryPr
     private static readonly HttpClient Http = new();
     private const string NugetExeUrl = "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe";
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
+    private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] IgnoredDependencyPrefixes =
+    [
+        "NETStandard.",
+        "runtime.",
+        "System.",
+        "Microsoft.Bcl.",
+        "Microsoft.NETCore.",
+    ];
 
     public static readonly string[] SDK_PACKAGES =
     [
@@ -185,6 +196,31 @@ internal partial class NugetService(ICurrentDirectoryProvider currentDirectoryPr
     /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
+        var cacheKey = $"{packageName}/{version}";
+        if (DependencyCache.TryGetValue(cacheKey, out var cached))
+        {
+            return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);
+        }
+
+        var directDeps = await FetchDirectDependenciesAsync(packageName, version, cancellationToken);
+
+        // Recursively resolve transitive dependencies
+        var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
+        foreach (var (depId, depVersion) in directDeps)
+        {
+            var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, cancellationToken);
+            foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
+            {
+                allDeps.TryAdd(transitiveId, transitiveVersion);
+            }
+        }
+
+        DependencyCache[cacheKey] = allDeps;
+        return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
+    {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Fetch the .nuspec from NuGet flat container API
@@ -218,7 +254,8 @@ internal partial class NugetService(ICurrentDirectoryProvider currentDirectoryPr
             {
                 var depId = node.Attributes?["id"]?.Value;
                 var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion)
+                    && !IgnoredDependencyPrefixes.Any(p => depId.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                 {
                     // Remove any brackets or parentheses from the version string
                     var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");

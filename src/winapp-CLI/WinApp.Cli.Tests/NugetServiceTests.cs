@@ -119,6 +119,28 @@ public partial class NugetServiceTests : BaseCommandTests
         Assert.IsNotEmpty(result, "Should have dependencies regardless of package name casing");
     }
 
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_ReturnsTransitiveDependencies()
+    {
+        // Arrange - Microsoft.Extensions.Logging 8.0.0 depends on
+        // Microsoft.Extensions.DependencyInjection.Abstractions (direct dep),
+        // and Microsoft.Extensions.Logging.Abstractions which itself depends on
+        // Microsoft.Extensions.DependencyInjection.Abstractions (transitive).
+        // We verify that a dependency of a dependency is included.
+        var packageName = "Microsoft.Extensions.Logging";
+        var version = "8.0.0";
+
+        // Act
+        var result = await _nugetService.GetPackageDependenciesAsync(packageName, version, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.DependencyInjection.Abstractions"),
+            "Should contain transitive dependency Microsoft.Extensions.DependencyInjection.Abstractions");
+        Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"),
+            "Should contain direct dependency Microsoft.Extensions.Logging.Abstractions");
+    }
+
     #endregion
 
     #region NuSpec XML Parsing Tests
