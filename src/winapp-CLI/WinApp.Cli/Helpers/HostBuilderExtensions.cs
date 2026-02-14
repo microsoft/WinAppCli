@@ -36,6 +36,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
+            .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>();
     }
@@ -57,7 +58,9 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
-                .UseCommandHandler<ToolCommand, ToolCommand.Handler>();
+                .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
+                .ConfigureCommand<SparseCommand>()
+                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services)
