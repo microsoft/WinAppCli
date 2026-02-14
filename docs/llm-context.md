@@ -83,7 +83,7 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 
 **Options:**
 - `--config-dir` - Directory to read/store configuration (default: current directory)
-- `--config-only` - Only handle configuration file operations (create if missing, validate if exists). Skip package installation, and other workspace setup steps.
+- `--config-only` - Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps.
 - `--ignore-config` / `--no-config` - Don't use configuration file for version management
 - `--no-gitignore` - Don't update .gitignore file
 - `--quiet` / `-q` - Suppress progress messages
