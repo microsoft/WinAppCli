@@ -20,6 +20,12 @@ internal class FakeDotNetService : IDotNetService
     /// </summary>
     public List<(string CsprojPath, string PackageName, string Version)> AddedPackages { get; } = [];
 
+    /// <summary>
+    /// Set this to control what GetPackageListAsync returns.
+    /// When null, the method returns null (default behavior).
+    /// </summary>
+    public DotNetPackageListJson? PackageListResult { get; set; }
+
     // Delegate file-based operations to real implementation
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory) => _real.FindCsproj(directory);
     public string? GetTargetFramework(FileInfo csprojPath) => _real.GetTargetFramework(csprojPath);
@@ -42,6 +48,6 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<DotNetPackageListJson?>(null);
+        return Task.FromResult(PackageListResult);
     }
 }
