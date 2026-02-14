@@ -17,7 +17,7 @@ internal class ManifestGenerateCommand : Command
     public static Option<string> PublisherNameOption { get; }
     public static Option<string> VersionOption { get; }
     public static Option<string> DescriptionOption { get; }
-    public static Option<FileInfo> EntryPointOption { get; }
+    public static Option<FileInfo> ExecutableOption { get; }
     public static Option<ManifestTemplates> TemplateOption { get; }
     public static Option<FileInfo> LogoPathOption { get; }
 
@@ -52,15 +52,15 @@ internal class ManifestGenerateCommand : Command
             DefaultValueFactory = (argumentResult) => SystemDefaultsHelper.GetDefaultDescription(),
         };
 
-        EntryPointOption = new Option<FileInfo>("--entrypoint", "--executable")
+        ExecutableOption = new Option<FileInfo>("--executable", "--entrypoint")
         {
-            Description = "Entry point of the application (e.g., executable path / name, or .py/.js script if template is HostedApp). Default: <package-name>.exe"
+            Description = "Path to the application's executable. Default: <package-name>.exe"
         };
-        EntryPointOption.AcceptExistingOnly();
+        ExecutableOption.AcceptExistingOnly();
 
         TemplateOption = new Option<ManifestTemplates>("--template")
         {
-            Description = "Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host)",
+            Description = "Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs)",
             DefaultValueFactory = (argumentResult) => ManifestTemplates.Packaged
         };
 
@@ -70,14 +70,14 @@ internal class ManifestGenerateCommand : Command
         };
     }
 
-    public ManifestGenerateCommand() : base("generate", "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).")
+    public ManifestGenerateCommand() : base("generate", "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).")
     {
         Arguments.Add(DirectoryArgument);
         Options.Add(PackageNameOption);
         Options.Add(PublisherNameOption);
         Options.Add(VersionOption);
         Options.Add(DescriptionOption);
-        Options.Add(EntryPointOption);
+        Options.Add(ExecutableOption);
         Options.Add(TemplateOption);
         Options.Add(LogoPathOption);
         Options.Add(CertGenerateCommand.IfExistsOption);
@@ -92,7 +92,7 @@ internal class ManifestGenerateCommand : Command
             var publisherName = parseResult.GetValue(PublisherNameOption);
             var version = parseResult.GetRequiredValue(VersionOption);
             var description = parseResult.GetRequiredValue(DescriptionOption);
-            var entryPoint = parseResult.GetValue(EntryPointOption);
+            var executable = parseResult.GetValue(ExecutableOption);
             var template = parseResult.GetValue(TemplateOption);
             var logoPath = parseResult.GetValue(LogoPathOption);
             var ifExists = parseResult.GetRequiredValue(CertGenerateCommand.IfExistsOption);
@@ -118,7 +118,7 @@ internal class ManifestGenerateCommand : Command
                 }
             }
 
-            var manifestGenerationInfo = await manifestService.PromptForManifestInfoAsync(directory, packageName, publisherName, version, description, entryPoint?.ToString(), true, cancellationToken);
+            var manifestGenerationInfo = await manifestService.PromptForManifestInfoAsync(directory, packageName, publisherName, version, description, executable?.ToString(), true, cancellationToken);
 
             return await statusService.ExecuteWithStatusAsync("Generating manifest", async (taskContext, cancellationToken) =>
             {
@@ -129,6 +129,7 @@ internal class ManifestGenerateCommand : Command
                         manifestGenerationInfo,
                         template,
                         logoPath,
+                        executable?.ToString(),
                         taskContext,
                         cancellationToken);
 

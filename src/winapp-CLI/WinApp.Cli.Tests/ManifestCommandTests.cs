@@ -80,7 +80,7 @@ public class ManifestCommandTests : BaseCommandTests
             "--publisher-name", "CN=TestPublisher",
             "--version", "2.0.0.0",
             "--description", "Test Application",
-            "--entrypoint", exeFilePath
+            "--executable", exeFilePath
         };
 
         // Act
@@ -100,7 +100,7 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.Contains("CN=TestPublisher", manifestContent, "Manifest should contain custom publisher");
         Assert.Contains("2.0.0.0", manifestContent, "Manifest should contain custom version");
         Assert.Contains("Test Application", manifestContent, "Manifest should contain custom description");
-        Assert.Contains("TestApp.exe", manifestContent, "Manifest should contain custom executable");
+        Assert.Contains("$targetnametoken$.exe", manifestContent, "Manifest should contain placeholder executable name");
     }
 
     [TestMethod]
@@ -214,7 +214,7 @@ public class ManifestCommandTests : BaseCommandTests
             "--publisher-name", "CN=TestPub",
             "--version", "1.2.3.4",
             "--description", "Test Description",
-            "--entrypoint", exeFilePath,
+            "--executable", exeFilePath,
             "--template", "sparse",
             "--logo-path", _testLogoPath,
             "--verbose"
@@ -346,90 +346,6 @@ public class ManifestCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task ManifestGenerateCommandWithHostedAppTemplateShouldCreateHostedAppManifest()
-    {
-        // Arrange - Create a Python script file
-        var pythonScriptPath = Path.Combine(_tempDirectory.FullName, "app.py");
-        await File.WriteAllTextAsync(pythonScriptPath, "# Python script\nprint('Hello, World!')", TestContext.CancellationToken);
-
-        var generateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", pythonScriptPath
-        };
-
-        DefaultAnswers();
-
-        // Act
-        var parseResult = generateCommand.Parse(args);
-        var exitCode = await parseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-
-        // Assert
-        Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
-
-        // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
-
-        // Verify hosted app specific content
-        var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
-        Assert.Contains("uap10:HostId", manifestContent, "HostedApp manifest should contain HostId");
-        Assert.Contains("uap10:Parameters", manifestContent, "HostedApp manifest should contain Parameters");
-        Assert.Contains("uap10:HostRuntimeDependency", manifestContent, "HostedApp manifest should contain HostRuntimeDependency");
-        Assert.Contains("Python314", manifestContent, "HostedApp manifest should reference Python314 host");
-        Assert.Contains("app.py", manifestContent, "HostedApp manifest should reference the Python script");
-    }
-
-    [TestMethod]
-    public async Task CreateDebugIdentityForHostedAppShouldSucceed()
-    {
-        // Arrange - Create a Python script file and manifest
-        var pythonScriptPath = Path.Combine(_tempDirectory.FullName, "app.py");
-        await File.WriteAllTextAsync(pythonScriptPath, "# Python script\nprint('Hello, World!')", TestContext.CancellationToken);
-
-        // First, generate a hosted app manifest
-        var generateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var generateArgs = new[]
-        {
-            _tempDirectory.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", pythonScriptPath
-        };
-
-        DefaultAnswers();
-
-        var generateParseResult = generateCommand.Parse(generateArgs);
-        var generateExitCode = await generateParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-        Assert.AreEqual(0, generateExitCode, "Manifest generation should succeed");
-
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest should exist");
-
-        // Act - Create debug identity
-        var debugIdentityCommand = GetRequiredService<CreateDebugIdentityCommand>();
-        var debugArgs = new[]
-        {
-            pythonScriptPath,
-            "--manifest", manifestPath,
-            "--no-install" // Skip actual installation in test
-        };
-
-        var debugParseResult = debugIdentityCommand.Parse(debugArgs);
-        var debugExitCode = await debugParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-
-        // Assert
-        Assert.AreEqual(0, debugExitCode, "Create debug identity should complete successfully");
-
-        // Verify the debug manifest has the .debug suffix by default
-        var debugManifestPath = Path.Combine(_testWinappDirectory.FullName, "debug", "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(debugManifestPath), "Debug manifest should be created");
-        var debugManifestContent = await File.ReadAllTextAsync(debugManifestPath, TestContext.CancellationToken);
-        Assert.Contains(".debug", debugManifestContent, "Debug manifest should contain .debug suffix in identity by default");
-    }
-
-    [TestMethod]
     public async Task CreateDebugIdentityWithKeepIdentityShouldPreserveOriginalIdentity()
     {
         // Arrange - Create a test script (non-.exe to skip mt.exe embedding) and manifest
@@ -492,91 +408,13 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.DoesNotContain(".debug", debugManifestContent, "Debug manifest should NOT contain .debug suffix when --keep-identity is used");
     }
 
-    [TestMethod]
-    public async Task ManifestGenerateCommandWithHostedAppTemplateAndJavaScriptShouldSucceed()
-    {
-        // Arrange - Create a JavaScript file
-        var jsScriptPath = Path.Combine(_tempDirectory.FullName, "app.js");
-        await File.WriteAllTextAsync(jsScriptPath, "// JavaScript\nconsole.log('Hello, World!');", TestContext.CancellationToken);
-
-        var generateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", jsScriptPath
-        };
-
-        DefaultAnswers();
-
-        // Act
-        var parseResult = generateCommand.Parse(args);
-        var exitCode = await parseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-
-        // Assert
-        Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
-
-        // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
-
-        // Verify hosted app specific content for Node.js
-        var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
-        Assert.Contains("Nodejs22", manifestContent, "HostedApp manifest should reference Nodejs22 host");
-        Assert.Contains("app.js", manifestContent, "HostedApp manifest should reference the JavaScript file");
-    }
-
     private void DefaultAnswers()
     {
-        // Use default answers for prompts during generation (packageName, publisherName, version, description, entryPoint)
+        // Use default answers for prompts during generation (packageName, publisherName, version, description)
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-    }
-
-    [TestMethod]
-    public async Task ManifestGenerateCommandWithHostedAppTemplateAndNonExistentEntryShouldFail()
-    {
-        // Arrange - Don't create the Python file
-        var generateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", "nonexistent.py"
-        };
-
-        // Act
-        var parseResult = generateCommand.Parse(args);
-        var exitCode = await parseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-
-        // Assert
-        Assert.AreNotEqual(0, exitCode, "Generate command should fail when entry point file doesn't exist");
-    }
-
-    [TestMethod]
-    public async Task ManifestGenerateCommandWithHostedAppTemplateAndUnsupportedTypeShouldFail()
-    {
-        // Arrange - Create a file with unsupported extension
-        var unsupportedFilePath = Path.Combine(_tempDirectory.FullName, "app.exe");
-        await File.WriteAllTextAsync(unsupportedFilePath, "fake exe content", TestContext.CancellationToken);
-
-        var generateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", "app.exe"
-        };
-
-        // Act
-        var parseResult = generateCommand.Parse(args);
-        var exitCode = await parseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-
-        // Assert
-        Assert.AreNotEqual(0, exitCode, "Generate command should fail for unsupported hosted app entry point type");
     }
 
     [TestMethod]
@@ -599,7 +437,7 @@ public class ManifestCommandTests : BaseCommandTests
         var args = new[]
         {
             _tempDirectory.FullName,
-            "--entrypoint", exeFilePath
+            "--executable", exeFilePath
         };
 
         // Act
@@ -615,8 +453,8 @@ public class ManifestCommandTests : BaseCommandTests
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
 
-        // Verify the executable is referenced in the manifest
-        Assert.Contains("Executable=\"winapp.exe\"", manifestContent, "Manifest should reference the executable entry point");
+        // Verify the executable placeholder is in the manifest (template uses $targetnametoken$.exe)
+        Assert.Contains("Executable=\"$targetnametoken$.exe\"", manifestContent, "Manifest should contain placeholder executable name");
 
         var fileVersionInfo = FileVersionInfo.GetVersionInfo(exeFilePath);
         Assert.Contains($"Description=\"{fileVersionInfo.Comments}\"", manifestContent,

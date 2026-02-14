@@ -680,6 +680,7 @@ internal class WorkspaceSetupService(
                     manifestGenerationInfo: manifestGenerationInfo,
                     manifestTemplate: ManifestTemplates.Packaged,
                     logoPath: null,
+                    executable: null,
                     taskContext,
                     cancellationToken: cancellationToken);
 

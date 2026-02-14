@@ -243,7 +243,7 @@ winapp manifest generate [directory] [options]
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
-- `--template <type>` - Template type: `packaged` (default) or `hostedapp`
+- `--template <type>` - Template type: `packaged` (default) or `sparse`
 - `--logo-path <path>` - Path to logo image file
 - `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
 
@@ -251,16 +251,12 @@ winapp manifest generate [directory] [options]
 
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
-- `hostedapp` - Hosted app manifest for Python/Node.js scripts
 
 **Examples:**
 
 ```bash
 # Generate standard manifest interactively
 winapp manifest generate
-
-# Generate hosted app manifest for Python script
-winapp manifest generate --template hostedapp --entrypoint app.py
 
 # Generate with all options specified
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite

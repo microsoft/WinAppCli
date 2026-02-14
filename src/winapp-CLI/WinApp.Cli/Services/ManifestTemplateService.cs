@@ -116,13 +116,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         string packageName,
         string publisherName,
         string version,
-        string entryPoint,
-        string description,
-        string? hostId,
-        string? hostParameters,
-        string? hostRuntimeDependencyPackageName,
-        string? hostRuntimeDependencyPublisherName,
-        string? hostRuntimeDependencyMinVersion)
+        string description)
     {
         var applicationId = FixAsciiWindowsId(ToCamelCase(packageName));
 
@@ -131,13 +125,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             .Replace("{ApplicationId}", applicationId)
             .Replace("{PublisherName}", publisherName)
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
-            .Replace("{Executable}", entryPoint)
-            .Replace("{Description}", description)
-            .Replace("{HostId}", hostId)
-            .Replace("{HostParameters}", hostParameters)
-            .Replace("{HostRuntimeDependencyPackageName}", hostRuntimeDependencyPackageName)
-            .Replace("{HostRuntimeDependencyPublisherName}", hostRuntimeDependencyPublisherName)
-            .Replace("{HostRuntimeDependencyMinVersion}", hostRuntimeDependencyMinVersion);
+            .Replace("{Description}", description);
 
         return result;
     }
@@ -233,7 +221,6 @@ internal partial class ManifestTemplateService : IManifestTemplateService
     /// <param name="packageName">Package name (null for auto-generated from directory)</param>
     /// <param name="publisherName">Publisher name (null for current user default)</param>
     /// <param name="version">Version string</param>
-    /// <param name="entryPoint">Entry point / executable name (null for auto-generated from package name)</param>
     /// <param name="manifestTemplate">Manifest template type</param>
     /// <param name="description">Description for manifest</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -242,14 +229,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         string packageName,
         string publisherName,
         string version,
-        string entryPoint,
         ManifestTemplates manifestTemplate,
         string description,
-        string? hostId,
-        string? hostParameters,
-        string? hostRuntimeDependencyPackageName,
-        string? hostRuntimeDependencyPublisherName,
-        string? hostRuntimeDependencyMinVersion,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
@@ -260,29 +241,6 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         taskContext.AddDebugMessage($"Publisher: {publisherName}");
         taskContext.AddDebugMessage($"Version: {version}");
         taskContext.AddDebugMessage($"Description: {description}");
-        if (!string.IsNullOrEmpty(hostId))
-        {
-            taskContext.AddDebugMessage($"Host ID: {hostId}");
-        }
-        if (!string.IsNullOrEmpty(hostParameters))
-        {
-            taskContext.AddDebugMessage($"Host Parameters: {hostParameters}");
-        }
-        if (!string.IsNullOrEmpty(hostRuntimeDependencyPackageName))
-        {
-            taskContext.AddDebugMessage($"Host Runtime Dependency Package Name: {hostRuntimeDependencyPackageName}");
-        }
-        if (!string.IsNullOrEmpty(hostRuntimeDependencyPublisherName))
-        {
-            hostRuntimeDependencyPublisherName = StripCnPrefix(NormalizePublisher(hostRuntimeDependencyPublisherName));
-            taskContext.AddDebugMessage($"Host Runtime Dependency Publisher Name: {hostRuntimeDependencyPublisherName}");
-        }
-        if (!string.IsNullOrEmpty(hostRuntimeDependencyMinVersion))
-        {
-            taskContext.AddDebugMessage($"Host Runtime Dependency Min Version: {hostRuntimeDependencyMinVersion}");
-        }
-
-        taskContext.AddDebugMessage($"EntryPoint/Executable: {entryPoint}");
         taskContext.AddDebugMessage($"Manifest template: {manifestTemplate}");
 
         // Create output directory if needed
@@ -297,13 +255,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             packageName,
             publisherName,
             version,
-            entryPoint,
-            description,
-            hostId,
-            hostParameters,
-            hostRuntimeDependencyPackageName,
-            hostRuntimeDependencyPublisherName,
-            hostRuntimeDependencyMinVersion);
+            description);
 
         // Write manifest file
         var manifestPath = Path.Combine(outputDirectory.FullName, "appxmanifest.xml");
