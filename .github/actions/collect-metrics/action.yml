@@ -1,5 +1,5 @@
 name: Collect Build Metrics
-description: Measure artifact sizes, build warnings, test results, and CLI startup time
+description: Measure artifact sizes, test results, and CLI startup time
 
 inputs:
   solution-path:
@@ -35,37 +35,6 @@ runs:
         Write-Host "Current artifact sizes:"
         $sizes.GetEnumerator() | Sort-Object Key | ForEach-Object {
           Write-Host "  $($_.Key): $([math]::Round($_.Value / 1MB, 2)) MB ($($_.Value) bytes)"
-        }
-
-    - name: Count build warnings
-      shell: pwsh
-      run: |
-        # Re-run build (incremental, near-instant) to capture warning output
-        # We only care about the warnings in stdout, not the exit code
-        $output = dotnet build "${{ inputs.solution-path }}" -c Release 2>&1 | Out-String
-        # Ignore build exit code — we're just scraping warnings from the output
-        $global:LASTEXITCODE = 0
-        $warningLines = ($output -split "`n") | Where-Object { $_ -match ': warning [A-Z]{2,}\d+:' }
-        $warningCount = ($warningLines | Measure-Object).Count
-
-        # Categorize warnings
-        $trimWarnings = ($warningLines | Where-Object { $_ -match ': warning IL\d+:' } | Measure-Object).Count
-        $codeAnalysis = ($warningLines | Where-Object { $_ -match ': warning CA\d+:' } | Measure-Object).Count
-        $otherWarnings = $warningCount - $trimWarnings - $codeAnalysis
-
-        $warnings = @{
-          total = $warningCount
-          trimming = $trimWarnings
-          codeAnalysis = $codeAnalysis
-          other = $otherWarnings
-        }
-
-        $warnings | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/build-warnings.json"
-
-        Write-Host "Build warnings: $warningCount total ($trimWarnings trimming/AOT, $codeAnalysis code analysis, $otherWarnings other)"
-        if ($warningLines) {
-          Write-Host "`nWarning details:"
-          $warningLines | ForEach-Object { Write-Host "  $_" }
         }
 
     - name: Parse test results
