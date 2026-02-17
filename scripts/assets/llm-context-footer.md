@@ -1,7 +1,7 @@
 ## Common Workflows
 
 ### New Project Setup
-1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certificate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
+1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
 2. Edit `appxmanifest.xml` if you need to modify properties, set capabilities, or other configurations
 3. Build your app
 4. `winapp create-debug-identity <exe-path>` - to generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
@@ -19,7 +19,7 @@
 ### Install SDKs After Initial Setup
 If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
 1. `winapp init --use-defaults --setup-sdks stable` - Re-run init to install SDKs
-   - `--use-defaults` skips prompts and preserves existing files (manifest, cert, etc.)
+   - `--use-defaults` skips prompts and preserves existing files (manifest, etc.)
    - Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions
 2. Rebuild your app with the new SDK projections in `.winapp/`
 
@@ -70,7 +70,7 @@ Using winapp CLI in a new project?
 
 | Command | Requires | Creates/Modifies |
 |---------|----------|------------------|
-| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/`, `devcert.pfx` |
+| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/` |
 | `restore` | `winapp.yaml` | `.winapp/packages/` |
 | `update` | `winapp.yaml` | Updates versions in `winapp.yaml` |
 | `manifest generate` | Nothing | `appxmanifest.xml`, `Assets/` |

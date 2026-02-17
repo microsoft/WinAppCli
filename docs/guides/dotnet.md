@@ -78,7 +78,7 @@ You should see the output "Not packaged". This confirms that the standard execut
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, and development certificate.
+The `winapp init` command sets up everything you need in one go: app manifest and assets.
 
 Run the following command and follow the prompts:
 
@@ -97,7 +97,6 @@ When prompted:
 
 This command will:
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
-- Generate a development certificate (`devcert.pfx`) for signing
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
@@ -255,9 +254,17 @@ Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if i
 </Package>
 ```
 
+### Generate a Development Certificate
+
+Before packaging, you need a development certificate for signing. Generate one if you haven't already:
+
+```powershell
+winapp cert generate --if-exists skip
+```
+
 ### Sign and Pack
 
-Since `winapp init` already generated the development certificate, you can proceed directly to packaging. Point the pack command to your build output folder:
+Now you can package and sign. Point the pack command to your build output folder:
 
 ```powershell
 # package and sign the app with the generated certificate

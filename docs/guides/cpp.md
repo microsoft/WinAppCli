@@ -129,7 +129,7 @@ You should see the output "Not packaged". This confirms that the standard execut
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, development certificate, and optionally Windows App SDK headers for C++ development.
+The `winapp init` command sets up everything you need in one go: app manifest, assets, and optionally Windows App SDK headers for C++ development.
 
 Run the following command and follow the prompts:
 
@@ -146,7 +146,6 @@ When prompted:
 
 This command will:
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
-- Generate a development certificate (`devcert.pfx`) for signing
 - Create a `.winapp` folder with Windows App SDK headers and libraries
 - Create a `winapp.yaml` configuration file for pinning sdk versions
 
@@ -298,9 +297,9 @@ The `.winapp/include` directory contains all the necessary headers for Windows A
 
 For more advanced Windows App SDK usage, check out the [Windows App SDK documentation](https://learn.microsoft.com/windows/apps/windows-app-sdk/).
 
-## 7. Restore headers and certificate when needed
+## 7. Restore headers when needed
 
-The `.winapp` folder and `devcert.pfx` are automatically added to `.gitignore` by `winapp init`, so they won't be checked into source control. When others clone your project, they'll need to restore these files before building.
+The `.winapp` folder is automatically added to `.gitignore` by `winapp init`, so it won't be checked into source control. When others clone your project, they'll need to restore these files before building.
 
 ### Manual Setup
 
@@ -459,9 +458,17 @@ Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if i
 </Package>
 ```
 
+### Generate a Development Certificate
+
+Before packaging, you need a development certificate for signing. Generate one if you haven't already:
+
+```powershell
+winapp cert generate --if-exists skip
+```
+
 ### Sign and Pack
 
-Since `winapp init` already generated the development certificate, you can proceed directly to packaging:
+Now you can package and sign:
 
 ```powershell
 # package and sign the app with the generated certificate
