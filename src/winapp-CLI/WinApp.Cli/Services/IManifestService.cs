@@ -5,6 +5,7 @@ using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
+
 public record ManifestGenerationInfo(
     string PackageName,
     string PublisherName,

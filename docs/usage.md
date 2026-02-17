@@ -31,6 +31,15 @@ winapp init [base-directory] [options]
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
 
+**Automatic .NET project detection:**
+
+When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
+
+- Validates and updates the `TargetFramework` to a Windows-compatible TFM (e.g., `net10.0-windows10.0.26100.0`)
+- Adds `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` as NuGet `PackageReference` entries directly in the `.csproj`
+- Generates `appxmanifest.xml`, assets, and a development certificate
+- Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
+
 **Examples:**
 
 ```bash
@@ -40,8 +49,12 @@ winapp init
 # Initialize with experimental packages
 winapp init --setup-sdks experimental
 
-# Initialize specific directory without promts
+# Initialize specific directory without prompts
 winapp init ./my-project --use-defaults
+
+# Initialize a .NET project (auto-detected from .csproj)
+cd my-dotnet-app
+winapp init
 ```
 
 **Tip: Install SDKs after initial setup**
@@ -75,6 +88,8 @@ winapp restore [options]
 - Downloads/updates SDK packages to specified versions
 - Regenerates C++/WinRT headers and binaries
 - Stores sharable files in the global cache directory
+
+> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 

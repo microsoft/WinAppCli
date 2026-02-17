@@ -40,15 +40,7 @@ dotnet run
 
 We'll update the app to check if it's running with package identity. We'll use the Windows Runtime API to access the Package APIs.
 
-First, update your project file to target a specific Windows SDK version. Open `dotnet-app.csproj` and change the `TargetFramework` to include the Windows SDK version:
-
-```xml
-  <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
-```
-
-This gives you access to Windows Runtime APIs without needing additional packages.
-
-Now replace the contents of `Program.cs` with the following code. This code attempts to retrieve the current package identity using the Windows Runtime API. If it succeeds, it prints the Package Family Name; otherwise, it prints "Not packaged".
+Replace the contents of `Program.cs` with the following code. This code attempts to retrieve the current package identity using the Windows Runtime API. If it succeeds, it prints the Package Family Name; otherwise, it prints "Not packaged".
 
 ```csharp
 using Windows.ApplicationModel;
@@ -66,6 +58,11 @@ catch (InvalidOperationException)
 }
 ```
 
+> **Note:** The `TargetFramework` will be updated automatically by `winapp init` in the next step. If you prefer to set it manually, open `dotnet-app.csproj` and change the `TargetFramework` to include the Windows SDK version:
+> ```xml
+>   <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+> ```
+
 ## 3. Run Without Identity
 
 Now, run the app as usual:
@@ -78,7 +75,7 @@ You should see the output "Not packaged". This confirms that the standard execut
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest and assets.
+The `winapp init` command automatically detects `.csproj` files and runs a .NET-specific setup. It sets up everything you need in one go: validates your `TargetFramework`, adds required NuGet packages, generates the app manifest, and assets.
 
 Run the following command and follow the prompts:
 
@@ -87,16 +84,21 @@ winapp init
 ```
 
 When prompted:
+- **TargetFramework update**: If your `TargetFramework` doesn't include a supported Windows SDK version, you'll be prompted to update it (e.g., to `net10.0-windows10.0.26100.0`)
+- **SDK install mode**: Select Stable, Preview, or Experimental (determines which Windows App SDK version is added)
 - **Package name**: Press Enter to accept the default (dotnet-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Description**: Press Enter to accept the default (Windows Application) or enter a description
 - **Version**: Press Enter to accept 1.0.0.0
 - **Entry point**: Press Enter to accept the default (dotnet-app.exe)
-- **Setup SDKs**: Select "Do not setup SDKs" - we'll add Windows App SDK via NuGet instead
-- **Developer Mode"**: If you are prompted about "Developer Mode", you can turn it on if you would like, but be aware that it requires administrative privileges
+- **Developer Mode**: If you are prompted about "Developer Mode", you can turn it on if you would like, but be aware that it requires administrative privileges
 
 This command will:
+- Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
+- Add `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` NuGet package references to your `.csproj`
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
+
+> **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
@@ -144,17 +146,11 @@ With this configuration, simply running `dotnet build` or `dotnet run` will auto
 
 ## 6. Using Windows App SDK
 
-If you want to use Windows App SDK APIs in your .NET application, add the Windows App SDK NuGet package to your project.
-
-### Add Windows App SDK Package
-
-Add the WindowsAppSDK package to your project:
+If you ran `winapp init` (Step 4), `Microsoft.WindowsAppSDK` was already added as a NuGet package reference to your `.csproj`. If you skipped SDK setup during init, or need to add it manually, run:
 
 ```powershell
 dotnet add package Microsoft.WindowsAppSDK
 ```
-
-This will update your `.csproj` file to include the Windows App SDK package reference.
 
 ### Update Program.cs
 

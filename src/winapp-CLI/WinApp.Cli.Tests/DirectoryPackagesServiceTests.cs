@@ -74,7 +74,7 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should return true when update is successful");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should contain new version");
         // Old version should be replaced
@@ -107,7 +107,7 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should return true when update is successful");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should contain new BuildTools version");
         StringAssert.Contains(updatedContent, "2.1.1", "Should contain new CsWinRT version");
@@ -139,7 +139,7 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should return true when update is successful");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         StringAssert.Contains(updatedContent, "<!-- This is a comment -->", "Should preserve comments");
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should contain new version");
@@ -167,7 +167,7 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsFalse(result, "Should return false when no changes are needed");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         Assert.AreEqual(originalContent, updatedContent, "Content should remain unchanged");
     }
@@ -196,10 +196,10 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should return true when update is successful");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should update matching package");
-        StringAssert.Contains(updatedContent, @"<PackageVersion Include=""SomeOtherPackage"" Version=""1.0.0"" />", 
+        StringAssert.Contains(updatedContent, @"<PackageVersion Include=""SomeOtherPackage"" Version=""1.0.0"" />",
             "Should leave non-matching package unchanged");
     }
 
@@ -268,7 +268,7 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should return true when update is successful");
-        
+
         var updatedContent = File.ReadAllText(propsFilePath);
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should update first ItemGroup");
         StringAssert.Contains(updatedContent, "2.1.1", "Should update second ItemGroup");
