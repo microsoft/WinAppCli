@@ -1,0 +1,269 @@
+name: Report Build Metrics
+description: Cache baseline metrics on main, post comparison comment on PRs
+
+inputs:
+  github-token:
+    description: GitHub token for posting PR comments
+    required: true
+  artifacts-path:
+    description: Path to the artifacts directory containing metric JSON files
+    default: artifacts
+
+runs:
+  using: composite
+  steps:
+    # On PRs, restore baseline for comparison
+    - name: Restore metrics baseline
+      if: github.event_name == 'pull_request'
+      id: metrics-baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: metrics-baseline
+        key: build-metrics-baseline-no-exact-match
+        restore-keys: build-metrics-main-
+
+    # On main, save current metrics as the baseline for future PRs
+    - name: Save metrics baseline
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path "metrics-baseline" -Force | Out-Null
+        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/build-warnings.json" "metrics-baseline/warnings.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "metrics-baseline/tests.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
+
+    - name: Cache metrics baseline
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: metrics-baseline
+        key: build-metrics-main-${{ github.sha }}
+
+    # On PRs, compare against baseline and post a comment
+    - name: Post PR metrics comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const artifactsPath = '${{ inputs.artifacts-path }}';
+
+          // --- Load current metrics ---
+          let current = {};
+          try { current = JSON.parse(fs.readFileSync(`${artifactsPath}/binary-sizes.json`, 'utf8')); } catch {}
+
+          let warnings = { total: 0, trimming: 0, codeAnalysis: 0, other: 0 };
+          try { warnings = JSON.parse(fs.readFileSync(`${artifactsPath}/build-warnings.json`, 'utf8')); } catch {}
+
+          let tests = { total: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0 };
+          try { tests = JSON.parse(fs.readFileSync(`${artifactsPath}/test-summary.json`, 'utf8')); } catch {}
+
+          let startup = { medianMs: 0 };
+          try { startup = JSON.parse(fs.readFileSync(`${artifactsPath}/startup-time.json`, 'utf8')); } catch {}
+
+          // --- Load baselines ---
+          let sizeBaseline = {};
+          let warningsBaseline = null;
+          let testsBaseline = null;
+          let startupBaseline = null;
+          let hasBaseline = false;
+          try {
+            sizeBaseline = JSON.parse(fs.readFileSync('metrics-baseline/sizes.json', 'utf8'));
+            hasBaseline = true;
+          } catch {}
+          try { warningsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/warnings.json', 'utf8')); } catch {}
+          try { testsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/tests.json', 'utf8')); } catch {}
+          try { startupBaseline = JSON.parse(fs.readFileSync('metrics-baseline/startup.json', 'utf8')); } catch {}
+
+          // --- Artifact download links ---
+          const artifactLinks = {};
+          try {
+            const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const artifactNameMap = {
+              'cli-win-x64': 'cli-binaries',
+              'cli-win-arm64': 'cli-binaries',
+              'npm-package': 'npm-package',
+              'msix-x64': 'msix-packages',
+              'msix-arm64': 'msix-packages',
+            };
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            for (const [sizeKey, artifactName] of Object.entries(artifactNameMap)) {
+              const artifact = artifacts.find(a => a.name === artifactName);
+              if (artifact) {
+                artifactLinks[sizeKey] = `${runUrl}/artifacts/${artifact.id}`;
+              }
+            }
+          } catch (e) {
+            core.warning(`Could not fetch artifact links: ${e.message}`);
+          }
+
+          // --- Helpers ---
+          function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            if (mb >= 1) return `${mb.toFixed(2)} MB`;
+            const kb = bytes / 1024;
+            return `${kb.toFixed(1)} KB`;
+          }
+
+          function formatDelta(curr, base) {
+            const delta = curr - base;
+            const pct = base > 0 ? ((delta / base) * 100).toFixed(2) : 'N/A';
+            const sign = delta > 0 ? '+' : '';
+            let icon = ':white_check_mark:';
+            if (delta > 0) icon = ':chart_with_upwards_trend:';
+            else if (delta < 0) icon = ':chart_with_downwards_trend:';
+            return `${icon} ${sign}${formatBytes(delta)} (${sign}${pct}%)`;
+          }
+
+          function deltaInt(curr, base, higherIsBad = true) {
+            const delta = curr - base;
+            if (delta === 0) return ':white_check_mark: no change';
+            const sign = delta > 0 ? '+' : '';
+            const icon = (higherIsBad ? delta > 0 : delta < 0) ? ':warning:' : ':white_check_mark:';
+            return `${icon} ${sign}${delta}`;
+          }
+
+          function deltaMs(curr, base) {
+            const delta = curr - base;
+            if (Math.abs(delta) < 5) return ':white_check_mark: no change';
+            const sign = delta > 0 ? '+' : '';
+            const icon = delta > 10 ? ':warning:' : delta < -10 ? ':chart_with_downwards_trend:' : ':white_check_mark:';
+            return `${icon} ${sign}${delta}ms`;
+          }
+
+          function artifactLink(key, label) {
+            const url = artifactLinks[key];
+            return url ? `[${label}](${url})` : label;
+          }
+
+          const labels = {
+            'cli-win-x64': 'CLI (x64)',
+            'cli-win-arm64': 'CLI (ARM64)',
+            'npm-package': 'NPM Package',
+            'msix-x64': 'MSIX (x64)',
+            'msix-arm64': 'MSIX (ARM64)',
+          };
+
+          let body = '## Build Metrics Report\n\n';
+
+          // --- Binary sizes ---
+          body += '### Binary Sizes\n\n';
+          if (hasBaseline) {
+            body += '| Artifact | Baseline | Current | Delta |\n';
+            body += '|----------|----------|---------|-------|\n';
+            const allKeys = [...new Set([...Object.keys(sizeBaseline), ...Object.keys(current)])].sort();
+            for (const key of allKeys) {
+              const label = labels[key] || key;
+              const linkedLabel = artifactLink(key, label);
+              const baseSize = sizeBaseline[key] || 0;
+              const currSize = current[key] || 0;
+              if (currSize === 0 && baseSize === 0) continue;
+              const baseStr = baseSize > 0 ? formatBytes(baseSize) : 'N/A';
+              const currStr = currSize > 0 ? formatBytes(currSize) : 'N/A';
+              const deltaStr = (baseSize > 0 && currSize > 0)
+                ? formatDelta(currSize, baseSize) : 'N/A';
+              body += `| ${linkedLabel} | ${baseStr} | ${currStr} | ${deltaStr} |\n`;
+            }
+          } else {
+            body += '> No baseline found. Showing absolute sizes only.\n\n';
+            body += '| Artifact | Size |\n';
+            body += '|----------|------|\n';
+            for (const [key, size] of Object.entries(current).sort()) {
+              const linkedLabel = artifactLink(key, labels[key] || key);
+              body += `| ${linkedLabel} | ${formatBytes(size)} |\n`;
+            }
+          }
+
+          // --- Build warnings ---
+          body += '\n### Build Warnings\n\n';
+          body += '| Category | Count |';
+          body += warningsBaseline ? ' Delta |\n' : '\n';
+          body += '|----------|-------|';
+          body += warningsBaseline ? '-------|\n' : '\n';
+          const warnRows = [
+            ['Trimming / AOT', warnings.trimming, warningsBaseline?.trimming],
+            ['Code Analysis', warnings.codeAnalysis, warningsBaseline?.codeAnalysis],
+            ['Other', warnings.other, warningsBaseline?.other],
+            ['**Total**', warnings.total, warningsBaseline?.total],
+          ];
+          for (const [label, curr, base] of warnRows) {
+            body += `| ${label} | ${curr} |`;
+            if (warningsBaseline) {
+              body += ` ${base != null ? deltaInt(curr, base) : 'N/A'} |`;
+            }
+            body += '\n';
+          }
+
+          // --- Test summary ---
+          body += '\n### Test Results\n\n';
+          const testIcon = tests.failed > 0 ? ':x:' : ':white_check_mark:';
+          const durationSec = (tests.durationMs / 1000).toFixed(1);
+          body += `${testIcon} **${tests.passed}** passed`;
+          if (tests.failed > 0) body += `, **${tests.failed}** failed`;
+          if (tests.skipped > 0) body += `, **${tests.skipped}** skipped`;
+          body += ` out of **${tests.total}** tests in **${durationSec}s**`;
+
+          if (testsBaseline) {
+            const items = [];
+            const testDelta = tests.total - testsBaseline.total;
+            if (testDelta !== 0) {
+              const sign = testDelta > 0 ? '+' : '';
+              items.push(`${sign}${testDelta} test${Math.abs(testDelta) !== 1 ? 's' : ''}`);
+            }
+            const durDelta = tests.durationMs - testsBaseline.durationMs;
+            if (Math.abs(durDelta) >= 500) {
+              const sign = durDelta > 0 ? '+' : '';
+              items.push(`${sign}${(durDelta / 1000).toFixed(1)}s`);
+            }
+            if (items.length > 0) {
+              body += ` (${items.join(', ')} vs. baseline)`;
+            }
+          }
+          body += '\n';
+
+          // --- Startup time ---
+          if (startup.medianMs > 0) {
+            body += '\n### CLI Startup Time\n\n';
+            body += `**${startup.medianMs}ms** median (x64, \`winapp --version\`)`;
+            if (startupBaseline && startupBaseline.medianMs > 0) {
+              body += ` · ${deltaMs(startup.medianMs, startupBaseline.medianMs)} vs. baseline`;
+            }
+            body += '\n';
+          }
+
+          body += '\n<!-- build-metrics-report -->';
+
+          // Find and update existing comment to avoid spam
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          // Also clean up old-format comments
+          const existing = comments.find(c => c.body &&
+            (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+            core.info(`Updated existing comment ${existing.id}`);
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+            core.info('Created new metrics report comment');
+          }
