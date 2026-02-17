@@ -36,7 +36,7 @@ npm install --save-dev @microsoft/winappcli
 
 ## Step 3: Initialize the project for Windows development
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, SDKs, and development certificate.
+The `winapp init` command sets up everything you need in one go: app manifest, assets, and SDKs.
 
 Run the following command and follow the prompts:
 
@@ -64,16 +64,14 @@ This command sets up everything you need for Windows development:
 
 3. **Creates `Assets/` folder** - Contains app icons and visual assets for your app
 
-4. **Generates `devcert.pfx`** - A development certificate for signing packages
-
-5. **Creates `winapp.yaml`** - Tracks SDK versions and project configuration
+4. **Creates `winapp.yaml`** - Tracks SDK versions and project configuration
 
 6. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
 
 7. **Enables Developer Mode in Windows** - Required for debugging our application
 
 > [!NOTE]
-> The `.winapp/` folder and `devcert.pfx` are automatically added to `.gitignore` and should not be checked in to source.
+> The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
@@ -92,16 +90,15 @@ To ensure the Windows SDKs are available when other developers clone your projec
 ```json
 {
   "scripts": {
-    "postinstall": "winapp restore && winapp cert generate --if-exists skip && winapp node add-electron-debug-identity"
+    "postinstall": "winapp restore && winapp node add-electron-debug-identity"
   }
 }
 ```
 
-This script automatically runs after `npm install` and does three things:
+This script automatically runs after `npm install` and does two things:
 
 1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
-2. **`winapp cert generate --if-exists skip`** - Generates a development certificate (if one doesn't exist)
-3. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
+2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
 
 Now whenever someone runs `npm install`, the Windows environment is automatically configured!
 

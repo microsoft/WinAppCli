@@ -19,7 +19,6 @@ winapp init [base-directory] [options]
 - `--ignore-config`, `--no-config` - Don't use configuration file for version management
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
-- `--no-cert` - Skip development certificate generation
 - `--config-only` - Only handle configuration file operations, skip package installation
 
 **What it does:**
@@ -27,7 +26,7 @@ winapp init [base-directory] [options]
 - Creates `winapp.yaml` configuration file
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
-- Creates development certificate and AppxManifest.xml
+- Creates AppxManifest.xml
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
@@ -50,7 +49,7 @@ winapp init ./my-project --use-defaults
 If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
 
 ```bash
-# Re-run init to install SDKs - preserves existing files (manifest, cert, etc.)
+# Re-run init to install SDKs - preserves existing files (manifest, etc.)
 winapp init --use-defaults --setup-sdks stable
 ```
 
