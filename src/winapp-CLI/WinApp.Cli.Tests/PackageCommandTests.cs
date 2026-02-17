@@ -20,7 +20,9 @@ public class PackageCommandTests : BaseCommandTests
     /// </summary>
     private const string StandardTestManifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
-         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap rescap"">
   <Identity Name=""TestPackage""
             Publisher=""CN=TestPublisher""
             Version=""1.0.0.0"" />
@@ -39,6 +41,9 @@ public class PackageCommandTests : BaseCommandTests
                           BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
     </Application>
   </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
 </Package>";
 
     [TestInitialize]
@@ -75,6 +80,21 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     /// <summary>
+    /// Extracts and reads the AppxManifest.xml content from a created MSIX package
+    /// </summary>
+    private async Task<string> ExtractManifestContentFromPackageAsync(FileInfo msixPath, string extractSubDir)
+    {
+        var extractDir = Path.Combine(_tempDirectory.FullName, extractSubDir);
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(msixPath.FullName, extractDir);
+
+        var extractedManifestPath = Path.Combine(extractDir, "AppxManifest.xml");
+        Assert.IsTrue(File.Exists(extractedManifestPath), "Extracted manifest should exist");
+
+        return await File.ReadAllTextAsync(extractedManifestPath, TestContext.CancellationToken);
+    }
+
+    /// <summary>
     /// Creates a minimal test package structure with manifest and basic files
     /// </summary>
     private static void CreateTestPackageStructure(DirectoryInfo packageDir)
@@ -100,7 +120,9 @@ public class PackageCommandTests : BaseCommandTests
     {
         return @"<?xml version=""1.0"" encoding=""utf-8""?>
 <Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
-         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap rescap"">
   <Identity Name=""ExternalTestPackage""
             Publisher=""CN=ExternalTestPublisher""
             Version=""1.0.0.0"" />
@@ -119,6 +141,9 @@ public class PackageCommandTests : BaseCommandTests
                           BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
     </Application>
   </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
 </Package>";
     }
 
@@ -333,6 +358,9 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsTrue(File.Exists(externalManifestPath), "External manifest should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "Logo.png")), "External Logo.png should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "StoreLogo.png")), "External StoreLogo.png should still exist");
+
+        // Verify the input folder was not polluted with a manifest copy
+        Assert.IsFalse(File.Exists(Path.Combine(packageDir, "AppxManifest.xml")), "Input folder should not contain AppxManifest.xml after packaging");
     }
 
     [TestMethod]
@@ -603,15 +631,7 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsNotNull(result, "Result should not be null");
         Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
 
-        // Extract and read the manifest from the created package
-        var extractDir = Path.Combine(_tempDirectory.FullName, "extracted");
-        Directory.CreateDirectory(extractDir);
-        ZipFile.ExtractToDirectory(result.MsixPath.FullName, extractDir);
-
-        var extractedManifestPath = Path.Combine(extractDir, "AppxManifest.xml");
-        Assert.IsTrue(File.Exists(extractedManifestPath), "Extracted manifest should exist");
-
-        var finalManifestContent = await File.ReadAllTextAsync(extractedManifestPath, TestContext.CancellationToken);
+        var finalManifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted");
 
         // Verify the PackageDependency exists
         Assert.Contains("<PackageDependency Name=\"Microsoft.WindowsAppRuntime", finalManifestContent,
@@ -655,7 +675,9 @@ public class PackageCommandTests : BaseCommandTests
     /// </summary>
     private const string PlaceholderTestManifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
-         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap rescap"">
   <Identity Name=""TestPackage""
             Publisher=""CN=TestPublisher""
             Version=""1.0.0.0"" />
@@ -674,6 +696,9 @@ public class PackageCommandTests : BaseCommandTests
                           BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
     </Application>
   </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
 </Package>";
 
     /// <summary>
@@ -705,28 +730,20 @@ public class PackageCommandTests : BaseCommandTests
         // Create a minimal winapp.yaml to satisfy config requirements
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
 
-        // Act - the placeholder resolution happens before makeappx, so even if makeappx fails,
-        // the manifest file should have been resolved correctly
-        try
-        {
-            await _msixService.CreateMsixPackageAsync(
-                inputFolder: packageDir,
-                outputPath: _tempDirectory,
-                TestTaskContext,
-                packageName: "TestPackage",
-                skipPri: true,
-                autoSign: false,
-                executable: "MyApp.exe",
-                cancellationToken: TestContext.CancellationToken
-            );
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("makeappx"))
-        {
-            // makeappx may fail with test fixtures; we're testing placeholder resolution, not makeappx
-        }
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            executable: "MyApp.exe",
+            cancellationToken: TestContext.CancellationToken
+        );
 
-        // Assert - verify the manifest was updated with resolved placeholders
-        var manifestContent = await File.ReadAllTextAsync(Path.Combine(packageDir.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+        // Assert - extract and verify the manifest from the created package
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderExeExtracted");
         Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "Executable should be resolved from --executable option");
         Assert.Contains("Windows.FullTrustApplication", manifestContent,
             "$targetentrypoint$ should be resolved to Windows.FullTrustApplication");
@@ -744,26 +761,19 @@ public class PackageCommandTests : BaseCommandTests
         // Create a minimal winapp.yaml to satisfy config requirements
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
 
-        // Act - the placeholder resolution happens before makeappx
-        try
-        {
-            await _msixService.CreateMsixPackageAsync(
-                inputFolder: packageDir,
-                outputPath: _tempDirectory,
-                TestTaskContext,
-                packageName: "TestPackage",
-                skipPri: true,
-                autoSign: false,
-                cancellationToken: TestContext.CancellationToken
-            );
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("makeappx"))
-        {
-            // makeappx may fail with test fixtures; we're testing placeholder resolution, not makeappx
-        }
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
 
-        // Assert
-        var manifestContent = await File.ReadAllTextAsync(Path.Combine(packageDir.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+        // Assert - extract and verify the manifest from the created package
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderAutoInferExtracted");
         Assert.Contains(@"Executable=""AutoDetected.exe""", manifestContent, "Executable should be auto-inferred from single exe");
         Assert.DoesNotContain("$targetnametoken$", manifestContent, "No $targetnametoken$ placeholders should remain");
     }

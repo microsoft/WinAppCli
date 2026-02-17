@@ -15,7 +15,6 @@ internal class InitCommand : Command
     public static Option<bool> IgnoreConfigOption { get; }
     public static Option<bool> NoGitignoreOption { get; }
     public static Option<bool> UseDefaults { get; }
-    public static Option<bool> NoCertOption { get; }
     public static Option<bool> ConfigOnlyOption { get; }
 
     static InitCommand()
@@ -48,17 +47,13 @@ internal class InitCommand : Command
         {
             Description = "Do not prompt, and use default of all prompts"
         };
-        NoCertOption = new Option<bool>("--no-cert")
-        {
-            Description = "Skip development certificate generation"
-        };
         ConfigOnlyOption = new Option<bool>("--config-only")
         {
-            Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps."
+            Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
         };
     }
 
-    public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.")
+    public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.")
     {
         Arguments.Add(BaseDirectoryArgument);
         Options.Add(ConfigDirOption);
@@ -66,7 +61,6 @@ internal class InitCommand : Command
         Options.Add(IgnoreConfigOption);
         Options.Add(NoGitignoreOption);
         Options.Add(UseDefaults);
-        Options.Add(NoCertOption);
         Options.Add(ConfigOnlyOption);
     }
 
@@ -80,7 +74,6 @@ internal class InitCommand : Command
             var ignoreConfig = parseResult.GetValue(IgnoreConfigOption);
             var noGitignore = parseResult.GetValue(NoGitignoreOption);
             var useDefaults = parseResult.GetValue(UseDefaults);
-            var noCert = parseResult.GetValue(NoCertOption);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
 
             var options = new WorkspaceSetupOptions
@@ -93,7 +86,6 @@ internal class InitCommand : Command
                 UseDefaults = useDefaults,
                 RequireExistingConfig = false,
                 ForceLatestBuildTools = true,
-                NoCert = noCert,
                 ConfigOnly = configOnly
             };
 

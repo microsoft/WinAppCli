@@ -67,7 +67,6 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
             UseDefaults = true,
             RequireExistingConfig = false,
             ForceLatestBuildTools = true,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -93,7 +92,6 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
             ConfigOnly = true,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -126,7 +124,6 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
             ConfigOnly = true,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -156,7 +153,6 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
             ConfigOnly = true, // Use config-only to avoid long-running operations
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true // Should NOT update .gitignore
         };
 
@@ -182,7 +178,6 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             RequireExistingConfig = true, // This should fail when config doesn't exist
             UseDefaults = true,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -263,7 +258,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -291,7 +285,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             SdkInstallMode = SdkInstallMode.None,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -323,7 +316,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -353,7 +345,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -381,7 +372,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -413,7 +403,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -458,7 +447,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             SdkInstallMode = SdkInstallMode.None,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -494,7 +482,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -536,7 +523,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             SdkInstallMode = SdkInstallMode.None,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -571,7 +557,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -603,7 +588,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -652,7 +636,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -684,7 +667,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             ConfigDir = _tempDirectory,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 
@@ -723,7 +705,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             SdkInstallMode = SdkInstallMode.None,
             UseDefaults = true,
             RequireExistingConfig = false,
-            NoCert = true,
             NoGitignore = true
         };
 

@@ -181,6 +181,50 @@ public class EndToEndTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
+    {
+        // This test verifies that --setup-sdks none skips adding package references
+        // but still creates manifest and certificate
+
+        // Arrange
+        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleAppNoSdk");
+        var projectName = "TestConsoleAppNoSdk";
+
+        // Step 1: Create a new console application
+        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
+
+        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
+
+
+        // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
+        var initCommand = GetRequiredService<InitCommand>();
+        var initArgs = new[]
+        {
+            projectDir.FullName,
+            "--setup-sdks", "none",
+            "--use-defaults"
+        };
+
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
+        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
+
+        // Step 3: Verify that csproj was NOT modified (no package references added)
+        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // When --setup-sdks none, we should not add WindowsAppSDK
+        Assert.IsFalse(
+            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
+            "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
+
+        // Step 4: Manifest should still be created
+        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
+
+        Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
+    }
+
+    [TestMethod]
     public async Task E2E_DotNetProject_InitDetectsCsprojAndAddsPackageReferences_ShouldSucceed()
     {
         // This test verifies the .NET project workflow:
@@ -251,50 +295,6 @@ public class EndToEndTests : BaseCommandTests
             "Manifest should contain Identity element");
 
         Console.WriteLine("Successfully set up .NET project with winapp init");
-    }
-
-    [TestMethod]
-    public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
-    {
-        // This test verifies that --setup-sdks none skips adding package references
-        // but still creates manifest and certificate
-
-        // Arrange
-        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleAppNoSdk");
-        var projectName = "TestConsoleAppNoSdk";
-
-        // Step 1: Create a new console application
-        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
-        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
-
-        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
-
-
-        // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
-        var initCommand = GetRequiredService<InitCommand>();
-        var initArgs = new[]
-        {
-            projectDir.FullName,
-            "--setup-sdks", "none",
-            "--use-defaults"
-        };
-
-        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
-        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
-
-        // Step 3: Verify that csproj was NOT modified (no package references added)
-        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
-
-        // When --setup-sdks none, we should not add WindowsAppSDK
-        Assert.IsFalse(
-            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
-            "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
-
-        // Step 4: Manifest should still be created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
-
-        Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
     }
 
     /// <summary>
