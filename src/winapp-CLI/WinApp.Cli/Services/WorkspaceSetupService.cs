@@ -23,7 +23,6 @@ internal class WorkspaceSetupOptions
     public bool UseDefaults { get; set; }
     public bool RequireExistingConfig { get; set; }
     public bool ForceLatestBuildTools { get; set; }
-    public bool NoCert { get; set; }
     public bool ConfigOnly { get; set; }
 }
 
@@ -37,7 +36,6 @@ internal class WorkspaceSetupService(
     IBuildToolsService buildToolsService,
     ICppWinrtService cppWinrtService,
     IPackageLayoutService packageLayoutService,
-    ICertificateService certificateService,
     IPowerShellService powerShellService,
     INugetService nugetService,
     IManifestService manifestService,
@@ -81,11 +79,10 @@ internal class WorkspaceSetupService(
         WinappConfig? config;
         bool shouldGenerateManifest;
         ManifestGenerationInfo? manifestGenerationInfo;
-        bool shouldGenerateCert;
         bool shouldEnableDeveloperMode;
         string? recommendedTfm;
 
-        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm) = await InitializeConfigurationAsync(options, isDotNetProject, csprojFile, cancellationToken);
+        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm) = await InitializeConfigurationAsync(options, isDotNetProject, csprojFile, cancellationToken);
         if (initializationResult != 0)
         {
             return initializationResult;
@@ -545,10 +542,6 @@ internal class WorkspaceSetupService(
                     }, cancellationToken);
                 }
 
-                // Step 8: Generate development certificate (unless --no-cert is specified)
-                var addedCertToGitignore = await SetupCertSubTaskAsync(options, shouldGenerateCert, taskContext, cancellationToken);
-
-                bool showedGitignoreMessage = false;
                 if (!options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && !options.NoGitignore && localWinappDir?.Parent != null)
                 {
                     var gitignorePath = Path.Combine(localWinappDir.Parent.FullName, ".gitignore");
@@ -557,34 +550,17 @@ internal class WorkspaceSetupService(
                     {
                         await taskContext.AddSubTaskAsync("Updating .gitignore", async (taskContext, cancellationToken) =>
                         {
-                            showedGitignoreMessage = true;
                             // Update .gitignore to exclude .winapp folder (unless --no-gitignore is specified)
                             var addedWinAppToGitIgnore = await gitignoreService.AddWinAppFolderToGitIgnoreAsync(localWinappDir.Parent, taskContext, cancellationToken);
 
-                            if (addedWinAppToGitIgnore && !addedCertToGitignore)
+                            if (addedWinAppToGitIgnore)
                             {
                                 return (0, "Added .winapp to [underline].gitignore[/]");
-                            }
-                            else if (!addedWinAppToGitIgnore && addedCertToGitignore)
-                            {
-                                return (0, "Added devcert.pfx to [underline].gitignore[/]");
-                            }
-                            else if (addedCertToGitignore && addedWinAppToGitIgnore)
-                            {
-                                return (0, "Added .winapp and devcert.pfx to [underline].gitignore[/]");
                             }
 
                             return (0, "[underline].gitignore[/] is up to date");
                         }, cancellationToken);
                     }
-                }
-
-                if (!showedGitignoreMessage && addedCertToGitignore)
-                {
-                    await taskContext.AddSubTaskAsync("Updating .gitignore", (taskContext, cancellationToken) =>
-                    {
-                        return Task.FromResult((0, "Added devcert.pfx to [underline].gitignore[/]"));
-                    }, cancellationToken);
                 }
 
                 // Update Directory.Packages.props versions to match winapp.yaml if needed (only with SDK installation)
@@ -693,52 +669,7 @@ internal class WorkspaceSetupService(
         }, cancellationToken);
     }
 
-    private async Task<bool> SetupCertSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateCert, TaskContext taskContext, CancellationToken cancellationToken)
-    {
-        var certPath = new FileInfo(Path.Combine(options.BaseDirectory.FullName, CertificateService.DefaultCertFileName));
-        var addedCertToGitignore = false;
-
-        if (!options.NoCert && shouldGenerateCert)
-        {
-            await taskContext.AddSubTaskAsync("Generating development certificate", async (taskContext, cancellationToken) =>
-            {
-                var result = await certificateService.GenerateDevCertificateWithInferenceAsync(
-                    outputPath: certPath,
-                    taskContext: taskContext,
-                    explicitPublisher: null,
-                    manifestPath: null,
-                    password: "password",
-                    validDays: 365,
-                    updateGitignore: !options.NoGitignore,
-                    install: false,
-                    cancellationToken: cancellationToken);
-
-                if (result?.UpdatedGitignore == true)
-                {
-                    addedCertToGitignore = true;
-                }
-
-                if (result == null || !result.CertificatePath.Exists)
-                {
-                    return (1, "Development certificate generation failed.");
-                }
-
-                return (0, $"Development certificate created: [underline]{certPath.Name}[/]");
-            }, cancellationToken);
-        }
-        else if (!options.NoCert && certPath.Exists)
-        {
-            taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate already exists → {certPath.FullName}");
-        }
-        else if (!options.NoCert)
-        {
-            taskContext.AddStatusMessage($"{UiSymbols.Skip} Development certificate generation skipped");
-        }
-
-        return addedCertToGitignore;
-    }
-
-    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldGenerateCert, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
+    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
     {
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null && options.UseDefaults)
         {
@@ -748,7 +679,6 @@ internal class WorkspaceSetupService(
 
         var hadExistingConfig = configService.Exists();
         bool shouldGenerateManifest = true;
-        bool shouldGenerateCert = !options.NoCert;
         bool shouldEnableDeveloperMode = false;
         string? recommendedTfm = null;
         ManifestGenerationInfo? manifestGenerationInfo = null;
@@ -759,7 +689,7 @@ internal class WorkspaceSetupService(
         {
             logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
             logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
         // Step 2: Load or prepare configuration
@@ -771,7 +701,7 @@ internal class WorkspaceSetupService(
             {
                 logger.LogInformation("{UISymbol} winapp.yaml found but contains no packages. Nothing to restore.", UiSymbols.Note);
                 shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
-                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
             }
 
             var operation = options.RequireExistingConfig ? "Found" : "Found existing";
@@ -797,7 +727,6 @@ internal class WorkspaceSetupService(
                     {
                         manifestGenerationInfo = await PromptForManifestInfoAsync(options, cancellationToken);
                     }
-                    shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
                     if (!overwriteConfig)
                     {
                         options.IgnoreConfig = true;
@@ -808,12 +737,6 @@ internal class WorkspaceSetupService(
                     }
                 }
             }
-            else
-            {
-                var certPath = new FileInfo(Path.Combine(options.BaseDirectory.FullName, CertificateService.DefaultCertFileName));
-
-                shouldGenerateCert = !options.NoCert && !certPath.Exists;
-            }
         }
         else
         {
@@ -822,7 +745,6 @@ internal class WorkspaceSetupService(
             {
                 manifestGenerationInfo = await PromptForManifestInfoAsync(options, cancellationToken);
             }
-            shouldGenerateCert = await AskShouldGenerateCertAsync(options, cancellationToken);
 
             await AskSdkInstallModeAsync(options, isDotNetProject, cancellationToken);
             if (options.SdkInstallMode != SdkInstallMode.None)
@@ -838,7 +760,7 @@ internal class WorkspaceSetupService(
             if (dotNetService.IsMultiTargeted(csprojFile))
             {
                 logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
-                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
             }
 
             var currentTfm = dotNetService.GetTargetFramework(csprojFile);
@@ -865,7 +787,7 @@ internal class WorkspaceSetupService(
                         if (options.SdkInstallMode != SdkInstallMode.None)
                         {
                             logger.LogError("TargetFramework '{Tfm}' is not supported for Windows App SDK. Cannot continue.", currentDisplay);
-                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
                         }
 
                         // Not installing SDKs, so TFM update is not required — skip it
@@ -890,7 +812,7 @@ internal class WorkspaceSetupService(
 
         shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
 
-        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldGenerateCert, shouldEnableDeveloperMode, recommendedTfm);
+        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
     }
 
     private async Task<ManifestGenerationInfo?> PromptForManifestInfoAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
@@ -949,22 +871,6 @@ internal class WorkspaceSetupService(
         }
 
         return true;
-    }
-
-    private async Task<bool> AskShouldGenerateCertAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
-    {
-        var certPath = new FileInfo(Path.Combine(options.BaseDirectory.FullName, CertificateService.DefaultCertFileName));
-
-        // useDefaults means skip without useDefaults means skip without prompting (non-destructive for automation)
-        if (!options.NoCert && certPath.Exists && !options.UseDefaults)
-        {
-            // Interactive mode - prompt user to overwrite
-            return await ansiConsole.PromptAsync(
-                new ConfirmationPrompt("Development certificate already exists. Overwrite?"),
-                cancellationToken);
-        }
-
-        return !options.NoCert;
     }
 
     private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, bool isDotNetProject, CancellationToken cancellationToken)

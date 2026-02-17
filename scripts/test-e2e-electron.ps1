@@ -316,7 +316,6 @@ try {
     Assert-DirectoryExists ".winapp" ".winapp directory"
     Assert-FileExists "winapp.yaml" "winapp.yaml configuration file"
     Assert-FileExists "appxmanifest.xml" "appxmanifest.xml manifest file"
-    Assert-FileExists "devcert.pfx" "Development certificate"
 
     # ========================================================================
     # Create Native Addons
@@ -404,9 +403,16 @@ try {
     $appPackageDir = $appPackageDirs[0].FullName
     Write-TestSuccess "Electron app packaged to: $appPackageDir"
 
-    Write-TestStep "Packaging app to MSIX..." 13
+    Write-TestStep "Generating development certificate..." 13
+
+    $certGenCommand = "npx winapp cert generate"
+    Assert-Command $certGenCommand "Failed to generate development certificate"
 
     $certPath = Join-Path $electronAppDir "devcert.pfx"
+    Assert-FileExists $certPath "Development certificate"
+
+    Write-TestStep "Packaging app to MSIX..." 14
+
     $packCommand = "npx winapp pack `"$appPackageDir`" --cert `"$certPath`""
     Assert-Command $packCommand "Failed to package app to MSIX"
 
@@ -437,7 +443,7 @@ try {
 
     if (-not $SkipCleanup) {
         Write-TestHeader "Cleanup"
-        Write-TestStep "Cleaning up temporary test directory..." 14
+        Write-TestStep "Cleaning up temporary test directory..." 15
 
         try {
             Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
