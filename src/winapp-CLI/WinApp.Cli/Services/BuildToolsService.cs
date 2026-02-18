@@ -16,6 +16,8 @@ internal partial class BuildToolsService(
     IWinappDirectoryService winappDirectoryService,
     INugetService nugetService,
     IPackageInstallationService packageInstallationService,
+    IDotNetService dotNetService,
+    ICurrentDirectoryProvider currentDirectoryProvider,
     ILogger<BuildToolsService> logger) : IBuildToolsService
 {
     internal const string BUILD_TOOLS_PACKAGE = "Microsoft.Windows.SDK.BuildTools";
@@ -49,30 +51,61 @@ internal partial class BuildToolsService(
             return null;
         }
 
-        WinappConfig? pinnedConfig = null;
+        // Resolve pinned version from winapp.yaml or .csproj
+        string? pinnedVersion = null;
+
+        // Path 1: Try winapp.yaml
         if (configService.Exists())
         {
-            pinnedConfig = configService.Load();
+            var pinnedConfig = configService.Load();
+            pinnedVersion = pinnedConfig.GetVersion(packageName);
+        }
+
+        // Path 2: Try .csproj via `dotnet list package --format json`
+        if (string.IsNullOrWhiteSpace(pinnedVersion))
+        {
+            try
+            {
+                var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
+                var csprojFiles = dotNetService.FindCsproj(cwd);
+                var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+                if (csproj != null)
+                {
+                    var packageList = dotNetService.GetPackageListAsync(csproj).GetAwaiter().GetResult();
+
+                    var allPackages = packageList?.Projects?
+                        .SelectMany(p => p.Frameworks ?? [])
+                        .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+                    var matchedPkg = allPackages?
+                        .FirstOrDefault(p => string.Equals(p.Id, packageName, StringComparison.OrdinalIgnoreCase));
+
+                    if (matchedPkg != null && !string.IsNullOrEmpty(matchedPkg.ResolvedVersion))
+                    {
+                        pinnedVersion = matchedPkg.ResolvedVersion;
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fall through to latest-version fallback
+            }
         }
 
         DirectoryInfo? selectedVersionDir = null;
 
-        // Check if we have a pinned version in config
-        if (pinnedConfig != null)
+        // Check if we have a pinned version
+        if (!string.IsNullOrWhiteSpace(pinnedVersion))
         {
-            var pinnedVersion = pinnedConfig.GetVersion(packageName);
-            if (!string.IsNullOrWhiteSpace(pinnedVersion))
-            {
-                // Look for the specific pinned version directory
-                selectedVersionDir = versionDirs
-                    .FirstOrDefault(d => string.Equals(d.Name, pinnedVersion, StringComparison.OrdinalIgnoreCase));
+            // Look for the specific pinned version directory
+            selectedVersionDir = versionDirs
+                .FirstOrDefault(d => string.Equals(d.Name, pinnedVersion, StringComparison.OrdinalIgnoreCase));
 
-                // If pinned version is specified but not found for bin path, return null (strict requirement)
-                // For other paths, continue to try latest
-                if (selectedVersionDir == null && requireArchitecture)
-                {
-                    return null;
-                }
+            // If pinned version is specified but not found for bin path, return null (strict requirement)
+            // For other paths, continue to try latest
+            if (selectedVersionDir == null && requireArchitecture)
+            {
+                return null;
             }
         }
 

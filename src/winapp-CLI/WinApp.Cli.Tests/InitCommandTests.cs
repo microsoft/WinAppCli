@@ -122,4 +122,22 @@ public class InitCommandTests : BaseCommandTests
         var configContent = await File.ReadAllTextAsync(configPath);
         Assert.Contains("10.0.26100.1", configContent, "Existing config version should be preserved");
     }
+
+    [TestMethod]
+    public async Task InitCommand_DoesNotGenerateCertificate()
+    {
+        // Arrange
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--setup-sdks", "none", "--no-prompt" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Init command should complete successfully");
+
+        // Verify that no devcert.pfx was created - init should not generate certificates
+        var certPath = Path.Combine(_tempDirectory.FullName, "devcert.pfx");
+        Assert.IsFalse(File.Exists(certPath), "Init should not generate devcert.pfx - certificates should be generated separately with 'cert generate'");
+    }
 }

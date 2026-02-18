@@ -75,7 +75,7 @@ You should see the output "Not packaged". This confirms that the standard execut
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command automatically detects `.csproj` files and runs a .NET-specific setup. It sets up everything you need in one go: validates your `TargetFramework`, adds required NuGet packages, generates the app manifest, assets, and development certificate.
+The `winapp init` command automatically detects `.csproj` files and runs a .NET-specific setup. It sets up everything you need in one go: validates your `TargetFramework`, adds required NuGet packages, generates the app manifest, and assets.
 
 Run the following command and follow the prompts:
 
@@ -85,19 +85,21 @@ winapp init
 
 When prompted:
 - **TargetFramework update**: If your `TargetFramework` doesn't include a supported Windows SDK version, you'll be prompted to update it (e.g., to `net10.0-windows10.0.26100.0`)
-- **SDK install mode**: Select Stable, Preview, or Experimental (determines which Windows App SDK version is added)
+- **Windows App SDK setup**: Select Stable, Preview, or Experimental (determines which Windows App SDK version is added)
 - **Package name**: Press Enter to accept the default (dotnet-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Description**: Press Enter to accept the default (Windows Application) or enter a description
 - **Version**: Press Enter to accept 1.0.0.0
 - **Entry point**: Press Enter to accept the default (dotnet-app.exe)
+- **TargetFramework update**: If your `TargetFramework` doesn't include a supported Windows SDK version, you'll be prompted to update it (e.g., to `net10.0-windows10.0.26100.0`)
 - **Developer Mode**: If you are prompted about "Developer Mode", you can turn it on if you would like, but be aware that it requires administrative privileges
 
 This command will:
 - Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
 - Add `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` NuGet package references to your `.csproj`
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
-- Generate a development certificate (`devcert.pfx`) for signing
+
+> **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
 > **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
@@ -251,9 +253,17 @@ Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if i
 </Package>
 ```
 
+### Generate a Development Certificate
+
+Before packaging, you need a development certificate for signing. Generate one if you haven't already:
+
+```powershell
+winapp cert generate --if-exists skip
+```
+
 ### Sign and Pack
 
-Since `winapp init` already generated the development certificate, you can proceed directly to packaging. Point the pack command to your build output folder:
+Now you can package and sign. Point the pack command to your build output folder:
 
 ```powershell
 # package and sign the app with the generated certificate

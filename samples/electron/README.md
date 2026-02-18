@@ -36,18 +36,17 @@ The sample is a default Electron Forge generated application with the following 
 1. **Initialized a winapp project** by running `npx winapp init`. This generates:
    - A `.winapp` folder containing headers and libs for the Windows SDK and Windows App SDK
    - An `appxmanifest.xml` with required assets
-   - A `devcert.pfx` (dev certificate)
    - Installs the Windows App SDK runtime
    - A `winapp.yaml` file to track NuGet versions and project configuration
    
-   The `.winapp` folder and `devcert.pfx` are added to `.gitignore` to ensure they are not committed to git. Running `npx winapp restore` will restore them (this is added as a postinstall script in `package.json`).
+   The `.winapp` folder is added to `.gitignore` to ensure it is not committed to git. Running `npx winapp restore` will restore it (this is added as a postinstall script in `package.json`).
 
 2. **Generated a native addon** using `npx winapp node generate-addon` to call APIs from the Windows SDK and Windows App SDK. The addon folder contains the generated addon alongside the `build-addon` script added to `package.json`. The addon contains a function to raise a Windows notification, and the JavaScript code has been modified to call this function.
 
 3. **Generated a C# addon** using `npx winapp node create-addon --template cs`.  This generates a simple c# addon using the node-api-dotnet project.  When you build the C# addon, this will use NAOT to produce
 a .node file that is trimmed and doesn't require the .net runtime to be installed on the target machine.
 
-4. **Modified `forge.config.js`** to ignore the `.winapp`, `devcert.pfx`, and `winapp.yaml` files from the final package, and to copy the `appxmanifest.xml` and `Assets` folder to the final package.
+4. **Modified `forge.config.js`** to ignore the `.winapp` and `winapp.yaml` files from the final package, and to copy the `appxmanifest.xml` and `Assets` folder to the final package.
 
 ## Prerequisites
 
@@ -64,7 +63,7 @@ Before running the sample, ensure the npm package has been built:
 Then run `npm install` to install all dependencies. The sample has a `postinstall` script that sets up the project with the CLI:
 
 ```json
-"postinstall": "winapp restore && winapp cert generate && winapp node add-electron-debug-identity"
+"postinstall": "winapp restore && winapp cert generate --if-exists skip && winapp node add-electron-debug-identity"
 ```
 
 This script runs three winapp commands:
