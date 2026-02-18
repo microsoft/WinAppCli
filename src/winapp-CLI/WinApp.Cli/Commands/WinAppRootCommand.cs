@@ -72,7 +72,7 @@ internal class WinAppRootCommand : RootCommand
         helpOption.Action = new CustomHelpAction(this,
             ("Setup", ["init", "restore", "update"]),
             ("Packaging & Signing", ["package", "sign", "cert", "manifest"]),
-            ("Development Tools", ["create-debug-identity", "tool", "get-winapp-path"])
+            ("Development Tools", ["create-debug-identity","store", "tool", "get-winapp-path"])
         );
     }
 }

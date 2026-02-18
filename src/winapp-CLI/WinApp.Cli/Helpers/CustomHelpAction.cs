@@ -23,6 +23,12 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
     public override bool Terminating => true;
 
     /// <summary>
+    /// Gets the flat set of all command names covered by the help categories.
+    /// </summary>
+    internal IReadOnlyCollection<string> CategorizedCommandNames =>
+        _categories.SelectMany(c => c.CommandNames).ToArray();
+
+    /// <summary>
     /// Creates a new custom help action with the specified command categories.
     /// </summary>
     /// <param name="targetCommand">The command this custom help applies to (e.g. root command).</param>
@@ -43,22 +49,34 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
             var defaultHelp = new HelpAction();
             return defaultHelp.Invoke(parseResult);
         }
+
+        var output = parseResult.InvocationConfiguration.Output;
         var useColor = BannerHelper.UseEmoji;
         var commandPath = GetCommandPath(command);
+
+        // Create a Spectre console that writes to the invocation output writer
+        var ansiSupport = Console.IsOutputRedirected ? AnsiSupport.No : AnsiSupport.Detect;
+        var terminalWidth = Math.Max(40, AnsiConsole.Profile.Width);
+        var spectreConsole = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(output),
+            Ansi = ansiSupport
+        });
+        spectreConsole.Profile.Width = terminalWidth;
 
         // Description
         if (!string.IsNullOrEmpty(command.Description))
         {
-            AnsiConsole.WriteLine();
-            WriteIndented(new Markup($"[dim]{Markup.Escape(command.Description)}[/]"));
+            spectreConsole.WriteLine();
+            WriteIndented(spectreConsole, new Markup($"[dim]{Markup.Escape(command.Description)}[/]"));
         }
 
         // Usage
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($" Usage: [white]{commandPath} <command>[/] [dim][[options]][/]");
-        AnsiConsole.MarkupLine($"        [white]{commandPath} --help[/]");
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($" Use '[white]{commandPath} <command> --help[/]' to get detailed help for any command.");
+        spectreConsole.WriteLine();
+        spectreConsole.MarkupLine($" Usage: [white]{commandPath} <command>[/] [dim][[options]][/]");
+        spectreConsole.MarkupLine($"        [white]{commandPath} --help[/]");
+        spectreConsole.WriteLine();
+        spectreConsole.MarkupLine($" Use '[white]{commandPath} <command> --help[/]' to get detailed help for any command.");
 
         // Build a lookup from command name -> Command object
         var subcommandLookup = new Dictionary<string, Command>(StringComparer.OrdinalIgnoreCase);
@@ -70,7 +88,7 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
         // Render each category
         foreach (var (category, commandNames) in _categories)
         {
-            AnsiConsole.WriteLine();
+            spectreConsole.WriteLine();
 
             var grid = new Grid();
             grid.AddColumn(new GridColumn().PadLeft(1).PadRight(2).NoWrap());
@@ -95,11 +113,11 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
                 useColor ? $"[rgb(99,141,255)]{Markup.Escape(category)}[/]" : $"[bold]{Markup.Escape(category)}[/]");
             panel.Padding = new Padding(1, 0, 1, 0);
 
-            WriteIndented(panel);
+            WriteIndented(spectreConsole, panel);
         }
 
         // Global options
-        AnsiConsole.WriteLine();
+        spectreConsole.WriteLine();
 
         var optGrid = new Grid();
         optGrid.AddColumn(new GridColumn().PadLeft(1).PadRight(2).NoWrap());
@@ -112,16 +130,16 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
                 continue;
             }
 
-            // Build alias string: --name, -alias
-            var aliases = new List<string> { option.Name };
+            // Build alias string: include the canonical name first, then additional aliases
+            var allAliases = new List<string> { option.Name };
             foreach (var alias in option.Aliases)
             {
                 if (alias != option.Name)
                 {
-                    aliases.Add(alias);
+                    allAliases.Add(alias);
                 }
             }
-            var aliasText = string.Join(", ", aliases);
+            var aliasText = string.Join(", ", allAliases);
             var desc = option.Description ?? "";
 
             optGrid.AddRow(
@@ -137,8 +155,8 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
             useColor ? "[rgb(99,141,255)]Options[/]" : "[bold]Options[/]");
         optPanel.Padding = new Padding(1, 0, 1, 0);
 
-        WriteIndented(optPanel);
-        AnsiConsole.WriteLine();
+        WriteIndented(spectreConsole, optPanel);
+        spectreConsole.WriteLine();
 
         return 0;
     }
@@ -146,24 +164,24 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
     /// <summary>
     /// Renders a Spectre renderable with a 1-space left indent, without trailing blank lines.
     /// </summary>
-    private static void WriteIndented(IRenderable renderable)
+    private static void WriteIndented(IAnsiConsole targetConsole, IRenderable renderable)
     {
-        // Account for the 1-space indent so the table fits within the real terminal width
-        var width = AnsiConsole.Profile.Width - 1;
+        // Account for the 1-space indent so content fits within the terminal width
+        var width = Math.Max(40, targetConsole.Profile.Width - 1);
         using var writer = new StringWriter();
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        var renderConsole = AnsiConsole.Create(new AnsiConsoleSettings
         {
             Out = new AnsiConsoleOutput(writer),
-            Ansi = AnsiSupport.Yes
+            Ansi = targetConsole.Profile.Capabilities.Ansi ? AnsiSupport.Yes : AnsiSupport.No
         });
-        console.Profile.Width = width;
-        console.Write(renderable);
+        renderConsole.Profile.Width = width;
+        renderConsole.Write(renderable);
 
         var lines = writer.ToString().TrimEnd('\r', '\n').Split('\n');
         foreach (var line in lines)
         {
-            Console.Write(' ');
-            Console.WriteLine(line.TrimEnd('\r'));
+            targetConsole.Write(new Text(" "));
+            targetConsole.Profile.Out.Writer.WriteLine(line.TrimEnd('\r'));
         }
     }
 
