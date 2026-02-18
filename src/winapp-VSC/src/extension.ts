@@ -220,8 +220,17 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 				debugConfiguration.processId = processId;
 			}
 
-			// Start the real debug session (coreclr/node attach)
-			await vscode.debug.startDebugging(folder, debugConfiguration);
+			// Start the real debug session as a child of the winapp session
+			await vscode.debug.startDebugging(folder, debugConfiguration, { parentSession: session });
+
+			// When the child debug session ends, stop the parent winapp session
+			const parentSession = session;
+			const disposable = vscode.debug.onDidTerminateDebugSession((ended) => {
+				if (ended.parentSession === parentSession) {
+					disposable.dispose();
+					vscode.debug.stopDebugging(parentSession);
+				}
+			});
 
 			// Return an inline no-op adapter — the real debugging happens in the child session above
 			return new vscode.DebugAdapterInlineImplementation(new NoOpDebugAdapter());
