@@ -10,8 +10,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CertGenerateCommand : Command
+internal class CertGenerateCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create a self-signed certificate for local testing";
+
     public static Option<string> PublisherOption { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<FileInfo> OutputOption { get; }

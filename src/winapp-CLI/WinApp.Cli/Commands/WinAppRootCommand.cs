@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.CommandLine;
+using System.CommandLine.Help;
 using System.CommandLine.Invocation;
 using WinApp.Cli.Helpers;
 
@@ -63,5 +64,13 @@ internal class WinAppRootCommand : RootCommand
         Subcommands.Add(toolCommand);
 
         Options.Add(CliSchemaOption);
+
+        // Replace the default help with a custom categorized help screen
+        var helpOption = Options.OfType<HelpOption>().First();
+        helpOption.Action = new CustomHelpAction(this,
+            ("Setup", ["init", "restore", "update"]),
+            ("Packaging & Signing", ["package", "sign", "cert", "manifest"]),
+            ("Development Tools", ["create-debug-identity", "tool", "get-winapp-path"])
+        );
     }
 }

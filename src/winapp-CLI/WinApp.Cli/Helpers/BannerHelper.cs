@@ -11,26 +11,27 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class BannerHelper
 {
-    // Stylized "winapp" text in block letters
+    // Stylized "winapp cli" text in block letters
     private static readonly string[] TitleBlockArt =
-    {
-        @"▄▄              ▀▀                          ",
-        @" ▀█▄    ██   ██ ██  ████▄  ▀▀█▄ ████▄ ████▄ ",
-        @"  ▄█▀   ██ █ ██ ██  ██ ██ ▄█▀██ ██ ██ ██ ██ ",
-        @"▄█▀      ██▀██  ██▄ ██ ██ ▀█▄██ ████▀ ████▀ ",
-        @"                                ██    ██    ",
-        @"                                ▀▀    ▀▀    ",
+    {                                                              
+        @"                                                    ▄▄     ",
+        @"▄▄              ▀▀                                  ██ ▀▀  ",
+        @" ▀█▄    ██   ██ ██  ████▄  ▀▀█▄ ████▄ ████▄   ▄████ ██ ██  ",
+        @"  ▄█▀   ██ █ ██ ██  ██ ██ ▄█▀██ ██ ██ ██ ██   ██    ██ ██  ",
+        @"▄█▀      ██▀██  ██▄ ██ ██ ▀█▄██ ████▀ ████▀   ▀████ ██ ██▄ ",
+        @"                                ██    ██                   ",
+        @"                                ▀▀    ▀▀                   ",
     };
 
     // Simple ASCII fallback for the title
     private static readonly string[] TitleAsciiArt =
     {
-        @"           _                          ",
-        @" __      _(_)_ __   __ _ _ __  _ __   ",
-        @" \ \ /\ / / | '_ \ / _` | '_ \| '_ \  ",
-        @"  \ V  V /| | | | | (_| | |_) | |_) | ",
-        @"   \_/\_/ |_|_| |_|\__,_| .__/| .__/  ",
-        @"                        |_|   |_|     ",
+        @"           _                                 _ _ ",
+        @" __      _(_)_ __   __ _ _ __  _ __      ___| (_)",
+        @" \ \ /\ / / | '_ \ / _` | '_ \| '_ \    / __| | |",
+        @"  \ V  V /| | | | | (_| | |_) | |_) |  | (__| | |",
+        @"   \_/\_/ |_|_| |_|\__,_| .__/| .__/    \___|_|_|",
+        @"                        |_|   |_|                ",
     };
 
     // ANSI color codes for gradient effect (Blue -> Purple, Windows-themed)
@@ -42,6 +43,7 @@ internal static class BannerHelper
         "\x1b[38;5;99m",   // Purple
         "\x1b[38;5;135m",  // Light Purple
         "\x1b[38;5;141m",  // Lavender
+        "\x1b[38;5;147m",  // Light Lavender
     };
 
     private const string ResetColor = "\x1b[0m";
@@ -74,8 +76,6 @@ internal static class BannerHelper
         var useColor = UseEmoji; // Same check - modern terminals support both
         var version = GetVersionString();
 
-        Console.WriteLine();
-
         if (useColor)
         {
             DisplayColorBanner(version);
@@ -84,8 +84,6 @@ internal static class BannerHelper
         {
             DisplayPlainBanner(version);
         }
-
-        Console.WriteLine();
     }
 
     private static void DisplayColorBanner(string version)
@@ -96,22 +94,20 @@ internal static class BannerHelper
         for (int i = 0; i < titleLines.Length; i++)
         {
             var color = GradientColors[i % GradientColors.Length];
-            Console.WriteLine($"  {color}{titleLines[i]}{ResetColor}");
+            Console.WriteLine($" {color}{titleLines[i]}{ResetColor}");
         }
 
-        Console.WriteLine();
-        Console.WriteLine($"  \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
+        Console.WriteLine($" \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
     }
 
     private static void DisplayPlainBanner(string version)
     {
         foreach (var line in TitleAsciiArt)
         {
-            Console.WriteLine($"  {line}");
+            Console.WriteLine($" {line}");
         }
 
-        Console.WriteLine();
-        Console.WriteLine($"  Windows App Development CLI - Version {version}");
+        Console.WriteLine($" Windows App Development CLI - Version {version}");
     }
 
     /// <summary>

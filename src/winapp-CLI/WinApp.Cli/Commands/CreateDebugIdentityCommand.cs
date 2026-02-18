@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CreateDebugIdentityCommand : Command
+internal class CreateDebugIdentityCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Enable package identity for debugging without full MSIX";
+
     public static Argument<FileInfo> EntryPointArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> NoInstallOption { get; }

@@ -7,8 +7,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class SignCommand : Command
+internal class SignCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Code-sign an MSIX package or executable";
+
     public static Argument<FileInfo> FilePathArgument { get; }
     public static Argument<FileInfo> CertPathArgument { get; }
     public static Option<string> PasswordOption { get; }
