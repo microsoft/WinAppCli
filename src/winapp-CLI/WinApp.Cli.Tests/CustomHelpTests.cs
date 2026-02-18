@@ -33,6 +33,25 @@ public class CustomHelpTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void AllTopLevelCommands_ShouldHaveShortDescription()
+    {
+        // Arrange
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        // Assert — every registered subcommand must implement IShortDescription
+        foreach (var subcommand in rootCommand.Subcommands)
+        {
+            Assert.IsInstanceOfType<IShortDescription>(subcommand,
+                $"Top-level command '{subcommand.Name}' does not implement IShortDescription. " +
+                "Add IShortDescription to the command class so it appears with a description in the help output.");
+
+            var shortDesc = ((IShortDescription)subcommand).ShortDescription;
+            Assert.IsFalse(string.IsNullOrWhiteSpace(shortDesc),
+                $"Top-level command '{subcommand.Name}' has an empty ShortDescription.");
+        }
+    }
+
+    [TestMethod]
     public async Task RootHelp_ShouldRenderSuccessfully()
     {
         // Arrange
