@@ -14,13 +14,11 @@ internal static class BannerHelper
     // Stylized "winapp cli" text in block letters
     private static readonly string[] TitleBlockArt =
     {                                                              
-        @"                                                    ▄▄     ",
         @"▄▄              ▀▀                                  ██ ▀▀  ",
         @" ▀█▄    ██   ██ ██  ████▄  ▀▀█▄ ████▄ ████▄   ▄████ ██ ██  ",
         @"  ▄█▀   ██ █ ██ ██  ██ ██ ▄█▀██ ██ ██ ██ ██   ██    ██ ██  ",
         @"▄█▀      ██▀██  ██▄ ██ ██ ▀█▄██ ████▀ ████▀   ▀████ ██ ██▄ ",
         @"                                ██    ██                   ",
-        @"                                ▀▀    ▀▀                   ",
     };
 
     // Simple ASCII fallback for the title
@@ -37,13 +35,11 @@ internal static class BannerHelper
     // ANSI color codes for gradient effect (Blue -> Purple, Windows-themed)
     private static readonly string[] GradientColors =
     {
-        "\x1b[38;5;39m",   // Bright Blue
         "\x1b[38;5;33m",   // Blue
         "\x1b[38;5;63m",   // Blue-Purple
         "\x1b[38;5;99m",   // Purple
         "\x1b[38;5;135m",  // Light Purple
         "\x1b[38;5;141m",  // Lavender
-        "\x1b[38;5;147m",  // Light Lavender
     };
 
     private const string ResetColor = "\x1b[0m";
@@ -89,6 +85,7 @@ internal static class BannerHelper
     private static void DisplayColorBanner(string version)
     {
         var titleLines = TitleBlockArt;
+        Console.WriteLine();
 
         // Display each line with a gradient color
         for (int i = 0; i < titleLines.Length; i++)
@@ -97,6 +94,7 @@ internal static class BannerHelper
             Console.WriteLine($" {color}{titleLines[i]}{ResetColor}");
         }
 
+        Console.WriteLine();
         Console.WriteLine($" \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
     }
 
