@@ -170,6 +170,9 @@ Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devce
 - `--quiet` / `-q` - Suppress progress messages
 - `--timestamp` - Timestamp server URL
 - `--verbose` / `-v` - Enable verbose output
+### `winapp store`
+
+Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI (https://aka.ms/msstoredevcli).
 ### `winapp tool`
 
 Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix

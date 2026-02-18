@@ -50,7 +50,8 @@ internal class WinAppRootCommand : RootCommand
         GetWinappPathCommand getWinappPathCommand,
         CertCommand certCommand,
         SignCommand signCommand,
-        ToolCommand toolCommand) : base("CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows")
+        ToolCommand toolCommand,
+        MSStoreCommand msStoreCommand) : base("CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -62,6 +63,7 @@ internal class WinAppRootCommand : RootCommand
         Subcommands.Add(certCommand);
         Subcommands.Add(signCommand);
         Subcommands.Add(toolCommand);
+        Subcommands.Add(msStoreCommand);
 
         Options.Add(CliSchemaOption);
 
