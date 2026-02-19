@@ -29,6 +29,8 @@
     GitHub Models model to use (default: openai/gpt-4o-mini)
 .PARAMETER SkipAI
     Skip the AI summarization step and output raw GitHub-generated notes
+.PARAMETER DebugLog
+    Write debug log with all retrieved PR data and prompts sent to the LLM (saved next to OutputPath)
 .EXAMPLE
     .\scripts\generate-release-notes.ps1
 .EXAMPLE
@@ -47,7 +49,8 @@ param(
     [string]$RepoName = "winappcli",
     [string]$OutputPath = "",
     [string]$Model = "openai/gpt-4o-mini",
-    [switch]$SkipAI = $false
+    [switch]$SkipAI = $false,
+    [switch]$DebugLog = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +82,22 @@ if (-not $OutputPath) {
 $outputDir = Split-Path $OutputPath -Parent
 if (-not (Test-Path $outputDir)) {
     New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+}
+
+# --- Debug log setup ---
+$debugLogPath = Join-Path $outputDir "release-notes-debug.log"
+function Write-DebugLog {
+    param([string]$Label, [string]$Content)
+    if (-not $DebugLog) { return }
+    $separator = "`n$('=' * 80)`n"
+    $entry = "$separator[$Label] $(Get-Date -Format 'HH:mm:ss')$separator$Content`n"
+    $entry | Out-File -FilePath $debugLogPath -Append -Encoding UTF8
+    Write-Host "[RELEASENOTES][DEBUG] $Label written to $debugLogPath" -ForegroundColor Magenta
+}
+
+if ($DebugLog) {
+    "" | Set-Content -Path $debugLogPath -Encoding UTF8 -NoNewline
+    Write-Host "[RELEASENOTES] Debug logging enabled -> $debugLogPath" -ForegroundColor Magenta
 }
 
 # --- Helper: GitHub API request ---
@@ -162,6 +181,8 @@ if (-not $rawNotes) {
     }
 }
 
+Write-DebugLog -Label "RAW NOTES" -Content $rawNotes
+
 # --- Step 3: Fetch PR bodies for additional context ---
 $prDetails = @()
 if ($GitHubToken) {
@@ -180,12 +201,36 @@ if ($GitHubToken) {
         try {
             $pr = Invoke-GitHubApi -Endpoint "/repos/$RepoOwner/$RepoName/pulls/$prNum"
             $body = if ($pr.body -and $pr.body.Length -gt 2000) { $pr.body.Substring(0, 2000) + "..." } elseif ($pr.body) { $pr.body } else { "" }
+
+            # Fetch Copilot review summary if available (first review contains the overview)
+            $copilotReview = ""
+            try {
+                $reviews = Invoke-GitHubApi -Endpoint "/repos/$RepoOwner/$RepoName/pulls/$prNum/reviews"
+                $copilotEntry = $reviews | Where-Object { $_.user.login -eq "copilot-pull-request-reviewer[bot]" } | Select-Object -First 1
+                if ($copilotEntry -and $copilotEntry.body) {
+                    # Extract just the overview and changes list, skip the file-level details
+                    $reviewBody = $copilotEntry.body
+                    $detailsIdx = $reviewBody.IndexOf("<details>")
+                    if ($detailsIdx -gt 0) {
+                        $reviewBody = $reviewBody.Substring(0, $detailsIdx).Trim()
+                    }
+                    if ($reviewBody.Length -gt 1500) {
+                        $reviewBody = $reviewBody.Substring(0, 1500) + "..."
+                    }
+                    $copilotReview = $reviewBody
+                }
+            }
+            catch {
+                # Copilot review not available — not critical
+            }
+
             $prDetails += [PSCustomObject]@{
-                Number = $pr.number
-                Title  = $pr.title
-                Body   = $body
-                Author = $pr.user.login
-                Labels = ($pr.labels | ForEach-Object { $_.name }) -join ", "
+                Number        = $pr.number
+                Title         = $pr.title
+                Body          = $body
+                Author        = $pr.user.login
+                Labels        = ($pr.labels | ForEach-Object { $_.name }) -join ", "
+                CopilotReview = $copilotReview
             }
         }
         catch {
@@ -193,7 +238,22 @@ if ($GitHubToken) {
         }
     }
 
-    Write-Host "[RELEASENOTES] Fetched details for $($prDetails.Count) PRs" -ForegroundColor Green
+    $copilotCount = ($prDetails | Where-Object { $_.CopilotReview }).Count
+    Write-Host "[RELEASENOTES] Fetched details for $($prDetails.Count) PRs ($copilotCount with Copilot reviews)" -ForegroundColor Green
+
+    # Log all fetched PR details
+    $prDebug = ""
+    foreach ($pr in $prDetails) {
+        $prDebug += "PR #$($pr.Number) — $($pr.Title)`n"
+        $prDebug += "  Author: $($pr.Author)  |  Labels: $($pr.Labels)`n"
+        $prDebug += "  Body: $(if ($pr.Body) { "$($pr.Body.Length) chars" } else { '(empty)' })`n"
+        $prDebug += "  Copilot Review: $(if ($pr.CopilotReview) { "$($pr.CopilotReview.Length) chars" } else { '(none)' })`n"
+        if ($pr.CopilotReview) {
+            $prDebug += "  --- Copilot Review Content ---`n$($pr.CopilotReview)`n  --- End Copilot Review ---`n"
+        }
+        $prDebug += "`n"
+    }
+    Write-DebugLog -Label "PR DETAILS ($($prDetails.Count) PRs, $copilotCount with Copilot reviews)" -Content $prDebug
 }
 
 # --- Step 4: AI summarization via GitHub Models ---
@@ -235,18 +295,37 @@ Style guidelines:
         if ($pr.Body -and $pr.Author -ne "dependabot[bot]") {
             $prContext += "Description: $($pr.Body)`n"
         }
+        if ($pr.CopilotReview) {
+            $prContext += "Copilot Review: $($pr.CopilotReview)`n"
+        }
         $prContext += "---`n"
     }
 
-    $userPrompt = @"
+    # GitHub Models free tier token limits vary by model (~8K tokens for gpt-4o-mini).
+    # ~4 chars per token, reserve space for system prompt + max_tokens output.
+    $maxPromptChars = 24000
+    $systemChars = $systemPrompt.Length
+    $availableForUser = $maxPromptChars - $systemChars
+
+    $userPromptHeader = @"
 Generate release notes for WinApp CLI $CurrentTag (previous: $PreviousTag).
 
 GitHub auto-generated changelog:
 $rawNotes
 
 Detailed PR information:
-$prContext
 "@
+
+    $remainingChars = $availableForUser - $userPromptHeader.Length
+    if ($prContext.Length -gt $remainingChars) {
+        Write-Warning "[RELEASENOTES] PR context ($($prContext.Length) chars) exceeds token budget ($remainingChars chars available). Truncating."
+        $prContext = $prContext.Substring(0, $remainingChars) + "`n... (truncated — $($prDetails.Count) PRs total, some details omitted to fit token limit)`n"
+    }
+
+    $userPrompt = $userPromptHeader + $prContext
+
+    Write-DebugLog -Label "SYSTEM PROMPT" -Content $systemPrompt
+    Write-DebugLog -Label "USER PROMPT ($($userPrompt.Length) chars, limit $availableForUser)" -Content $userPrompt
 
     try {
         $aiHeaders = @{
@@ -271,6 +350,8 @@ $prContext
             -ContentType "application/json"
 
         $aiNotes = $aiResponse.choices[0].message.content
+
+        Write-DebugLog -Label "AI RESPONSE ($($aiNotes.Length) chars)" -Content $aiNotes
 
         if ($aiNotes -and $aiNotes.Trim().Length -gt 50) {
             Write-Host "[RELEASENOTES] AI generation successful ($($aiNotes.Length) chars)" -ForegroundColor Green
