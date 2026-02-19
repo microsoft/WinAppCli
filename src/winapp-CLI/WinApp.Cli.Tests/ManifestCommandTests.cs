@@ -12,7 +12,7 @@ namespace WinApp.Cli.Tests;
 public class ManifestCommandTests : BaseCommandTests
 {
     private string _testLogoPath = null!;
-    
+
     [TestInitialize]
     public void Setup()
     {
@@ -173,7 +173,7 @@ public class ManifestCommandTests : BaseCommandTests
 
             // Since the source image is a 1x1 transparent pixel, all generated assets
             // should be fully transparent (empty canvases)
-            Assert.IsTrue(PngHelper.IsFullyTransparent(assetPath), 
+            Assert.IsTrue(PngHelper.IsFullyTransparent(assetPath),
                 $"Asset {assetName} should be fully transparent when generated from a transparent source");
         }
     }
@@ -584,7 +584,7 @@ public class ManifestCommandTests : BaseCommandTests
     {
         // Arrange - Use winapp.exe which has version info
         var winappAssemblyPath = typeof(ManifestService).Assembly.Location;
-        
+
         if (string.IsNullOrEmpty(winappAssemblyPath) || !File.Exists(winappAssemblyPath))
         {
             Assert.Inconclusive("winapp assembly not found");

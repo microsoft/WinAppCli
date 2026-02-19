@@ -19,7 +19,6 @@ winapp init [base-directory] [options]
 - `--ignore-config`, `--no-config` - Don't use configuration file for version management
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
-- `--no-cert` - Skip development certificate generation
 - `--config-only` - Only handle configuration file operations, skip package installation
 
 **What it does:**
@@ -27,10 +26,19 @@ winapp init [base-directory] [options]
 - Creates `winapp.yaml` configuration file
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
-- Creates development certificate and AppxManifest.xml
+- Creates AppxManifest.xml
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
+
+**Automatic .NET project detection:**
+
+When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
+
+- Validates and updates the `TargetFramework` to a Windows-compatible TFM (e.g., `net10.0-windows10.0.26100.0`)
+- Adds `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` as NuGet `PackageReference` entries directly in the `.csproj`
+- Generates `appxmanifest.xml`, assets, and a development certificate
+- Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
 **Examples:**
 
@@ -41,8 +49,12 @@ winapp init
 # Initialize with experimental packages
 winapp init --setup-sdks experimental
 
-# Initialize specific directory without promts
+# Initialize specific directory without prompts
 winapp init ./my-project --use-defaults
+
+# Initialize a .NET project (auto-detected from .csproj)
+cd my-dotnet-app
+winapp init
 ```
 
 **Tip: Install SDKs after initial setup**
@@ -50,7 +62,7 @@ winapp init ./my-project --use-defaults
 If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
 
 ```bash
-# Re-run init to install SDKs - preserves existing files (manifest, cert, etc.)
+# Re-run init to install SDKs - preserves existing files (manifest, etc.)
 winapp init --use-defaults --setup-sdks stable
 ```
 
@@ -76,6 +88,8 @@ winapp restore [options]
 - Downloads/updates SDK packages to specified versions
 - Regenerates C++/WinRT headers and binaries
 - Stores sharable files in the global cache directory
+
+> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
@@ -396,6 +410,36 @@ winapp tool <tool-name> [tool-arguments]
 ```bash
 # Use signtool to verify signature
 winapp tool signtool verify /pa MyApp.msix
+```
+
+---
+
+### store
+
+Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
+
+```bash
+winapp store [args...]
+```
+
+**Arguments:**
+
+- `args...` – Arguments to pass directly to the `msstore` CLI. See [MSStore CLI documentation](https://aka.ms/msstoredevcli/docs) for available commands and options.
+
+**What it does:**
+
+- Ensures the Microsoft Store Developer CLI (`msstore`) is installed and available on your system.
+- Forwards all arguments to the `msstore` CLI.
+- Runs the command showing output directly in your terminal.
+
+**Examples:**
+
+```bash
+# List all apps in your Microsoft Partner Center account
+winapp store app list
+
+# Publish a package to the Microsoft Store
+winapp store publish ./myapp.msix --appId <your-app-id>
 ```
 
 ---

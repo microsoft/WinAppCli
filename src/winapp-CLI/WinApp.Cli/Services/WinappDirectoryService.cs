@@ -50,9 +50,9 @@ internal class WinappDirectoryService(ICurrentDirectoryProvider currentDirectory
         while (dir != null)
         {
             var winappDirectory = Path.Combine(dir.FullName, ".winapp");
-            if (Directory.Exists(winappDirectory))            
+            if (Directory.Exists(winappDirectory))
             {
-                bool isGlobalWinAppDir = 
+                bool isGlobalWinAppDir =
                     string.Equals(winappDirectory, globalWinappDirectory.FullName, StringComparison.OrdinalIgnoreCase);
                 if (isGlobalWinAppDir)
                 {
@@ -68,5 +68,5 @@ internal class WinappDirectoryService(ICurrentDirectoryProvider currentDirectory
         }
 
         return new DirectoryInfo(Path.Combine(originalBaseDir.FullName, ".winapp"));
-    }    
+    }
 }

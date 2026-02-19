@@ -1,18 +1,83 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
-internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) : INugetService
+internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
 {
     private static readonly HttpClient Http = new();
-    private const string NugetExeUrl = "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe";
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
+    private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public DirectoryInfo GetNuGetGlobalPackagesDir()
+    {
+        // In test mode (cache override set), use a "packages" subdir of the override directory
+        var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
+        if (IsTestOverride(globalDir))
+        {
+            var overrideDir = new DirectoryInfo(Path.Combine(globalDir.FullName, "packages"));
+            if (!overrideDir.Exists)
+            {
+                overrideDir.Create();
+            }
+            return overrideDir;
+        }
+
+        // NUGET_PACKAGES env var takes priority
+        var envPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrEmpty(envPath))
+        {
+            var envDir = new DirectoryInfo(envPath);
+            if (!envDir.Exists)
+            {
+                envDir.Create();
+            }
+            return envDir;
+        }
+
+        // Default: %USERPROFILE%/.nuget/packages
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
+        if (!nugetDir.Exists)
+        {
+            nugetDir.Create();
+        }
+        return nugetDir;
+    }
+
+    public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
+    {
+        var cache = GetNuGetGlobalPackagesDir();
+        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
+    }
+
+    /// <summary>
+    /// Detects whether the global winapp directory is a test override (not the real user profile .winapp).
+    /// </summary>
+    private static bool IsTestOverride(DirectoryInfo globalDir)
+    {
+        var defaultWinapp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp");
+        return !string.Equals(globalDir.FullName, defaultWinapp, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
+    }
+
+    private static readonly string[] IgnoredDependencyPrefixes =
+    [
+        "NETStandard.",
+        "runtime.",
+        "System.",
+        "Microsoft.Bcl.",
+        "Microsoft.NETCore.",
+    ];
 
     public static readonly string[] SDK_PACKAGES =
     [
@@ -25,20 +90,166 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
         $"{BuildToolsService.CPP_SDK_PACKAGE}.arm64"
     ];
 
-    public async Task EnsureNugetExeAsync(DirectoryInfo winappDir, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
-        var toolsDir = Path.Combine(winappDir.FullName, "tools");
-        var nugetExe = Path.Combine(toolsDir, "nuget.exe");
-        if (File.Exists(nugetExe))
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await InstallPackageRecursiveAsync(package, version, packages, taskContext, cancellationToken);
+        return packages;
+    }
+
+    /// <summary>
+    /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
+    /// </summary>
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        // Already processed this package?
+        if (installed.ContainsKey(package))
         {
             return;
         }
 
-        Directory.CreateDirectory(toolsDir);
-        using var resp = await Http.GetAsync(NugetExeUrl, cancellationToken);
-        resp.EnsureSuccessStatusCode();
-        await using var fs = File.Create(nugetExe);
-        await resp.Content.CopyToAsync(fs, cancellationToken);
+        var packageDir = GetNuGetPackageDir(package, version);
+
+        // Already installed on disk?
+        if (packageDir.Exists)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {version} already present");
+            installed[package] = version;
+            // Still resolve dependencies to populate installed dictionary
+            await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+            return;
+        }
+
+        // Download .nupkg from the NuGet flat container API
+        var lowerId = package.ToLowerInvariant();
+        var lowerVersion = version.ToLowerInvariant();
+        var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
+
+        using var resp = await Http.GetAsync(url, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
+        }
+
+        // Extract to the NuGet global cache location
+        Directory.CreateDirectory(packageDir.FullName);
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        ZipFile.ExtractToDirectory(stream, packageDir.FullName, overwriteFiles: true);
+
+        installed[package] = version;
+        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {version}");
+
+        // Recursively install dependencies
+        await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the .nuspec from an extracted package and recursively installs dependencies.
+    /// </summary>
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var deps = ReadDependenciesFromNuspec(packageDir, package);
+            foreach (var (depName, depVersionRange) in deps)
+            {
+                if (installed.ContainsKey(depName))
+                {
+                    continue;
+                }
+
+                var depVersion = ParseMinimumVersion(depVersionRange);
+                if (!string.IsNullOrEmpty(depVersion))
+                {
+                    await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cancellationToken);
+                }
+            }
+        }
+        catch
+        {
+            // Dependency resolution failures are non-fatal; the main package is installed
+        }
+    }
+
+    /// <summary>
+    /// Reads dependencies from the .nuspec file embedded in an extracted NuGet package.
+    /// </summary>
+    private static Dictionary<string, string> ReadDependenciesFromNuspec(DirectoryInfo packageDir, string packageName)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec
+        var nuspecPath = Path.Combine(packageDir.FullName, $"{packageName.ToLowerInvariant()}.nuspec");
+        if (!File.Exists(nuspecPath))
+        {
+            // Try finding any .nuspec file
+            var nuspecFiles = Directory.GetFiles(packageDir.FullName, "*.nuspec", SearchOption.TopDirectoryOnly);
+            if (nuspecFiles.Length == 0)
+            {
+                return dependencies;
+            }
+            nuspecPath = nuspecFiles[0];
+        }
+
+        var doc = new XmlDocument();
+        doc.Load(nuspecPath);
+
+        var nsMgr = new XmlNamespaceManager(doc.NameTable);
+        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
+        if (!string.IsNullOrEmpty(ns))
+        {
+            nsMgr.AddNamespace("ns", ns);
+        }
+
+        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
+        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
+        if (depNodes != null)
+        {
+            foreach (XmlNode node in depNodes)
+            {
+                var depId = node.Attributes?["id"]?.Value;
+                var depVersion = node.Attributes?["version"]?.Value;
+                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                {
+                    dependencies.TryAdd(depId, depVersion);
+                }
+            }
+        }
+
+        return dependencies;
+    }
+
+    /// <summary>
+    /// Parses a NuGet version range and extracts the minimum version.
+    /// Handles: "1.0.0", "[1.0.0]", "[1.0.0, )", "(1.0.0, 2.0.0)", etc.
+    /// </summary>
+    internal static string ParseMinimumVersion(string versionRange)
+    {
+        if (string.IsNullOrWhiteSpace(versionRange))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = versionRange.Trim();
+
+        // Simple version (no brackets)
+        if (!trimmed.Contains('[') && !trimmed.Contains('('))
+        {
+            return trimmed;
+        }
+
+        // Strip brackets/parens
+        trimmed = trimmed.TrimStart('[', '(').TrimEnd(']', ')');
+
+        // Take the lower bound (before comma if present)
+        var commaIdx = trimmed.IndexOf(',');
+        if (commaIdx >= 0)
+        {
+            trimmed = trimmed[..commaIdx].Trim();
+        }
+
+        return trimmed;
     }
 
     public async Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
@@ -106,87 +317,81 @@ internal class NugetService(ICurrentDirectoryProvider currentDirectoryProvider) 
         return list[^1];
     }
 
-    public async Task<Dictionary<string, string>> InstallPackageAsync(DirectoryInfo globalWinappDir, string package, string version, DirectoryInfo outputDir, TaskContext taskContext, CancellationToken cancellationToken = default)
+    [GeneratedRegex(@"[\[\]\(\)]")]
+    private static partial Regex BracketsAndParenthesesRegex();
+
+    /// <inheritdoc />
+    public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
-        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        var nugetExe = Path.Combine(globalWinappDir.FullName, "tools", "nuget.exe");
-        if (!File.Exists(nugetExe))
+        var cacheKey = $"{packageName}/{version}";
+        if (DependencyCache.TryGetValue(cacheKey, out var cached))
         {
-            throw new FileNotFoundException("nuget.exe missing; call EnsureNugetExeAsync first", nugetExe);
+            return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);
         }
 
-        outputDir.Create();
+        var directDeps = await FetchDirectDependenciesAsync(packageName, version, cancellationToken);
 
-        // If already installed, skip
-        var expectedFolder = Path.Combine(outputDir.FullName, $"{package}.{version}");
-        if (Directory.Exists(expectedFolder))
+        // Recursively resolve transitive dependencies
+        var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
+        foreach (var (depId, depVersion) in directDeps)
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {version} already present");
-            packages[package] = version;
-            return packages;
-        }
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = nugetExe,
-            Arguments = $"install {EscapeArg(package)} -Version {EscapeArg(version)} -OutputDirectory {Quote(outputDir.FullName)} -NonInteractive -ForceEnglishOutput",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = currentDirectoryProvider.GetCurrentDirectory(),
-        };
-        using var p = Process.Start(psi)!;
-        var stdout = await p.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await p.StandardError.ReadToEndAsync(cancellationToken);
-        await p.WaitForExitAsync(cancellationToken);
-        if (p.ExitCode != 0)
-        {
-            taskContext.StatusError(stdout);
-            taskContext.StatusError(stderr);
-            throw new InvalidOperationException($"nuget install failed for {package} {version}");
-        }
-
-        var lines = stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        foreach (var line in lines)
-        {
-            if (line.StartsWith("Successfully installed '", StringComparison.OrdinalIgnoreCase))
+            var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, cancellationToken);
+            foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
             {
-                var parts = line.Split('\'', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2)
+                allDeps.TryAdd(transitiveId, transitiveVersion);
+            }
+        }
+
+        DependencyCache[cacheKey] = allDeps;
+        return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Fetch the .nuspec from NuGet flat container API
+        var id = packageName.ToLowerInvariant();
+        var ver = version.ToLowerInvariant();
+        var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
+
+        using var resp = await Http.GetAsync(nuspecUrl, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return dependencies;
+        }
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        var doc = new XmlDocument();
+        doc.Load(stream);
+
+        // The nuspec uses a default namespace; we need a namespace manager
+        var nsMgr = new XmlNamespaceManager(doc.NameTable);
+        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
+        if (!string.IsNullOrEmpty(ns))
+        {
+            nsMgr.AddNamespace("ns", ns);
+        }
+
+        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
+        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
+        if (depNodes != null)
+        {
+            foreach (XmlNode node in depNodes)
+            {
+                var depId = node.Attributes?["id"]?.Value;
+                var depVersion = node.Attributes?["version"]?.Value;
+                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion)
+                    && !IgnoredDependencyPrefixes.Any(p => depId.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                 {
-                    var installed = parts[1].Trim();
-                    var spaceIdx = installed.LastIndexOf(' ');
-                    if (spaceIdx > 0)
-                    {
-                        var installedName = installed[..spaceIdx];
-                        var installedVersion = installed[(spaceIdx + 1)..];
-                        packages[installedName] = installedVersion;
-                        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {installedName} {installedVersion}");
-                    }
+                    // Remove any brackets or parentheses from the version string
+                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
+                    dependencies.TryAdd(depId, cleanedVersion);
                 }
             }
         }
 
-        if (!packages.ContainsKey(package))
-        {
-            throw new InvalidOperationException($"Could not determine installed version for {package} {version}");
-        }
-
-        return packages;
-    }
-
-    private static string Quote(string path) => $"\"{path}\"";
-
-    private static string EscapeArg(string v)
-    {
-        if (v.Contains(' ') || v.Contains('"'))
-        {
-            return Quote(v.Replace("\"", "\\\""));
-        }
-
-        return v;
+        return dependencies;
     }
 
     public static int CompareVersions(string a, string b)

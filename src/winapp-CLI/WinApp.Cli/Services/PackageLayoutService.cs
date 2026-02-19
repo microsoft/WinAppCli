@@ -8,56 +8,88 @@ internal sealed class PackageLayoutService : IPackageLayoutService
     private const string winPrefix = "win-";
     private const string win10Prefix = "win10-";
 
-    public void CopyIncludesFromPackages(DirectoryInfo pkgsDir, DirectoryInfo includeOut)
+    /// <summary>
+    /// Resolves a package directory in the NuGet global cache using lowercase-id/version/ layout.
+    /// </summary>
+    private static DirectoryInfo GetPackageDir(DirectoryInfo nugetCacheDir, string packageName, string version)
     {
-        includeOut.Create();
-        foreach (var includeDir in SafeEnumDirs(pkgsDir, "include", SearchOption.AllDirectories))
+        return new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageName.ToLowerInvariant(), version));
+    }
+
+    /// <summary>
+    /// Enumerates all existing package directories from the usedVersions dictionary.
+    /// </summary>
+    private static IEnumerable<DirectoryInfo> EnumeratePackageDirs(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions)
+    {
+        foreach (var (packageName, version) in usedVersions)
         {
-            foreach (var file in SafeEnumFiles(includeDir, "*.*", SearchOption.TopDirectoryOnly))
+            var packageDir = GetPackageDir(nugetCacheDir, packageName, version);
+            if (packageDir.Exists)
             {
-                var target = Path.Combine(includeOut.FullName, file.Name);
-                TryCopy(file, target);
+                yield return packageDir;
             }
         }
     }
 
-    public static void CopyLibs(DirectoryInfo pkgsDir, DirectoryInfo libOut, string arch)
+    public void CopyIncludesFromPackages(DirectoryInfo nugetCacheDir, DirectoryInfo includeOut, Dictionary<string, string> usedVersions)
+    {
+        includeOut.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var includeDir in SafeEnumDirs(packageDir, "include", SearchOption.AllDirectories))
+            {
+                foreach (var file in SafeEnumFiles(includeDir, "*.*", SearchOption.TopDirectoryOnly))
+                {
+                    var target = Path.Combine(includeOut.FullName, file.Name);
+                    TryCopy(file, target);
+                }
+            }
+        }
+    }
+
+    public static void CopyLibs(DirectoryInfo nugetCacheDir, DirectoryInfo libOut, string arch, Dictionary<string, string> usedVersions)
     {
         libOut.Create();
-        foreach (var libDir in SafeEnumDirs(pkgsDir, "lib", SearchOption.AllDirectories))
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
         {
-            var archDir = new DirectoryInfo(Path.Combine(libDir.FullName, arch));
-            var nativeArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", arch));
-            var winArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win-{arch}"));
-            var win10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win10-{arch}"));
-            var nativeWin10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", $"win10-{arch}"));
-            
-            CopyTopFiles(archDir, "*.lib", libOut);
-            CopyTopFiles(nativeArchDir, "*.lib", libOut);
-            CopyTopFiles(winArchDir, "*.lib", libOut);
-            CopyTopFiles(win10ArchDir, "*.lib", libOut);
-            CopyTopFiles(nativeWin10ArchDir, "*.lib", libOut);
+            foreach (var libDir in SafeEnumDirs(packageDir, "lib", SearchOption.AllDirectories))
+            {
+                var archDir = new DirectoryInfo(Path.Combine(libDir.FullName, arch));
+                var nativeArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", arch));
+                var winArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win-{arch}"));
+                var win10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win10-{arch}"));
+                var nativeWin10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", $"win10-{arch}"));
+
+                CopyTopFiles(archDir, "*.lib", libOut);
+                CopyTopFiles(nativeArchDir, "*.lib", libOut);
+                CopyTopFiles(winArchDir, "*.lib", libOut);
+                CopyTopFiles(win10ArchDir, "*.lib", libOut);
+                CopyTopFiles(nativeWin10ArchDir, "*.lib", libOut);
+            }
         }
     }
 
-    public static void CopyRuntimes(DirectoryInfo pkgsDir, DirectoryInfo binOut, string arch)
+    public static void CopyRuntimes(DirectoryInfo nugetCacheDir, DirectoryInfo binOut, string arch, Dictionary<string, string> usedVersions)
     {
         binOut.Create();
-        foreach (var rtDir in SafeEnumDirs(pkgsDir, "runtimes", SearchOption.AllDirectories))
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
         {
-            var native = new DirectoryInfo(Path.Combine(rtDir.FullName, $"win-{arch}", "native"));
-            CopyTopFiles(native, "*.*", binOut);
+            foreach (var rtDir in SafeEnumDirs(packageDir, "runtimes", SearchOption.AllDirectories))
+            {
+                var native = new DirectoryInfo(Path.Combine(rtDir.FullName, $"win-{arch}", "native"));
+                CopyTopFiles(native, "*.*", binOut);
+            }
         }
     }
 
-    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo pkgsDir, Dictionary<string, string> usedVersions)
+    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions)
     {
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Only search in package directories that were actually used
         foreach (var (packageName, version) in usedVersions)
         {
-            var packageDir = new DirectoryInfo(Path.Combine(pkgsDir.FullName, $"{packageName}.{version}"));
+            var packageDir = GetPackageDir(nugetCacheDir, packageName, version);
             if (!packageDir.Exists)
             {
                 continue;
@@ -161,76 +193,82 @@ internal sealed class PackageLayoutService : IPackageLayoutService
         catch { return []; }
     }
 
-    public void CopyLibsAllArch(DirectoryInfo pkgsDir, DirectoryInfo libRoot)
+    public void CopyLibsAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo libRoot, Dictionary<string, string> usedVersions)
     {
         libRoot.Create();
-        foreach (var libDir in SafeEnumDirs(pkgsDir, "lib", SearchOption.AllDirectories))
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
         {
-            foreach (var sub in SafeEnumSubdirs(libDir))
+            foreach (var libDir in SafeEnumDirs(packageDir, "lib", SearchOption.AllDirectories))
             {
-                var name = sub.Name;
-                if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
+                foreach (var sub in SafeEnumSubdirs(libDir))
                 {
-                    var arch = name[winPrefix.Length..];
-                    var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
-                    CopyTopFiles(sub, "*.lib", outDir);
-                }
-                else if (name.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    var arch = name[win10Prefix.Length..];
-                    var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
-                    CopyTopFiles(sub, "*.lib", outDir);
-                }
-                else if (string.Equals(name, "native", StringComparison.OrdinalIgnoreCase))
-                {
-                    foreach (var d in SafeEnumSubdirs(sub))
+                    var name = sub.Name;
+                    if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
                     {
-                        var dn = d.Name;
-                        if (dn.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
+                        var arch = name[winPrefix.Length..];
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                        CopyTopFiles(sub, "*.lib", outDir);
+                    }
+                    else if (name.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var arch = name[win10Prefix.Length..];
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                        CopyTopFiles(sub, "*.lib", outDir);
+                    }
+                    else if (string.Equals(name, "native", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var d in SafeEnumSubdirs(sub))
                         {
-                            var arch = dn[win10Prefix.Length..];
-                            var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
-                            CopyTopFiles(d, "*.lib", outDir);
+                            var dn = d.Name;
+                            if (dn.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var arch = dn[win10Prefix.Length..];
+                                var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                                CopyTopFiles(d, "*.lib", outDir);
+                            }
+                        }
+
+                        // Also check for direct arch folders under native
+                        foreach (var d in SafeEnumSubdirs(sub))
+                        {
+                            var dn = d.Name;
+                            // Check for direct architecture names (x86, x64, arm, arm64)
+                            if (IsValidArchitecture(dn))
+                            {
+                                var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, dn));
+                                CopyTopFiles(d, "*.lib", outDir);
+                            }
                         }
                     }
-                    
-                    // Also check for direct arch folders under native
-                    foreach (var d in SafeEnumSubdirs(sub))
+
+                    // Handle direct architecture folders
+                    if (IsValidArchitecture(name))
                     {
-                        var dn = d.Name;
-                        // Check for direct architecture names (x86, x64, arm, arm64)
-                        if (IsValidArchitecture(dn))
-                        {
-                            var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, dn));
-                            CopyTopFiles(d, "*.lib", outDir);
-                        }
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, name));
+                        CopyTopFiles(sub, "*.lib", outDir);
                     }
-                }
-                
-                // Handle direct architecture folders
-                if (IsValidArchitecture(name))
-                {
-                    var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, name));
-                    CopyTopFiles(sub, "*.lib", outDir);
                 }
             }
         }
     }
 
-    public void CopyRuntimesAllArch(DirectoryInfo pkgsDir, DirectoryInfo binRoot)
+    public void CopyRuntimesAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo binRoot, Dictionary<string, string> usedVersions)
     {
         binRoot.Create();
-        foreach (var rtDir in SafeEnumDirs(pkgsDir, "runtimes", SearchOption.AllDirectories))
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
         {
-            foreach (var plat in SafeEnumSubdirs(rtDir))
+            foreach (var rtDir in SafeEnumDirs(packageDir, "runtimes", SearchOption.AllDirectories))
             {
-                var name = plat.Name;
-                if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
+                foreach (var plat in SafeEnumSubdirs(rtDir))
                 {
-                    var arch = name[winPrefix.Length..];
-                    var native = new DirectoryInfo(Path.Combine(plat.FullName, "native"));
-                    var outDir = new DirectoryInfo(Path.Combine(binRoot.FullName, arch));
-                    CopyTopFiles(native, "*.*", outDir);
+                    var name = plat.Name;
+                    if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var arch = name[winPrefix.Length..];
+                        var native = new DirectoryInfo(Path.Combine(plat.FullName, "native"));
+                        var outDir = new DirectoryInfo(Path.Combine(binRoot.FullName, arch));
+                        CopyTopFiles(native, "*.*", outDir);
+                    }
                 }
             }
         }

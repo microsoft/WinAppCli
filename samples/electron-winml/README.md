@@ -33,7 +33,6 @@ npm install
 
 This automatically runs the `postinstall` script which:
 - Restores Windows SDK packages to `.winapp/`
-- Generates a development certificate
 - Adds debug identity to Electron
 
 ### 2. Download the Model

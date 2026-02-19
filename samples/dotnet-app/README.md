@@ -6,8 +6,9 @@ For a complete step-by-step guide, see the [.NET Getting Started Guide](../../do
 
 ## What This Sample Shows
 
-- Basic .NET console application
+- Basic .NET console application with automatic .NET project detection by `winapp init`
 - Using Windows Runtime APIs to retrieve package identity
+- NuGet package references (`Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`) added directly to `.csproj` by `winapp init`
 - Configuring MSBuild to automatically apply debug identity after building in Debug configuration
 - Using Windows App SDK via NuGet for modern Windows APIs
 - MSIX packaging with app manifest and assets
@@ -16,6 +17,16 @@ For a complete step-by-step guide, see the [.NET Getting Started Guide](../../do
 
 - .NET 10.0 SDK
 - winapp CLI installed via winget: `winget install Microsoft.winappcli --source winget`
+
+## Setup
+
+Run `winapp init` in this directory. It auto-detects the `.csproj` and runs the .NET-specific setup flow:
+
+```powershell
+winapp init
+```
+
+This will validate the `TargetFramework`, add required NuGet packages to the `.csproj`, and generate the manifest, assets, and development certificate. No `winapp.yaml` is needed for .NET projects.
 
 ## Building and Running
 

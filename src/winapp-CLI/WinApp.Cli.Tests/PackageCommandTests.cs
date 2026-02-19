@@ -327,12 +327,15 @@ public class PackageCommandTests : BaseCommandTests
         // If successful, verify the package was created correctly
         Assert.IsNotNull(result, "Result should not be null");
         Assert.Contains("ExternalTestPackage", result.MsixPath.FullName, "Package name should reflect external manifest");
-        
+
         // Verify that assets were accessible during processing
         // The external manifest and assets should still exist
         Assert.IsTrue(File.Exists(externalManifestPath), "External manifest should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "Logo.png")), "External Logo.png should still exist");
         Assert.IsTrue(File.Exists(Path.Combine(externalAssetsDir, "StoreLogo.png")), "External StoreLogo.png should still exist");
+
+        // Verify the input folder was not polluted with a manifest copy
+        Assert.IsFalse(File.Exists(Path.Combine(packageDir, "AppxManifest.xml")), "Input folder should not contain AppxManifest.xml after packaging");
     }
 
     [TestMethod]

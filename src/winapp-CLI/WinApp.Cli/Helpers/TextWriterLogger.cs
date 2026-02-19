@@ -130,7 +130,7 @@ internal sealed class OutputCapture : StringWriter, IDisposable
 {
     private readonly TextWriter _stdOutWriter;
     public override Encoding Encoding => Encoding.ASCII;
-    
+
     public OutputCapture(TextWriter textWriter)
     {
         _stdOutWriter = textWriter;
