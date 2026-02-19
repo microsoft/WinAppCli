@@ -1,0 +1,199 @@
+name: AI PR Description
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  generate-description:
+    # Skip dependabot and bot PRs
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Generate AI description
+        uses: actions/github-script@v7
+        env:
+          GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const startMarker = '<!-- ai-description-start -->';
+            const endMarker = '<!-- ai-description-end -->';
+
+            // --- Get PR details ---
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            const body = pr.body || '';
+
+            // --- Check for opt-out (markers removed) ---
+            if (!body.includes(startMarker) || !body.includes(endMarker)) {
+              core.info('AI description markers not found — skipping (opted out).');
+              return;
+            }
+
+            // --- Get the diff ---
+            const { data: diff } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              mediaType: { format: 'diff' },
+            });
+
+            // Truncate diff to ~6000 chars to stay within token limits
+            const maxDiffLen = 6000;
+            const truncatedDiff = diff.length > maxDiffLen
+              ? diff.substring(0, maxDiffLen) + '\n... (diff truncated)'
+              : diff;
+
+            // --- Get list of changed files ---
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            const fileList = files.map(f => `${f.status}: ${f.filename} (+${f.additions} -${f.deletions})`).join('\n');
+
+            // --- Get existing labels for suggestion ---
+            const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const availableLabels = repoLabels.map(l => l.name);
+
+            // --- Build prompt ---
+            const systemPrompt = `You are a technical writer for winapp CLI, a command-line tool for Windows app developers.
+
+            You analyze pull request diffs and generate two things:
+
+            1. **AI_DESCRIPTION**: A concise description of the PR changes for release notes automation. Include:
+               - What changed and why (1-3 sentences, user-facing language)
+               - Code usage examples if new commands, flags, or APIs were added (as fenced code blocks)
+               - A "**Breaking Change:**" callout if existing behavior changed, APIs were removed/renamed, defaults changed, or command signatures changed. Describe what breaks and how to migrate.
+
+            2. **SUGGESTED_LABELS**: A comma-separated list of labels to apply from this set: ${availableLabels.join(', ')}
+               - Always suggest exactly one type label (bug, enhancement, documentation, etc.)
+               - Add "breaking-change" if there are breaking changes
+               - Add framework labels (electron, dotnet, rust, python) if the change is framework-specific
+
+            Format your response exactly like this:
+            AI_DESCRIPTION:
+            <your description here>
+            SUGGESTED_LABELS:
+            <comma-separated labels>`;
+
+            // Strip the AI description section from body so the AI doesn't see its own previous output
+            const bodyForContext = body.replace(
+              new RegExp(`${startMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${endMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+              ''
+            ).trim();
+
+            const userPrompt = `PR #${pr.number}: ${pr.title}
+
+            Author: ${pr.user.login}
+            Base: ${pr.base.ref} <- ${pr.head.ref}
+
+            PR description (written by author):
+            ${bodyForContext}
+
+            Changed files:
+            ${fileList}
+
+            Diff:
+            ${truncatedDiff}`;
+
+            // --- Call GitHub Models API ---
+            const modelsToken = process.env.GH_MODELS_TOKEN;
+            if (!modelsToken) {
+              core.warning('GH_MODELS_TOKEN not set — skipping AI generation.');
+              return;
+            }
+
+            let aiResponse;
+            try {
+              const response = await fetch('https://models.github.ai/inference/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${modelsToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'openai/gpt-4o-mini',
+                  max_tokens: 2048,
+                  messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                  ],
+                }),
+              });
+
+              if (!response.ok) {
+                const err = await response.text();
+                core.warning(`GitHub Models API error (${response.status}): ${err}`);
+                return;
+              }
+
+              const data = await response.json();
+              aiResponse = data.choices[0].message.content;
+            } catch (err) {
+              core.warning(`GitHub Models API call failed: ${err.message}`);
+              return;
+            }
+
+            // --- Parse response ---
+            const descMatch = aiResponse.match(/AI_DESCRIPTION:\s*([\s\S]*?)(?=SUGGESTED_LABELS:|$)/);
+            const labelsMatch = aiResponse.match(/SUGGESTED_LABELS:\s*(.*)/);
+
+            const aiDescription = descMatch ? descMatch[1].trim() : aiResponse.trim();
+            const suggestedLabels = labelsMatch
+              ? labelsMatch[1].split(',').map(l => l.trim()).filter(l => availableLabels.includes(l))
+              : [];
+
+            // --- Update PR body ---
+            const startIdx = body.indexOf(startMarker);
+            const endIdx = body.indexOf(endMarker) + endMarker.length;
+
+            const newSection = `${startMarker}\n${aiDescription}\n${endMarker}`;
+            const newBody = body.substring(0, startIdx) + newSection + body.substring(endIdx);
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              body: newBody,
+            });
+
+            core.info(`Updated PR body with AI description (${aiDescription.length} chars)`);
+
+            // --- Apply suggested labels ---
+            if (suggestedLabels.length > 0) {
+              // Get current labels to avoid removing manually-added ones
+              const currentLabels = pr.labels.map(l => l.name);
+              const newLabels = suggestedLabels.filter(l => !currentLabels.includes(l));
+
+              if (newLabels.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  labels: newLabels,
+                });
+                core.info(`Applied labels: ${newLabels.join(', ')}`);
+              }
+            }
