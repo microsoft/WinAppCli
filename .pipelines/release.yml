@@ -150,6 +150,67 @@ extends:
                   Rename-Item -Path $_.FullName -NewName $newName
                 }
 
+          - checkout: self
+            fetchDepth: 0
+
+          - task: PowerShell@2
+            displayName: "Generate Release Notes"
+            continueOnError: true
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+            inputs:
+              pwsh: true
+              filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
+              arguments: '-CurrentTag "v$(version)" -CurrentRef "$(Build.SourceVersion)" -OutputPath "$(Pipeline.Workspace)/release-notes.md"'
+
+          - task: PowerShell@2
+            displayName: "Compose Full Release Body"
+            inputs:
+              pwsh: true
+              targetType: 'inline'
+              script: |
+                $aiNotes = ""
+                $notesPath = "$(Pipeline.Workspace)/release-notes.md"
+                if (Test-Path $notesPath) {
+                    $aiNotes = Get-Content $notesPath -Raw
+                }
+
+                $lines = @(
+                    "## Installation Options"
+                    ""
+                    "### MSIX Installer (Recommended)"
+                    "1. Download ``winappcli_x64.msix`` for x64 or ``winappcli_arm64.msix`` for ARM64"
+                    "2. Double-click to install"
+                    "3. Automatically added to PATH"
+                    ""
+                    "### Standalone CLI Binaries"
+                    "1. Download ``winappcli-x64.zip`` for x64 or ``winappcli-arm64.zip`` for ARM64"
+                    "2. Extract to your desired location"
+                    "3. Add to PATH or run directly: ``winapp.exe``"
+                    ""
+                    "### NPM Package (for Electron or NodeJS)"
+                    "``````bash"
+                    "npm install microsoft-winappcli.tgz"
+                    "``````"
+                    ""
+                    "## What's Included"
+                    "- MSIX installer packages (x64 and ARM64)"
+                    "- Standalone CLI binaries (x64 and ARM64)"
+                    "- NPM package for NodeJS/Electron integration"
+                )
+                $installationNotes = $lines -join "`n"
+
+                $fullBody = "Version: ``$(version)```n"
+                $fullBody += "Commit: ``$(Build.SourceVersion)```n`n"
+                if ($aiNotes) {
+                    $fullBody += $aiNotes + "`n`n---`n`n"
+                }
+                $fullBody += $installationNotes
+
+                $fullBody | Set-Content "$(Pipeline.Workspace)/full-release-notes.md" -Encoding UTF8 -NoNewline
+                Write-Host "Release body written ($($fullBody.Length) chars)"
+
           - ${{ if ne(parameters.GitHubReleaseAlreadyExists, 'true') }}:
             - task: GitHubRelease@1
               displayName: "Create GitHub Release"
@@ -168,34 +229,8 @@ extends:
                   $(Pipeline.Workspace)/npm-package/*.tgz
                 assetUploadMode: 'delete'
                 addChangeLog: false
-                releaseNotesSource: 'inline'
-                releaseNotesInline: |
-                  🚀 **Automated Release Build**
-
-                  Version: `$(version)`
-                  Commit: `$(Build.SourceVersion)`
-
-                  ## Installation Options
-
-                  ### 📦 MSIX Installer (Recommended)
-                  1. Download `winappcli_x64.msix` for x64 or `winappcli_arm64.msix` for ARM64
-                  2. Double-click to install
-                  3. Automatically added to PATH
-
-                  ### 📦 Standalone CLI Binaries
-                  1. Download `winappcli-x64.zip` for x64 or `winappcli-arm64.zip` for ARM64
-                  2. Extract to your desired location
-                  3. Add to PATH or run directly: `winapp.exe`
-
-                  ### 📚 NPM Package (for Electron or NodeJS)
-                  ```bash
-                  npm install microsoft-winappcli.tgz
-                  ```
-
-                  ## What's Included
-                  - ✅ MSIX installer packages (x64 and ARM64)
-                  - ✅ Standalone CLI binaries (x64 and ARM64)
-                  - ✅ NPM package for NodeJS/Electron integration
+                releaseNotesSource: 'filePath'
+                releaseNotesFilePath: '$(Pipeline.Workspace)/full-release-notes.md'
 
     - ${{ if eq(parameters.DoEsrp, 'true') }}:
       - stage: Release_Npm
