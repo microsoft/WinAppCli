@@ -96,20 +96,20 @@ Create and modify appxmanifest.xml files for package identity and MSIX packaging
 
 #### `winapp manifest generate`
 
-Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).
+Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
 
 **Arguments:**
 - `<directory>` - Directory to generate manifest in
 
 **Options:**
 - `--description` - Human-readable app description shown during installation and in Windows Settings (default: `My Application`)
-- `--entrypoint` / `--executable` - Entry point of the application (e.g., executable path / name, or .py/.js script if template is HostedApp). Default: <package-name>.exe
+- `--executable` / `--entrypoint` - Path to the application's executable. Default: <package-name>.exe
 - `--if-exists` - Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) (default: `Error`)
 - `--logo-path` - Path to logo image file
 - `--package-name` - Package name (default: folder name)
 - `--publisher-name` - Publisher CN (default: CN=<current user>)
 - `--quiet` / `-q` - Suppress progress messages
-- `--template` - Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host) (default: `Packaged`)
+- `--template` - Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) (default: `Packaged`)
 - `--verbose` / `-v` - Enable verbose output
 - `--version` - App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). (default: `1.0.0.0`)
 
@@ -136,6 +136,7 @@ Create MSIX installer from your built app. Run after building your app. appxmani
 **Options:**
 - `--cert` - Path to signing certificate (will auto-sign if provided)
 - `--cert-password` - Certificate password (default: password) (default: `password`)
+- `--executable` / `--exe` - Path to the executable relative to the input folder.
 - `--generate-cert` - Generate a new development certificate
 - `--install-cert` - Install certificate to machine
 - `--manifest` - Path to AppX manifest file (default: auto-detect from input folder or current directory)

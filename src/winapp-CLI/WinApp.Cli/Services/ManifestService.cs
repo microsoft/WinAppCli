@@ -23,17 +23,17 @@ internal partial class ManifestService(
         string? publisherName,
         string version,
         string? description,
-        string? entryPoint,
+        string? executable,
         bool useDefaults,
         CancellationToken cancellationToken = default)
     {
         // Interactive mode if not --use-defaults (get defaults for prompts)
-        if (!string.IsNullOrEmpty(entryPoint))
+        if (!string.IsNullOrEmpty(executable))
         {
-            var fileVersionInfo = FileVersionInfo.GetVersionInfo(entryPoint);
+            var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable);
             packageName ??= !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription)
                 ? fileVersionInfo.FileDescription
-                : Path.GetFileNameWithoutExtension(entryPoint);
+                : Path.GetFileNameWithoutExtension(executable);
             if (!string.IsNullOrWhiteSpace(fileVersionInfo.Comments))
             {
                 description = fileVersionInfo.Comments;
@@ -50,7 +50,6 @@ internal partial class ManifestService(
         packageName ??= SystemDefaultsHelper.GetDefaultPackageName(directory);
         description ??= SystemDefaultsHelper.GetDefaultDescription();
         publisherName ??= SystemDefaultsHelper.GetDefaultPublisherCN();
-        entryPoint ??= $"{packageName}.exe";
 
         packageName = CleanPackageName(packageName);
 
@@ -61,15 +60,13 @@ internal partial class ManifestService(
             publisherName = await PromptForValueAsync(ansiConsole, "Publisher name", publisherName, cancellationToken);
             version = await PromptForValueAsync(ansiConsole, "Version", version, cancellationToken);
             description = await PromptForValueAsync(ansiConsole, "Description", description, cancellationToken);
-            entryPoint = await PromptForValueAsync(ansiConsole, "EntryPoint/Executable", entryPoint, cancellationToken);
         }
 
         return new ManifestGenerationInfo(
             packageName,
             publisherName,
             version,
-            description,
-            entryPoint);
+            description);
     }
 
     public async Task GenerateManifestAsync(
@@ -77,6 +74,7 @@ internal partial class ManifestService(
         ManifestGenerationInfo manifestGenerationInfo,
         ManifestTemplates manifestTemplate,
         FileInfo? logoPath,
+        string? executable,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
@@ -86,52 +84,20 @@ internal partial class ManifestService(
         string? publisherName = manifestGenerationInfo.PublisherName;
         string version = manifestGenerationInfo.Version;
         string description = manifestGenerationInfo.Description;
-        string? entryPoint = manifestGenerationInfo.EntryPoint;
 
         taskContext.AddDebugMessage($"Logo path: {logoPath?.FullName ?? "None"}");
 
         packageName = CleanPackageName(packageName);
 
-        var entryPointAbsolute = Path.IsPathRooted(entryPoint)
-                ? entryPoint
-                : Path.GetFullPath(Path.Combine(directory.FullName, entryPoint));
-
-        entryPoint = Path.GetRelativePath(directory.FullName, entryPointAbsolute);
-
-        string? hostId = null;
-        string? hostParameters = null;
-        string? hostRuntimeDependencyPackageName = null;
-        string? hostRuntimeDependencyPublisherName = null;
-        string? hostRuntimeDependencyMinVersion = null;
-        if (manifestTemplate == ManifestTemplates.HostedApp)
+        // Resolve executable path if provided (used for icon extraction)
+        string? executableAbsolute = null;
+        if (!string.IsNullOrEmpty(executable))
         {
-            if (!File.Exists(entryPointAbsolute))
-            {
-                taskContext.AddDebugMessage($"Hosted app entry point file not found: {entryPointAbsolute}");
-                throw new FileNotFoundException($"Hosted app entry point file not found.", entryPointAbsolute);
-            }
+            executableAbsolute = Path.IsPathRooted(executable)
+                ? executable
+                : Path.GetFullPath(Path.Combine(directory.FullName, executable));
 
-            // TODO: generalize this mapping or move to a config file
-            if (entryPoint.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
-            {
-                hostId = "Python314";
-                hostParameters = $"$(package.effectivePath)\\{entryPoint}";
-                hostRuntimeDependencyPackageName = "Python314";
-                hostRuntimeDependencyPublisherName = "Test Publisher";
-                hostRuntimeDependencyMinVersion = "3.14.0.0";
-            }
-            else if (entryPoint.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
-            {
-                hostId = "Nodejs22";
-                hostParameters = $"$(package.effectivePath)\\{entryPoint}";
-                hostRuntimeDependencyPackageName = "Nodejs22";
-                hostRuntimeDependencyPublisherName = "Test Publisher";
-                hostRuntimeDependencyMinVersion = "22.21.0.0";
-            }
-            else
-            {
-                throw new InvalidOperationException("Unsupported hosted app executable type. Only .py and .js are supported.");
-            }
+            executable = Path.GetRelativePath(directory.FullName, executableAbsolute);
         }
 
         // Generate complete manifest using shared service
@@ -140,27 +106,21 @@ internal partial class ManifestService(
             packageName,
             publisherName,
             version,
-            entryPoint,
             manifestTemplate,
             description,
-            hostId,
-            hostParameters,
-            hostRuntimeDependencyPackageName,
-            hostRuntimeDependencyPublisherName,
-            hostRuntimeDependencyMinVersion,
             taskContext,
             cancellationToken);
 
         string? extractedLogoPath = null;
 
-        // If no logo provided, extract from entry point
-        if (logoPath == null)
+        // If no logo provided, try to extract from executable (when available)
+        if (logoPath == null && !string.IsNullOrEmpty(executableAbsolute))
         {
-            taskContext.AddDebugMessage($"No logo path provided, attempting to extract from entry point: {entryPointAbsolute}");
+            taskContext.AddDebugMessage($"No logo path provided, attempting to extract from executable: {executableAbsolute}");
             Icon? extractedIcon = null;
             try
             {
-                extractedIcon = ShellIcon.GetJumboIcon(entryPointAbsolute);
+                extractedIcon = ShellIcon.GetJumboIcon(executableAbsolute);
                 // save temporary
                 if (extractedIcon != null)
                 {

@@ -9,6 +9,5 @@ namespace WinApp.Cli.Models;
 public enum ManifestTemplates
 {
     Packaged,
-    Sparse,
-    HostedApp
+    Sparse
 }

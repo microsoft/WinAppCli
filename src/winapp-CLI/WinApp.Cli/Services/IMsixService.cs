@@ -22,6 +22,7 @@ internal interface IMsixService
         string? publisher = null,
         FileInfo? manifestPath = null,
         bool selfContained = false,
+        string? executable = null,
         CancellationToken cancellationToken = default);
 
     public Task<MsixIdentityResult> AddMsixIdentityAsync(
