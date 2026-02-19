@@ -37,7 +37,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton(AnsiConsole.Console)
-            .AddSingleton<IStatusService, StatusService>();
+            .AddSingleton<IStatusService, StatusService>()
+            .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -57,10 +58,11 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
-                .UseCommandHandler<ToolCommand, ToolCommand.Handler>();
+                .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
+                .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false);
     }
 
-    public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services)
+    public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)
         where TCommand : Command
         where THandler : AsynchronousCommandLineAction
     {
@@ -69,8 +71,11 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton(sp =>
             {
                 var command = ActivatorUtilities.CreateInstance<TCommand>(sp);
-                command.Options.Add(WinAppRootCommand.VerboseOption);
-                command.Options.Add(WinAppRootCommand.QuietOption);
+                if (addDefaultOptions)
+                {
+                    command.Options.Add(WinAppRootCommand.VerboseOption);
+                    command.Options.Add(WinAppRootCommand.QuietOption);
+                }
                 command.SetAction((parseResult, ct) => sp.GetRequiredService<THandler>().InvokeAsync(parseResult, ct));
                 return command;
             });
