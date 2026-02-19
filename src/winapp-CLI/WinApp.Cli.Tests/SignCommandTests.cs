@@ -606,7 +606,7 @@ public class SignCommandTests : BaseCommandTests
 
         var errorMessage = ConsoleStdErr.ToString().Trim();
 
-        Assert.Contains("Failed to sign file: error 0x8007000B: The app manifest publisher name (CN=Right) must match the subject name of the signing certificate (CN=Wrong).", errorMessage,
+        Assert.Contains("[ERROR] - Failed to sign file: The app manifest publisher name (CN=Right) must match the subject name of the signing certificate (CN=Wrong).", errorMessage,
             "Expected specific error message about publisher mismatch with error code 0x8007000B");
     }
 }

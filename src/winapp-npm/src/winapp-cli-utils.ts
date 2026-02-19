@@ -58,7 +58,6 @@ export async function callWinappCli(args: string[], options: CallWinappCliOption
         resolve({ exitCode: code });
       } else {
         if (exitOnError) {
-          console.error(`winapp-cli exited with code ${code}`);
           process.exit(code ?? 1);
         } else {
           reject(new Error(`winapp-cli exited with code ${code}`));

@@ -234,7 +234,12 @@ internal partial class CertificateService(
 
                 if (record != null)
                 {
-                    throw new InvalidOperationException($"Failed to sign file: {record.FormatDescription()}", ex);
+                    var description = record.FormatDescription() ?? string.Empty;
+
+                    // Strip leading "error 0x8007000B: " from the event log description
+                    description = EventLogHexErrorRegex().Replace(description, "");
+
+                    throw new InvalidOperationException($"Failed to sign file: {description}", ex);
                 }
                 
                 await Task.Delay(pollingInterval, cancellationToken);
@@ -427,7 +432,7 @@ internal partial class CertificateService(
             if (!string.Equals(normalizedCertPublisher, normalizedManifestPublisher, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    $"Error: Publisher in {manifestPath} (CN={normalizedManifestPublisher}) does not match the publisher in the certificate {certificatePath} (CN={normalizedCertPublisher}).");
+                    $"Publisher in {manifestPath} (CN={normalizedManifestPublisher}) does not match the publisher in the certificate {certificatePath} (CN={normalizedCertPublisher}).");
             }
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
@@ -496,4 +501,7 @@ internal partial class CertificateService(
 
     [GeneratedRegex(@"CN=([^,]+)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex CnFieldRegex();
+
+    [GeneratedRegex(@"^error\s+0x[0-9A-Fa-f]+:\s*", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex EventLogHexErrorRegex();
 }

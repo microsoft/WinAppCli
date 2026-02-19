@@ -74,7 +74,7 @@ internal class CreateDebugIdentityCommand : Command
                 }
                 catch (Exception error)
                 {
-                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.Message}");
+                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.GetBaseException().Message}");
                 }
 
                 return (0, "Package identity created successfully.");

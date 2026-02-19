@@ -61,9 +61,7 @@ export async function main(): Promise<void> {
 
     // Route everything else to winapp-cli
     await callWinappCli(args, { exitOnError: true });
-  } catch (error) {
-    const err = error as Error;
-    console.error(`Error: ${err.message}`);
+  } catch {
     process.exit(1);
   }
 }
@@ -318,9 +316,7 @@ async function handleCreateAddon(args: string[]): Promise<void> {
         `     "const ${result.addonName} = require('./${result.addonName}/build/Release/${result.addonName}.node')";`
       );
     }
-  } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to generate addon files: ${err.message}`);
+  } catch {
     process.exit(1);
   }
 }
@@ -384,9 +380,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     });
 
     console.log(`✅ Electron debug identity setup completed successfully!`);
-  } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to add Electron debug identity: ${err.message}`);
+  } catch {
     process.exit(1);
   }
 }
@@ -424,9 +418,7 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
     } else {
       console.log(`ℹ️  No backup found - electron.exe may already be clean.`);
     }
-  } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to clear Electron debug identity: ${err.message}`);
+  } catch {
     process.exit(1);
   }
 }

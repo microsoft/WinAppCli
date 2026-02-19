@@ -157,7 +157,7 @@ internal class UpdateCommand : Command
                     {
                         taskContext.AddDebugMessage(error.StackTrace);
                     }
-                    return (1, $"{UiSymbols.Error} Update command failed: {error.Message}");
+                    return (1, $"{UiSymbols.Error} Update command failed: {error.GetBaseException().Message}");
                 }
             }, cancellationToken);
         }

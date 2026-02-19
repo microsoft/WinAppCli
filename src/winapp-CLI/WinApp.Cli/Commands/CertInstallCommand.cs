@@ -62,7 +62,7 @@ internal class CertInstallCommand : Command
                 }
                 catch (Exception error)
                 {
-                    return Task.FromResult((1, $"{UiSymbols.Error} Failed to install certificate: {error.Message}"));
+                    return Task.FromResult((1, $"{UiSymbols.Error} Failed to install certificate: {error.GetBaseException().Message}"));
                 }
             }, cancellationToken);
         }
