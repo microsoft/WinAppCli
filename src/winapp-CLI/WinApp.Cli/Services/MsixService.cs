@@ -287,7 +287,7 @@ internal partial class MsixService(
         {
             var manifestContent = await File.ReadAllTextAsync(appxManifestPath.FullName, Encoding.UTF8, cancellationToken);
 
-            // Resolve placeholders in manifest before extracting executable
+            // Resolve placeholders in memory only to extract the executable path
             if (PlaceholderHelper.ContainsPlaceholders(manifestContent))
             {
                 // Without an explicit entrypoint, we can't resolve $targetnametoken$
@@ -299,45 +299,14 @@ internal partial class MsixService(
                         "Provide the entrypoint argument to specify the executable path.");
                 }
 
-                // Resolve built-in tokens (e.g. $targetentrypoint$)
+                // Resolve built-in tokens (e.g. $targetentrypoint$) in memory to extract executable
                 manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent);
-
-                // Write the resolved manifest back
-                await File.WriteAllTextAsync(appxManifestPath.FullName, manifestContent, Encoding.UTF8, cancellationToken);
             }
 
             var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
             if (execMatch.Success)
             {
                 entryPointPath = execMatch.Groups[1].Value;
-            }
-        }
-        else
-        {
-            // entryPointPath was provided — resolve manifest placeholders using it
-            var manifestContent = await File.ReadAllTextAsync(appxManifestPath.FullName, Encoding.UTF8, cancellationToken);
-            if (PlaceholderHelper.ContainsPlaceholders(manifestContent))
-            {
-                var nameWithoutExtension = Path.GetFileNameWithoutExtension(entryPointPath);
-                var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [PlaceholderHelper.TargetNameToken] = nameWithoutExtension
-                };
-
-                // Also replace the Executable attribute if it has a placeholder
-                var executableAttrMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-                if (executableAttrMatch.Success && PlaceholderHelper.ContainsPlaceholders(executableAttrMatch.Groups[1].Value))
-                {
-                    var exeName = Path.GetFileName(entryPointPath);
-                    manifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
-                        manifestContent, $"${{1}}\"{exeName}\"");
-                }
-
-                manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
-                PlaceholderHelper.ThrowIfUnresolvedPlaceholders(manifestContent);
-
-                // Write the resolved manifest back
-                await File.WriteAllTextAsync(appxManifestPath.FullName, manifestContent, Encoding.UTF8, cancellationToken);
             }
         }
 
@@ -1351,6 +1320,31 @@ internal partial class MsixService(
 
         // Step 2: Parse original manifest to get identity and assets
         var originalManifestContent = await File.ReadAllTextAsync(originalManifestPath.FullName, Encoding.UTF8, cancellationToken);
+
+        // Resolve placeholders in memory (never write back to the original manifest)
+        if (PlaceholderHelper.ContainsPlaceholders(originalManifestContent))
+        {
+            var nameWithoutExtension = Path.GetFileNameWithoutExtension(entryPointPath);
+            var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [PlaceholderHelper.TargetNameToken] = nameWithoutExtension
+            };
+
+            // Also replace the Executable attribute if it has a placeholder
+            var executableAttrMatch = AppxPackageApplicationExecutableRegex().Match(originalManifestContent);
+            if (executableAttrMatch.Success && PlaceholderHelper.ContainsPlaceholders(executableAttrMatch.Groups[1].Value))
+            {
+                var exeName = Path.GetFileName(entryPointPath);
+                originalManifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
+                    originalManifestContent, $"${{1}}\"{exeName}\"");
+            }
+
+            originalManifestContent = PlaceholderHelper.ReplacePlaceholders(originalManifestContent, replacements);
+            PlaceholderHelper.ThrowIfUnresolvedPlaceholders(originalManifestContent);
+
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Resolved manifest placeholders for debug identity");
+        }
+
         var originalIdentity = ParseAppxManifestAsync(originalManifestContent);
 
         // Step 3: Create debug identity (optionally with ".debug" suffix)
