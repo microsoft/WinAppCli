@@ -5,8 +5,8 @@ namespace WinApp.Cli.Services;
 
 internal interface IPackageLayoutService
 {
-    public void CopyIncludesFromPackages(DirectoryInfo pkgsDir, DirectoryInfo includeOut);
-    public void CopyLibsAllArch(DirectoryInfo pkgsDir, DirectoryInfo libRoot);
-    public void CopyRuntimesAllArch(DirectoryInfo pkgsDir, DirectoryInfo binRoot);
-    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo pkgsDir, Dictionary<string, string> usedVersions);
+    public void CopyIncludesFromPackages(DirectoryInfo nugetCacheDir, DirectoryInfo includeOut, Dictionary<string, string> usedVersions);
+    public void CopyLibsAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo libRoot, Dictionary<string, string> usedVersions);
+    public void CopyRuntimesAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo binRoot, Dictionary<string, string> usedVersions);
+    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions);
 }

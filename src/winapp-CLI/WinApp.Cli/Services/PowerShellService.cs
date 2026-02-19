@@ -114,7 +114,7 @@ internal class PowerShellService : IPowerShellService
 
         // For elevated commands, exit codes may not be reliable, so we return 0 if no exception occurred
         var exitCode = elevated ? (process.ExitCode == 0 ? 0 : process.ExitCode) : process.ExitCode;
-        
+
         return (exitCode, stdOut);
     }
 }

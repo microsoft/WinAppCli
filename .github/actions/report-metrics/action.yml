@@ -29,7 +29,6 @@ runs:
       run: |
         New-Item -ItemType Directory -Path "metrics-baseline" -Force | Out-Null
         Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json" -ErrorAction SilentlyContinue
-        Copy-Item "${{ inputs.artifacts-path }}/build-warnings.json" "metrics-baseline/warnings.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "metrics-baseline/tests.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
 
@@ -54,9 +53,6 @@ runs:
           let current = {};
           try { current = JSON.parse(fs.readFileSync(`${artifactsPath}/binary-sizes.json`, 'utf8')); } catch {}
 
-          let warnings = { total: 0, trimming: 0, codeAnalysis: 0, other: 0 };
-          try { warnings = JSON.parse(fs.readFileSync(`${artifactsPath}/build-warnings.json`, 'utf8')); } catch {}
-
           let tests = { total: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0 };
           try { tests = JSON.parse(fs.readFileSync(`${artifactsPath}/test-summary.json`, 'utf8')); } catch {}
 
@@ -65,7 +61,6 @@ runs:
 
           // --- Load baselines ---
           let sizeBaseline = {};
-          let warningsBaseline = null;
           let testsBaseline = null;
           let startupBaseline = null;
           let hasBaseline = false;
@@ -73,7 +68,6 @@ runs:
             sizeBaseline = JSON.parse(fs.readFileSync('metrics-baseline/sizes.json', 'utf8'));
             hasBaseline = true;
           } catch {}
-          try { warningsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/warnings.json', 'utf8')); } catch {}
           try { testsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/tests.json', 'utf8')); } catch {}
           try { startupBaseline = JSON.parse(fs.readFileSync('metrics-baseline/startup.json', 'utf8')); } catch {}
 
@@ -178,26 +172,6 @@ runs:
               const linkedLabel = artifactLink(key, labels[key] || key);
               body += `| ${linkedLabel} | ${formatBytes(size)} |\n`;
             }
-          }
-
-          // --- Build warnings ---
-          body += '\n### Build Warnings\n\n';
-          body += '| Category | Count |';
-          body += warningsBaseline ? ' Delta |\n' : '\n';
-          body += '|----------|-------|';
-          body += warningsBaseline ? '-------|\n' : '\n';
-          const warnRows = [
-            ['Trimming / AOT', warnings.trimming, warningsBaseline?.trimming],
-            ['Code Analysis', warnings.codeAnalysis, warningsBaseline?.codeAnalysis],
-            ['Other', warnings.other, warningsBaseline?.other],
-            ['**Total**', warnings.total, warningsBaseline?.total],
-          ];
-          for (const [label, curr, base] of warnRows) {
-            body += `| ${label} | ${curr} |`;
-            if (warningsBaseline) {
-              body += ` ${base != null ? deltaInt(curr, base) : 'N/A'} |`;
-            }
-            body += '\n';
           }
 
           // --- Test summary ---

@@ -47,7 +47,7 @@ node cli.js help
 
 | Command | When to use |
 |---------|-------------|
-| `init` | First-time project setup. Creates `winapp.yaml`, `appxmanifest.xml` with assets, dev certificate, and downloads SDKs. Combines `manifest generate` + `cert generate`. Interactive by default. |
+| `init` | First-time project setup. Creates `winapp.yaml`, `appxmanifest.xml` with assets, and downloads SDKs. Interactive by default. |
 | `restore` | Reinstall packages from existing `winapp.yaml`. Use after clone or when `.winapp/` is missing. Does not update versions. |
 | `update` | Check for newer SDK versions and update `winapp.yaml`. Also refreshes build tools cache. |
 | `manifest generate` | Create `appxmanifest.xml` standalone, without full init. Use when you only need a manifest. |

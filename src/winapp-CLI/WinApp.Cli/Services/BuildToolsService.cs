@@ -14,7 +14,10 @@ namespace WinApp.Cli.Services;
 internal partial class BuildToolsService(
     IConfigService configService,
     IWinappDirectoryService winappDirectoryService,
+    INugetService nugetService,
     IPackageInstallationService packageInstallationService,
+    IDotNetService dotNetService,
+    ICurrentDirectoryProvider currentDirectoryProvider,
     ILogger<BuildToolsService> logger) : IBuildToolsService
 {
     internal const string BUILD_TOOLS_PACKAGE = "Microsoft.Windows.SDK.BuildTools";
@@ -24,6 +27,7 @@ internal partial class BuildToolsService(
 
     /// <summary>
     /// Find a path within any package structure (generic version)
+    /// Uses the NuGet global packages cache layout: {cache}/{lowercase-id}/{version}/
     /// </summary>
     /// <param name="packageName">The package name (e.g., BUILD_TOOLS_PACKAGE or CPP_SDK_PACKAGE)</param>
     /// <param name="subPath">The subdirectory within the package (e.g., "bin", "schemas", "c")</param>
@@ -32,56 +36,85 @@ internal partial class BuildToolsService(
     /// <returns>Full path to the requested location, or null if not found</returns>
     private DirectoryInfo? FindPackagePath(string packageName, string subPath, string? finalSubPath = null, bool requireArchitecture = false)
     {
-        var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
-        var packagesDir = new DirectoryInfo(Path.Combine(globalWinappDir.FullName, "packages"));
-        if (!packagesDir.Exists)
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+        var packageBaseDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageName.ToLowerInvariant()));
+        if (!packageBaseDir.Exists)
         {
             return null;
         }
 
-        // Find the package directory
-        var packageDirs = packagesDir.EnumerateDirectories()
-            .Where(d => d.Name.StartsWith($"{packageName}.", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        // Enumerate version directories (NuGet cache layout: lowercase-id/version/)
+        var versionDirs = packageBaseDir.EnumerateDirectories().ToArray();
 
-        if (packageDirs.Length == 0)
+        if (versionDirs.Length == 0)
         {
             return null;
         }
 
-        WinappConfig? pinnedConfig = null;
+        // Resolve pinned version from winapp.yaml or .csproj
+        string? pinnedVersion = null;
+
+        // Path 1: Try winapp.yaml
         if (configService.Exists())
         {
-            pinnedConfig = configService.Load();
+            var pinnedConfig = configService.Load();
+            pinnedVersion = pinnedConfig.GetVersion(packageName);
         }
 
-        DirectoryInfo? selectedPackageDir = null;
-
-        // Check if we have a pinned version in config
-        if (pinnedConfig != null)
+        // Path 2: Try .csproj via `dotnet list package --format json`
+        if (string.IsNullOrWhiteSpace(pinnedVersion))
         {
-            var pinnedVersion = pinnedConfig.GetVersion(packageName);
-            if (!string.IsNullOrWhiteSpace(pinnedVersion))
+            try
             {
-                // Look for the specific pinned version
-                selectedPackageDir = packageDirs
-                    .FirstOrDefault(d => d.Name.EndsWith($".{pinnedVersion}", StringComparison.OrdinalIgnoreCase));
-
-                // If pinned version is specified but not found for bin path, return null (strict requirement)
-                // For other paths, continue to try latest
-                if (selectedPackageDir == null && requireArchitecture)
+                var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
+                var csprojFiles = dotNetService.FindCsproj(cwd);
+                var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+                if (csproj != null)
                 {
-                    return null;
+                    var packageList = dotNetService.GetPackageListAsync(csproj).GetAwaiter().GetResult();
+
+                    var allPackages = packageList?.Projects?
+                        .SelectMany(p => p.Frameworks ?? [])
+                        .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+                    var matchedPkg = allPackages?
+                        .FirstOrDefault(p => string.Equals(p.Id, packageName, StringComparison.OrdinalIgnoreCase));
+
+                    if (matchedPkg != null && !string.IsNullOrEmpty(matchedPkg.ResolvedVersion))
+                    {
+                        pinnedVersion = matchedPkg.ResolvedVersion;
+                    }
                 }
+            }
+            catch
+            {
+                // Silently fall through to latest-version fallback
             }
         }
 
-        // No pinned version specified, use latest
-        selectedPackageDir ??= packageDirs
-            .OrderByDescending(d => ExtractVersion(d.Name))
+        DirectoryInfo? selectedVersionDir = null;
+
+        // Check if we have a pinned version
+        if (!string.IsNullOrWhiteSpace(pinnedVersion))
+        {
+            // Look for the specific pinned version directory
+            selectedVersionDir = versionDirs
+                .FirstOrDefault(d => string.Equals(d.Name, pinnedVersion, StringComparison.OrdinalIgnoreCase));
+
+            // If pinned version is specified but not found for bin path, return null (strict requirement)
+            // For other paths, continue to try latest
+            if (selectedVersionDir == null && requireArchitecture)
+            {
+                return null;
+            }
+        }
+
+        // No pinned version specified or not found, use latest
+        selectedVersionDir ??= versionDirs
+            .OrderByDescending(d => ParseVersion(d.Name))
             .First();
 
-        var basePath = new DirectoryInfo(Path.Combine(selectedPackageDir.FullName, subPath));
+        var basePath = new DirectoryInfo(Path.Combine(selectedVersionDir.FullName, subPath));
         if (!basePath.Exists)
         {
             return null;
@@ -146,21 +179,6 @@ internal partial class BuildToolsService(
         return FindPackagePath(BUILD_TOOLS_PACKAGE, "bin", requireArchitecture: true);
     }
 
-    private static Version ExtractVersion(string packageFolderName)
-    {
-        // Extract version from package folder name like "Microsoft.Windows.SDK.BuildTools.10.0.26100.1742"
-        var parts = packageFolderName.Split('.');
-        if (parts.Length >= 4)
-        {
-            var versionPart = string.Join(".", parts.Skip(parts.Length - 4));
-            if (Version.TryParse(versionPart, out var version))
-            {
-                return version;
-            }
-        }
-        return new Version(0, 0, 0, 0);
-    }
-
     private static Version ParseVersion(string versionString)
     {
         return Version.TryParse(versionString, out var version) ? version : new Version(0, 0, 0, 0);
@@ -175,12 +193,6 @@ internal partial class BuildToolsService(
     /// <returns>Full path to the executable if found, null otherwise</returns>
     public FileInfo? GetBuildToolPath(string toolName)
     {
-        var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
-        if (globalWinappDir == null)
-        {
-            return null;
-        }
-
         var binPath = FindBuildToolsBinPath();
         if (binPath == null)
         {
@@ -343,7 +355,7 @@ internal partial class BuildToolsService(
             {
                 tool.PrintErrorText(stdout, stderr, logger);
             }
-            
+
             throw new InvalidBuildToolException(p.Id, stdout, stderr, $"{tool.ExecutableName} execution failed with exit code {p.ExitCode}");
         }
 
