@@ -21,6 +21,7 @@ internal class PackageCommand : Command
     public static Option<string?> PublisherOption { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> SelfContainedOption { get; }
+    public static Option<string?> ExecutableOption { get; }
 
     static PackageCommand()
     {
@@ -74,6 +75,11 @@ internal class PackageCommand : Command
         {
             Description = "Bundle Windows App SDK runtime for self-contained deployment"
         };
+        ExecutableOption = new Option<string?>("--executable")
+        {
+            Description = "Path to the executable relative to the input folder."
+        };
+        ExecutableOption.Aliases.Add("--exe");
     }
 
     public PackageCommand()
@@ -91,6 +97,7 @@ internal class PackageCommand : Command
         Options.Add(PublisherOption);
         Options.Add(ManifestOption);
         Options.Add(SelfContainedOption);
+        Options.Add(ExecutableOption);
     }
 
     public class Handler(IMsixService msixService, IStatusService statusService) : AsynchronousCommandLineAction
@@ -108,6 +115,7 @@ internal class PackageCommand : Command
             var publisher = parseResult.GetValue(PublisherOption);
             var manifestPath = parseResult.GetValue(ManifestOption);
             var selfContained = parseResult.GetValue(SelfContainedOption);
+            var executable = parseResult.GetValue(ExecutableOption);
 
             return await statusService.ExecuteWithStatusAsync("Creating MSIX package...", async (taskContext, cancellationToken) =>
             {
@@ -116,7 +124,7 @@ internal class PackageCommand : Command
                     // Auto-sign if certificate is provided or if generate-cert is specified
                     var autoSign = certPath != null || generateCert;
 
-                    var result = await msixService.CreateMsixPackageAsync(inputFolder, output, taskContext, name, skipPri, autoSign, certPath, certPassword, generateCert, installCert, publisher, manifestPath, selfContained, cancellationToken);
+                    var result = await msixService.CreateMsixPackageAsync(inputFolder, output, taskContext, name, skipPri, autoSign, certPath, certPassword, generateCert, installCert, publisher, manifestPath, selfContained, executable, cancellationToken);
 
                     taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.MsixPath}");
                     if (result.Signed)

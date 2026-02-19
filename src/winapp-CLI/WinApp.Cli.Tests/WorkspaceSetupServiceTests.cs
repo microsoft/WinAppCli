@@ -193,7 +193,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
 /// End-to-end tests for the merged .NET and native workspace setup code paths.
 /// These tests verify that the unified WorkspaceSetupService correctly handles
 /// both .NET (csproj) and native (C++) projects through the shared flow,
-/// including the key fix: WinAppSDK Runtime installation on the .NET path.
+/// including the key fix: Windows App SDK Runtime installation on the .NET path.
 /// </summary>
 [TestClass]
 public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
@@ -327,7 +327,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
 
         // Verify TFM was updated in the csproj file
         var updatedContent = await File.ReadAllTextAsync(csproj.FullName);
-        Assert.Contains("-windows", updatedContent, "TFM should be updated to include -windows for WinAppSDK support");
+        Assert.Contains("-windows", updatedContent, "TFM should be updated to include -windows for Windows App SDK support");
         Assert.DoesNotContain(">net8.0<", updatedContent, "Original unsupported TFM should be replaced");
     }
 
@@ -467,12 +467,12 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
 
     #endregion
 
-    #region WinAppSDK Runtime installation tests (bug fix verification)
+    #region Windows App SDK Runtime installation tests (bug fix verification)
 
     [TestMethod]
     public async Task SetupWorkspace_DotNet_AttemptsRuntimeInstall()
     {
-        // This test verifies the key bug fix: the WinAppSDK Runtime install
+        // This test verifies the key bug fix: the Windows App SDK Runtime install
         // is now shared between .NET and native paths.
         // Previously, the .NET path skipped the runtime install entirely.
 

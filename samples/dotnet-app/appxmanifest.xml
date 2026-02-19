@@ -33,7 +33,7 @@
 
   <Applications>
     <Application Id="dotnetApp"
-      Executable="dotnet-app.exe"
+      Executable="$targetnametoken$.exe"
       EntryPoint="Windows.FullTrustApplication"
       uap10:TrustLevel="mediumIL" 
       uap10:RuntimeBehavior="packagedClassicApp">

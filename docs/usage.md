@@ -156,14 +156,23 @@ winapp pack <input-folder> [options]
 - `--publisher <name>` - Publisher name for certificate generation
 - `--self-contained` - Bundle Windows App SDK runtime
 - `--skip-pri` - Skip PRI file generation
+- `--executable <path>` - Path to the executable relative to the input folder (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
 
 **What it does:**
 
 - Validates and processes AppxManifest.xml files
+- Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+**Placeholder resolution during packaging:**
+
+If the manifest contains `$targetnametoken$` in the `Executable` attribute:
+1. If `--executable` is provided (path relative to the input folder), the placeholder is replaced with the specified value
+2. Otherwise, `winapp pack` scans the input folder root for `.exe` files — if exactly one is found, it is used automatically
+3. If zero or multiple `.exe` files are found, an error is shown asking you to specify `--executable`
 
 **Examples:**
 
@@ -176,6 +185,9 @@ winapp pack ./dist --output MyApp.msix --cert ./cert.pfx
 
 # Package with generated and installed certificate and self-contained WinAppSDK runtime
 winapp pack ./dist --generate-cert --install-cert --self-contained
+
+# Package with explicit executable (resolves $targetnametoken$ in manifest)
+winapp pack ./dist --executable MyApp.exe
 ```
 
 ---
@@ -242,7 +254,7 @@ winapp manifest generate [directory] [options]
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
-- `--template <type>` - Template type: `packaged` (default) or `hostedapp`
+- `--template <type>` - Template type: `packaged` (default) or `sparse`
 - `--logo-path <path>` - Path to logo image file
 - `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
 
@@ -250,16 +262,31 @@ winapp manifest generate [directory] [options]
 
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
-- `hostedapp` - Hosted app manifest for Python/Node.js scripts
+
+**Manifest placeholders:**
+
+Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
+
+| Placeholder | Resolved to | Example |
+|-------------|-------------|---------|
+| `$targetnametoken$` | Executable name without extension | `Executable="$targetnametoken$.exe"` &rarr; `Executable="MyApp.exe"` |
+| `$targetentrypoint$` | `Windows.FullTrustApplication` | Always resolved automatically |
+
+This follows the same convention used by Visual Studio project templates, so manifests are portable across tooling.
+
+**How placeholders are resolved:**
+
+- **`winapp pack`** — During packaging, `$targetnametoken$` is resolved using the `--executable` option or by auto-detecting the single `.exe` in the input folder. If multiple (or zero) `.exe` files are found and `--executable` is not specified, an error is shown.
+- **`winapp create-debug-identity`** — When an entrypoint argument is provided, `$targetnametoken$` is resolved from it. Without an entrypoint, the executable placeholder must already be resolved in the manifest.
+- **`winapp manifest generate --executable`** — When `--executable` is provided, manifest metadata (version, description) and icons are extracted from the executable, but the generated manifest still uses `$targetnametoken$.exe`; this placeholder is resolved later (e.g. `winapp pack` or `winapp create-debug-identity`).
+
+> **PS:** Keeping `$targetnametoken$` in your checked-in manifest avoids hard-coding executable names and works with both `winapp pack` and Visual Studio builds.
 
 **Examples:**
 
 ```bash
 # Generate standard manifest interactively
 winapp manifest generate
-
-# Generate hosted app manifest for Python script
-winapp manifest generate --template hostedapp --entrypoint app.py
 
 # Generate with all options specified
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite

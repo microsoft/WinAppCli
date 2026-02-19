@@ -64,7 +64,7 @@ public class EndToEndTests : BaseCommandTests
             projectDir.FullName,
             "--package-name", projectName,
             "--publisher-name", "CN=TestPublisher",
-            "--entrypoint", exePath
+            "--executable", exePath
         };
 
         var manifestExitCode = await ParseAndInvokeWithCaptureAsync(manifestGenerateCommand, manifestArgs);
@@ -143,7 +143,7 @@ public class EndToEndTests : BaseCommandTests
             "--publisher-name", "CN=TestPublisher",
             "--version", "2.5.0.0",
             "--description", "Custom test application",
-            "--entrypoint", exePath
+            "--executable", exePath
         };
 
         var manifestExitCode = await ParseAndInvokeWithCaptureAsync(manifestGenerateCommand, manifestArgs);
@@ -181,75 +181,47 @@ public class EndToEndTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task E2E_HostedApp_PythonScript_ManifestAndDebugIdentity_ShouldSucceed()
+    public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
     {
-        // This test verifies the hosted app workflow for Python scripts:
-        // 1. Creates a simple Python script (main.py)
-        // 2. Runs 'winapp manifest generate --template hostedapp --entrypoint main.py'
-        // 3. Runs 'winapp create-debug-identity'
-        // 4. Verifies the debug identity was created successfully
+        // This test verifies that --setup-sdks none skips adding package references
+        // but still creates manifest and certificate
 
         // Arrange
-        var projectDir = _tempDirectory.CreateSubdirectory("PythonHostedApp");
-        var scriptName = "main.py";
-        var scriptPath = Path.Combine(projectDir.FullName, scriptName);
+        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleAppNoSdk");
+        var projectName = "TestConsoleAppNoSdk";
 
-        // Step 1: Create a simple Python script
-        var pythonScript = @"# Simple Python hosted app
-import sys
+        // Step 1: Create a new console application
+        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
 
-def main():
-    print(""Hello from Python hosted app!"")
-    print(f""Python version: {sys.version}"")
-    return 0
+        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
 
-if __name__ == ""__main__"":
-    sys.exit(main())
-";
-        await File.WriteAllTextAsync(scriptPath, pythonScript, TestContext.CancellationToken);
-        Assert.IsTrue(File.Exists(scriptPath), "Python script should be created");
 
-        // Step 2: Run 'winapp manifest generate --template hostedapp --entrypoint main.py'
-        var manifestGenerateCommand = GetRequiredService<ManifestGenerateCommand>();
-        var manifestArgs = new[]
+        // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
+        var initCommand = GetRequiredService<InitCommand>();
+        var initArgs = new[]
         {
             projectDir.FullName,
-            "--template", "hostedapp",
-            "--entrypoint", scriptPath
+            "--setup-sdks", "none",
+            "--use-defaults"
         };
 
-        var manifestParseResult = manifestGenerateCommand.Parse(manifestArgs);
-        var manifestExitCode = await manifestParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-        Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
+        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
 
-        // Verify manifest was created with hosted app configuration
+        // Step 3: Verify that csproj was NOT modified (no package references added)
+        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+
+        // When --setup-sdks none, we should not add WindowsAppSDK
+        Assert.IsFalse(
+            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
+            "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
+
+        // Step 4: Manifest should still be created
         var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
 
-        var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
-        Assert.IsTrue(manifestContent.Contains("Python314", StringComparison.OrdinalIgnoreCase) ||
-                      manifestContent.Contains("Python", StringComparison.OrdinalIgnoreCase),
-            "Manifest should contain Python runtime dependency");
-        Assert.IsTrue(manifestContent.Contains(scriptName, StringComparison.OrdinalIgnoreCase),
-            "Manifest should reference the Python script");
-
-        var assetsDir = Path.Combine(projectDir.FullName, "Assets");
-        Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
-
-        // Step 3: Run 'winapp create-debug-identity'
-        var createDebugIdentityCommand = GetRequiredService<CreateDebugIdentityCommand>();
-        var debugIdentityArgs = new[]
-        {
-            "--manifest", manifestPath
-        };
-
-        var debugIdentityParseResult = createDebugIdentityCommand.Parse(debugIdentityArgs);
-        var debugIdentityExitCode = await debugIdentityParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
-        Assert.AreEqual(0, debugIdentityExitCode, "Create debug identity command should complete successfully");
-
-        // Verify the debug identity package was created (sparse package registration)
-        // The create-debug-identity command should have registered the package
-        Console.WriteLine($"Successfully created debug identity for Python hosted app: {scriptName}");
+        Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
     }
 
     [TestMethod]
@@ -323,50 +295,6 @@ if __name__ == ""__main__"":
             "Manifest should contain Identity element");
 
         Console.WriteLine("Successfully set up .NET project with winapp init");
-    }
-
-    [TestMethod]
-    public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
-    {
-        // This test verifies that --setup-sdks none skips adding package references
-        // but still creates manifest and certificate
-
-        // Arrange
-        var projectDir = _tempDirectory.CreateSubdirectory("DotNetConsoleAppNoSdk");
-        var projectName = "TestConsoleAppNoSdk";
-
-        // Step 1: Create a new console application
-        var createResult = await RunDotnetCommandAsync(projectDir, $"new console -n {projectName} -o .");
-        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create console app: {createResult.Output}");
-
-        var csprojPath = Path.Combine(projectDir.FullName, $"{projectName}.csproj");
-
-
-        // Step 2: Run 'winapp init --setup-sdks none --use-defaults'
-        var initCommand = GetRequiredService<InitCommand>();
-        var initArgs = new[]
-        {
-            projectDir.FullName,
-            "--setup-sdks", "none",
-            "--use-defaults"
-        };
-
-        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand, initArgs);
-        Assert.AreEqual(0, initExitCode, "Init command should complete successfully");
-
-        // Step 3: Verify that csproj was NOT modified (no package references added)
-        var updatedCsprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
-
-        // When --setup-sdks none, we should not add WindowsAppSDK
-        Assert.IsFalse(
-            updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
-            "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
-
-        // Step 4: Manifest should still be created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
-
-        Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
     }
 
     /// <summary>
