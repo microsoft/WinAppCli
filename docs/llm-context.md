@@ -136,7 +136,7 @@ Create MSIX installer from your built app. Run after building your app. appxmani
 **Options:**
 - `--cert` - Path to signing certificate (will auto-sign if provided)
 - `--cert-password` - Certificate password (default: password) (default: `password`)
-- `--executable` / `--exe` - Relative path to the executable in the package.
+- `--executable` / `--exe` - Path to the executable relative to the input folder.
 - `--generate-cert` - Generate a new development certificate
 - `--install-cert` - Install certificate to machine
 - `--manifest` - Path to AppX manifest file (default: auto-detect from input folder or current directory)

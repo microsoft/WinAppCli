@@ -156,7 +156,7 @@ winapp pack <input-folder> [options]
 - `--publisher <name>` - Publisher name for certificate generation
 - `--self-contained` - Bundle Windows App SDK runtime
 - `--skip-pri` - Skip PRI file generation
-- `--executable <path>` - Relative path to the executable in the package (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
+- `--executable <path>` - Path to the executable relative to the input folder (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
 
 **What it does:**
 
@@ -170,7 +170,7 @@ winapp pack <input-folder> [options]
 **Placeholder resolution during packaging:**
 
 If the manifest contains `$targetnametoken$` in the `Executable` attribute:
-1. If `--executable` is provided, the placeholder is replaced with the specified value
+1. If `--executable` is provided (path relative to the input folder), the placeholder is replaced with the specified value
 2. Otherwise, `winapp pack` scans the input folder root for `.exe` files — if exactly one is found, it is used automatically
 3. If zero or multiple `.exe` files are found, an error is shown asking you to specify `--executable`
 
@@ -278,7 +278,7 @@ This follows the same convention used by Visual Studio project templates, so man
 
 - **`winapp pack`** — During packaging, `$targetnametoken$` is resolved using the `--executable` option or by auto-detecting the single `.exe` in the input folder. If multiple (or zero) `.exe` files are found and `--executable` is not specified, an error is shown.
 - **`winapp create-debug-identity`** — When an entrypoint argument is provided, `$targetnametoken$` is resolved from it. Without an entrypoint, the executable placeholder must already be resolved in the manifest.
-- **`winapp manifest generate --executable`** — When `--executable` is provided, the generated manifest uses the actual executable name instead of a placeholder.
+- **`winapp manifest generate --executable`** — When `--executable` is provided, manifest metadata (version, description) and icons are extracted from the executable, but the generated manifest still uses `$targetnametoken$.exe`; this placeholder is resolved later (e.g. `winapp pack` or `winapp create-debug-identity`).
 
 > **PS:** Keeping `$targetnametoken$` in your checked-in manifest avoids hard-coding executable names and works with both `winapp pack` and Visual Studio builds.
 

@@ -35,10 +35,6 @@ internal static partial class PlaceholderHelper
     private static partial Regex PlaceholderPattern();
 
     /// <summary>
-    /// Replaces all $key$ placeholders in the content with the corresponding values
-    /// from the replacements dictionary. Matching is case-insensitive on the key.
-    /// </summary>
-    /// <summary>
     /// Built-in replacements that are always applied (e.g. $targetentrypoint$).
     /// </summary>
     private static readonly Dictionary<string, string> BuiltInReplacements = new(StringComparer.OrdinalIgnoreCase)
@@ -46,6 +42,10 @@ internal static partial class PlaceholderHelper
         [TargetEntryPointToken] = FullTrustEntryPoint
     };
 
+    /// <summary>
+    /// Replaces all $key$ placeholders in the content with the corresponding values
+    /// from the replacements dictionary. Matching is case-insensitive on the key.
+    /// </summary>
     /// <param name="content">The manifest content containing placeholders.</param>
     /// <param name="replacements">Dictionary mapping placeholder names to replacement values.</param>
     /// <returns>The content with all matching placeholders resolved.</returns>

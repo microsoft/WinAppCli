@@ -77,7 +77,7 @@ internal class PackageCommand : Command
         };
         ExecutableOption = new Option<string?>("--executable")
         {
-            Description = "Relative path to the executable in the package."
+            Description = "Path to the executable relative to the input folder."
         };
         ExecutableOption.Aliases.Add("--exe");
     }

@@ -802,7 +802,7 @@
           "recursive": false
         },
         "--executable": {
-          "description": "Relative path to the executable in the package.",
+          "description": "Path to the executable relative to the input folder.",
           "hidden": false,
           "aliases": [
             "--exe"
