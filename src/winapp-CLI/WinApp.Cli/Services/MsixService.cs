@@ -369,6 +369,16 @@ internal partial class MsixService(
 
         taskContext.AddDebugMessage($"Using AppX manifest: {appxManifestPath}");
 
+        // If there is a csproj, warn the user that they should use `dotnet run` instead of `winapp run`
+        var csprojFiles = dotNetService.FindCsproj(inputDirectory);
+        var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+        if (csproj != null)
+        {
+            throw new InvalidOperationException(
+                $"A .csproj file was found in the input directory: {csproj.FullName}. " +
+                $"Please use 'dotnet run' to run your application instead of 'winapp run'.");
+        }
+
         if (!outputAppXDirectory.Exists)
         {
             outputAppXDirectory.Create();
