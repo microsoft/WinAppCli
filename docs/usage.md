@@ -443,7 +443,7 @@ winapp tool signtool verify /pa MyApp.msix
 
 ### store
 
-Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
 
 ```bash
 winapp store [args...]
@@ -455,7 +455,7 @@ winapp store [args...]
 
 **What it does:**
 
-- Ensures the Microsoft Store Developer CLI (`msstore`) is installed and available on your system.
+- Ensures the Microsoft Store Developer CLI (`msstore`) is downloaded and available on your system.
 - Forwards all arguments to the `msstore` CLI.
 - Runs the command showing output directly in your terminal.
 

@@ -84,12 +84,23 @@ jobs:
 
             1. **AI_DESCRIPTION**: A concise description of the PR changes for release notes automation. Include:
                - What changed and why (1-3 sentences, user-facing language)
-               - Code usage examples if new commands, flags, or APIs were added (as fenced code blocks)
-               - A "**Breaking Change:**" callout if existing behavior changed, APIs were removed/renamed, defaults changed, or command signatures changed. Describe what breaks and how to migrate.
+               - Code usage examples if new public commands, flags, or APIs were added (as fenced code blocks)
+               - A "**Breaking Change:**" callout ONLY if the change would break existing users who upgrade without modifying their code or configuration. Specifically, flag as breaking only if:
+                 • A previously existing command, flag, or API was removed or renamed
+                 • The default value of an existing option was changed in a way that alters previous behavior
+                 • An existing command's output format changed in a way that breaks automation
+                 • A required argument was added to an existing command (not a new command)
+               - Do NOT flag as breaking change:
+                 • Adding new commands, subcommands, or flags
+                 • Adding new optional parameters to existing commands
+                 • Adding new features that don't affect existing usage
+                 • Internal refactors that don't change public CLI surface
+                 • Changes to build scripts, tests, CI, or docs
+               - When uncertain whether something is a breaking change, do NOT flag it as breaking.
 
             2. **SUGGESTED_LABELS**: A comma-separated list of labels to apply. Only use labels from this exact set: ${ALLOWED_LABELS.join(', ')}
                - Always suggest exactly one type label (bug, enhancement, documentation)
-               - Add "breaking-change" if there are breaking changes
+               - Add "breaking-change" ONLY if you are confident there is a genuine breaking change per the criteria above. When in doubt, omit it.
                - Add framework labels (electron, dotnet, rust, python) if the change is framework-specific
 
             Format your response exactly like this:
