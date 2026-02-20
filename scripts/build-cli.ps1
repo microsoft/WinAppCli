@@ -220,9 +220,22 @@ try
         & $PackageNpmScript -Version $FullVersion -Stable:$Stable
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "npm package creation failed, but continuing..."
-        } else {
-            Write-Host "[NPM] npm package created successfully!" -ForegroundColor Green
+            Write-Error "npm package creation failed"
+            exit 1
+        }
+
+        # Generate npm API documentation from TypeScript source (after npm build so codegen is fresh)
+        Write-Host "[NPM] Generating npm API documentation..." -ForegroundColor Blue
+        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
+        try {
+            npm run generate-docs
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm API documentation generation failed, but continuing..."
+            } else {
+                Write-Host "[NPM] npm API documentation generated successfully!" -ForegroundColor Green
+            }
+        } finally {
+            Pop-Location
         }
     } else {
         Write-Host ""
