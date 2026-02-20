@@ -21,13 +21,13 @@ public class CustomHelpTests : BaseCommandTests
 
         Assert.IsNotNull(helpAction, "Root command help action should be a CustomHelpAction");
 
-        var categorizedNames = new HashSet<string>(helpAction.CategorizedCommandNames, StringComparer.OrdinalIgnoreCase);
+        var categorizedTypes = new HashSet<Type>(helpAction.CategorizedCommandTypes);
 
         // Assert — every registered subcommand must be present in a help category
         foreach (var subcommand in rootCommand.Subcommands)
         {
-            CollectionAssert.Contains(categorizedNames.ToList(), subcommand.Name,
-                $"Top-level command '{subcommand.Name}' is registered on the root command but not listed in any " +
+            CollectionAssert.Contains(categorizedTypes.ToList(), subcommand.GetType(),
+                $"Top-level command '{subcommand.Name}' ({subcommand.GetType().Name}) is registered on the root command but not listed in any " +
                 "help category. Add it to the categories in WinAppRootCommand.");
         }
     }

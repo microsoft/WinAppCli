@@ -1,6 +1,6 @@
 ---
 name: winapp-cli
-description: CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+description: CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 version: 0.1.11
 schema_version: 1.0
 ---
@@ -14,7 +14,7 @@ schema_version: 1.0
 
 ## Overview
 
-CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 
 **Installation:**
 - WinGet: `winget install Microsoft.WinAppCli --source winget`

@@ -17,25 +17,28 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal sealed class CustomHelpAction : SynchronousCommandLineAction
 {
-    private readonly (string Category, string[] CommandNames)[] _categories;
+    private readonly (string Category, Type[] CommandTypes)[] _categories;
     private readonly Command _targetCommand;
+    private readonly IAnsiConsole _ansiConsole;
 
     public override bool Terminating => true;
 
     /// <summary>
-    /// Gets the flat set of all command names covered by the help categories.
+    /// Gets the flat set of all command types covered by the help categories.
     /// </summary>
-    internal IReadOnlyCollection<string> CategorizedCommandNames =>
-        _categories.SelectMany(c => c.CommandNames).ToArray();
+    internal IReadOnlyCollection<Type> CategorizedCommandTypes =>
+        _categories.SelectMany(c => c.CommandTypes).ToArray();
 
     /// <summary>
     /// Creates a new custom help action with the specified command categories.
     /// </summary>
     /// <param name="targetCommand">The command this custom help applies to (e.g. root command).</param>
-    /// <param name="categories">Ordered list of (category name, command names) tuples.</param>
-    public CustomHelpAction(Command targetCommand, params (string Category, string[] CommandNames)[] categories)
+    /// <param name="ansiConsole">The Spectre.Console instance to render help output to.</param>
+    /// <param name="categories">Ordered list of (category name, command types) tuples.</param>
+    public CustomHelpAction(Command targetCommand, IAnsiConsole ansiConsole, params (string Category, Type[] CommandTypes)[] categories)
     {
         _targetCommand = targetCommand;
+        _ansiConsole = ansiConsole;
         _categories = categories;
     }
 
@@ -50,53 +53,42 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
             return defaultHelp.Invoke(parseResult);
         }
 
-        var output = parseResult.InvocationConfiguration.Output;
         var useColor = BannerHelper.UseEmoji;
         var commandPath = GetCommandPath(command);
-
-        // Create a Spectre console that writes to the invocation output writer
-        var ansiSupport = Console.IsOutputRedirected ? AnsiSupport.No : AnsiSupport.Detect;
-        var terminalWidth = Math.Max(40, AnsiConsole.Profile.Width);
-        var spectreConsole = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(output),
-            Ansi = ansiSupport
-        });
-        spectreConsole.Profile.Width = terminalWidth;
 
         // Description
         if (!string.IsNullOrEmpty(command.Description))
         {
-            spectreConsole.WriteLine();
-            WriteIndented(spectreConsole, new Markup($"[dim]{Markup.Escape(command.Description)}[/]"));
+            _ansiConsole.WriteLine();
+            WriteIndented(new Markup($"[dim]{Markup.Escape(command.Description)}[/]"));
         }
 
         // Usage
-        spectreConsole.WriteLine();
-        spectreConsole.MarkupLine($" Usage: [white]{commandPath} <command>[/] [dim][[options]][/]");
-        spectreConsole.MarkupLine($"        [white]{commandPath} --help[/]");
-        spectreConsole.WriteLine();
-        spectreConsole.MarkupLine($" Use '[white]{commandPath} <command> --help[/]' to get detailed help for any command.");
+        _ansiConsole.WriteLine();
+        _ansiConsole.MarkupLine($" Usage: [white]{commandPath} <command>[/] [dim][[options]][/]");
+        _ansiConsole.MarkupLine($"        [white]{commandPath} --help[/]");
+        _ansiConsole.WriteLine();
+        _ansiConsole.MarkupLine($" Use '[white]{commandPath} <command> --help[/]' to get detailed help for any command.");
 
-        // Build a lookup from command name -> Command object
-        var subcommandLookup = new Dictionary<string, Command>(StringComparer.OrdinalIgnoreCase);
+        // Build a lookup from command type -> Command object
+        var subcommandByType = new Dictionary<Type, Command>();
         foreach (var sub in command.Subcommands)
         {
-            subcommandLookup[sub.Name] = sub;
+            subcommandByType[sub.GetType()] = sub;
         }
 
         // Render each category
-        foreach (var (category, commandNames) in _categories)
+        foreach (var (category, commandTypes) in _categories)
         {
-            spectreConsole.WriteLine();
+            _ansiConsole.WriteLine();
 
             var grid = new Grid();
             grid.AddColumn(new GridColumn().PadLeft(1).PadRight(2).NoWrap());
             grid.AddColumn(new GridColumn());
 
-            foreach (var name in commandNames)
+            foreach (var type in commandTypes)
             {
-                if (subcommandLookup.TryGetValue(name, out var sub))
+                if (subcommandByType.TryGetValue(type, out var sub))
                 {
                     var desc = sub is IShortDescription sd ? sd.ShortDescription : sub.Description ?? "";
                     grid.AddRow(
@@ -113,11 +105,11 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
                 useColor ? $"[rgb(99,141,255)]{Markup.Escape(category)}[/]" : $"[bold]{Markup.Escape(category)}[/]");
             panel.Padding = new Padding(1, 0, 1, 0);
 
-            WriteIndented(spectreConsole, panel);
+            WriteIndented(panel);
         }
 
         // Global options
-        spectreConsole.WriteLine();
+        _ansiConsole.WriteLine();
 
         var optGrid = new Grid();
         optGrid.AddColumn(new GridColumn().PadLeft(1).PadRight(2).NoWrap());
@@ -155,34 +147,18 @@ internal sealed class CustomHelpAction : SynchronousCommandLineAction
             useColor ? "[rgb(99,141,255)]Options[/]" : "[bold]Options[/]");
         optPanel.Padding = new Padding(1, 0, 1, 0);
 
-        WriteIndented(spectreConsole, optPanel);
-        spectreConsole.WriteLine();
+        WriteIndented(optPanel);
+        _ansiConsole.WriteLine();
 
         return 0;
     }
 
     /// <summary>
-    /// Renders a Spectre renderable with a 1-space left indent, without trailing blank lines.
+    /// Renders a Spectre renderable with a 1-space left indent.
     /// </summary>
-    private static void WriteIndented(IAnsiConsole targetConsole, IRenderable renderable)
+    private void WriteIndented(IRenderable renderable)
     {
-        // Account for the 1-space indent so content fits within the terminal width
-        var width = Math.Max(40, targetConsole.Profile.Width - 1);
-        using var writer = new StringWriter();
-        var renderConsole = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(writer),
-            Ansi = targetConsole.Profile.Capabilities.Ansi ? AnsiSupport.Yes : AnsiSupport.No
-        });
-        renderConsole.Profile.Width = width;
-        renderConsole.Write(renderable);
-
-        var lines = writer.ToString().TrimEnd('\r', '\n').Split('\n');
-        foreach (var line in lines)
-        {
-            targetConsole.Write(new Text(" "));
-            targetConsole.Profile.Out.Writer.WriteLine(line.TrimEnd('\r'));
-        }
+        _ansiConsole.Write(new Padder(renderable, new Padding(1, 0, 0, 0)));
     }
 
     private static string GetCommandPath(Command command)

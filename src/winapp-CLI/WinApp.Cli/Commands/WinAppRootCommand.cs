@@ -4,12 +4,14 @@
 using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Invocation;
+using Spectre.Console;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Commands;
 
-internal class WinAppRootCommand : RootCommand
+internal class WinAppRootCommand : RootCommand, IShortDescription
 {
+    public string ShortDescription => "Tools for Windows app development, package identity, packaging, and the Windows (App) SDK";
     internal static Option<bool> VerboseOption = new Option<bool>("--verbose", "-v")
     {
         Description = "Enable verbose output"
@@ -51,7 +53,8 @@ internal class WinAppRootCommand : RootCommand
         CertCommand certCommand,
         SignCommand signCommand,
         ToolCommand toolCommand,
-        MSStoreCommand msStoreCommand) : base("CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows")
+        MSStoreCommand msStoreCommand,
+        IAnsiConsole ansiConsole) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -69,10 +72,10 @@ internal class WinAppRootCommand : RootCommand
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
-        helpOption.Action = new CustomHelpAction(this,
-            ("Setup", ["init", "restore", "update"]),
-            ("Packaging & Signing", ["package", "sign", "cert", "manifest"]),
-            ("Development Tools", ["create-debug-identity","store", "tool", "get-winapp-path"])
+        helpOption.Action = new CustomHelpAction(this, ansiConsole,
+            ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
+            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand)]),
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
         );
     }
 }
