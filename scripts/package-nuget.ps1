@@ -4,7 +4,7 @@
     Package Windows App Development CLI as NuGet packages
 .DESCRIPTION
     This script creates NuGet packages for:
-    1. Microsoft.Windows.SDK.BuildTools.Extras - MSBuild integration for 'dotnet run' with packaged apps
+    1. Microsoft.Windows.SDK.BuildTools.MSIX.Extras - MSBuild integration for 'dotnet run' with packaged apps
     2. Microsoft.WindowsAppSDK.Templates - Project templates for 'dotnet new winui'
     
     These packages include the CLI binaries from artifacts/cli and output to artifacts/nuget.
@@ -130,10 +130,10 @@ try
     }
 
     # ============================================================================
-    # Step 1: Build Microsoft.Windows.SDK.BuildTools.Extras package
+    # Step 1: Build Microsoft.Windows.SDK.BuildTools.MSIX.Extras package
     # ============================================================================
     Write-Host ""
-    Write-Host "[NUGET] Building Microsoft.Windows.SDK.BuildTools.Extras package..." -ForegroundColor Blue
+    Write-Host "[NUGET] Building Microsoft.Windows.SDK.BuildTools.MSIX.Extras package..." -ForegroundColor Blue
     
     # Create tools directory structure in the NuGet project
     $ExtrasToolsPath = Join-Path $ExtrasProjectPath "tools"
@@ -161,16 +161,16 @@ try
     # Pack the NuGet package
     Write-Host "[PACK] Creating NuGet package..." -ForegroundColor Blue
     
-    $ExtrasCsproj = Join-Path $ExtrasProjectPath "Microsoft.Windows.SDK.BuildTools.Extras.csproj"
+    $ExtrasCsproj = Join-Path $ExtrasProjectPath "Microsoft.Windows.SDK.BuildTools.MSIX.Extras.csproj"
     
     dotnet pack $ExtrasCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to create Microsoft.Windows.SDK.BuildTools.Extras NuGet package"
+        Write-Error "Failed to create Microsoft.Windows.SDK.BuildTools.MSIX.Extras NuGet package"
         exit 1
     }
     
-    Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.Extras package created successfully!" -ForegroundColor Green
+    Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.MSIX.Extras package created successfully!" -ForegroundColor Green
 
     # ============================================================================
     # Step 2: Build Microsoft.WindowsAppSDK.Templates package

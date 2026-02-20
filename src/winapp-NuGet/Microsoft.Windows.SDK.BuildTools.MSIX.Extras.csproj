@@ -7,11 +7,11 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     
     <!-- NuGet Package Metadata -->
-    <PackageId>Microsoft.Windows.SDK.BuildTools.Extras</PackageId>
+    <PackageId>Microsoft.Windows.SDK.BuildTools.MSIX.Extras</PackageId>
     <Version>1.0.0</Version>
     <Authors>Microsoft</Authors>
     <Company>Microsoft Corporation</Company>
-    <Product>Windows SDK Build Tools Extras</Product>
+    <Product>Windows SDK Build Tools MSIX Extras</Product>
     <Description>Enables 'dotnet run' for packaged Windows applications. This package provides MSBuild targets that integrate with the .NET CLI to build, register, and launch packaged applications seamlessly.</Description>
     <PackageTags>winui;msix;packaged;dotnet-run;msbuild;build-tools</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
