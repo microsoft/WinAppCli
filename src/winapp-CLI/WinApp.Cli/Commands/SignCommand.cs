@@ -68,7 +68,7 @@ internal class SignCommand : Command
                 }
                 catch (Exception error)
                 {
-                    return (1, $"{error.Message}");
+                    return (1, error.Message);
                 }
             }, cancellationToken);
         }
