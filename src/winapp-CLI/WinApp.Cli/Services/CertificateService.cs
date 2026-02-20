@@ -238,8 +238,11 @@ internal partial class CertificateService(
                 {
                     var description = record.FormatDescription() ?? string.Empty;
 
-                    // Strip leading "error 0x8007000B: " from the event log description
-                    description = EventLogHexErrorRegex().Replace(description, "");
+                    // Keep raw error code in verbose mode; simplify for non-verbose output.
+                    if (!taskContext.IsVerboseEnabled)
+                    {
+                        description = EventLogHexErrorRegex().Replace(description, "");
+                    }
 
                     throw new InvalidOperationException($"Failed to sign file: {description}", ex);
                 }
