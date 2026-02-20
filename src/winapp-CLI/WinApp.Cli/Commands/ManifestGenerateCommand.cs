@@ -103,7 +103,7 @@ internal class ManifestGenerateCommand : Command
             {
                 if (ifExists == IfExists.Error)
                 {
-                    logger.LogError("{UISymbol} Manifest file already exists: {Output}\nPlease specify a different output path or remove the existing file.", UiSymbols.Error, manifestPath);
+                    logger.LogError("{UISymbol} Manifest file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, manifestPath, System.Environment.NewLine);
                     return 1;
                 }
                 else if (ifExists == IfExists.Skip)

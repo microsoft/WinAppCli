@@ -147,7 +147,7 @@ internal class GroupableTask<T> : GroupableTask
                 StatusMessageTask statusMessageTask => $"{indentStr}{Markup.Escape(statusMessageTask.CompletedMessage ?? string.Empty)}",
                 // Error details are logged to stderr by StatusService, so skip rendering them in the task tree.
                 GroupableTask<T> failedTask when failedTask.CompletedMessage is ITuple resultTuple
-                    && resultTuple[0] is int returnCode && returnCode != 0 => null,
+                    && resultTuple[0] is int and not 0 => null,
                 GroupableTask<T> genericTask => FormatCheckMarkMessage(indentStr, (genericTask.CompletedMessage as ITuple) switch
                 {
                     ITuple tuple when tuple.Length > 0 && tuple[0] is string str => str,
