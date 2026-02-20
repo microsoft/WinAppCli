@@ -94,4 +94,17 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
 
         return 1;
     }
+
+    /// <inheritdoc />
+    public async Task<TResult> ExecuteQuietlyAsync<TResult>(Func<TaskContext, CancellationToken, Task<TResult>> taskFunc, CancellationToken cancellationToken)
+    {
+        var quietConsole = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(TextWriter.Null)
+        });
+        var dummyTask = new GroupableTask("quiet", null);
+        var renderLock = new Lock();
+        var taskContext = new TaskContext(dummyTask, null, quietConsole, logger, renderLock);
+        return await taskFunc(taskContext, cancellationToken);
+    }
 }

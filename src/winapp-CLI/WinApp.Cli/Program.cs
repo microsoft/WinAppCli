@@ -49,6 +49,13 @@ internal static class Program
             return 1;
         }
 
+        // Suppress all log output when --json is specified so stdout contains only valid JSON
+        bool jsonMode = args.Contains(WinAppRootCommand.JsonOption.Name);
+        if (jsonMode)
+        {
+            minimumLogLevel = LogLevel.None;
+        }
+
         // Check if --cli-schema is specified - this outputs machine-readable JSON
         // and should not display any interactive messages like first-run notices
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
@@ -67,7 +74,7 @@ internal static class Program
 
         // Skip first-run notice for machine-readable output modes
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode)
+        if (!isCliSchemaMode && !jsonMode)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();

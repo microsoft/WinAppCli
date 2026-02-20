@@ -31,14 +31,29 @@ Manage development certificates for code signing. Use 'cert generate' to create 
 Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
 
 **Options:**
+- `--export-cer` - Export a .cer file (public key only) alongside the .pfx
 - `--if-exists` - Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) (default: `Error`)
 - `--install` - Install the certificate to the local machine store after generation
+- `--json` - Format output as JSON
 - `--manifest` - Path to appxmanifest.xml file to extract publisher information from
 - `--output` - Output path for the generated PFX file
 - `--password` - Password for the generated PFX file (default: `password`)
 - `--publisher` - Publisher name for the generated certificate. If not specified, will be inferred from manifest.
 - `--quiet` / `-q` - Suppress progress messages
 - `--valid-days` - Number of days the certificate is valid (default: `365`)
+- `--verbose` / `-v` - Enable verbose output
+
+#### `winapp cert info`
+
+Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
+
+**Arguments:**
+- `<cert-path>` *(required)* - Path to the certificate file (PFX)
+
+**Options:**
+- `--json` - Format output as JSON
+- `--password` - Password for the PFX file (default: `password`)
+- `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
 
 #### `winapp cert install`

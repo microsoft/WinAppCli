@@ -57,6 +57,7 @@ internal static class StoreHostBuilderExtensions
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
+                .UseCommandHandler<CertInfoCommand, CertInfoCommand.Handler>()
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false);
