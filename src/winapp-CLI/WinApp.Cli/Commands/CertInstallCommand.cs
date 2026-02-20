@@ -8,8 +8,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CertInstallCommand : Command
+internal class CertInstallCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Trust a certificate on this machine (requires admin)";
+
     public static Argument<FileInfo> CertPathArgument { get; }
     public static Option<string> PasswordOption { get; }
     public static Option<bool> ForceOption { get; }

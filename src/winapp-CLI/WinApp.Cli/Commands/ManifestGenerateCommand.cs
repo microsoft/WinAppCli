@@ -10,8 +10,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class ManifestGenerateCommand : Command
+internal class ManifestGenerateCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create appxmanifest.xml and required image assets";
+
     public static Argument<DirectoryInfo> DirectoryArgument { get; }
     public static Option<string> PackageNameOption { get; }
     public static Option<string> PublisherNameOption { get; }

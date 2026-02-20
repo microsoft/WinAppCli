@@ -1,6 +1,6 @@
 ---
 name: winapp-cli
-description: CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+description: CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 version: 0.1.11
 schema_version: 1.0
 ---
@@ -14,7 +14,7 @@ schema_version: 1.0
 
 ## Overview
 
-CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 
 **Installation:**
 - WinGet: `winget install Microsoft.WinAppCli --source winget`
@@ -173,7 +173,7 @@ Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devce
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp store`
 
-Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI (https://aka.ms/msstoredevcli).
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli
 ### `winapp tool`
 
 Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix

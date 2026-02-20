@@ -2,7 +2,7 @@
   "name": "winapp",
   "version": "0.1.11",
   "schemaVersion": "1.0",
-  "description": "CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows",
+  "description": "CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
   "options": {
     "--cli-schema": {
@@ -1101,7 +1101,7 @@
       }
     },
     "store": {
-      "description": "Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI (https://aka.ms/msstoredevcli).",
+      "description": "Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli",
       "hidden": false
     },
     "tool": {
