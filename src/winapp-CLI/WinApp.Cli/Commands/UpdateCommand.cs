@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class UpdateCommand : Command
+internal class UpdateCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Update packages in winapp.yaml";
+
     public UpdateCommand() : base("update", "Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.")
     {
         Options.Add(InitCommand.SetupSdksOption);

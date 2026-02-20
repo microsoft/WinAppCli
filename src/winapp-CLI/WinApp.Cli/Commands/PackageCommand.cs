@@ -8,8 +8,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class PackageCommand : Command
+internal class PackageCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create MSIX package";
+
     public static Argument<DirectoryInfo> InputFolderArgument { get; }
     public static Option<FileInfo> OutputOption { get; }
     public static Option<string?> NameOption { get; }
