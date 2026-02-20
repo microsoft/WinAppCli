@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class GetWinappPathCommand : Command
+internal class GetWinappPathCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Print the path to the global .winapp directory";
+
     public static Option<bool> GlobalOption { get; }
 
     static GetWinappPathCommand()

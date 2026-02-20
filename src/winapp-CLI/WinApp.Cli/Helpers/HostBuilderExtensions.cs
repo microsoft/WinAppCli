@@ -64,7 +64,7 @@ internal static class StoreHostBuilderExtensions
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)
-        where TCommand : Command
+        where TCommand : Command, IShortDescription
         where THandler : AsynchronousCommandLineAction
     {
         return services
@@ -83,7 +83,7 @@ internal static class StoreHostBuilderExtensions
     }
 
     public static IServiceCollection ConfigureCommand<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand>(this IServiceCollection services)
-        where TCommand : Command
+        where TCommand : Command, IShortDescription
     {
         return services
             .AddSingleton(sp =>

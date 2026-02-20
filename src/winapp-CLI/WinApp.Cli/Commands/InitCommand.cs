@@ -7,8 +7,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class InitCommand : Command
+internal class InitCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Initialize existing project with manifest and/or SDK packages";
+
     public static Argument<DirectoryInfo> BaseDirectoryArgument { get; }
     public static Option<DirectoryInfo> ConfigDirOption { get; }
     public static Option<SdkInstallMode?> SetupSdksOption { get; }

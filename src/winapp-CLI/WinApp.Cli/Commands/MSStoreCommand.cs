@@ -8,9 +8,11 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class MSStoreCommand : Command
+internal class MSStoreCommand : Command, IShortDescription
 {
-    public MSStoreCommand() : base("store", "Run a Microsoft Store Developer CLI command. This command might prompt the installation of Microsoft Store Developer CLI (https://aka.ms/msstoredevcli).")
+    public string ShortDescription => "Run a Microsoft Store Developer CLI command";
+
+    public MSStoreCommand() : base("store", "Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli")
     {
         this.TreatUnmatchedTokensAsErrors = false;
     }
