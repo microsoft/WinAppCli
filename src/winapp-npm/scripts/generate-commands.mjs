@@ -83,29 +83,26 @@ const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
 const TS_RESERVED = new Set(['package', 'default', 'export', 'import', 'class', 'function', 'return', 'delete', 'new']);
 
 /**
- * Known .NET enum types → TypeScript union type name + values.
- * Detected by matching the `valueType` field from the schema.
- * The union types are emitted once in the shared types section.
- */
-const KNOWN_UNIONS = {
-  'WinApp.Cli.Models.IfExists': {
-    tsName: 'IfExistsPolicy',
-    values: ['error', 'skip', 'overwrite'],
-  },
-  'WinApp.Cli.Models.ManifestTemplates': {
-    tsName: 'ManifestTemplate',
-    values: ['packaged', 'sparse'],
-  },
-};
-
-/**
  * Nullable enum types — strip `System.Nullable<...>` wrapper.
- * The helpName hint (e.g. "stable|preview|experimental|none") is used for values.
  */
 const NULLABLE_ENUM_RE = /^System\.Nullable<(.+)>$/;
 
 /** Collect all union types actually used across all commands. */
 const usedUnions = new Map(); // tsName → { values, tsName }
+
+/**
+ * Derive a TypeScript union type name from the .NET valueType string.
+ * e.g. "WinApp.Cli.Models.IfExists" → "IfExists"
+ *      "System.Nullable<WinApp.Cli.Models.IfExists>" → "IfExists"
+ */
+function deriveUnionName(valueType) {
+  let key = valueType;
+  const nullableMatch = key.match(NULLABLE_ENUM_RE);
+  if (nullableMatch) key = nullableMatch[1];
+  // Extract short class name (last segment after '.')
+  const lastDot = key.lastIndexOf('.');
+  return lastDot >= 0 ? key.slice(lastDot + 1) : key;
+}
 
 /** Map a .NET value type to a TypeScript type string. */
 function tsType(valueType, helpName) {
@@ -113,29 +110,11 @@ function tsType(valueType, helpName) {
   if (valueType.includes('Boolean')) return 'boolean';
   if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double')) return 'number';
 
-  // Check for known enum (exact or nullable-wrapped)
-  let enumKey = valueType;
-  const nullableMatch = valueType.match(NULLABLE_ENUM_RE);
-  if (nullableMatch) enumKey = nullableMatch[1];
-
-  if (KNOWN_UNIONS[enumKey]) {
-    const u = KNOWN_UNIONS[enumKey];
-    usedUnions.set(u.tsName, u);
-    return u.tsName;
-  }
-
-  // Heuristic: if helpName has pipe-separated values, generate an inline union
+  // If helpName has pipe-separated values, it's an enum — derive a named union type
   if (helpName && helpName.includes('|')) {
     const vals = helpName.split('|').map((v) => v.trim()).filter(Boolean);
     if (vals.length >= 2) {
-      // Create a named union type from the option's camelCase name
-      const tsName = kebabToPascal(vals.join('-')) + 'Mode';
-      // Use a simpler name if it looks like an SDK mode
-      const sdkName = 'SdkInstallMode';
-      if (vals.includes('stable') && vals.includes('preview')) {
-        usedUnions.set(sdkName, { tsName: sdkName, values: vals });
-        return sdkName;
-      }
+      const tsName = deriveUnionName(valueType);
       usedUnions.set(tsName, { tsName, values: vals });
       return tsName;
     }

@@ -2,21 +2,7 @@
 import { execSyncWithBuildTools } from './buildtools-utils';
 import { addMsixIdentityToExe, addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getGlobalWinappPath, getLocalWinappPath } from './winapp-path-utils';
-import {
-  init,
-  restore,
-  update,
-  manifestGenerate,
-  manifestUpdateAssets,
-  certGenerate,
-  certInstall,
-  packageApp,
-  sign,
-  createDebugIdentity,
-  getWinappPath,
-  tool,
-  store,
-} from './winapp-commands';
+import * as winappCommands from './winapp-commands';
 
 // Re-export types from child_process for convenience
 export type { ExecSyncOptions } from 'child_process';
@@ -37,27 +23,8 @@ export {
 export { GenerateCppAddonOptions, GenerateCppAddonResult } from './cpp-addon-utils';
 export { GenerateCsAddonOptions, GenerateCsAddonResult } from './cs-addon-utils';
 
-// Re-export all command option/result types
-export {
-  CommonOptions,
-  WinappResult,
-  IfExistsPolicy,
-  SdkInstallMode,
-  ManifestTemplate,
-  InitOptions,
-  RestoreOptions,
-  UpdateOptions,
-  ManifestGenerateOptions,
-  ManifestUpdateAssetsOptions,
-  CertGenerateOptions,
-  CertInstallOptions,
-  PackageOptions,
-  SignOptions,
-  CreateDebugIdentityOptions,
-  GetWinappPathOptions,
-  ToolOptions,
-  StoreOptions,
-} from './winapp-commands';
+// Re-export all command types and functions automatically
+export * from './winapp-commands';
 
 // Re-export functions
 export {
@@ -72,21 +39,6 @@ export {
   // winapp directory utilities
   getGlobalWinappPath,
   getLocalWinappPath,
-
-  // Programmatic CLI command wrappers
-  init,
-  restore,
-  update,
-  manifestGenerate,
-  manifestUpdateAssets,
-  certGenerate,
-  certInstall,
-  packageApp,
-  sign,
-  createDebugIdentity,
-  getWinappPath,
-  tool,
-  store,
 };
 
 // Default export for CommonJS compatibility
@@ -97,17 +49,5 @@ export default {
   clearElectronDebugIdentity,
   getGlobalWinappPath,
   getLocalWinappPath,
-  init,
-  restore,
-  update,
-  manifestGenerate,
-  manifestUpdateAssets,
-  certGenerate,
-  certInstall,
-  packageApp,
-  sign,
-  createDebugIdentity,
-  getWinappPath,
-  tool,
-  store,
+  ...winappCommands,
 };

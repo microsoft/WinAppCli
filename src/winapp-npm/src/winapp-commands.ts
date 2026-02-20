@@ -18,14 +18,14 @@ import {
 // Shared / common types
 // ---------------------------------------------------------------------------
 
-/** IfExistsPolicy values. */
-export type IfExistsPolicy = 'error' | 'skip' | 'overwrite';
+/** IfExists values. */
+export type IfExists = 'error' | 'overwrite' | 'skip';
 
 /** SdkInstallMode values. */
 export type SdkInstallMode = 'stable' | 'preview' | 'experimental' | 'none';
 
-/** ManifestTemplate values. */
-export type ManifestTemplate = 'packaged' | 'sparse';
+/** ManifestTemplates values. */
+export type ManifestTemplates = 'packaged' | 'sparse';
 
 /** Base options shared by most commands. */
 export interface CommonOptions {
@@ -72,7 +72,7 @@ async function run(args: string[], opts: CommonOptions): Promise<WinappResult> {
 
 export interface CertGenerateOptions extends CommonOptions {
   /** Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) */
-  ifExists?: IfExistsPolicy;
+  ifExists?: IfExists;
   /** Install the certificate to the local machine store after generation */
   install?: boolean;
   /** Path to appxmanifest.xml file to extract publisher information from */
@@ -219,7 +219,7 @@ export interface ManifestGenerateOptions extends CommonOptions {
   /** Path to the application's executable. Default: <package-name>.exe */
   executable?: string;
   /** Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) */
-  ifExists?: IfExistsPolicy;
+  ifExists?: IfExists;
   /** Path to logo image file */
   logoPath?: string;
   /** Package name (default: folder name) */
@@ -227,7 +227,7 @@ export interface ManifestGenerateOptions extends CommonOptions {
   /** Publisher CN (default: CN=<current user>) */
   publisherName?: string;
   /** Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) */
-  template?: ManifestTemplate;
+  template?: ManifestTemplates;
   /** App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). */
   version?: string;
 }

@@ -56,6 +56,89 @@ Result returned by every command wrapper.
 
 These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).
 
+### `certGenerate()`
+
+Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
+
+```typescript
+function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
+| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
+| `output` | `string \| undefined` | No | Output path for the generated PFX file |
+| `password` | `string \| undefined` | No | Password for the generated PFX file |
+| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
+| `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `certInstall()`
+
+Trust a certificate on this machine (requires admin). Run before installing MSIX packages signed with dev certificates. Example: winapp cert install ./devcert.pfx. Only needed once per certificate.
+
+```typescript
+function certInstall(options: CertInstallOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
+| `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
+| `password` | `string \| undefined` | No | Password for the PFX file |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `createDebugIdentity()`
+
+Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.
+
+```typescript
+function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `entrypoint` | `string \| undefined` | No | Path to the .exe that will need to run with identity, or entrypoint script. |
+| `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
+| `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `getWinappPath()`
+
+Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.
+
+```typescript
+function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `global` | `boolean \| undefined` | No | Get the global .winapp directory instead of local |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `init()`
 
 Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
@@ -75,43 +158,6 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `restore()`
-
-Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
-
-```typescript
-function restore(options?: RestoreOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `update()`
-
-Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.
-
-```typescript
-function update(options?: UpdateOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -162,50 +208,6 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
-### `certGenerate()`
-
-Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
-
-```typescript
-function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
-| `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
-| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
-| `output` | `string \| undefined` | No | Output path for the generated PFX file |
-| `password` | `string \| undefined` | No | Password for the generated PFX file |
-| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
-| `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `certInstall()`
-
-Trust a certificate on this machine (requires admin). Run before installing MSIX packages signed with dev certificates. Example: winapp cert install ./devcert.pfx. Only needed once per certificate.
-
-```typescript
-function certInstall(options: CertInstallOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
-| `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
-| `password` | `string \| undefined` | No | Password for the PFX file |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
@@ -235,6 +237,25 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 ---
 
+### `restore()`
+
+Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
+
+```typescript
+function restore(options?: RestoreOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `sign()`
 
 Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.
@@ -256,40 +277,19 @@ function sign(options: SignOptions): Promise<WinappResult>
 
 ---
 
-### `createDebugIdentity()`
+### `store()`
 
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli
 
 ```typescript
-function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<WinappResult>
+function store(options?: StoreOptions): Promise<WinappResult>
 ```
 
 **Options:**
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `entrypoint` | `string \| undefined` | No | Path to the .exe that will need to run with identity, or entrypoint script. |
-| `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
-| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
-| `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `getWinappPath()`
-
-Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.
-
-```typescript
-function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `global` | `boolean \| undefined` | No | Get the global .winapp directory instead of local |
+| `storeArgs` | `string[] \| undefined` | No | Arguments to pass through to the Microsoft Store Developer CLI. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -313,19 +313,19 @@ function tool(options?: ToolOptions): Promise<WinappResult>
 
 ---
 
-### `store()`
+### `update()`
 
-Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli
+Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.
 
 ```typescript
-function store(options?: StoreOptions): Promise<WinappResult>
+function update(options?: UpdateOptions): Promise<WinappResult>
 ```
 
 **Options:**
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `storeArgs` | `string[] \| undefined` | No | Arguments to pass through to the Microsoft Store Developer CLI. |
+| `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -635,6 +635,53 @@ ManifestTemplate values.
 type ManifestTemplate = "packaged" | "sparse"
 ```
 
+### `CertGenerateOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
+| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
+| `output` | `string \| undefined` | No | Output path for the generated PFX file |
+| `password` | `string \| undefined` | No | Password for the generated PFX file |
+| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
+| `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `CertInstallOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
+| `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
+| `password` | `string \| undefined` | No | Password for the PFX file |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `CreateDebugIdentityOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `entrypoint` | `string \| undefined` | No | Path to the .exe that will need to run with identity, or entrypoint script. |
+| `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
+| `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `GetWinappPathOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `global` | `boolean \| undefined` | No | Get the global .winapp directory instead of local |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `InitOptions`
 
 | Property | Type | Required | Description |
@@ -646,25 +693,6 @@ type ManifestTemplate = "packaged" | "sparse"
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `RestoreOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `UpdateOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -696,32 +724,6 @@ type ManifestTemplate = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
-### `CertGenerateOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
-| `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
-| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
-| `output` | `string \| undefined` | No | Output path for the generated PFX file |
-| `password` | `string \| undefined` | No | Password for the generated PFX file |
-| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
-| `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `CertInstallOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
-| `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
-| `password` | `string \| undefined` | No | Password for the PFX file |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
 ### `PackageOptions`
 
 | Property | Type | Required | Description |
@@ -742,6 +744,16 @@ type ManifestTemplate = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `RestoreOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `SignOptions`
 
 | Property | Type | Required | Description |
@@ -754,23 +766,11 @@ type ManifestTemplate = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
-### `CreateDebugIdentityOptions`
+### `StoreOptions`
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `entrypoint` | `string \| undefined` | No | Path to the .exe that will need to run with identity, or entrypoint script. |
-| `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
-| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
-| `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `GetWinappPathOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `global` | `boolean \| undefined` | No | Get the global .winapp directory instead of local |
+| `storeArgs` | `string[] \| undefined` | No | Arguments to pass through to the Microsoft Store Developer CLI. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -784,11 +784,11 @@ type ManifestTemplate = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
-### `StoreOptions`
+### `UpdateOptions`
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `storeArgs` | `string[] \| undefined` | No | Arguments to pass through to the Microsoft Store Developer CLI. |
+| `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
