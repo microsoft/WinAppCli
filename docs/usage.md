@@ -344,7 +344,7 @@ winapp manifest update-assets mylogo.png --verbose
 
 ### cert
 
-Generate and install development certificates.
+Generate, inspect, and install development certificates.
 
 #### cert generate
 
@@ -358,11 +358,30 @@ winapp cert generate [options]
 
 - `--manifest <appxmanifest.xml>` - Extract publisher information from appxmanifest.xml 
 - `--publisher <name>` - Publisher name for certificate
-- `--output <path>` - Output certificate file path
+- `--output <path>` - Output certificate file path (supports absolute and relative paths)
 - `--password <password>` - Certificate password (default: "password")
 - `--valid-days <valid-days>` - Number of days the certificate is valid (default: 365)
 - `--install` - Install the certificate to the local machine store after generation
 - `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
+- `--export-cer` - Export a `.cer` file (public key only) alongside the `.pfx`. Useful for distributing the public certificate separately for trust installation.
+- `--json` - Format output as JSON for programmatic consumption. Errors are also returned as JSON (`{"error": "..."}`).
+
+#### cert info
+
+Display certificate details from a PFX file. Useful for verifying a certificate matches your manifest before signing.
+
+```bash
+winapp cert info <cert-path> [options]
+```
+
+**Arguments:**
+
+- `cert-path` - Path to the certificate file (PFX)
+
+**Options:**
+
+- `--password <password>` - Password for the PFX file (default: "password")
+- `--json` - Format output as JSON
 
 #### cert install
 
@@ -381,6 +400,18 @@ winapp cert install <cert-path> [options]
 ```bash
 # Generate certificate for specific publisher
 winapp cert generate --publisher "CN=My Company" --output ./mycert.pfx
+
+# Generate certificate and export public key .cer file
+winapp cert generate --publisher "CN=My Company" --export-cer
+
+# Generate certificate with JSON output (for scripting)
+winapp cert generate --publisher "CN=My Company" --json
+
+# View certificate details
+winapp cert info ./mycert.pfx
+
+# View certificate details as JSON
+winapp cert info ./mycert.pfx --json
 
 # Install certificate to machine
 winapp cert install ./mycert.pfx
