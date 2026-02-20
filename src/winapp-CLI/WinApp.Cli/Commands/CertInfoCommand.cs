@@ -10,8 +10,9 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Commands;
 
-internal class CertInfoCommand : Command
+internal class CertInfoCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Display certificate details.";
     public static Argument<FileInfo> CertPathArgument { get; }
     public static Option<string> PasswordOption { get; }
 
