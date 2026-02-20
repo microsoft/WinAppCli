@@ -178,7 +178,7 @@ function emitFunction(lines, name, symbol, isCLIWrapper) {
         for (const prop of filtered) {
           const propDecl = prop.valueDeclaration || prop.declarations?.[0];
           let pt = typeStr(getSymType(prop));
-          pt = pt.replace(/\|/g, '\\|');
+          pt = pt.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
           const pdoc = getDoc(prop);
           const opt = isOptionalDecl(propDecl);
           lines.push(`| \`${prop.getName()}\` | \`${pt}\` | ${opt ? 'No' : 'Yes'} | ${pdoc} |`);
@@ -204,7 +204,7 @@ function emitFunction(lines, name, symbol, isCLIWrapper) {
         return text.startsWith(param.getName());
       });
       const desc = pTag ? paramTagDesc(pTag) : '';
-      lines.push(`| \`${param.getName()}\` | \`${pType.replace(/\|/g, '\\|')}\` | ${opt ? 'No' : 'Yes'} | ${desc} |`);
+      lines.push(`| \`${param.getName()}\` | \`${pType.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')}\` | ${opt ? 'No' : 'Yes'} | ${desc} |`);
     }
     lines.push('');
   }
@@ -265,7 +265,7 @@ function emitType(lines, name, symbol, external) {
       for (const prop of props) {
         const propDecl = prop.valueDeclaration || prop.declarations?.[0];
         let pt = typeStr(getSymType(prop));
-        pt = pt.replace(/\|/g, '\\|');
+        pt = pt.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
         const pdoc = getDoc(prop);
         const opt = isOptionalDecl(propDecl);
         lines.push(`| \`${prop.getName()}\` | \`${pt}\` | ${opt ? 'No' : 'Yes'} | ${pdoc} |`);
