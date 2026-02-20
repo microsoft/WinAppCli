@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal partial class RunCommand : Command
+internal partial class RunCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create debug identity and launch the packaged application.";
+
     public static Option<FileInfo?> ManifestOption { get; }
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
