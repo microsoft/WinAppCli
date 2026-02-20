@@ -34,7 +34,7 @@
 
   <Applications>
     <Application Id="{ApplicationId}"
-      Executable="{Executable}"
+      Executable="$targetnametoken$.exe"
       uap10:TrustLevel="mediumIL"
       uap10:RuntimeBehavior="packagedClassicApp">
       <uap:VisualElements

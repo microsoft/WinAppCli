@@ -538,7 +538,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).",
+          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -567,11 +567,11 @@
               "required": false,
               "recursive": false
             },
-            "--entrypoint": {
-              "description": "Entry point of the application (e.g., executable path / name, or .py/.js script if template is HostedApp). Default: <package-name>.exe",
+            "--executable": {
+              "description": "Path to the application's executable. Default: <package-name>.exe",
               "hidden": false,
               "aliases": [
-                "--executable"
+                "--entrypoint"
               ],
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -648,7 +648,7 @@
               "recursive": false
             },
             "--template": {
-              "description": "Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host)",
+              "description": "Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs)",
               "hidden": false,
               "valueType": "WinApp.Cli.Models.ManifestTemplates",
               "hasDefaultValue": true,
@@ -794,6 +794,21 @@
           "valueType": "System.String",
           "hasDefaultValue": true,
           "defaultValue": "password",
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--executable": {
+          "description": "Path to the executable relative to the input folder.",
+          "hidden": false,
+          "aliases": [
+            "--exe"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
             "maximum": 1
