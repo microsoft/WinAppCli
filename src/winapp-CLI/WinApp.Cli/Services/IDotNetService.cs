@@ -61,6 +61,23 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Ensures the .csproj has a RuntimeIdentifier element with a default that auto-detects
+    /// the current platform architecture. Only adds the element if no RuntimeIdentifier or
+    /// RuntimeIdentifiers element already exists in the project.
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if it already had a RuntimeIdentifier.</returns>
+    Task<bool> EnsureRuntimeIdentifierAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates the PublishProfile element in a .csproj to include a Condition that checks
+    /// whether the publish profile file actually exists, preventing build errors when it doesn't.
+    /// Transforms: &ltPublishProfile&gt;win-$(Platform).pubxml&lt;/PublishProfile&gt;
+    /// To: &lt;PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')"&gt;win-$(Platform).pubxml&lt;/PublishProfile&gt;
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if no matching PublishProfile element was found.</returns>
+    Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs `dotnet list package --include-transitive --format json` and returns the parsed result.
     /// </summary>
     Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default);

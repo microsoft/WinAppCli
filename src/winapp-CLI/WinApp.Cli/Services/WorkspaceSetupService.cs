@@ -271,6 +271,16 @@ internal class WorkspaceSetupService(
                         taskContext.AddStatusMessage($"{UiSymbols.Check} Updated TargetFramework to {recommendedTfm}");
                     }
 
+                    if (await dotNetService.UpdatePublishProfileAsync(csprojFile, cancellationToken))
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Updated PublishProfile with existence condition");
+                    }
+
+                    if (await dotNetService.EnsureRuntimeIdentifierAsync(csprojFile, cancellationToken))
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Added default RuntimeIdentifier");
+                    }
+
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
                         usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

@@ -33,6 +33,8 @@ internal class FakeDotNetService : IDotNetService
     public bool IsTargetFrameworkSupported(string targetFramework) => _real.IsTargetFrameworkSupported(targetFramework);
     public string GetRecommendedTargetFramework(string? currentTargetFramework = null) => _real.GetRecommendedTargetFramework(currentTargetFramework);
     public void SetTargetFramework(FileInfo csprojPath, string newTargetFramework) => _real.SetTargetFramework(csprojPath, newTargetFramework);
+    public Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default) => _real.UpdatePublishProfileAsync(csprojPath, cancellationToken);
+    public Task<bool> EnsureRuntimeIdentifierAsync(FileInfo csprojPath, CancellationToken cancellationToken = default) => _real.EnsureRuntimeIdentifierAsync(csprojPath, cancellationToken);
 
     // Fake CLI-based operations
     public Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)

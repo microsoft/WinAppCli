@@ -45,6 +45,9 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
+    [GeneratedRegex(@"<RuntimeIdentifiers?[\s>]", RegexOptions.IgnoreCase)]
+    private static partial Regex RuntimeIdentifierElementRegex();
+
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
         if (!directory.Exists)
@@ -225,6 +228,83 @@ internal partial class DotNetService : IDotNetService
         }
 
         File.WriteAllText(csprojPath.FullName, content);
+    }
+
+    public async Task<bool> EnsureRuntimeIdentifierAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+
+        // Don't modify if the project already defines RuntimeIdentifier or RuntimeIdentifiers
+        if (RuntimeIdentifierElementRegex().IsMatch(content))
+        {
+            return false;
+        }
+
+        // Insert a RuntimeIdentifier with a Condition so it only applies when not already set
+        // (e.g. via command-line -r or Directory.Build.props)
+        const string runtimeIdentifierElement =
+            "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
+
+        // Insert into the first PropertyGroup, after <TargetFramework> if present
+        var tfmMatch = TargetFrameworkElementRegex().Match(content);
+        if (tfmMatch.Success)
+        {
+            // Insert after the TargetFramework line
+            var insertPos = tfmMatch.Index + tfmMatch.Length;
+            content = content[..insertPos]
+                + Environment.NewLine + "    " + runtimeIdentifierElement
+                + content[insertPos..];
+        }
+        else
+        {
+            // No TargetFramework found; insert at start of first PropertyGroup
+            var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+            if (propGroupIdx >= 0)
+            {
+                var closeTag = content.IndexOf('>', propGroupIdx);
+                if (closeTag >= 0)
+                {
+                    var insertPos = closeTag + 1;
+                    content = content[..insertPos]
+                        + Environment.NewLine + "    " + runtimeIdentifierElement
+                        + content[insertPos..];
+                }
+            }
+        }
+
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    [GeneratedRegex(@"<PublishProfile>([^<]*\$\(Platform\)[^<]*\.pubxml)</PublishProfile>", RegexOptions.Singleline)]
+    private static partial Regex PublishProfileElementRegex();
+
+    public async Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = PublishProfileElementRegex().Match(content);
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var profileValue = match.Groups[1].Value;
+        var replacement = $"<PublishProfile Condition=\"Exists('Properties\\PublishProfiles\\{profileValue}')\">{profileValue}</PublishProfile>";
+        content = content[..match.Index] + replacement + content[(match.Index + match.Length)..];
+
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
     }
 
     public async Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
