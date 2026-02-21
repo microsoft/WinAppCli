@@ -159,8 +159,8 @@ try
     New-Item -ItemType Directory -Path "$VscBinPath\win-x64" -Force | Out-Null
     New-Item -ItemType Directory -Path "$VscBinPath\win-arm64" -Force | Out-Null
 
-    Copy-Item "$CliBinariesPath\win-x64\*" "$VscBinPath\win-x64\" -Recurse -Force
-    Copy-Item "$CliBinariesPath\win-arm64\*" "$VscBinPath\win-arm64\" -Recurse -Force
+    Copy-Item "$CliBinariesPath\win-x64\*.exe" "$VscBinPath\win-x64\" -Force
+    Copy-Item "$CliBinariesPath\win-arm64\*.exe" "$VscBinPath\win-arm64\" -Force
 
     # Copy LICENSE from project root
     Copy-Item "$ProjectRoot\LICENSE" "LICENSE" -Force
