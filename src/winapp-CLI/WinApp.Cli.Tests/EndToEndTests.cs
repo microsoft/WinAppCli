@@ -390,6 +390,120 @@ public class EndToEndTests : BaseCommandTests
             $"Did not expect duplicate generic wrapper error output. Output: {combinedOutput}");
     }
 
+    [TestMethod]
+    public async Task E2E_NodeSubcommand_AddElectronDebugIdentityWithInvalidManifest_ShouldSurfaceManifestError()
+    {
+        // Arrange
+        var projectDir = _tempDirectory.CreateSubdirectory("NodeInvalidManifestPath");
+        var electronDistDir = Directory.CreateDirectory(Path.Combine(projectDir.FullName, "node_modules", "electron", "dist"));
+        var electronExePath = Path.Combine(electronDistDir.FullName, "electron.exe");
+        await File.WriteAllTextAsync(electronExePath, "fake electron executable", TestContext.CancellationToken);
+
+        var invalidManifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(invalidManifestPath, "<Package></Package>", TestContext.CancellationToken);
+
+        // Act
+        var result = await RunNodeWinappCommandAsync(
+            ["node", "add-electron-debug-identity", "--manifest", invalidManifestPath, "--no-install"],
+            projectDir,
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreNotEqual(0, result.ExitCode, "Command should fail for invalid AppX manifest.");
+        var combinedOutput = $"{result.Output}\n{result.Error}";
+        Assert.IsTrue(
+            combinedOutput.Contains("No Identity element found in AppX manifest", StringComparison.OrdinalIgnoreCase),
+            $"Expected invalid-manifest diagnostic to be surfaced. Output: {combinedOutput}");
+        Assert.IsFalse(
+            combinedOutput.Contains("PowerShell command failed with exit code", StringComparison.OrdinalIgnoreCase),
+            $"Did not expect generic PowerShell exit-code prefix in output. Output: {combinedOutput}");
+    }
+
+        [TestMethod]
+        public async Task E2E_CreateDebugIdentityWithInvalidIdentityName_ShouldSurfaceDecodedPowerShellError()
+        {
+                // Arrange
+                var projectDir = _tempDirectory.CreateSubdirectory("NodeInvalidIdentityNameManifest");
+                var electronDistDir = Directory.CreateDirectory(Path.Combine(projectDir.FullName, "node_modules", "electron", "dist"));
+                var electronExePath = Path.Combine(electronDistDir.FullName, "electron.exe");
+
+                // Use a real PE file so mt.exe succeeds and registration reaches PowerShell Add-AppxPackage.
+                var sourceExePath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+                File.Copy(sourceExePath, electronExePath, overwrite: true);
+
+                var assetsDir = Directory.CreateDirectory(Path.Combine(projectDir.FullName, "Assets"));
+                await File.WriteAllTextAsync(Path.Combine(assetsDir.FullName, "Square150x150Logo.png"), "placeholder", TestContext.CancellationToken);
+                await File.WriteAllTextAsync(Path.Combine(assetsDir.FullName, "Square44x44Logo.png"), "placeholder", TestContext.CancellationToken);
+                await File.WriteAllTextAsync(Path.Combine(assetsDir.FullName, "StoreLogo.png"), "placeholder", TestContext.CancellationToken);
+
+                var invalidManifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+                var invalidManifestContent = """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <Package
+                                xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                                xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                                xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+                                IgnorableNamespaces="uap rescap">
+                            <Identity Name="my-  app" Publisher="CN=TestPublisher" Version="1.0.0.0" />
+                            <Properties>
+                                <DisplayName>Test App</DisplayName>
+                                <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+                                <Logo>Assets/StoreLogo.png</Logo>
+                            </Properties>
+                            <Resources>
+                                <Resource Language="en-us" />
+                            </Resources>
+                            <Applications>
+                                <Application Id="App" Executable="electron.exe" EntryPoint="Windows.FullTrustApplication">
+                                    <uap:VisualElements
+                                        DisplayName="Test App"
+                                        Description="Test App"
+                                        BackgroundColor="transparent"
+                                        Square150x150Logo="Assets/Square150x150Logo.png"
+                                        Square44x44Logo="Assets/Square44x44Logo.png" />
+                                </Application>
+                            </Applications>
+                            <Capabilities>
+                                <rescap:Capability Name="runFullTrust" />
+                            </Capabilities>
+                        </Package>
+                        """;
+                await File.WriteAllTextAsync(invalidManifestPath, invalidManifestContent, TestContext.CancellationToken);
+
+                var repoRoot = FindRepositoryRoot();
+                if (repoRoot == null)
+                {
+                    Assert.Inconclusive("Could not find repository root containing src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj.");
+                }
+
+                var cliProjectPath = Path.Combine(repoRoot!.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
+                if (!File.Exists(cliProjectPath))
+                {
+                    Assert.Inconclusive($"Native CLI project not found at: {cliProjectPath}");
+                }
+
+                // Act
+                var result = await RunDotnetCommandAsync(
+                    projectDir,
+                    $"run --project \"{cliProjectPath}\" -- create-debug-identity \"{electronExePath}\" --manifest \"{invalidManifestPath}\"");
+
+                    // Assert
+                    Assert.AreNotEqual(0, result.ExitCode, "Command should fail for manifest with invalid Identity Name value.");
+                    var combinedOutput = $"{result.Output}\n{result.Error}";
+                    Assert.IsTrue(
+                        combinedOutput.Contains("Failed to add package identity:", StringComparison.OrdinalIgnoreCase),
+                        $"Expected add-package-identity failure message to be surfaced. Output: {combinedOutput}");
+                    Assert.IsFalse(
+                        combinedOutput.Contains("Get-AppPackageLog", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("At line:", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("FullyQualifiedErrorId", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("CategoryInfo", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("_x000D__x000A_", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("<Objs Version=", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("#< CLIXML", StringComparison.OrdinalIgnoreCase),
+                        $"Did not expect raw CLIXML output. Output: {combinedOutput}");
+        }
+
     /// <summary>
     /// Helper method to run dotnet commands
     /// </summary>

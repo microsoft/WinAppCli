@@ -1084,7 +1084,7 @@ if ($toInstall.Count -gt 0) {{
         taskContext.AddDebugMessage($"{UiSymbols.Info} Checking and installing {packageEntries.Count} MSIX packages");
 
         // Execute the batch script
-        var (exitCode, output) = await powerShellService.RunCommandAsync(script, taskContext, cancellationToken: cancellationToken);
+        var (exitCode, output, _) = await powerShellService.RunCommandAsync(script, taskContext, cancellationToken: cancellationToken);
 
         // Parse the output to provide user feedback
         var outputLines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
