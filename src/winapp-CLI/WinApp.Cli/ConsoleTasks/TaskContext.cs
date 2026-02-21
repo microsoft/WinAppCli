@@ -41,6 +41,8 @@ internal class TaskContext
         AddStatusMessageInternal(message, UiSymbols.Info);
     }
 
+    public bool IsVerboseEnabled => _logger.IsEnabled(LogLevel.Debug);
+
     public void AddDebugMessage(string message)
     {
         // Only update status and log if verbose logging is enabled
