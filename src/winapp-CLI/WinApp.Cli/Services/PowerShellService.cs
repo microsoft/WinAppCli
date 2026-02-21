@@ -18,8 +18,8 @@ internal class PowerShellService : IPowerShellService
     /// <param name="elevated">Whether to run with elevated privileges (UAC prompt)</param>
     /// <param name="environmentVariables">Optional dictionary of environment variables to set/override</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Tuple containing (exitCode, stdout)</returns>
-    public async Task<(int exitCode, string output)> RunCommandAsync(
+    /// <returns>Tuple containing (exitCode, stdout, stderr)</returns>
+    public async Task<(int exitCode, string output, string error)> RunCommandAsync(
         string command,
         TaskContext taskContext,
         bool elevated = false,
@@ -34,12 +34,15 @@ internal class PowerShellService : IPowerShellService
         }
 
         // Build a safe, profile-less, non-interactive PowerShell invocation
+        // Prefix command to suppress progress records that can otherwise pollute stderr output.
+        var preparedCommand = $"$ProgressPreference='SilentlyContinue'; {command}";
+
         static string ToEncodedCommand(string s)
         {
             var bytes = System.Text.Encoding.Unicode.GetBytes(s); // UTF-16LE
             return Convert.ToBase64String(bytes);
         }
-        var encoded = ToEncodedCommand(command);
+        var encoded = ToEncodedCommand(preparedCommand);
 
         var psi = new ProcessStartInfo
         {
@@ -81,7 +84,7 @@ internal class PowerShellService : IPowerShellService
         using var process = Process.Start(psi);
         if (process == null)
         {
-            return (-1, "Failed to start PowerShell process");
+            return (-1, string.Empty, "Failed to start PowerShell process");
         }
 
         string stdOut = string.Empty, stdErr = string.Empty;
@@ -97,8 +100,8 @@ internal class PowerShellService : IPowerShellService
             process.StandardInput.Close();
 
             await Task.WhenAll(outTask, errTask);
-            stdOut = outTask.Result;
-            stdErr = errTask.Result;
+            stdOut = NormalizePowerShellStream(outTask.Result);
+            stdErr = NormalizePowerShellStream(errTask.Result);
         }
 
         await process.WaitForExitAsync(cancellationToken);
@@ -115,6 +118,121 @@ internal class PowerShellService : IPowerShellService
         // For elevated commands, exit codes may not be reliable, so we return 0 if no exception occurred
         var exitCode = elevated ? (process.ExitCode == 0 ? 0 : process.ExitCode) : process.ExitCode;
 
-        return (exitCode, stdOut);
+        return (exitCode, stdOut, stdErr);
+    }
+
+    private static string NormalizePowerShellStream(string stream)
+    {
+        if (string.IsNullOrWhiteSpace(stream))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = stream.Trim();
+        var reasonIndex = trimmed.IndexOf("Reason:", StringComparison.OrdinalIgnoreCase);
+        if (reasonIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        var reasonStart = reasonIndex + "Reason:".Length;
+        var section = trimmed[reasonStart..];
+
+        var noteIndex = section.IndexOf("NOTE:", StringComparison.OrdinalIgnoreCase);
+        if (noteIndex >= 0)
+        {
+            section = section[..noteIndex];
+        }
+
+        section = StripXmlTags(section);
+        section = DecodeClixmlEscapes(section);
+        section = section.Replace("#< CLIXML", string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        var lines = section
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line));
+
+        return string.Join(" ", lines).Trim();
+    }
+
+    private static string StripXmlTags(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sb = new System.Text.StringBuilder(value.Length);
+        var inTag = false;
+
+        foreach (var character in value)
+        {
+            if (character == '<')
+            {
+                inTag = true;
+                continue;
+            }
+
+            if (character == '>')
+            {
+                inTag = false;
+                sb.Append(' ');
+                continue;
+            }
+
+            if (!inTag)
+            {
+                sb.Append(character);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string DecodeClixmlEscapes(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sb = new System.Text.StringBuilder(value.Length);
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (i + 6 < value.Length
+                && value[i] == '_'
+                && (value[i + 1] == 'x' || value[i + 1] == 'X')
+                && IsHex(value[i + 2])
+                && IsHex(value[i + 3])
+                && IsHex(value[i + 4])
+                && IsHex(value[i + 5])
+                && value[i + 6] == '_')
+            {
+                var hex = value.AsSpan(i + 2, 4);
+                var codePoint = Convert.ToInt32(hex.ToString(), 16);
+
+                sb.Append(codePoint switch
+                {
+                    0x000D => '\r',
+                    0x000A => '\n',
+                    0x0009 => ' ',
+                    _ => (char)codePoint
+                });
+
+                i += 6;
+                continue;
+            }
+
+            sb.Append(value[i]);
+        }
+
+        return sb.ToString();
+
+        static bool IsHex(char c)
+            => (c >= '0' && c <= '9')
+               || (c >= 'a' && c <= 'f')
+               || (c >= 'A' && c <= 'F');
     }
 }

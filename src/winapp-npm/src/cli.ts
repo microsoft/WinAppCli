@@ -62,9 +62,7 @@ export async function main(): Promise<void> {
     // Route everything else to winapp-cli
     await callWinappCli(args, { exitOnError: true });
   } catch (error) {
-    const err = error as Error;
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
+    logErrorAndExit(error);
   }
 }
 
@@ -319,9 +317,7 @@ async function handleCreateAddon(args: string[]): Promise<void> {
       );
     }
   } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to generate addon files: ${err.message}`);
-    process.exit(1);
+    logErrorAndExit(error);
   }
 }
 
@@ -385,9 +381,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
 
     console.log(`✅ Electron debug identity setup completed successfully!`);
   } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to add Electron debug identity: ${err.message}`);
-    process.exit(1);
+    logErrorAndExit(error);
   }
 }
 
@@ -425,10 +419,22 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
       console.log(`ℹ️  No backup found - electron.exe may already be clean.`);
     }
   } catch (error) {
-    const err = error as Error;
-    console.error(`❌ Failed to clear Electron debug identity: ${err.message}`);
+    logErrorAndExit(error);
+  }
+}
+
+function logErrorAndExit(error: unknown): never {
+  if (error instanceof Error && error.message.includes('winapp-cli exited with code')) {
     process.exit(1);
   }
+
+  if (error instanceof Error && error.message) {
+    console.error(error.message);
+  } else {
+    console.error(error);
+  }
+
+  process.exit(1);
 }
 
 function parseArgs(args: string[], defaults: ParsedArgs = {}): ParsedArgs {

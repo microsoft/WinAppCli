@@ -2042,7 +2042,7 @@ $1");
         {
             // First check if package exists
             var checkCommand = $"Get-AppxPackage -Name '{packageName}'";
-            var (_, checkResult) = await powerShellService.RunCommandAsync(checkCommand, taskContext, cancellationToken: cancellationToken);
+            var (_, checkResult, _) = await powerShellService.RunCommandAsync(checkCommand, taskContext, cancellationToken: cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(checkResult))
             {
@@ -2084,11 +2084,16 @@ $1");
 
         try
         {
-            var (exitCode, _) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
+            var (exitCode, output, error) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
 
             if (exitCode != 0)
             {
-                throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
+                if (string.IsNullOrWhiteSpace(error))
+                {
+                    throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
+                }
+
+                throw new InvalidOperationException(error.Trim());
             }
 
             taskContext.AddDebugMessage($"{UiSymbols.Check} Sparse package registered successfully");

@@ -90,8 +90,7 @@ internal class CertGenerateCommand : Command, IShortDescription
             {
                 if (ifExists == IfExists.Error)
                 {
-                    logger.LogError("{UISymbol} Certificate file already exists: {Output}", UiSymbols.Error, output);
-                    logger.LogError("Please specify a different output path or remove the existing file.");
+                    logger.LogError("{UISymbol} Certificate file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, output, System.Environment.NewLine);
                     return 1;
                 }
                 else if (ifExists == IfExists.Skip)

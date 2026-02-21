@@ -139,7 +139,7 @@ internal class PackageCommand : Command, IShortDescription
                 catch (Exception ex)
                 {
                     taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
-                    return (1, $"{UiSymbols.Error} Failed to create MSIX package: {ex.Message}");
+                    return (1, $"{UiSymbols.Error} Failed to create MSIX package: {ex.GetBaseException().Message}");
                 }
             }, cancellationToken);
         }
