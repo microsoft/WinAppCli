@@ -310,6 +310,17 @@ try
 
     # Build process complete - all artifacts are ready
 
+    # Copy install-dev script into artifacts so the folder is self-contained
+    Write-Host ""
+    Write-Host "[INSTALL] Copying setup-winapprun.ps1 to artifacts..." -ForegroundColor Blue
+    $InstallDevScript = Join-Path $PSScriptRoot "setup-winapprun.ps1"
+    if (Test-Path $InstallDevScript) {
+        Copy-Item $InstallDevScript -Destination $ArtifactsPath -Force
+        Write-Host "[INSTALL] setup-winapprun.ps1 copied to artifacts" -ForegroundColor Green
+    } else {
+        Write-Warning "setup-winapprun.ps1 not found at $InstallDevScript"
+    }
+
     # Display results
     Write-Host ""
     Write-Host "[SUCCESS] Build completed successfully!" -ForegroundColor Green
