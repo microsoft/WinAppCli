@@ -19,6 +19,7 @@
     <RepositoryUrl>https://github.com/microsoft/WinAppCli.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     
     <!-- Package as a tools package -->
     <IsTool>false</IsTool>
@@ -34,6 +35,7 @@
   <!-- Include the README file in the package -->
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="icon.png" Pack="true" PackagePath="" />
   </ItemGroup>
 
   <!-- Include MSBuild targets and props files -->
