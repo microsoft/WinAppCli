@@ -71,7 +71,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
                 }
                 catch (Exception ex)
                 {
-                    return (1, $"{UiSymbols.Error} Error updating assets: {ex.Message}");
+                    return (1, $"{UiSymbols.Error} Error updating assets: {ex.GetBaseException().Message}");
                 }
             }, cancellationToken);
         }

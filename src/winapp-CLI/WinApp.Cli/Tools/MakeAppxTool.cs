@@ -49,7 +49,6 @@ public class MakeAppxTool : Tool
                 {
                     logger.LogError("{ErrorLine}", lines[i]);
                 }
-                logger.LogError("{ExeName} reported an error. The above text is only part of the tool output. Please re-run with --verbose to see the full output.", ExecutableName);
                 return;
             }
         }
@@ -58,7 +57,6 @@ public class MakeAppxTool : Tool
         if (!string.IsNullOrWhiteSpace(stderr))
         {
             logger.LogError("{Stderr}", stderr);
-            logger.LogError("{ExeName} reported an error. The above text is only part of the tool output. Please re-run with --verbose to see the full output.", ExecutableName);
         }
         else
         {
