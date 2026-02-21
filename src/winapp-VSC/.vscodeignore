@@ -2,9 +2,12 @@
 .vscode-test/**
 src/**
 !bin/**/*.exe
+out/**
 node_modules/**
 .gitignore
 eslint.config.mjs
+esbuild.mjs
 tsconfig.json
 **/*.ts
 **/*.map
+**/*.backup
