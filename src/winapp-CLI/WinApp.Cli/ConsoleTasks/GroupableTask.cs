@@ -124,7 +124,7 @@ internal class GroupableTask<T> : GroupableTask
 
     private static void RenderTask(GroupableTask task, StringBuilder sb, int indentLevel, string indentStr, int maxForcedDepth)
     {
-        string msg;
+        string? msg;
 
         if (task.SuccessfullyCompleted != null)
         {
@@ -145,6 +145,9 @@ internal class GroupableTask<T> : GroupableTask
             msg = task switch
             {
                 StatusMessageTask statusMessageTask => $"{indentStr}{Markup.Escape(statusMessageTask.CompletedMessage ?? string.Empty)}",
+                // Error details are logged to stderr by StatusService, so skip rendering them in the task tree.
+                GroupableTask<T> failedTask when failedTask.CompletedMessage is ITuple resultTuple
+                    && resultTuple[0] is int and not 0 => null,
                 GroupableTask<T> genericTask => FormatCheckMarkMessage(indentStr, (genericTask.CompletedMessage as ITuple) switch
                 {
                     ITuple tuple when tuple.Length > 0 && tuple[0] is string str => str,
@@ -176,9 +179,11 @@ internal class GroupableTask<T> : GroupableTask
         }
 
         // make line endings consistent
-        msg = msg.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine).TrimEnd([.. Environment.NewLine]);
-
-        sb.AppendLine(msg);
+        if (msg != null)
+        {
+            msg = msg.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine).TrimEnd([.. Environment.NewLine]);
+            sb.AppendLine(msg);
+        }
 
         bool shouldRenderChildren = indentLevel + 1 <= maxForcedDepth || task.SuccessfullyCompleted == null;
         if (shouldRenderChildren)

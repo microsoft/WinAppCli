@@ -25,7 +25,6 @@ public partial class MakePriTool : Tool
         else
         {
             logger.LogError("{Stderr}", stderr);
-            logger.LogError("{ExeName} reported an error. The above text is only part of the tool output. Please re-run with --verbose to see the full output.", ExecutableName);
         }
     }
 }

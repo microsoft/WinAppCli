@@ -83,7 +83,11 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         {
             if (result.Value.ReturnCode != 0)
             {
-                logger.LogError("Task failed with return code {ReturnCode}, message: {CompletedMessage}", result.Value.ReturnCode, result.Value.CompletedMessage);
+                logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
+                if (!logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogInformation("Run with --verbose for more details.");
+                }
             }
             else
             {
