@@ -712,4 +712,158 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     #endregion
+
+    #region EnsureRuntimeIdentifierAsync Tests (RuntimeIdentifierElementRegex)
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_NoRuntimeIdentifier_InsertsOne()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NoRid.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when RuntimeIdentifier was inserted");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifier_DoesNotModify()
+    {
+        // Arrange — singular <RuntimeIdentifier>
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRid.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when RuntimeIdentifier already exists");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifiers_StillInserts()
+    {
+        // Arrange — plural <RuntimeIdentifiers> should NOT prevent inserting singular <RuntimeIdentifier>
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRids.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier even when RuntimeIdentifiers (plural) exists");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+        // Verify it's inserted right after </RuntimeIdentifiers>
+        var ridsEnd = content.IndexOf("</RuntimeIdentifiers>", StringComparison.Ordinal);
+        var ridStart = content.IndexOf("<RuntimeIdentifier Condition=", StringComparison.Ordinal);
+        Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
+        // Nothing but whitespace between them
+        var between = content[(ridsEnd + "</RuntimeIdentifiers>".Length)..ridStart];
+        Assert.IsTrue(string.IsNullOrWhiteSpace(between), $"Only whitespace expected between elements, got: '{between}'");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifierWithCondition_DoesNotModify()
+    {
+        // Arrange — <RuntimeIdentifier with a Condition attribute (whitespace after tag name)
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRidCondition.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier Condition=""'$(RuntimeIdentifier)' == ''"">win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when RuntimeIdentifier with attributes already exists");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifiersWithCondition_StillInserts()
+    {
+        // Arrange — plural <RuntimeIdentifiers with a Condition attribute should NOT block insertion
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRidsCondition.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifiers Condition=""'$(RuntimeIdentifiers)' == ''"">win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier even when RuntimeIdentifiers (plural) with attributes exists");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+        // Verify it's inserted right after </RuntimeIdentifiers>
+        var ridsEnd = content.IndexOf("</RuntimeIdentifiers>", StringComparison.Ordinal);
+        var ridStart = content.IndexOf("<RuntimeIdentifier Condition=", StringComparison.Ordinal);
+        Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_FileDoesNotExist_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NonExistent.csproj");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_DoesNotMatchSimilarElementNames()
+    {
+        // Arrange — contains <RuntimeIdentifierGraph> which should NOT prevent insertion
+        var csprojPath = Path.Combine(_testTempDirectory, "SimilarName.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+  <!-- RuntimeIdentifierGraph should not be confused with RuntimeIdentifier -->
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier — RuntimeIdentifierGraph is not RuntimeIdentifier");
+    }
+
+    #endregion
 }

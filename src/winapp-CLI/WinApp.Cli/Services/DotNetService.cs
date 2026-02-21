@@ -45,8 +45,11 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
-    [GeneratedRegex(@"<RuntimeIdentifiers?[\s>]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"<RuntimeIdentifier[\s>]", RegexOptions.IgnoreCase)]
     private static partial Regex RuntimeIdentifierElementRegex();
+
+    [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex RuntimeIdentifiersElementRegex();
 
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
@@ -239,7 +242,7 @@ internal partial class DotNetService : IDotNetService
 
         var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
 
-        // Don't modify if the project already defines RuntimeIdentifier or RuntimeIdentifiers
+        // Don't modify if the project already defines RuntimeIdentifier (singular)
         if (RuntimeIdentifierElementRegex().IsMatch(content))
         {
             return false;
@@ -250,29 +253,44 @@ internal partial class DotNetService : IDotNetService
         const string runtimeIdentifierElement =
             "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
 
-        // Insert into the first PropertyGroup, after <TargetFramework> if present
-        var tfmMatch = TargetFrameworkElementRegex().Match(content);
-        if (tfmMatch.Success)
+        // Insert into the first PropertyGroup:
+        // 1. After <RuntimeIdentifiers> if present (keep RID properties together)
+        // 2. After <TargetFramework> if present
+        // 3. At start of first PropertyGroup as last resort
+        var ridsMatch = RuntimeIdentifiersElementRegex().Match(content);
+        if (ridsMatch.Success)
         {
-            // Insert after the TargetFramework line
-            var insertPos = tfmMatch.Index + tfmMatch.Length;
+            // Insert right after the </RuntimeIdentifiers> element
+            var insertPos = ridsMatch.Index + ridsMatch.Length;
             content = content[..insertPos]
                 + Environment.NewLine + "    " + runtimeIdentifierElement
                 + content[insertPos..];
         }
         else
         {
-            // No TargetFramework found; insert at start of first PropertyGroup
-            var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
-            if (propGroupIdx >= 0)
+            var tfmMatch = TargetFrameworkElementRegex().Match(content);
+            if (tfmMatch.Success)
             {
-                var closeTag = content.IndexOf('>', propGroupIdx);
-                if (closeTag >= 0)
+                // Insert after the TargetFramework line
+                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                content = content[..insertPos]
+                    + Environment.NewLine + "    " + runtimeIdentifierElement
+                    + content[insertPos..];
+            }
+            else
+            {
+                // No TargetFramework found; insert at start of first PropertyGroup
+                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+                if (propGroupIdx >= 0)
                 {
-                    var insertPos = closeTag + 1;
-                    content = content[..insertPos]
-                        + Environment.NewLine + "    " + runtimeIdentifierElement
-                        + content[insertPos..];
+                    var closeTag = content.IndexOf('>', propGroupIdx);
+                    if (closeTag >= 0)
+                    {
+                        var insertPos = closeTag + 1;
+                        content = content[..insertPos]
+                            + Environment.NewLine + "    " + runtimeIdentifierElement
+                            + content[insertPos..];
+                    }
                 }
             }
         }

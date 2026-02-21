@@ -2233,16 +2233,16 @@ $1");
 
         try
         {
-            var (exitCode, _, error) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
+            var (exitCode, output, _) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
 
             if (exitCode != 0)
             {
-                if (string.IsNullOrWhiteSpace(error))
+                if (string.IsNullOrWhiteSpace(output))
                 {
                     throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
                 }
 
-                throw new InvalidOperationException(error.Trim());
+                throw new InvalidOperationException(output.Trim());
             }
 
             taskContext.AddDebugMessage($"{UiSymbols.Check} Package registered successfully");

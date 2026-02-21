@@ -132,7 +132,7 @@ internal class PowerShellService : IPowerShellService
         var reasonIndex = trimmed.IndexOf("Reason:", StringComparison.OrdinalIgnoreCase);
         if (reasonIndex < 0)
         {
-            return string.Empty;
+            return trimmed;
         }
 
         var reasonStart = reasonIndex + "Reason:".Length;
