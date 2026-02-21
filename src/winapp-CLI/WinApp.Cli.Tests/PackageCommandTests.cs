@@ -582,7 +582,7 @@ public class PackageCommandTests : BaseCommandTests
             async () => await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken));
 
         // Verify error message format matches requirement
-        Assert.Contains($"Error: Publisher in {manifestPath} (CN=ManifestPublisher)", ex.Message);
+        Assert.Contains($"Publisher in {manifestPath} (CN=ManifestPublisher)", ex.Message);
         Assert.Contains($"does not match the publisher in the certificate {certPath} (CN=CertificatePublisher)", ex.Message);
     }
 

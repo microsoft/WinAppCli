@@ -66,11 +66,11 @@ internal class SignCommand : Command, IShortDescription
                 }
                 catch (InvalidOperationException error)
                 {
-                    return (1, $"Failed to sign file: {error.Message}");
+                    return (1, error.Message);
                 }
                 catch (Exception error)
                 {
-                    return (1, $"Failed to sign file: {error.Message}");
+                    return (1, error.Message);
                 }
             }, cancellationToken);
         }

@@ -8,8 +8,8 @@ namespace WinApp.Cli.Tests;
 
 internal class FakePowerShellService : IPowerShellService
 {
-    public Task<(int exitCode, string output)> RunCommandAsync(string command, TaskContext taskContext, bool elevated = false, Dictionary<string, string>? environmentVariables = null, CancellationToken cancellationToken = default)
+    public Task<(int exitCode, string output, string error)> RunCommandAsync(string command, TaskContext taskContext, bool elevated = false, Dictionary<string, string>? environmentVariables = null, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult((0, "Fake PowerShell command executed successfully."));
+        return Task.FromResult((0, "Fake PowerShell command executed successfully.", string.Empty));
     }
 }

@@ -105,8 +105,7 @@ internal class ManifestGenerateCommand : Command, IShortDescription
             {
                 if (ifExists == IfExists.Error)
                 {
-                    logger.LogError("{UISymbol} Manifest file already exists: {Output}", UiSymbols.Error, manifestPath);
-                    logger.LogError("Please specify a different output path or remove the existing file.");
+                    logger.LogError("{UISymbol} Manifest file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, manifestPath, System.Environment.NewLine);
                     return 1;
                 }
                 else if (ifExists == IfExists.Skip)
@@ -140,7 +139,7 @@ internal class ManifestGenerateCommand : Command, IShortDescription
                 catch (Exception ex)
                 {
                     taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
-                    return (1, $"{UiSymbols.Error} Error generating manifest: {ex.Message}");
+                    return (1, $"{UiSymbols.Error} Error generating manifest: {ex.GetBaseException().Message}");
                 }
             }, cancellationToken);
         }
