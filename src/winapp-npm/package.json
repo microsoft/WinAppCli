@@ -43,20 +43,20 @@
     "url": "https://github.com/microsoft/WinAppCli.git"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "os": [
     "win32"
   ],
   "devDependencies": {
-    "@types/node": "^25.0.9",
-    "@typescript-eslint/eslint-plugin": "^8.53.1",
-    "@typescript-eslint/parser": "^8.53.1",
-    "eslint": "^9.39.2",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.3.0",
+    "eslint": "^10.0.1",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.0.0",
-    "prettier": "^3.8.0",
-    "typescript": "^5.9.3"
+    "globals": "^17.3.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
   },
   "files": [
     "dist/**/*.js",
