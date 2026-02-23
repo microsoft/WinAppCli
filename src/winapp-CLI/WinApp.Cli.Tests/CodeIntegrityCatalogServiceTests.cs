@@ -50,15 +50,6 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         _codeIntegrityCatalogService = new CodeIntegrityCatalogService(GetRequiredService<ILogger<CodeIntegrityCatalogService>>());
     }
 
-    [TestCleanup]
-    public void Cleanup()
-    {
-        if (Directory.Exists(_testInputDirectory))
-        {
-            Directory.Delete(_testInputDirectory, true);
-        }
-    }
-
     private static void CopyExecutablesForTest(string destPath)
     {
         File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), Path.Combine(destPath, "cmd.exe"));
