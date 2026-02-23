@@ -159,7 +159,7 @@ export async function generateCsAddonFiles(options: GenerateCsAddonOptions = {})
     return result;
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Failed to generate C# addon files: ${err.message}`);
+    throw new Error(`Failed to generate C# addon files: ${err.message}`, { cause: error });
   }
 }
 
@@ -310,7 +310,7 @@ async function installNodeApiDotnet(projectRoot: string, verbose: boolean): Prom
     }
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Failed to install node-api-dotnet: ${err.message}`);
+    throw new Error(`Failed to install node-api-dotnet: ${err.message}`, { cause: error });
   }
 }
 
