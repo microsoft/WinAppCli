@@ -7,7 +7,7 @@
       1. winapp MSIX package (architecture-matched) + its signing certificate
       2. winapp VS Code extension (.vsix)
       3. dotnet new templates (Microsoft.WindowsAppSDK.Templates nupkg)
-      4. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.MSIX.Extras
+      4. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.WinApp
 
     Re-running with newer files will upgrade everything in place.
 .PARAMETER Elevated
@@ -235,7 +235,7 @@ if (-not $templatePkg) {
 # ═══════════════════════════════════════════════════════════════════════════════
 Write-Step "Setting up local NuGet feed for BuildTools.MSIX.Extras"
 
-$extrasPkg = Get-ChildItem -Path $NugetDir -Filter "Microsoft.Windows.SDK.BuildTools.MSIX.Extras.*.nupkg" -ErrorAction SilentlyContinue |
+$extrasPkg = Get-ChildItem -Path $NugetDir -Filter "Microsoft.Windows.SDK.BuildTools.WinApp.*.nupkg" -ErrorAction SilentlyContinue |
              Select-Object -First 1
 if (-not $extrasPkg) {
     Write-Skip "No BuildTools.MSIX.Extras nupkg found in $NugetDir -- skipping"

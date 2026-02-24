@@ -15,7 +15,7 @@ dotnet run
 
 ### Components
 
-1. **Microsoft.Windows.SDK.BuildTools.MSIX.Extras** (NuGet Package)
+1. **Microsoft.Windows.SDK.BuildTools.WinApp** (NuGet Package)
    - Contains the WinAppCLI binary in `tools/` folder
    - Provides MSBuild targets that hook into `dotnet run`
    - Automatically detects packaged WinUI apps and handles launch
@@ -58,11 +58,11 @@ WinAppCLI
 ```
 src/
 ├── winapp-NuGet/                           # BuildTools.Extras NuGet package
-│   ├── Microsoft.Windows.SDK.BuildTools.MSIX.Extras.csproj
+│   ├── Microsoft.Windows.SDK.BuildTools.WinApp.csproj
 │   ├── README.md
 │   ├── build/
-│   │   ├── Microsoft.Windows.SDK.BuildTools.MSIX.Extras.props
-│   │   └── Microsoft.Windows.SDK.BuildTools.MSIX.Extras.targets
+│   │   ├── Microsoft.Windows.SDK.BuildTools.WinApp.props
+│   │   └── Microsoft.Windows.SDK.BuildTools.WinApp.targets
 │   └── tools/                              # CLI binaries (copied by build script)
 │       ├── win-x64/
 │       └── win-arm64/
@@ -90,7 +90,7 @@ samples/
 
 ## MSBuild Integration Details
 
-### Properties (Microsoft.Windows.SDK.BuildTools.MSIX.Extras.props)
+### Properties (Microsoft.Windows.SDK.BuildTools.WinApp.props)
 
 | Property | Default | Description |
 |----------|---------|-------------|
@@ -100,7 +100,7 @@ samples/
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
 
-### Targets (Microsoft.Windows.SDK.BuildTools.MSIX.Extras.targets)
+### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
 
 | Target | Description |
 |--------|-------------|
@@ -227,8 +227,8 @@ The current implementation defaults to x64. For ARM64 machines, the targets corr
 The sample project imports the MSBuild targets directly:
 
 ```xml
-<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.MSIX.Extras.props" />
-<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.MSIX.Extras.targets" />
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.WinApp.props" />
+<Import Project="..\..\src\winapp-NuGet\build\Microsoft.Windows.SDK.BuildTools.WinApp.targets" />
 ```
 
 ### Diagnostic Commands

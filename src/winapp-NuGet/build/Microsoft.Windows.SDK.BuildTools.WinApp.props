@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Microsoft.Windows.SDK.BuildTools.MSIX.Extras.props
+  Microsoft.Windows.SDK.BuildTools.WinApp.props
   
   This file is imported early in the build process and sets up default properties
   for packaged application support.

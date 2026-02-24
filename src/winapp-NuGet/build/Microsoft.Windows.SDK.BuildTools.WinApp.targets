@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Microsoft.Windows.SDK.BuildTools.MSIX.Extras.targets
+  Microsoft.Windows.SDK.BuildTools.WinApp.targets
   
   This file provides MSBuild targets that enable 'dotnet run' for packaged
   applications.

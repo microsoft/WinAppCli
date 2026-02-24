@@ -28,7 +28,7 @@ internal partial class DotNetService : IDotNetService
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
-    internal const string WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE = "Microsoft.Windows.SDK.BuildTools.MSIX.Extras";
+    internal const string WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE = "Microsoft.Windows.SDK.BuildTools.WinApp";
 
     [GeneratedRegex(@"^net(\d+\.\d+)-windows([\d.]+)$", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsTfmRegex();

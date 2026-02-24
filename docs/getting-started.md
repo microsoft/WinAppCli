@@ -156,7 +156,7 @@ This works regardless of how the app was built — whether from `dotnet build`, 
 
 ### The MSIX Extras NuGet package (.NET-specific)
 
-The `Microsoft.Windows.SDK.BuildTools.MSIX.Extras` package contains MSBuild `.props` and `.targets` files that hook into the `dotnet run` lifecycle. When you execute `dotnet run`, MSBuild's `Run` target is intercepted and redirected through `winapp run` with the correct output directory and manifest path. The package also bundles a copy of the WinApp CLI, so no global installation is required for `dotnet run` to work.
+The `Microsoft.Windows.SDK.BuildTools.WinApp` package contains MSBuild `.props` and `.targets` files that hook into the `dotnet run` lifecycle. When you execute `dotnet run`, MSBuild's `Run` target is intercepted and redirected through `winapp run` with the correct output directory and manifest path. The package also bundles a copy of the WinApp CLI, so no global installation is required for `dotnet run` to work.
 
 ### The VS Code extension debug flow
 
@@ -187,7 +187,7 @@ winapp pack ./dist --cert ./devcert.pfx              # create and sign an MSIX p
 `winapp init` and `winapp run` will detect this and prompt to enable it automatically (requires elevation). You can also enable it manually under Windows Settings > For Developers.
 
 **`dotnet run` does not launch as packaged**
-Ensure the `Microsoft.Windows.SDK.BuildTools.MSIX.Extras` package reference is present in your `.csproj`. If you initialized with `winapp init`, it should already be there. Run `dotnet restore` to make sure NuGet packages are resolved (the local NuGet feed registered by the setup script must be accessible).
+Ensure the `Microsoft.Windows.SDK.BuildTools.WinApp` package reference is present in your `.csproj`. If you initialized with `winapp init`, it should already be there. Run `dotnet restore` to make sure NuGet packages are resolved (the local NuGet feed registered by the setup script must be accessible).
 
 **F5 says "No AppxManifest.xml found"**
 Build the project first (`dotnet build`), then try again. The extension looks for the manifest in your build output, not the project root.
