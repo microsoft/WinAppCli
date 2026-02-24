@@ -10,8 +10,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CertGenerateCommand : Command
+internal class CertGenerateCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create a self-signed certificate for local testing";
+
     public static Option<string> PublisherOption { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<FileInfo> OutputOption { get; }
@@ -88,8 +90,7 @@ internal class CertGenerateCommand : Command
             {
                 if (ifExists == IfExists.Error)
                 {
-                    logger.LogError("{UISymbol} Certificate file already exists: {Output}", UiSymbols.Error, output);
-                    logger.LogError("Please specify a different output path or remove the existing file.");
+                    logger.LogError("{UISymbol} Certificate file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, output, System.Environment.NewLine);
                     return 1;
                 }
                 else if (ifExists == IfExists.Skip)

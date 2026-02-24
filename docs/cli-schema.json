@@ -2,7 +2,7 @@
   "name": "winapp",
   "version": "0.1.11",
   "schemaVersion": "1.0",
-  "description": "CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows",
+  "description": "CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
   "options": {
     "--cli-schema": {
@@ -400,7 +400,7 @@
       }
     },
     "init": {
-      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.",
+      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -429,7 +429,7 @@
           "recursive": false
         },
         "--config-only": {
-          "description": "Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps.",
+          "description": "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -447,19 +447,6 @@
           "aliases": [
             "--no-config"
           ],
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
-        "--no-cert": {
-          "description": "Skip development certificate generation",
-          "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
           "defaultValue": false,
@@ -551,7 +538,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).",
+          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -580,11 +567,11 @@
               "required": false,
               "recursive": false
             },
-            "--entrypoint": {
-              "description": "Entry point of the application (e.g., executable path / name, or .py/.js script if template is HostedApp). Default: <package-name>.exe",
+            "--executable": {
+              "description": "Path to the application's executable. Default: <package-name>.exe",
               "hidden": false,
               "aliases": [
-                "--executable"
+                "--entrypoint"
               ],
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -661,7 +648,7 @@
               "recursive": false
             },
             "--template": {
-              "description": "Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host)",
+              "description": "Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs)",
               "hidden": false,
               "valueType": "WinApp.Cli.Models.ManifestTemplates",
               "hasDefaultValue": true,
@@ -807,6 +794,21 @@
           "valueType": "System.String",
           "hasDefaultValue": true,
           "defaultValue": "password",
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--executable": {
+          "description": "Path to the executable relative to the input folder.",
+          "hidden": false,
+          "aliases": [
+            "--exe"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
             "maximum": 1
@@ -1097,6 +1099,10 @@
           "recursive": false
         }
       }
+    },
+    "store": {
+      "description": "Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli",
+      "hidden": false
     },
     "tool": {
       "description": "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix",

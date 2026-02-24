@@ -41,6 +41,8 @@ internal class TaskContext
         AddStatusMessageInternal(message, UiSymbols.Info);
     }
 
+    public bool IsVerboseEnabled => _logger.IsEnabled(LogLevel.Debug);
+
     public void AddDebugMessage(string message)
     {
         // Only update status and log if verbose logging is enabled
@@ -104,7 +106,7 @@ internal class TaskContext
     {
         // Create a prompt task that displays and tracks the confirmation state
         var promptTask = new PromptConfirmationTask(prompt, _task, _ansiConsole, _logger, _renderLock, _onUpdate);
-        
+
         lock (_renderLock)
         {
             _task.SubTasks.Add(promptTask, cancellationToken);

@@ -12,19 +12,18 @@
   IgnorableNamespaces="uap uap2 uap3 uap10 desktop desktop6 rescap">
 
   <Identity
-    Name="{PackageName}"
-    Publisher="CN={PublisherName}"
+    Name="flutter-app"
+    Publisher="CN=nikolame"
     Version="1.0.0.0" />
 
   <Properties>
-    <DisplayName>{PackageName}</DisplayName>
-    <PublisherDisplayName>{PublisherName}</PublisherDisplayName>
+    <DisplayName>flutter_app</DisplayName>
+    <PublisherDisplayName>nikolame</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26200.0" />
-    <uap10:HostRuntimeDependency Name="{HostRuntimeDependencyPackageName}" Publisher="CN={HostRuntimeDependencyPublisherName}" MinVersion="{HostRuntimeDependencyMinVersion}" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26200.0" />
   </Dependencies>
 
   <Resources>
@@ -32,12 +31,14 @@
   </Resources>
 
   <Applications>
-    <Application Id="{ApplicationId}"
-      uap10:HostId="{HostId}"
-      uap10:Parameters="{HostParameters}">
+    <Application Id="flutterApp"
+      Executable="$targetnametoken$.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      uap10:TrustLevel="mediumIL"
+      uap10:RuntimeBehavior="packagedClassicApp">
       <uap:VisualElements
-        DisplayName="{PackageName}"
-        Description="{Description}"
+        DisplayName="flutter_app"
+        Description="Windows Application"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

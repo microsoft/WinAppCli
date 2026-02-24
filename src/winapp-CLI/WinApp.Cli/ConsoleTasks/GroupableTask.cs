@@ -14,7 +14,7 @@ namespace WinApp.Cli.ConsoleTasks;
 internal class GroupableTask(string inProgressMessage, GroupableTask? parent) : IDisposable
 {
     public BlockingCollection<GroupableTask> SubTasks { get; set; } = [];
-    public bool IsCompleted { get; protected set; }
+    public bool? SuccessfullyCompleted { get; set; }
     public GroupableTask? Parent { get; } = parent;
     public string InProgressMessage { get; set; } = inProgressMessage;
     public bool EscapeInProgressMessage { get; set; } = true;
@@ -56,14 +56,26 @@ internal class GroupableTask<T> : GroupableTask
             {
                 var context = new TaskContext(this, onUpdate, AnsiConsole, _logger, RenderLock);
                 CompletedMessage = await _taskFunc(context, cancellationToken);
-                IsCompleted = true;
+                SuccessfullyCompleted = true;
             }
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
+            SuccessfullyCompleted = false;
             Debug.WriteLine(ex);
 
-            return default(T?);
+            // Handle if T is a ValueTuple with an int first element (e.g., (int ReturnCode, string Message))
+            // to return a non-zero ReturnCode on error, which prevents the spinner from continuing indefinitely.
+            T? result = default;
+            if (result is ValueTuple<int, string> v)
+            {
+                v.Item1 = 1;
+                CompletedMessage = (T?)(object)v;
+            }
+            else
+            {
+                return result;
+            }
         }
         finally
         {
@@ -112,11 +124,11 @@ internal class GroupableTask<T> : GroupableTask
 
     private static void RenderTask(GroupableTask task, StringBuilder sb, int indentLevel, string indentStr, int maxForcedDepth)
     {
-        string msg;
+        string? msg;
 
-        if (task.IsCompleted)
+        if (task.SuccessfullyCompleted != null)
         {
-            static string FormatCheckMarkMessage(string indentStr, string message)
+            string FormatCheckMarkMessage(string indentStr, string message)
             {
                 bool firstCharIsEmojiOrOpenBracket = false;
                 if (message.Length > 0)
@@ -126,12 +138,16 @@ internal class GroupableTask<T> : GroupableTask
                                                  || char.GetUnicodeCategory(firstChar) == System.Globalization.UnicodeCategory.OtherSymbol
                                                  || firstChar == '[';
                 }
-                return firstCharIsEmojiOrOpenBracket ? $"{indentStr}{message}" : $"{indentStr}[green]{Emoji.Known.CheckMarkButton}[/] {message}";
+                var emoji = task.SuccessfullyCompleted == true ? $"[green]{Emoji.Known.CheckMarkButton}[/]" : $"[red]{Emoji.Known.CrossMark}[/]";
+                return firstCharIsEmojiOrOpenBracket ? $"{indentStr}{message}" : $"{indentStr}{emoji} {message}";
             }
 
             msg = task switch
             {
                 StatusMessageTask statusMessageTask => $"{indentStr}{Markup.Escape(statusMessageTask.CompletedMessage ?? string.Empty)}",
+                // Error details are logged to stderr by StatusService, so skip rendering them in the task tree.
+                GroupableTask<T> failedTask when failedTask.CompletedMessage is ITuple resultTuple
+                    && resultTuple[0] is int and not 0 => null,
                 GroupableTask<T> genericTask => FormatCheckMarkMessage(indentStr, (genericTask.CompletedMessage as ITuple) switch
                 {
                     ITuple tuple when tuple.Length > 0 && tuple[0] is string str => str,
@@ -163,11 +179,13 @@ internal class GroupableTask<T> : GroupableTask
         }
 
         // make line endings consistent
-        msg = msg.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine).TrimEnd([.. Environment.NewLine]);
+        if (msg != null)
+        {
+            msg = msg.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine).TrimEnd([.. Environment.NewLine]);
+            sb.AppendLine(msg);
+        }
 
-        sb.AppendLine(msg);
-
-        bool shouldRenderChildren = indentLevel + 1 <= maxForcedDepth || !task.IsCompleted;
+        bool shouldRenderChildren = indentLevel + 1 <= maxForcedDepth || task.SuccessfullyCompleted == null;
         if (shouldRenderChildren)
         {
             RenderSubTasks(task, sb, indentLevel + 1, maxForcedDepth);

@@ -8,8 +8,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CertInstallCommand : Command
+internal class CertInstallCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Trust a certificate on this machine (requires admin)";
+
     public static Argument<FileInfo> CertPathArgument { get; }
     public static Option<string> PasswordOption { get; }
     public static Option<bool> ForceOption { get; }
@@ -62,7 +64,7 @@ internal class CertInstallCommand : Command
                 }
                 catch (Exception error)
                 {
-                    return Task.FromResult((1, $"{UiSymbols.Error} Failed to install certificate: {error.Message}"));
+                    return Task.FromResult((1, $"{UiSymbols.Error} Failed to install certificate: {error.GetBaseException().Message}"));
                 }
             }, cancellationToken);
         }

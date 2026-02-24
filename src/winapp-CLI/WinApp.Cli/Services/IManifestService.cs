@@ -5,12 +5,12 @@ using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
+
 public record ManifestGenerationInfo(
     string PackageName,
     string PublisherName,
     string Version,
-    string Description,
-    string EntryPoint);
+    string Description);
 
 internal interface IManifestService
 {
@@ -20,7 +20,7 @@ internal interface IManifestService
         string? publisherName,
         string version,
         string? description,
-        string? entryPoint,
+        string? executable,
         bool useDefaults,
         CancellationToken cancellationToken = default);
 
@@ -29,6 +29,7 @@ internal interface IManifestService
         ManifestGenerationInfo manifestGenerationInfo,
         ManifestTemplates manifestTemplate,
         FileInfo? logoPath,
+        string? executable,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 

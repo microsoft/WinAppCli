@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class GetWinappPathCommand : Command
+internal class GetWinappPathCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Print the path to the global .winapp directory";
+
     public static Option<bool> GlobalOption { get; }
 
     static GetWinappPathCommand()
@@ -36,7 +38,7 @@ internal class GetWinappPathCommand : Command
             {
                 DirectoryInfo winappDir;
                 string directoryType;
-                
+
                 if (global)
                 {
                     // Get the global .winapp directory
@@ -49,7 +51,7 @@ internal class GetWinappPathCommand : Command
                     winappDir = winappDirectoryService.GetLocalWinappDirectory();
                     directoryType = "Local";
                 }
-                
+
                 // For global directories, check if they exist
                 if (global && !winappDir.Exists)
                 {

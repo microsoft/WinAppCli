@@ -7,7 +7,7 @@ namespace WinApp.Cli.Services;
 
 internal interface IPowerShellService
 {
-    public Task<(int exitCode, string output)> RunCommandAsync(
+    public Task<(int exitCode, string output, string error)> RunCommandAsync(
         string command,
         TaskContext taskContext,
         bool elevated = false,

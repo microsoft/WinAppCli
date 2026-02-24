@@ -18,10 +18,10 @@ public static class GlobalTestSetup
     {
         // Set up any global test resources here
         Console.WriteLine("Initializing WinApp.Cli test suite...");
-        
+
         // Ensure we have a predictable environment for testing
         Environment.SetEnvironmentVariable("WINAPP_TEST_MODE", "true");
-        
+
         // Suppress emoji output during tests for consistent output
         Environment.SetEnvironmentVariable("TERM_PROGRAM", "");
         Environment.SetEnvironmentVariable("VSCODE_PID", "");
@@ -35,13 +35,13 @@ public static class GlobalTestSetup
     public static void AssemblyCleanup()
     {
         Console.WriteLine("Cleaning up WinApp.Cli test suite...");
-        
+
         // Clean up any global test resources here
         Environment.SetEnvironmentVariable("WINAPP_TEST_MODE", null);
         Environment.SetEnvironmentVariable("TERM_PROGRAM", null);
         Environment.SetEnvironmentVariable("VSCODE_PID", null);
         Environment.SetEnvironmentVariable("WT_SESSION", null);
-        
+
         // Clean up any temporary files that might have been left behind
         CleanupTempDirectories();
     }
@@ -55,7 +55,7 @@ public static class GlobalTestSetup
         {
             var tempPath = Path.GetTempPath();
             var testDirectories = Directory.GetDirectories(tempPath, "WinAppSignTest_*");
-            
+
             foreach (var dir in testDirectories)
             {
                 try

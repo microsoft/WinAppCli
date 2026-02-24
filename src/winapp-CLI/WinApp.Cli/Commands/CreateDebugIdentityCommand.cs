@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CreateDebugIdentityCommand : Command
+internal class CreateDebugIdentityCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Enable package identity for debugging without full MSIX";
+
     public static Argument<FileInfo> EntryPointArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> NoInstallOption { get; }
@@ -74,7 +76,7 @@ internal class CreateDebugIdentityCommand : Command
                 }
                 catch (Exception error)
                 {
-                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.Message}");
+                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.GetBaseException().Message}");
                 }
 
                 return (0, "Package identity created successfully.");

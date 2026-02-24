@@ -8,8 +8,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class ToolCommand : Command
+internal class ToolCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Run Windows SDK tools directly (makeappx, signtool, etc.)";
+
     public ToolCommand() : base("tool", "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix")
     {
         Aliases.Add("run-buildtool");

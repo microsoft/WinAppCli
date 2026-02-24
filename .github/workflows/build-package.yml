@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write  # Required for creating releases
+  pull-requests: write  # Required for binary size report comments
 
 jobs:
   build-and-package:
@@ -85,6 +86,17 @@ jobs:
         name: msix-packages
         path: artifacts/msix-packages/*.msix
         if-no-files-found: error
+
+    # --- Build quality metrics ---
+    - name: Collect build metrics
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/collect-metrics
+
+    - name: Report build metrics
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/report-metrics
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # E2E test for Electron workflow - runs after build completes
   e2e-test:

@@ -9,8 +9,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class ManifestUpdateAssetsCommand : Command
+internal class ManifestUpdateAssetsCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Update image assets from source image";
+
     public static Argument<FileInfo> ImageArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
 
@@ -69,7 +71,7 @@ internal class ManifestUpdateAssetsCommand : Command
                 }
                 catch (Exception ex)
                 {
-                    return (1, $"{UiSymbols.Error} Error updating assets: {ex.Message}");
+                    return (1, $"{UiSymbols.Error} Error updating assets: {ex.GetBaseException().Message}");
                 }
             }, cancellationToken);
         }

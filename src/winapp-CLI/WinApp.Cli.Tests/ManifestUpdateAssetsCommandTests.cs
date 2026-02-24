@@ -59,7 +59,7 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsNotNull(manifestCommand, "ManifestCommand should be created");
-        Assert.IsTrue(manifestCommand.Subcommands.Any(c => c.Name == "update-assets"), 
+        Assert.IsTrue(manifestCommand.Subcommands.Any(c => c.Name == "update-assets"),
             "Should have 'update-assets' subcommand");
     }
 
@@ -160,7 +160,7 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
 
         // Verify specific asset sizes
         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
-        
+
         // Check that scale-200 assets exist (which should be 2x the base size)
         Assert.IsTrue(File.Exists(Path.Combine(assetsDir, "Square44x44Logo.scale-200.png")),
             "Square44x44Logo.scale-200.png should exist");
@@ -174,7 +174,7 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         // Arrange
         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
         Directory.CreateDirectory(assetsDir);
-        
+
         // Create a dummy existing asset
         var existingAssetPath = Path.Combine(assetsDir, "Square150x150Logo.png");
         File.WriteAllText(existingAssetPath, "old content");
@@ -194,7 +194,7 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Update-assets command should complete successfully");
         Assert.IsTrue(File.Exists(existingAssetPath), "Asset should still exist");
-        
+
         var newLength = new FileInfo(existingAssetPath).Length;
         Assert.AreNotEqual(oldLength, newLength, "Asset should be overwritten with new content");
     }

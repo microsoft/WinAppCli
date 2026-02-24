@@ -19,7 +19,6 @@ winapp init [base-directory] [options]
 - `--ignore-config`, `--no-config` - Don't use configuration file for version management
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
-- `--no-cert` - Skip development certificate generation
 - `--config-only` - Only handle configuration file operations, skip package installation
 
 **What it does:**
@@ -27,10 +26,19 @@ winapp init [base-directory] [options]
 - Creates `winapp.yaml` configuration file
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
-- Creates development certificate and AppxManifest.xml
+- Creates AppxManifest.xml
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
+
+**Automatic .NET project detection:**
+
+When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
+
+- Validates and updates the `TargetFramework` to a Windows-compatible TFM (e.g., `net10.0-windows10.0.26100.0`)
+- Adds `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` as NuGet `PackageReference` entries directly in the `.csproj`
+- Generates `appxmanifest.xml`, assets, and a development certificate
+- Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
 **Examples:**
 
@@ -41,8 +49,12 @@ winapp init
 # Initialize with experimental packages
 winapp init --setup-sdks experimental
 
-# Initialize specific directory without promts
+# Initialize specific directory without prompts
 winapp init ./my-project --use-defaults
+
+# Initialize a .NET project (auto-detected from .csproj)
+cd my-dotnet-app
+winapp init
 ```
 
 **Tip: Install SDKs after initial setup**
@@ -50,7 +62,7 @@ winapp init ./my-project --use-defaults
 If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
 
 ```bash
-# Re-run init to install SDKs - preserves existing files (manifest, cert, etc.)
+# Re-run init to install SDKs - preserves existing files (manifest, etc.)
 winapp init --use-defaults --setup-sdks stable
 ```
 
@@ -76,6 +88,8 @@ winapp restore [options]
 - Downloads/updates SDK packages to specified versions
 - Regenerates C++/WinRT headers and binaries
 - Stores sharable files in the global cache directory
+
+> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
@@ -142,14 +156,23 @@ winapp pack <input-folder> [options]
 - `--publisher <name>` - Publisher name for certificate generation
 - `--self-contained` - Bundle Windows App SDK runtime
 - `--skip-pri` - Skip PRI file generation
+- `--executable <path>` - Path to the executable relative to the input folder (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
 
 **What it does:**
 
 - Validates and processes AppxManifest.xml files
+- Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+**Placeholder resolution during packaging:**
+
+If the manifest contains `$targetnametoken$` in the `Executable` attribute:
+1. If `--executable` is provided (path relative to the input folder), the placeholder is replaced with the specified value
+2. Otherwise, `winapp pack` scans the input folder root for `.exe` files — if exactly one is found, it is used automatically
+3. If zero or multiple `.exe` files are found, an error is shown asking you to specify `--executable`
 
 **Examples:**
 
@@ -162,6 +185,9 @@ winapp pack ./dist --output MyApp.msix --cert ./cert.pfx
 
 # Package with generated and installed certificate and self-contained WinAppSDK runtime
 winapp pack ./dist --generate-cert --install-cert --self-contained
+
+# Package with explicit executable (resolves $targetnametoken$ in manifest)
+winapp pack ./dist --executable MyApp.exe
 ```
 
 ---
@@ -228,7 +254,7 @@ winapp manifest generate [directory] [options]
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
-- `--template <type>` - Template type: `packaged` (default) or `hostedapp`
+- `--template <type>` - Template type: `packaged` (default) or `sparse`
 - `--logo-path <path>` - Path to logo image file
 - `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
 
@@ -236,16 +262,31 @@ winapp manifest generate [directory] [options]
 
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
-- `hostedapp` - Hosted app manifest for Python/Node.js scripts
+
+**Manifest placeholders:**
+
+Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
+
+| Placeholder | Resolved to | Example |
+|-------------|-------------|---------|
+| `$targetnametoken$` | Executable name without extension | `Executable="$targetnametoken$.exe"` &rarr; `Executable="MyApp.exe"` |
+| `$targetentrypoint$` | `Windows.FullTrustApplication` | Always resolved automatically |
+
+This follows the same convention used by Visual Studio project templates, so manifests are portable across tooling.
+
+**How placeholders are resolved:**
+
+- **`winapp pack`** — During packaging, `$targetnametoken$` is resolved using the `--executable` option or by auto-detecting the single `.exe` in the input folder. If multiple (or zero) `.exe` files are found and `--executable` is not specified, an error is shown.
+- **`winapp create-debug-identity`** — When an entrypoint argument is provided, `$targetnametoken$` is resolved from it. Without an entrypoint, the executable placeholder must already be resolved in the manifest.
+- **`winapp manifest generate --executable`** — When `--executable` is provided, manifest metadata (version, description) and icons are extracted from the executable, but the generated manifest still uses `$targetnametoken$.exe`; this placeholder is resolved later (e.g. `winapp pack` or `winapp create-debug-identity`).
+
+> **PS:** Keeping `$targetnametoken$` in your checked-in manifest avoids hard-coding executable names and works with both `winapp pack` and Visual Studio builds.
 
 **Examples:**
 
 ```bash
 # Generate standard manifest interactively
 winapp manifest generate
-
-# Generate hosted app manifest for Python script
-winapp manifest generate --template hostedapp --entrypoint app.py
 
 # Generate with all options specified
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite
@@ -396,6 +437,36 @@ winapp tool <tool-name> [tool-arguments]
 ```bash
 # Use signtool to verify signature
 winapp tool signtool verify /pa MyApp.msix
+```
+
+---
+
+### store
+
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
+
+```bash
+winapp store [args...]
+```
+
+**Arguments:**
+
+- `args...` – Arguments to pass directly to the `msstore` CLI. See [MSStore CLI documentation](https://aka.ms/msstoredevcli/docs) for available commands and options.
+
+**What it does:**
+
+- Ensures the Microsoft Store Developer CLI (`msstore`) is downloaded and available on your system.
+- Forwards all arguments to the `msstore` CLI.
+- Runs the command showing output directly in your terminal.
+
+**Examples:**
+
+```bash
+# List all apps in your Microsoft Partner Center account
+winapp store app list
+
+# Publish a package to the Microsoft Store
+winapp store publish ./myapp.msix --appId <your-app-id>
 ```
 
 ---

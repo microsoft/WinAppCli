@@ -11,7 +11,7 @@ internal class StatusMessageTask : GroupableTask<string>
     public StatusMessageTask(string inProgressMessage, GroupableTask? parent, IAnsiConsole ansiConsole, ILogger logger, Lock renderLock)
         : base(inProgressMessage, parent, null, ansiConsole, logger, renderLock)
     {
-        IsCompleted = true;
+        SuccessfullyCompleted = true;
         CompletedMessage = InProgressMessage;
     }
 

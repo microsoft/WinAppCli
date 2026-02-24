@@ -13,14 +13,8 @@ internal interface IManifestTemplateService
         string packageName,
         string publisherName,
         string version,
-        string entryPoint,
         ManifestTemplates manifestTemplate,
         string description,
-        string? hostId,
-        string? hostParameters,
-        string? hostRuntimeDependencyPackageName,
-        string? hostRuntimeDependencyPublisherName,
-        string? hostRuntimeDependencyMinVersion,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

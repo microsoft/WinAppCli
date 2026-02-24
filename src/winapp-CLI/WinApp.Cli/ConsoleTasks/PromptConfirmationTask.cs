@@ -68,7 +68,7 @@ internal class PromptConfirmationTask : GroupableTask<bool>
     {
         return state switch
         {
-            PromptState.WaitingForInput => string.IsNullOrEmpty(typedInput) 
+            PromptState.WaitingForInput => string.IsNullOrEmpty(typedInput)
                 ? $"{promptText} [blue][[Y/n]][/] [green](y)[/]: "
                 : $"{promptText} [blue][[Y/n]][/] [green](y)[/]: {typedInput}",
             PromptState.Confirmed => $"{UiSymbols.Check} {promptText} Yes",
@@ -83,7 +83,7 @@ internal class PromptConfirmationTask : GroupableTask<bool>
         InProgressMessage = FormatPromptMessage(PromptText, _state, _typedInput);
         if (_state != PromptState.WaitingForInput)
         {
-            IsCompleted = true;
+            SuccessfullyCompleted = true;
             CompletedMessage = _state == PromptState.Confirmed;
         }
         _onUpdate?.Invoke();

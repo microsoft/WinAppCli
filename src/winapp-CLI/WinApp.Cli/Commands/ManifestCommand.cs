@@ -5,8 +5,10 @@ using System.CommandLine;
 
 namespace WinApp.Cli.Commands;
 
-internal class ManifestCommand : Command
+internal class ManifestCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Create and modify appxmanifest.xml files";
+
     public ManifestCommand(ManifestGenerateCommand manifestGenerateCommand, ManifestUpdateAssetsCommand manifestUpdateAssetsCommand)
         : base("manifest", "Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, or 'manifest update-assets' to regenerate app icons from a source image.")
     {

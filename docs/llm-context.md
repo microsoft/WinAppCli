@@ -1,6 +1,6 @@
 ---
 name: winapp-cli
-description: CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+description: CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 version: 0.1.11
 schema_version: 1.0
 ---
@@ -14,7 +14,7 @@ schema_version: 1.0
 
 ## Overview
 
-CLI for generating and managing appxmanifest.xml, image assets, test certificates, Windows (App) SDK projections, package identity, and packaging. For use with any app framework targeting Windows
+CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
 
 **Installation:**
 - WinGet: `winget install Microsoft.WinAppCli --source winget`
@@ -76,16 +76,15 @@ Print the path to the .winapp directory. Use --global for the shared cache locat
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, generates devcert.pfx for code signing, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' or 'cert generate' if you only need one of those pieces.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 **Arguments:**
 - `<base-directory>` - Base/root directory for the winapp workspace, for consumption or installation.
 
 **Options:**
 - `--config-dir` - Directory to read/store configuration (default: current directory)
-- `--config-only` - Only handle configuration file operations (create if missing, validate if exists). Skip package installation, certificate generation, and other workspace setup steps.
+- `--config-only` - Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps.
 - `--ignore-config` / `--no-config` - Don't use configuration file for version management
-- `--no-cert` - Skip development certificate generation
 - `--no-gitignore` - Don't update .gitignore file
 - `--quiet` / `-q` - Suppress progress messages
 - `--setup-sdks` - SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)
@@ -97,20 +96,20 @@ Create and modify appxmanifest.xml files for package identity and MSIX packaging
 
 #### `winapp manifest generate`
 
-Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs), 'hostedapp' (Python/Node scripts).
+Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
 
 **Arguments:**
 - `<directory>` - Directory to generate manifest in
 
 **Options:**
 - `--description` - Human-readable app description shown during installation and in Windows Settings (default: `My Application`)
-- `--entrypoint` / `--executable` - Entry point of the application (e.g., executable path / name, or .py/.js script if template is HostedApp). Default: <package-name>.exe
+- `--executable` / `--entrypoint` - Path to the application's executable. Default: <package-name>.exe
 - `--if-exists` - Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) (default: `Error`)
 - `--logo-path` - Path to logo image file
 - `--package-name` - Package name (default: folder name)
 - `--publisher-name` - Publisher CN (default: CN=<current user>)
 - `--quiet` / `-q` - Suppress progress messages
-- `--template` - Manifest template type: 'packaged' (full MSIX app, default), 'sparse' (desktop app with package identity for Windows APIs), or 'hostedapp' (script running under Python/Node host) (default: `Packaged`)
+- `--template` - Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) (default: `Packaged`)
 - `--verbose` / `-v` - Enable verbose output
 - `--version` - App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). (default: `1.0.0.0`)
 
@@ -137,6 +136,7 @@ Create MSIX installer from your built app. Run after building your app. appxmani
 **Options:**
 - `--cert` - Path to signing certificate (will auto-sign if provided)
 - `--cert-password` - Certificate password (default: password) (default: `password`)
+- `--executable` / `--exe` - Path to the executable relative to the input folder.
 - `--generate-cert` - Generate a new development certificate
 - `--install-cert` - Install certificate to machine
 - `--manifest` - Path to AppX manifest file (default: auto-detect from input folder or current directory)
@@ -171,6 +171,9 @@ Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devce
 - `--quiet` / `-q` - Suppress progress messages
 - `--timestamp` - Timestamp server URL
 - `--verbose` / `-v` - Enable verbose output
+### `winapp store`
+
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli
 ### `winapp tool`
 
 Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix
@@ -192,7 +195,7 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 ## Common Workflows
 
 ### New Project Setup
-1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, test certificate, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
+1. `winapp init .` - Initialize workspace with appxmanifest.xml, image assets, and optionally SDK projections in the .winapp folder. (run with `--use-defaults` to make it non-interactive)
 2. Edit `appxmanifest.xml` if you need to modify properties, set capabilities, or other configurations
 3. Build your app
 4. `winapp create-debug-identity <exe-path>` - to generate package identity from generated appxmanifest.xml before running the app so the exe has package identity
@@ -210,7 +213,7 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 ### Install SDKs After Initial Setup
 If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and later need the SDKs:
 1. `winapp init --use-defaults --setup-sdks stable` - Re-run init to install SDKs
-   - `--use-defaults` skips prompts and preserves existing files (manifest, cert, etc.)
+   - `--use-defaults` skips prompts and preserves existing files (manifest, etc.)
    - Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions
 2. Rebuild your app with the new SDK projections in `.winapp/`
 
@@ -261,7 +264,7 @@ Using winapp CLI in a new project?
 
 | Command | Requires | Creates/Modifies |
 |---------|----------|------------------|
-| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/`, `devcert.pfx` |
+| `init` | Nothing | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/` |
 | `restore` | `winapp.yaml` | `.winapp/packages/` |
 | `update` | `winapp.yaml` | Updates versions in `winapp.yaml` |
 | `manifest generate` | Nothing | `appxmanifest.xml`, `Assets/` |
