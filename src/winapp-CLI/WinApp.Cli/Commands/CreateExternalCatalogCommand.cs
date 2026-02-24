@@ -10,8 +10,10 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class CreateExternalCatalogCommand : Command
+internal class CreateExternalCatalogCommand : Command, IShortDescription
 {
+    public string ShortDescription => "Commands for creating external catalogs.";
+
     public static Argument<string> InputFolderArgument { get; }
     public static Option<bool> RecursiveOption { get; }
     public static Option<bool> UsePageHashesOption { get; }
