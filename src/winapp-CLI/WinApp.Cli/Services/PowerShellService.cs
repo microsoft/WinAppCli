@@ -100,8 +100,8 @@ internal class PowerShellService : IPowerShellService
             process.StandardInput.Close();
 
             await Task.WhenAll(outTask, errTask);
-            stdOut = NormalizePowerShellStream(outTask.Result);
-            stdErr = NormalizePowerShellStream(errTask.Result);
+            stdOut = outTask.Result.Trim();
+            stdErr = NormalizePowerShellErrorStream(errTask.Result);
         }
 
         await process.WaitForExitAsync(cancellationToken);
@@ -121,7 +121,7 @@ internal class PowerShellService : IPowerShellService
         return (exitCode, stdOut, stdErr);
     }
 
-    private static string NormalizePowerShellStream(string stream)
+    private static string NormalizePowerShellErrorStream(string stream)
     {
         if (string.IsNullOrWhiteSpace(stream))
         {
@@ -129,10 +129,16 @@ internal class PowerShellService : IPowerShellService
         }
 
         var trimmed = stream.Trim();
+
+        if (!trimmed.Contains("<Objs", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
         var reasonIndex = trimmed.IndexOf("Reason:", StringComparison.OrdinalIgnoreCase);
         if (reasonIndex < 0)
         {
-            return string.Empty;
+            return trimmed;
         }
 
         var reasonStart = reasonIndex + "Reason:".Length;
@@ -153,7 +159,8 @@ internal class PowerShellService : IPowerShellService
             .Select(line => line.Trim())
             .Where(line => !string.IsNullOrWhiteSpace(line));
 
-        return string.Join(" ", lines).Trim();
+        var normalized = string.Join(" ", lines).Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? trimmed : normalized;
     }
 
     private static string StripXmlTags(string value)

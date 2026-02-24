@@ -83,7 +83,7 @@ export async function generateCppAddonFiles(options: GenerateCppAddonOptions = {
     return result;
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Failed to generate addon files: ${err.message}`);
+    throw new Error(`Failed to generate addon files: ${err.message}`, { cause: error });
   }
 }
 
@@ -190,7 +190,7 @@ async function installRequiredPackages(projectRoot: string, verbose: boolean): P
       }
     } catch (error) {
       const err = error as Error;
-      throw new Error(`Failed to install packages: ${err.message}`);
+      throw new Error(`Failed to install packages: ${err.message}`, { cause: error });
     }
   } else {
     if (verbose) {
