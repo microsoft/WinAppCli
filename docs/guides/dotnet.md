@@ -89,9 +89,8 @@ winapp init
 When prompted:
 - **Package name**: Press Enter to accept the default (dotnet-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
-- **Description**: Press Enter to accept the default (Windows Application) or enter a description
 - **Version**: Press Enter to accept 1.0.0.0
-- **Entry point**: Press Enter to accept the default (dotnet-app.exe)
+- **Description**: Press Enter to accept the default (Windows Application) or enter a description
 - **Windows App SDK setup**: Select Stable, Preview, or Experimental (determines which Windows App SDK version is added)
 - **TargetFramework update**: If your `TargetFramework` doesn't include a supported Windows SDK version, you'll be prompted to update it (e.g., to `net10.0-windows10.0.26100.0`)
 - **Developer Mode**: If you are prompted about "Developer Mode", you can turn it on if you would like, but be aware that it requires administrative privileges
@@ -198,7 +197,7 @@ winapp create-debug-identity .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.
 You should now see output like:
 ```
 Package Family Name: dotnet-app.debug_12345abcde
-Windows App Runtime Version: 1.8-stable (1.8.0)
+Windows App Runtime Version: 8000.770.947.0
 ```
 
 The Windows App SDK NuGet package includes all the necessary assemblies for accessing modern Windows APIs including:
