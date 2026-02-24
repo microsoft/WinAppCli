@@ -149,8 +149,8 @@ if ([string]::IsNullOrEmpty($PackagePath)) {
     # Detect current processor architecture
     $CurrentArch = $env:PROCESSOR_ARCHITECTURE
     $ArchPattern = switch ($CurrentArch) {
-        "AMD64" { "*_x64_*.msix" }
-        "ARM64" { "*_arm64_*.msix" }
+        "AMD64" { "*_x64*.msix" }
+        "ARM64" { "*_arm64*.msix" }
         default { "*.msix" }
     }
     

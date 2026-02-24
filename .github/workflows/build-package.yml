@@ -84,7 +84,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: msix-packages
-        path: artifacts/msix-packages/*.msix
+        path: artifacts/msix-packages/
         if-no-files-found: error
 
     # --- Build quality metrics ---

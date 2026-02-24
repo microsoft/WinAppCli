@@ -350,7 +350,7 @@ try
     
     # Package x64 directly to final location
     Write-Host "[PACKAGE] Creating x64 MSIX package..." -ForegroundColor Blue
-    $X64PackageCmd = "& `"$CliExe`" package `"$X64LayoutPath`" --name `"$($X64PackageName -replace '\.msix$', '')`" --output `"$DistributionPath`" $CertParam"
+    $X64PackageCmd = "& `"$CliExe`" package `"$X64LayoutPath`" --name `"$($X64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $X64PackageName)`" $CertParam"
     Write-Host "  Command: $X64PackageCmd" -ForegroundColor Gray
     Invoke-Expression $X64PackageCmd
     if ($LASTEXITCODE -ne 0) {
@@ -362,7 +362,7 @@ try
     
     # Package arm64 directly to final location
     Write-Host "[PACKAGE] Creating arm64 MSIX package..." -ForegroundColor Blue
-    $Arm64PackageCmd = "& `"$CliExe`" package `"$Arm64LayoutPath`" --name `"$($Arm64PackageName -replace '\.msix$', '')`" --output `"$DistributionPath`" $CertParam"
+    $Arm64PackageCmd = "& `"$CliExe`" package `"$Arm64LayoutPath`" --name `"$($Arm64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $Arm64PackageName)`" $CertParam"
     Write-Host "  Command: $Arm64PackageCmd" -ForegroundColor Gray
     Invoke-Expression $Arm64PackageCmd
     if ($LASTEXITCODE -ne 0) {
