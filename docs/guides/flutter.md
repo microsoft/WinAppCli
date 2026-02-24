@@ -192,10 +192,10 @@ winapp init
 ```
 
 When prompted:
-- **Package name**: Press Enter to accept the default (flutter-app)
+- **Package name**: Press Enter to accept the default (flutterapp)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
-- **Entry point**: Press Enter to accept the default (flutter_app.exe)
+- **Description**: Press Enter to accept the default (Windows Application)
 - **Setup SDKs**: Select "Stable SDKs" to download Windows App SDK and generate C++ headers
 
 This command will:
@@ -209,24 +209,19 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp create-debug-identity`. This applies a temporary identity to your executable using the manifest we just generated.
 
-1. **Build the app**:
-    ```powershell
-    flutter build windows
-    ```
-
-2. **Apply Debug Identity**:
+1. **Apply Debug Identity**:
     ```powershell
     winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe
     ```
 
-3. **Run the executable**:
+2. **Run the executable**:
     ```powershell
     .\build\windows\x64\runner\Release\flutter_app.exe
     ```
 
 You should now see the app with a green indicator showing:
 ```
-Package Family Name: flutter-app_xxxxxxxx
+Package Family Name: flutterapp.debug_xxxxxxxx
 ```
 This confirms your app is running with a valid package identity!
 
@@ -370,7 +365,7 @@ winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe
 
 You should now see output like:
 ```
-Package Family Name: flutter-app_xxxxxxxx
+Package Family Name: flutterapp.debug_xxxxxxxx
 Windows App Runtime: 8000.731.1532.0
 ```
 
@@ -432,10 +427,10 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-Install the package by double-clicking the generated `flutter-app.msix` file, or using PowerShell:
+Install the package by double-clicking the generated `flutterapp.msix` file, or using PowerShell:
 
 ```powershell
-Add-AppxPackage .\flutter-app.msix
+Add-AppxPackage .\flutterapp.msix
 ```
 
 ### Tips
