@@ -204,7 +204,7 @@ export async function addElectronDebugIdentity(
     return result;
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Failed to add Electron debug identity: ${err.message}`);
+    throw new Error(`Failed to add Electron debug identity: ${err.message}`, { cause: error });
   }
 }
 
@@ -268,6 +268,6 @@ export async function clearElectronDebugIdentity(
     };
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Failed to clear Electron debug identity: ${err.message}`);
+    throw new Error(`Failed to clear Electron debug identity: ${err.message}`, { cause: error });
   }
 }
