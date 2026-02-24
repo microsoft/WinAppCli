@@ -76,7 +76,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
-            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand)]),
+            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(SparseCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
         );
     }
