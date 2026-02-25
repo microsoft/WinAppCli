@@ -138,15 +138,21 @@ try
         exit 1
     }
 
+    # Determine prerelease label based on current branch
+    # - main and rel/* branches use "prerelease" (default)
+    # - all other branches use a sanitized branch name (e.g., dev/my-feature -> dev-my-feature)
+    $PrereleaseLabel = & "$PSScriptRoot\get-prerelease-label.ps1"
+    Write-Host "[VERSION] Prerelease label: $PrereleaseLabel" -ForegroundColor Gray
+
     # Construct full version based on Stable flag
     if ($Stable) {
         # Stable build: use semantic version without prerelease suffix (e.g., "0.1.0")
         $FullVersion = $BaseVersion
         Write-Host "[VERSION] Using stable version (no prerelease suffix)" -ForegroundColor Cyan
     } else {
-        # Prerelease build: add prerelease number suffix (e.g., "0.1.0-prerelease.73")
-        $FullVersion = "$BaseVersion-prerelease.$BuildNumber"
-        Write-Host "[VERSION] Using prerelease version (with prerelease suffix)" -ForegroundColor Cyan
+        # Prerelease build: add prerelease label suffix (e.g., "0.1.0-prerelease.73" or "0.1.0-dev-my-feature.73")
+        $FullVersion = "$BaseVersion-$PrereleaseLabel.$BuildNumber"
+        Write-Host "[VERSION] Using prerelease version (with $PrereleaseLabel suffix)" -ForegroundColor Cyan
     }
     Write-Host "[VERSION] Package version: $FullVersion" -ForegroundColor Cyan
 
@@ -234,20 +240,22 @@ try
         Write-Host ""
         Write-Host "[MSIX] Creating MSIX packages..." -ForegroundColor Blue
     
-        # Convert npm version format to MSIX format
-        if ($Stable) {
-            # For stable builds: version is already in correct format (e.g., 0.1.0)
-            # But MSIX needs 4 parts, so append build number (e.g., 0.1.0.73)
-            $MsixVersion = "$BaseVersion.$BuildNumber"
-        } else {
-            # For prerelease builds: convert 0.1.0-prerelease.73 to 0.1.0.73
-            $MsixVersion = $FullVersion -replace '-prerelease\.', '.'
-        }
+        # MSIX version is always 4-part numeric: major.minor.patch.buildNumber
+        $MsixVersion = "$BaseVersion.$BuildNumber"
+    
+        # Pass branch tag so MSIX filename reflects the branch (e.g., winappcli-dev-my-feature_0.2.0.73_x64.msix)
+        $MsixTag = if (-not $Stable -and $PrereleaseLabel -ne 'prerelease') { $PrereleaseLabel } else { $null }
     
         $PackageMsixScript = Join-Path $PSScriptRoot "package-msix.ps1"
         $CliBinariesPath = Join-Path (Join-Path $ProjectRoot $ArtifactsPath) "cli"
 
-        & $PackageMsixScript -CliBinariesPath $CliBinariesPath -Version $MsixVersion -Stable:$Stable
+        $MsixArgs = @{
+            CliBinariesPath = $CliBinariesPath
+            Version = $MsixVersion
+            Stable = $Stable
+        }
+        if ($MsixTag) { $MsixArgs['Tag'] = $MsixTag }
+        & $PackageMsixScript @MsixArgs
 
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "MSIX packages creation failed, but continuing..."
