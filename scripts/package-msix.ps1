@@ -357,8 +357,17 @@ try
         }
     }
     
+    # Validate Tag for filename safety (when provided)
+    if (-not [string]::IsNullOrWhiteSpace($Tag)) {
+        $invalidFileNameChars = [System.IO.Path]::GetInvalidFileNameChars() + [char[]]('/','\')
+        if ($Tag.IndexOfAny($invalidFileNameChars) -ge 0) {
+            Write-Error "Invalid Tag value '$Tag'. Tag must not contain path separators or characters invalid in file names."
+            exit 1
+        }
+    }
+    
     # Define final package names with version (and optional branch tag)
-    $FilePrefix = if ($Tag) { "winappcli-$Tag" } else { "winappcli" }
+    $FilePrefix = if (-not [string]::IsNullOrWhiteSpace($Tag)) { "winappcli-$Tag" } else { "winappcli" }
     $X64PackageName = "${FilePrefix}_${MsixVersion}_x64.msix"
     $Arm64PackageName = "${FilePrefix}_${MsixVersion}_arm64.msix"
     

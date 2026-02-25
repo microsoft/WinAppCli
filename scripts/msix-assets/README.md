@@ -2,7 +2,7 @@
 
 This package contains a pre-release development build of the Windows Development CLI MSIX packages. 
 
-> **Note:** The MSIX packages are signed with a dev certificate - only release packages are signed with production certificate. Installing via the `install.cmd` script will install the dev certificate on your machine.
+> **Note:** The MSIX packages are signed with a dev certificate; only release packages are signed with a production certificate. Installing via the `install.cmd` script will install the dev certificate on your machine.
 
 ## Quick Installation
 
