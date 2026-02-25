@@ -71,9 +71,7 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel
             return false;
         }
 
-        var dev = (int?)key.GetValue("AllowDevelopmentWithoutDevLicense") == 1;
-        var sideload = (int?)key.GetValue("AllowAllTrustedApps") == 1;
-        return dev && sideload;
+        return (int?)key.GetValue("AllowDevelopmentWithoutDevLicense") == 1;
     }
 
     private static int RunElevated(string fileName, string arguments)
