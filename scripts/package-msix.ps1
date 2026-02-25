@@ -16,6 +16,10 @@
     If not provided, signtool will attempt to sign without a password.
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
+.PARAMETER Tag
+    Optional branch tag to include in the MSIX filename (e.g., "dev-my-feature").
+    When set, filenames become winappcli-<tag>_<version>_<arch>.msix.
+    When not set, filenames use the default winappcli_<version>_<arch>.msix.
 .EXAMPLE
     .\scripts\package-msix.ps1
     .\scripts\package-msix.ps1 -CliBinariesPath "artifacts/cli"
@@ -34,7 +38,10 @@ param(
     [string]$CertPassword = "password",
 
     [Parameter(Mandatory=$false)]
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+
+    [Parameter(Mandatory=$false)]
+    [string]$Tag
 )
 
 # Ensure we're running from the project root
@@ -344,9 +351,10 @@ try
         }
     }
     
-    # Define final package names with version
-    $X64PackageName = "winappcli_${MsixVersion}_x64.msix"
-    $Arm64PackageName = "winappcli_${MsixVersion}_arm64.msix"
+    # Define final package names with version (and optional branch tag)
+    $FilePrefix = if ($Tag) { "winappcli-$Tag" } else { "winappcli" }
+    $X64PackageName = "${FilePrefix}_${MsixVersion}_x64.msix"
+    $Arm64PackageName = "${FilePrefix}_${MsixVersion}_arm64.msix"
     
     # Package x64 directly to final location
     Write-Host "[PACKAGE] Creating x64 MSIX package..." -ForegroundColor Blue
@@ -399,8 +407,8 @@ try
     # Read the template README and replace version placeholder
     $ReadmeContent = Get-Content $ReadmeSource -Raw
     $ReadmeContent = $ReadmeContent -replace '\[version\]', $MsixVersion
-    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_x64\.msix', "winappcli_${MsixVersion}_x64.msix"
-    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_arm64\.msix', "winappcli_${MsixVersion}_arm64.msix"
+    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_x64\.msix', $X64PackageName
+    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_arm64\.msix', $Arm64PackageName
     
     $ReadmeContent | Set-Content $ReadmeDest -Encoding UTF8
     Write-Host "  - Added README.md" -ForegroundColor Gray

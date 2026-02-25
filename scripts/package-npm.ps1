@@ -106,9 +106,11 @@ try
             $Version = $BaseVersion
             Write-Host "[VERSION] Using stable version (no prerelease suffix)" -ForegroundColor Cyan
         } else {
-            # Prerelease build: add prerelease number suffix (e.g., "0.1.0-prerelease.73")
-            $Version = "$BaseVersion-prerelease.$BuildNumber"
-            Write-Host "[VERSION] Using prerelease version (with prerelease suffix)" -ForegroundColor Cyan
+            # Determine prerelease label based on current branch
+            $PrereleaseLabel = & "$PSScriptRoot\get-prerelease-label.ps1"
+            # Prerelease build: add prerelease label suffix (e.g., "0.1.0-prerelease.73" or "0.1.0-dev-my-feature.73")
+            $Version = "$BaseVersion-$PrereleaseLabel.$BuildNumber"
+            Write-Host "[VERSION] Using prerelease version (with $PrereleaseLabel suffix)" -ForegroundColor Cyan
         }
     }
     
