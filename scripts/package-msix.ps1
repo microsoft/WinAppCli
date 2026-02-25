@@ -16,6 +16,10 @@
     If not provided, signtool will attempt to sign without a password.
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
+.PARAMETER Tag
+    Optional branch tag to include in the MSIX filename (e.g., "dev-my-feature").
+    When set, filenames become winappcli-<tag>_<version>_<arch>.msix.
+    When not set, filenames use the default winappcli_<version>_<arch>.msix.
 .EXAMPLE
     .\scripts\package-msix.ps1
     .\scripts\package-msix.ps1 -CliBinariesPath "artifacts/cli"
@@ -34,7 +38,10 @@ param(
     [string]$CertPassword = "password",
 
     [Parameter(Mandatory=$false)]
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+
+    [Parameter(Mandatory=$false)]
+    [string]$Tag
 )
 
 # Ensure we're running from the project root
@@ -246,14 +253,20 @@ try
             $namespaceManager = New-Object System.Xml.XmlNamespaceManager($ManifestXml.NameTable)
             $namespaceManager.AddNamespace("ns", $ManifestXml.Package.xmlns)
             $namespaceManager.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
+
+            # Use a different identity for dev builds to avoid clashing with the production package
+            $ManifestXml.Package.Identity.Name = "winapp-dev"
+            Write-Host "  - Updated Identity.Name to winapp-dev for non-stable build" -ForegroundColor Gray
         
-            # Add ' (Dev Build)' to DisplayName for prerelease builds'
-            $ManifestXml.Package.Properties.DisplayName = $ManifestXml.Package.Properties.DisplayName + " (Dev Build)"
+            # Add dev build suffix to DisplayName for prerelease builds
+            # Include branch tag if available (e.g., "Windows App Development CLI (Dev Build: dev-my-feature)")
+            $DisplaySuffix = if ($Tag) { " (Dev Build: $Tag)" } else { " (Dev Build)" }
+            $ManifestXml.Package.Properties.DisplayName = $ManifestXml.Package.Properties.DisplayName + $DisplaySuffix
 
             $visualElementsNode = $ManifestXml.SelectSingleNode("//ns:Package/ns:Applications/ns:Application/ns:VisualElements", $namespaceManager)
 
             if ($visualElementsNode -ne $null) {
-                $visualElementsNode.DisplayName += " (Dev Build)"
+                $visualElementsNode.DisplayName += $DisplaySuffix
             }
             Write-Host "  - Updated DisplayName for non-stable build" -ForegroundColor Gray
 
@@ -344,13 +357,23 @@ try
         }
     }
     
-    # Define final package names with version
-    $X64PackageName = "winappcli_${MsixVersion}_x64.msix"
-    $Arm64PackageName = "winappcli_${MsixVersion}_arm64.msix"
+    # Validate Tag for filename safety (when provided)
+    if (-not [string]::IsNullOrWhiteSpace($Tag)) {
+        $invalidFileNameChars = [System.IO.Path]::GetInvalidFileNameChars() + [char[]]('/','\')
+        if ($Tag.IndexOfAny($invalidFileNameChars) -ge 0) {
+            Write-Error "Invalid Tag value '$Tag'. Tag must not contain path separators or characters invalid in file names."
+            exit 1
+        }
+    }
+    
+    # Define final package names with version (and optional branch tag)
+    $FilePrefix = if (-not [string]::IsNullOrWhiteSpace($Tag)) { "winappcli-$Tag" } else { "winappcli" }
+    $X64PackageName = "${FilePrefix}_${MsixVersion}_x64.msix"
+    $Arm64PackageName = "${FilePrefix}_${MsixVersion}_arm64.msix"
     
     # Package x64 directly to final location
     Write-Host "[PACKAGE] Creating x64 MSIX package..." -ForegroundColor Blue
-    $X64PackageCmd = "& `"$CliExe`" package `"$X64LayoutPath`" --name `"$($X64PackageName -replace '\.msix$', '')`" --output `"$DistributionPath`" $CertParam"
+    $X64PackageCmd = "& `"$CliExe`" package `"$X64LayoutPath`" --name `"$($X64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $X64PackageName)`" $CertParam"
     Write-Host "  Command: $X64PackageCmd" -ForegroundColor Gray
     Invoke-Expression $X64PackageCmd
     if ($LASTEXITCODE -ne 0) {
@@ -362,7 +385,7 @@ try
     
     # Package arm64 directly to final location
     Write-Host "[PACKAGE] Creating arm64 MSIX package..." -ForegroundColor Blue
-    $Arm64PackageCmd = "& `"$CliExe`" package `"$Arm64LayoutPath`" --name `"$($Arm64PackageName -replace '\.msix$', '')`" --output `"$DistributionPath`" $CertParam"
+    $Arm64PackageCmd = "& `"$CliExe`" package `"$Arm64LayoutPath`" --name `"$($Arm64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $Arm64PackageName)`" $CertParam"
     Write-Host "  Command: $Arm64PackageCmd" -ForegroundColor Gray
     Invoke-Expression $Arm64PackageCmd
     if ($LASTEXITCODE -ne 0) {
@@ -399,8 +422,8 @@ try
     # Read the template README and replace version placeholder
     $ReadmeContent = Get-Content $ReadmeSource -Raw
     $ReadmeContent = $ReadmeContent -replace '\[version\]', $MsixVersion
-    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_x64\.msix', "winappcli_${MsixVersion}_x64.msix"
-    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_arm64\.msix', "winappcli_${MsixVersion}_arm64.msix"
+    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_x64\.msix', $X64PackageName
+    $ReadmeContent = $ReadmeContent -replace 'winappcli_\[version\]_arm64\.msix', $Arm64PackageName
     
     $ReadmeContent | Set-Content $ReadmeDest -Encoding UTF8
     Write-Host "  - Added README.md" -ForegroundColor Gray
