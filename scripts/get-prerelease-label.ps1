@@ -29,6 +29,20 @@ if ([string]::IsNullOrEmpty($CurrentBranch)) {
 }
 
 if ([string]::IsNullOrEmpty($CurrentBranch) -or $CurrentBranch -eq 'HEAD') {
+    # CI environments check out in detached HEAD - use CI environment variables
+    if ($env:GITHUB_HEAD_REF) {
+        # GitHub Actions: PR source branch
+        $CurrentBranch = $env:GITHUB_HEAD_REF
+    } elseif ($env:GITHUB_REF_NAME) {
+        # GitHub Actions: push branch
+        $CurrentBranch = $env:GITHUB_REF_NAME
+    } elseif ($env:BUILD_SOURCEBRANCH) {
+        # Azure DevOps: strip refs/heads/ prefix
+        $CurrentBranch = $env:BUILD_SOURCEBRANCH -replace '^refs/heads/', ''
+    }
+}
+
+if ([string]::IsNullOrEmpty($CurrentBranch) -or $CurrentBranch -eq 'HEAD') {
     Write-Output "prerelease"
 } elseif ($CurrentBranch -eq 'main' -or $CurrentBranch -match '^rel/') {
     Write-Output "prerelease"
