@@ -147,6 +147,37 @@ public class PackageCommandTests : BaseCommandTests
 </Package>";
     }
 
+        private static string CreateExternalTestManifestWithScaledVisualLogos()
+        {
+                return @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+                 xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+                 xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+                 IgnorableNamespaces=""uap rescap"">
+    <Identity Name=""ExternalTestPackage""
+                        Publisher=""CN=ExternalTestPublisher""
+                        Version=""1.0.0.0"" />
+    <Properties>
+        <DisplayName>External Test Package</DisplayName>
+        <PublisherDisplayName>External Test Publisher</PublisherDisplayName>
+        <Description>Test package with external manifest</Description>
+        <Logo>Assets\StoreLogo.png</Logo>
+    </Properties>
+    <Dependencies>
+        <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+    </Dependencies>
+    <Applications>
+        <Application Id=""ExternalTestApp"" Executable=""TestApp.exe"" EntryPoint=""ExternalTestApp.App"">
+            <uap:VisualElements DisplayName=""External Test App"" Description=""Test application with external manifest""
+                                                    BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.scale-200.png"" Square44x44Logo=""Assets\Logo.scale-200.png"" />
+        </Application>
+    </Applications>
+    <Capabilities>
+        <rescap:Capability Name=""runFullTrust"" />
+    </Capabilities>
+</Package>";
+        }
+
     /// <summary>
     /// Removes test certificates from the CurrentUser\My certificate store
     /// This ensures test certificates don't accumulate and interfere with other tests
@@ -361,6 +392,104 @@ public class PackageCommandTests : BaseCommandTests
 
         // Verify the input folder was not polluted with a manifest copy
         Assert.IsFalse(File.Exists(Path.Combine(packageDir, "AppxManifest.xml")), "Input folder should not contain AppxManifest.xml after packaging");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestWithAssets_IncludesExternalAndMrtAssetsInMsix()
+    {
+        // Arrange
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_WithExternalAndMrtAssets");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_WithExternalAndMrtAssets");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalAssetsDir = Path.Combine(externalManifestDir, "Assets");
+        Directory.CreateDirectory(externalAssetsDir);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.scale-200.png"), "external mrt logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, CreateExternalTestManifest(), TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalAndMrtAssetsIncludedPackage",
+            skipPri: true,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/Logo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/StoreLogo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.scale-200.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include MRT variant Assets/Logo.scale-200.png");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestWithScaledVisualLogos_IncludesAllThreeAssetsInMsix()
+    {
+        // Arrange
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_WithScaledVisualLogos");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_WithScaledVisualLogos");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalAssetsDir = Path.Combine(externalManifestDir, "Assets");
+        Directory.CreateDirectory(externalAssetsDir);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.scale-200.png"), "external mrt logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, CreateExternalTestManifestWithScaledVisualLogos(), TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalScaledVisualLogosAssetsIncludedPackage",
+            skipPri: true,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/Logo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/StoreLogo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.scale-200.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include MRT variant Assets/Logo.scale-200.png");
     }
 
     [TestMethod]
