@@ -253,14 +253,20 @@ try
             $namespaceManager = New-Object System.Xml.XmlNamespaceManager($ManifestXml.NameTable)
             $namespaceManager.AddNamespace("ns", $ManifestXml.Package.xmlns)
             $namespaceManager.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
+
+            # Use a different identity for dev builds to avoid clashing with the production package
+            $ManifestXml.Package.Identity.Name = "winapp-dev"
+            Write-Host "  - Updated Identity.Name to winapp-dev for non-stable build" -ForegroundColor Gray
         
-            # Add ' (Dev Build)' to DisplayName for prerelease builds'
-            $ManifestXml.Package.Properties.DisplayName = $ManifestXml.Package.Properties.DisplayName + " (Dev Build)"
+            # Add dev build suffix to DisplayName for prerelease builds
+            # Include branch tag if available (e.g., "Windows App Development CLI (Dev Build: dev-my-feature)")
+            $DisplaySuffix = if ($Tag) { " (Dev Build: $Tag)" } else { " (Dev Build)" }
+            $ManifestXml.Package.Properties.DisplayName = $ManifestXml.Package.Properties.DisplayName + $DisplaySuffix
 
             $visualElementsNode = $ManifestXml.SelectSingleNode("//ns:Package/ns:Applications/ns:Application/ns:VisualElements", $namespaceManager)
 
             if ($visualElementsNode -ne $null) {
-                $visualElementsNode.DisplayName += " (Dev Build)"
+                $visualElementsNode.DisplayName += $DisplaySuffix
             }
             Write-Host "  - Updated DisplayName for non-stable build" -ForegroundColor Gray
 
