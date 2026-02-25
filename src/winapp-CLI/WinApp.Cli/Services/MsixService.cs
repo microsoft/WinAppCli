@@ -514,7 +514,18 @@ internal partial class MsixService(
         }
 
         var resfilesPath = Path.Combine(packageDir.FullName, "pri.resfiles");
-        var priFiles = (packageDir.EnumerateFiles("*.pri").Select(di => di.FullName)).ToList();
+        var assetsDir = new DirectoryInfo(Path.Combine(packageDir.FullName, "Assets"));
+        var priFiles = assetsDir.Exists
+            ? assetsDir
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Where(ShouldIncludeInPri)
+                .Select(file => Path.GetRelativePath(packageDir.FullName, file.FullName))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : new List<string>();
+
+        taskContext.AddDebugMessage($"PRI resource candidates discovered: {priFiles.Count}");
+
         using (var writer = new StreamWriter(resfilesPath))
         {
             foreach (var priFile in priFiles)
@@ -540,10 +551,52 @@ internal partial class MsixService(
             if (resourcesNode != null)
             {
                 var indexNode = resourcesNode.SelectSingleNode("index");
-                if (indexNode?.Attributes?["startIndexAt"]?.Value != null)
+                if (indexNode != null)
                 {
-                    // set to relative path
-                    indexNode!.Attributes!["startIndexAt"]!.Value = ".\\pri.resfiles";
+                    if (indexNode?.Attributes?["startIndexAt"]?.Value != null)
+                    {
+                        // set to relative path
+                        indexNode!.Attributes!["startIndexAt"]!.Value = ".\\pri.resfiles";
+                    }
+
+                    var resfilesIndexerNode = xmlDoc.CreateElement("indexer-config");
+                    var typeAttr = xmlDoc.CreateAttribute("type");
+                    typeAttr.Value = "resfiles";
+                    resfilesIndexerNode.Attributes.Append(typeAttr);
+
+                    var delimiterAttr = xmlDoc.CreateAttribute("qualifierDelimiter");
+                    delimiterAttr.Value = ".";
+                    resfilesIndexerNode.Attributes.Append(delimiterAttr);
+
+                    indexNode!.AppendChild(resfilesIndexerNode);
+
+                    // Ensure folder-based indexer is configured to parse qualifiers from
+                    // both folder names and file names (e.g. targetsize-48_altform-unplated).
+                    var folderIndexerNode = indexNode
+                        .SelectNodes("indexer-config")
+                        ?.OfType<XmlNode>()
+                        .FirstOrDefault(node =>
+                            node.Attributes?["type"]?.Value?.Equals("folder", StringComparison.OrdinalIgnoreCase) == true);
+
+                    if (folderIndexerNode != null)
+                    {
+                        var folderNameAsQualifierAttr = folderIndexerNode.Attributes?["foldernameAsQualifier"]
+                            ?? xmlDoc.CreateAttribute("foldernameAsQualifier");
+                        folderNameAsQualifierAttr.Value = "true";
+                        if (folderIndexerNode.Attributes?["foldernameAsQualifier"] == null)
+                        {
+                            folderIndexerNode.Attributes?.Append(folderNameAsQualifierAttr);
+                        }
+
+                        var fileNameAsQualifierAttr = folderIndexerNode.Attributes?["filenameAsQualifier"]
+                            ?? xmlDoc.CreateAttribute("filenameAsQualifier");
+                        fileNameAsQualifierAttr.Value = "true";
+                        if (folderIndexerNode.Attributes?["filenameAsQualifier"] == null)
+                        {
+                            folderIndexerNode.Attributes?.Append(fileNameAsQualifierAttr);
+                        }
+                    }
+
                     xmlDoc.Save(configPath.FullName);
                 }
             }
@@ -554,6 +607,27 @@ internal partial class MsixService(
         {
             throw new InvalidOperationException($"Failed to create PRI configuration: {ex.Message}", ex);
         }
+    }
+
+    private static readonly HashSet<string> PriIncludedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".ico",
+        ".svg"
+    };
+
+    private static bool ShouldIncludeInPri(FileInfo file)
+    {
+        // Only include likely resource-content file types
+        var extension = file.Extension;
+        if (!PriIncludedExtensions.Contains(extension))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1889,11 +1963,12 @@ $1");
             }
 
             var logicalBaseName = Path.GetFileNameWithoutExtension(logicalSourceFile.Name);
+            var variantBaseName = GetMrtVariantBaseName(logicalBaseName);
             var extension = logicalSourceFile.Extension; // includes the dot, e.g. ".png"
 
             // Enumerate candidates: same directory, same extension, starting with base name
             // e.g. Logo.png, Logo.scale-200.png, Logo.scale-200.theme-dark.en-US.png, etc.
-            var searchPattern = logicalBaseName + "*" + extension;
+            var searchPattern = variantBaseName + "*" + extension;
             var candidates = sourceDir.EnumerateFiles(searchPattern);
             var anyCopiedForLogical = false;
 
@@ -1902,7 +1977,7 @@ $1");
                 var candidateName = candidateFile.Name;
                 var candidateNameWithoutExtension = Path.GetFileNameWithoutExtension(candidateName);
 
-                if (!IsMrtVariantName(logicalBaseName, candidateNameWithoutExtension))
+                if (!IsMrtVariantName(variantBaseName, candidateNameWithoutExtension))
                 {
                     // e.g. Logo.old.png or Logo.scale-200.backup.png -> ignore
                     continue;
@@ -2026,6 +2101,41 @@ $1");
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// For a qualified logical name like "Logo.scale-100" or "Logo.targetsize-24_altform-unplated",
+    /// returns the unqualified asset family base (e.g. "Logo").
+    /// If the name has no trailing qualifier tokens, returns the original name unchanged.
+    /// </summary>
+    private static string GetMrtVariantBaseName(string logicalBaseName)
+    {
+        var parts = logicalBaseName.Split('.');
+        if (parts.Length <= 1)
+        {
+            return logicalBaseName;
+        }
+
+        // Find the earliest segment where every remaining segment is a valid qualifier token.
+        for (int i = 1; i < parts.Length; i++)
+        {
+            var allRemainingAreQualifiers = true;
+            for (int j = i; j < parts.Length; j++)
+            {
+                if (!IsQualifierToken(parts[j]))
+                {
+                    allRemainingAreQualifiers = false;
+                    break;
+                }
+            }
+
+            if (allRemainingAreQualifiers)
+            {
+                return string.Join('.', parts[..i]);
+            }
+        }
+
+        return logicalBaseName;
     }
 
     /// <summary>
