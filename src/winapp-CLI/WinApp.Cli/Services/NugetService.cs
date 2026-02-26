@@ -3,7 +3,6 @@
 
 using System.Collections.Concurrent;
 using System.IO.Compression;
-using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -14,12 +13,9 @@ namespace WinApp.Cli.Services;
 
 internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
 {
-    private static readonly HttpClient Http = new(new HttpClientHandler
-    {
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-    });
+    private static readonly HttpClient Http = new();
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
-    private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-gz-semver2";
+    private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()
