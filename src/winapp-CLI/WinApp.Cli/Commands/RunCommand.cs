@@ -100,10 +100,10 @@ internal partial class RunCommand : Command, IShortDescription
                         }
                         if (!manifest.Exists)
                         {
-                            var fileInfo = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.AppxManifest"));
+                            var fileInfo = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.appxmanifest"));
                             if (!fileInfo.Exists)
                             {
-                                throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path.");
+                                throw new Exception("AppxManifest.xml/Package.appxmanifest not found in the current directory. Use --manifest to specify the path.");
                             }
                             manifest = fileInfo;
                             if (outputAppXDirectory == null)
@@ -124,11 +124,11 @@ internal partial class RunCommand : Command, IShortDescription
                         }
                         if (!manifest.Exists)
                         {
-                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.AppxManifest"));
+                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.appxmanifest"));
                         }
                         if (!manifest.Exists)
                         {
-                            throw new Exception("AppxManifest.xml not found in the current directory. Use --manifest to specify the path.");
+                            throw new Exception("AppxManifest.xml/Package.appxmanifest not found in the current directory. Use --manifest to specify the path.");
                         }
                     }
 

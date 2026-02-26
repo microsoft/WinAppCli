@@ -884,7 +884,7 @@ internal class WorkspaceSetupService(
         var manifestPath = MsixService.FindProjectManifest(currentDirectoryProvider, options.BaseDirectory);
         if ((manifestPath?.Exists) == true)
         {
-            logger.LogDebug("{UISymbol} AppxManifest.xml already exists at {ManifestPath}", UiSymbols.Check, manifestPath.FullName);
+            logger.LogDebug("{UISymbol} {ManifestFileName} already exists at {ManifestPath}", UiSymbols.Check, manifestPath.Name, manifestPath.FullName);
             if (options.UseDefaults)
             {
                 // With --use-defaults, skip overwriting existing manifest (non-destructive)
@@ -892,7 +892,7 @@ internal class WorkspaceSetupService(
             }
             else
             {
-                return await ansiConsole.PromptAsync(new ConfirmationPrompt("AppxManifest.xml already exists. Overwrite?"), cancellationToken);
+                return await ansiConsole.PromptAsync(new ConfirmationPrompt($"{manifestPath.Name} already exists. Overwrite?"), cancellationToken);
             }
         }
 

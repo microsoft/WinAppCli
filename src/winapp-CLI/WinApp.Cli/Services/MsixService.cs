@@ -864,7 +864,7 @@ internal partial class MsixService(
         }
         else
         {
-            var inputFolderManifest = new FileInfo(Path.Combine(inputFolder.FullName, "appxmanifest.xml"));
+            var inputFolderManifest = GetManifest(inputFolder.FullName);
             if (inputFolderManifest.Exists)
             {
                 resolvedManifestPath = inputFolderManifest;
@@ -872,7 +872,7 @@ internal partial class MsixService(
             }
             else
             {
-                var currentDirManifest = new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "appxmanifest.xml"));
+                var currentDirManifest = GetManifest(currentDirectoryProvider.GetCurrentDirectory());
                 if (currentDirManifest.Exists)
                 {
                     resolvedManifestPath = currentDirManifest;
@@ -1057,6 +1057,17 @@ internal partial class MsixService(
         }
 
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
+    }
+
+    private static FileInfo GetManifest(string inputDirectory)
+    {
+        var manifestPath = Path.Combine(inputDirectory, "appxmanifest.xml");
+        if (File.Exists(manifestPath))
+        {
+            return new FileInfo(manifestPath);
+        }
+        manifestPath = Path.Combine(inputDirectory, "Package.appxmanifest");
+        return new FileInfo(manifestPath);
     }
 
     private async Task EmbedWindowsAppSDKManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
@@ -1395,10 +1406,16 @@ internal partial class MsixService(
 
         while (directory != null)
         {
-            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-            if (manifestPath.Exists)
+            var appxmanifestXmlPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
+            if (appxmanifestXmlPath.Exists)
             {
-                return manifestPath;
+                return appxmanifestXmlPath;
+            }
+            
+            var packageAppxManifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+            if (packageAppxManifestPath.Exists)
+            {
+                return packageAppxManifestPath;
             }
 
             directory = directory.Parent;

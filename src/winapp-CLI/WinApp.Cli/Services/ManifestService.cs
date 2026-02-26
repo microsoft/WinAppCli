@@ -151,7 +151,14 @@ internal partial class ManifestService(
         if (logoPath?.Exists == true)
         {
             var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-            await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken);
+            if (!manifestPath.Exists)
+            {
+                manifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+            }
+            if (manifestPath.Exists)
+            {
+                await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken);
+            }
         }
 
         if (extractedLogoPath != null)
