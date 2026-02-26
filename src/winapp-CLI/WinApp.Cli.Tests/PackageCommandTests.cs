@@ -178,6 +178,13 @@ public class PackageCommandTests : BaseCommandTests
 </Package>";
         }
 
+        private static string CreateExternalTestManifestWithScaledVisualLogosInImagesFolder()
+        {
+                return CreateExternalTestManifestWithScaledVisualLogos()
+                        .Replace("Assets\\StoreLogo.png", "Images\\StoreLogo.png", StringComparison.Ordinal)
+                        .Replace("Assets\\Logo.scale-200.png", "Images\\Logo.scale-200.png", StringComparison.Ordinal);
+        }
+
     /// <summary>
     /// Removes test certificates from the CurrentUser\My certificate store
     /// This ensures test certificates don't accumulate and interfere with other tests
@@ -493,6 +500,55 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestWithImagesFolder_IncludesAllThreeAssetsInMsix()
+    {
+        // Arrange
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_WithImagesFolder");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_WithImagesFolder");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalImagesDir = Path.Combine(externalManifestDir, "Images");
+        Directory.CreateDirectory(externalImagesDir);
+        await File.WriteAllTextAsync(Path.Combine(externalImagesDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalImagesDir, "Logo.scale-200.png"), "external mrt logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalImagesDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, CreateExternalTestManifestWithScaledVisualLogosInImagesFolder(), TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalImagesFolderAssetsIncludedPackage",
+            skipPri: false,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Images/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Images/Logo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Images/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Images/StoreLogo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Images/Logo.scale-200.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include MRT variant Images/Logo.scale-200.png");
+    }
+
+    [TestMethod]
     public async Task CreateMsixPackageAsync_WithSigningAndMatchingPublishers_ShouldSucceed()
     {
         // Arrange - Create package structure
@@ -795,6 +851,111 @@ public class PackageCommandTests : BaseCommandTests
         var betweenContent = dependenciesSection.Substring(closingBracketIndex, closingTagIndex - closingBracketIndex);
         Assert.Contains("\n", betweenContent,
             "There should be a newline between PackageDependency closing and </Dependencies> tag");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_InternalManifestWithPri_ComputesResourcesWithoutCopyingAssets()
+    {
+        // Arrange - Manifest is INSIDE the input folder, skipPri is false.
+        // This exercises the path where expandedFiles are computed for PRI generation
+        // but NOT copied (because manifestIsOutsideInputFolder is false).
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "InternalManifestPriTest"));
+        CreateTestPackageStructure(packageDir);
+
+        // Create winapp.yaml with Windows App SDK package for PRI generation
+        var configContent = @"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: 2.0.250930001-experimental1";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        // Act - skipPri: false with manifest inside input folder
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "InternalManifestPriTest",
+            skipPri: false,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert - package should be created with PRI resources
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+
+        // PRI file should have been generated
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("resources.pri", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include resources.pri when skipPri is false");
+
+        // Assets should still be present (they were already in the input folder, not copied)
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/Logo.png from the input folder");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestSkipPri_CopiesAssetsIntoMsix()
+    {
+        // Arrange - Manifest is OUTSIDE the input folder, skipPri is true.
+        // This exercises the path where assets are copied from the external manifest
+        // directory into the staging directory without PRI generation.
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_ExternalSkipPri");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_SkipPri");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalAssetsDir = Path.Combine(externalManifestDir, "Assets");
+        Directory.CreateDirectory(externalAssetsDir);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, CreateExternalTestManifest(), TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalSkipPriTest",
+            skipPri: true,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert - external assets should be inside the MSIX even with skipPri
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/Logo.png");
+        Assert.IsTrue(
+            archive.Entries.Any(entry => entry.FullName.Equals("Assets/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include external Assets/StoreLogo.png");
+
+        // PRI file should NOT be present since skipPri is true
+        Assert.IsFalse(
+            archive.Entries.Any(entry => entry.FullName.Equals("resources.pri", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should NOT include resources.pri when skipPri is true");
     }
 
     #region Placeholder Resolution Tests
