@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,6 +15,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
 {
     private static readonly HttpClient Http = new();
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
+    private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()
@@ -259,25 +259,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             throw new ArgumentException("sdkInstallMode cannot be None", nameof(sdkInstallMode));
         }
 
-        var url = $"{FlatIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await Http.GetAsync(url, cancellationToken);
-        resp.EnsureSuccessStatusCode();
-        using var s = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(s, cancellationToken: cancellationToken);
-        if (!doc.RootElement.TryGetProperty("versions", out var versionsElem) || versionsElem.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException($"No versions found for {packageName}");
-        }
-
-        var list = new List<string>();
-        foreach (var el in versionsElem.EnumerateArray())
-        {
-            var v = el.GetString();
-            if (!string.IsNullOrWhiteSpace(v))
-            {
-                list.Add(v);
-            }
-        }
+        var list = await GetListedVersionsAsync(packageName, cancellationToken);
 
         // If not winapp SDK, preview and experimental versions are the same
         if (packageName.StartsWith(BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase))
@@ -315,6 +297,90 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
 
         list.Sort(CompareVersions);
         return list[^1];
+    }
+
+    /// <summary>
+    /// Fetches all listed (non-unlisted) versions of a package from the NuGet registration API.
+    /// The flat container index does not distinguish between listed and unlisted versions,
+    /// so we use the registration endpoint which includes a "listed" property.
+    /// </summary>
+    private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
+    {
+        var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await Http.GetAsync(url, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var list = new List<string>();
+
+        // The registration index contains "items" (pages). Each page may have inline "items"
+        // or require a separate fetch via its "@id" URL.
+        if (!doc.RootElement.TryGetProperty("items", out var pages) || pages.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException($"No versions found for {packageName}");
+        }
+
+        foreach (var page in pages.EnumerateArray())
+        {
+            JsonElement leafItems;
+
+            if (page.TryGetProperty("items", out var inlineItems) && inlineItems.ValueKind == JsonValueKind.Array)
+            {
+                leafItems = inlineItems;
+            }
+            else
+            {
+                // Page items are not inlined; fetch the page by its @id
+                if (!page.TryGetProperty("@id", out var pageIdElem))
+                {
+                    continue;
+                }
+
+                var pageUrl = pageIdElem.GetString();
+                if (string.IsNullOrEmpty(pageUrl))
+                {
+                    continue;
+                }
+
+                using var pageResp = await Http.GetAsync(pageUrl, cancellationToken);
+                pageResp.EnsureSuccessStatusCode();
+                using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
+                using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
+
+                if (!pageDoc.RootElement.TryGetProperty("items", out var fetchedItems) || fetchedItems.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                leafItems = fetchedItems.Clone();
+            }
+
+            foreach (var leaf in leafItems.EnumerateArray())
+            {
+                if (!leaf.TryGetProperty("catalogEntry", out var catalogEntry))
+                {
+                    continue;
+                }
+
+                // Skip unlisted versions
+                if (catalogEntry.TryGetProperty("listed", out var listedProp) && !listedProp.GetBoolean())
+                {
+                    continue;
+                }
+
+                if (catalogEntry.TryGetProperty("version", out var versionProp))
+                {
+                    var v = versionProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        list.Add(v);
+                    }
+                }
+            }
+        }
+
+        return list;
     }
 
     [GeneratedRegex(@"[\[\]\(\)]")]
