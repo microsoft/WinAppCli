@@ -27,6 +27,9 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
     private const string CatAttr1 = "0x10010001:OSAttr:2:6.2";
     private static readonly byte[] SECTION_NAME_TEXT = { (byte)'.', (byte)'t', (byte)'e', (byte)'x', (byte)'t', 0, 0, 0 };
 
+    [ThreadStatic]
+    private static ILogger? t_callbackLogger;
+
     public static T ReadBytes<T>(BinaryReader reader) where T : unmanaged
     {
         var size = Unsafe.SizeOf<T>();
@@ -68,10 +71,8 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
             _ => $"Unknown ({localError})"
         };
 
-        //GetRequiredService<ILogger<CodeIntegrityCatalogService>>();
-        //logger.LogInformation("{UISymbol} Adding executable file: {File}", UiSymbols.Info, file);
-
-        throw new InvalidOperationException($"CDF Parsing Error - Area: {errorArea} : {areaDescription}, Error: {localError} : {errorDescription}, Line: {lineStr}");
+        t_callbackLogger?.LogError("CDF Parsing Error - Area: {ErrorArea} : {AreaDescription}, Error: {LocalError} : {ErrorDescription}, Line: {Line}",
+            errorArea, areaDescription, localError, errorDescription, lineStr);
     }
 
     private List<string> CollectExecutableFiles(IReadOnlyCollection<string> directories, SearchOption searchOption)
@@ -259,6 +260,7 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
 
         var cdfPath = CreateCatalogDefinitionFile(outputCatalogPath, files, usePageHashes, computeFlatHashes);
 
+        t_callbackLogger = logger;
         try
         {
             fixed (char* pCdfPath = cdfPath)
@@ -288,6 +290,7 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
         }
         finally
         {
+            t_callbackLogger = null;
             if (cdfOutputPath == null)
             {
                 try
