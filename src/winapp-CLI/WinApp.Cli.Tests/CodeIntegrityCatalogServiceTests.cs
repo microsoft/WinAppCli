@@ -298,13 +298,13 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
     public async Task CreateExternalCatalog_SkipsNonExecutableFiles()
     {
         CopyExecutablesForTest(_testInputDirectory);
-        var nonExecucutableFiles = new List<string>
+        var nonExecutableFiles = new List<string>
         {
             Path.Combine(_testInputDirectory, "readme.txt"),
             Path.Combine(_testInputDirectory, "data.json")
         };
 
-        foreach (var file in nonExecucutableFiles)
+        foreach (var file in nonExecutableFiles)
         {
             File.WriteAllText(file, "not executable");
         }
@@ -313,7 +313,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var files = new List<string>();
         foreach (var file in Directory.EnumerateFiles(_testInputDirectory, "*.*", SearchOption.TopDirectoryOnly))
         {
-            if (!nonExecucutableFiles.Contains(file))
+            if (!nonExecutableFiles.Contains(file))
             {
                 files.Add(file);
             }
