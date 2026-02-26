@@ -73,7 +73,7 @@ public class ChatClient
         {
             if (cts != null && !cts.Token.IsCancellationRequested)
             {
-                throw ex;
+                throw;
             }
         }
 
