@@ -149,8 +149,8 @@ if ([string]::IsNullOrEmpty($PackagePath)) {
     # Detect current processor architecture
     $CurrentArch = $env:PROCESSOR_ARCHITECTURE
     $ArchPattern = switch ($CurrentArch) {
-        "AMD64" { "*_x64_*.msix" }
-        "ARM64" { "*_arm64_*.msix" }
+        "AMD64" { "*_x64*.msix" }
+        "ARM64" { "*_arm64*.msix" }
         default { "*.msix" }
     }
     
@@ -281,7 +281,29 @@ try {
     Write-Host "[INSTALL] Installing MSIX package..." -ForegroundColor Blue
     Write-Host "  Package: $PackagePath" -ForegroundColor Gray
     Write-Host ""
-    
+
+    # Check for existing winapp packages that could conflict with the app execution alias
+    $existingPackages = Get-AppxPackage | Where-Object { $_.Name -eq 'winapp' -or $_.Name -eq 'winapp-dev' }
+    if ($existingPackages) {
+        Write-Host "[CHECK] Found existing winapp package(s) that may conflict:" -ForegroundColor Yellow
+        foreach ($pkg in $existingPackages) {
+            Write-Host "  - $($pkg.Name) v$($pkg.Version)" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        $response = Read-Host "Uninstall existing package(s) before installing? (Y/N)"
+        if ($response -eq 'Y' -or $response -eq 'y') {
+            foreach ($pkg in $existingPackages) {
+                Write-Host "[REMOVE] Removing $($pkg.Name) v$($pkg.Version)..." -ForegroundColor Blue
+                Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction SilentlyContinue
+                Write-Host "  - Removed $($pkg.Name)" -ForegroundColor Gray
+            }
+            Write-Host ""
+        } else {
+            Write-Host "[INFO] Continuing without removing existing packages..." -ForegroundColor Gray
+            Write-Host ""
+        }
+    }
+
     # Use Add-AppxPackage to install the package
     try {
         Add-AppxPackage -Path $PackagePath -ErrorAction Stop

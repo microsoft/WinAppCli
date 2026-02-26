@@ -2,15 +2,17 @@
 
 This package contains a pre-release development build of the Windows Development CLI MSIX packages. 
 
-> **Note:** The MSIX packages are signed with a dev certificate. This is temporary until we can sign with a proper certificate. Installing via the `install.cmd` script will install the dev certificate on your machine.
+> **Note:** The MSIX packages are signed with a dev certificate; only release packages are signed with a production certificate. Installing via the `install.cmd` script will install the dev certificate on your machine.
 
 ## Quick Installation
 
 1. Double-click `install.cmd`
 2. When prompted, allow elevation to Administrator
-3. Done! 
+3. Done!
 
-> **Note:** When downloading scripts from the internet, Windows blocks execution until they are unblocked. The `instal.cmd` should automatically unblock downloaded files. However, if that fails, you will need to right click on each file -> click Properties -> check Unblock -> click OK.
+The installer automatically detects your device architecture (x64 or ARM64) and installs the correct package.
+
+> **Note:** When downloading scripts from the internet, Windows blocks execution until they are unblocked. The `install.cmd` script should automatically unblock downloaded files. However, if that fails, you will need to right click on each file -> click Properties -> check Unblock -> click OK.
 
 ## What's Included
 
@@ -36,7 +38,3 @@ If you see a script execution error, Right-click `install.ps1` â†’ Properties â†
 ### "This app package is not signed with a trusted certificate"
 - Run `install.ps1` with administrator privileges
 - Verify the certificate was installed to LocalMachine\TrustedPeople
-
-## Support
-
-For more information, visit: https://github.com/microsoft/WinAppCli

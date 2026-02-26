@@ -41,7 +41,10 @@ jobs:
         $versionJson = Get-Content "version.json" | ConvertFrom-Json
         $baseVersion = $versionJson.version
         $buildNumber = & ".\scripts\get-build-number.ps1"
-        $fullVersion = "$baseVersion-prerelease.$buildNumber"
+        
+        # Determine prerelease label based on current branch
+        $prereleaseLabel = & ".\scripts\get-prerelease-label.ps1"
+        $fullVersion = "$baseVersion-$prereleaseLabel.$buildNumber"
         
         # Export for use in subsequent steps
         echo "version=$fullVersion" >> $env:GITHUB_OUTPUT
@@ -84,7 +87,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: msix-packages
-        path: artifacts/msix-packages/*.msix
+        path: artifacts/msix-packages/
         if-no-files-found: error
 
     # --- Build quality metrics ---
