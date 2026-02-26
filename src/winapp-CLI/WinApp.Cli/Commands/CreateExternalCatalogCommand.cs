@@ -41,7 +41,7 @@ internal class CreateExternalCatalogCommand : Command, IShortDescription
         };
         IfExistsOption = new Option<IfExists>("--if-exists")
         {
-            Description = "Behavior when an CodeIntegrityExternal.cat file already exists",
+            Description = "Behavior when output file already exists",
             DefaultValueFactory = _ => IfExists.Error
         };
         OutputOption = new Option<FileInfo?>("--output", "-o")
@@ -51,7 +51,7 @@ internal class CreateExternalCatalogCommand : Command, IShortDescription
         OutputOption.AcceptLegalFilePathsOnly();
     }
 
-    public CreateExternalCatalogCommand() : base("create-external-catalog", "Generates CodeIntegrityExternal.cat catalog file with hashes of executable file from a given directory.")
+    public CreateExternalCatalogCommand() : base("create-external-catalog", "Generates CodeIntegrityExternal.cat catalog file with hashes of executable files from the given directory.")
     {
         Arguments.Add(InputFolderArgument);
         Options.Add(RecursiveOption);
@@ -63,6 +63,29 @@ internal class CreateExternalCatalogCommand : Command, IShortDescription
 
     public class Handler(ICodeIntegrityCatalogService externalCatalogService, ICurrentDirectoryProvider currentDirectoryProvider, ILogger<CreateExternalCatalogCommand> logger) : AsynchronousCommandLineAction
     {
+        private static string ResolveOutputCatalogPath(string? outputPath, ICurrentDirectoryProvider currentDirectoryProvider)
+        {
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                return Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), CodeIntegrityCatalogService.DefaultCatalogFileName);
+            }
+
+            var trimmedPath = outputPath.Trim();
+            var endsWithSeparator = trimmedPath.EndsWith(Path.DirectorySeparatorChar) || trimmedPath.EndsWith(Path.AltDirectorySeparatorChar);
+
+            if (Directory.Exists(trimmedPath) || endsWithSeparator)
+            {
+                return Path.GetFullPath(Path.Combine(trimmedPath, CodeIntegrityCatalogService.DefaultCatalogFileName));
+            }
+
+            if (!Path.HasExtension(trimmedPath))
+            {
+                return Path.GetFullPath(Path.ChangeExtension(trimmedPath, CodeIntegrityCatalogService.CatalogFileExtension));
+            }
+
+            return Path.GetFullPath(trimmedPath);
+        }
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var directories = parseResult.GetValue(InputFolderArgument)!;
@@ -73,20 +96,21 @@ internal class CreateExternalCatalogCommand : Command, IShortDescription
             var usePageHashes = parseResult.GetValue(UsePageHashesOption);
             var computeFlatHashes = parseResult.GetValue(ComputeFlatHashesOption);
             var ifExists = parseResult.GetRequiredValue(IfExistsOption);
-            var output = parseResult.GetValue(OutputOption) ?? new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), CodeIntegrityCatalogService.DefaultCatalogFileName));
+
+            var output = new FileInfo(ResolveOutputCatalogPath(parseResult.GetValue(OutputOption)?.FullName, currentDirectoryProvider));
 
             try
             {
                 logger.LogInformation("{UISymbol} Generating CodeIntegrityExternal.cat for directory: {Directory}", UiSymbols.Info, directories);
 
-                await externalCatalogService.CreateExternalCatalog(inputDirectories, recursive, usePageHashes, computeFlatHashes, ifExists, output);
+                await externalCatalogService.CreateExternalCatalogAsync(inputDirectories, recursive, usePageHashes, computeFlatHashes, ifExists, output);
 
                 logger.LogInformation("{UISymbol} {ExternalCatalog} was generated successfully.", UiSymbols.Check, output.FullName);
                 return 0;
             }
             catch (Exception ex)
             {
-                logger.LogError("{UISymbol} Error generating {ExternalCatalog}: {ErrorMessage}", UiSymbols.Error, output.FullName, ex.Message);
+                logger.LogError("{UISymbol} Error generating {ExternalCatalog}: {ErrorMessage}", UiSymbols.Error, output.FullName, ex.GetBaseException().Message);
                 return 1;
             }
         }

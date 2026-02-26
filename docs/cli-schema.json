@@ -1105,7 +1105,7 @@
       "hidden": false,
       "subcommands": {
         "create-external-catalog": {
-          "description": "Generates CodeIntegrityExternal.cat catalog file with hashes of executable file from a given directory.",
+          "description": "Generates CodeIntegrityExternal.cat catalog file with hashes of executable files from the given directory.",
           "hidden": false,
           "arguments": {
             "input-folder": {
@@ -1135,7 +1135,7 @@
               "recursive": false
             },
             "--if-exists": {
-              "description": "Behavior when an CodeIntegrityExternal.cat file already exists",
+              "description": "Behavior when output file already exists",
               "hidden": false,
               "valueType": "WinApp.Cli.Models.IfExists",
               "hasDefaultValue": true,

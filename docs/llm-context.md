@@ -177,14 +177,14 @@ Commands for working with MSIX sparse packages, including TrustedLaunch external
 
 #### `winapp sparse create-external-catalog`
 
-Generates CodeIntegrityExternal.cat catalog file with hashes of executable file from a given directory.
+Generates CodeIntegrityExternal.cat catalog file with hashes of executable files from the given directory.
 
 **Arguments:**
 - `<input-folder>` *(required)* - List of input folders with executable files to process (separated by semicolons)
 
 **Options:**
 - `--compute-flat-hashes` - Include flat hashes when generating the catalog
-- `--if-exists` - Behavior when an CodeIntegrityExternal.cat file already exists (default: `Error`)
+- `--if-exists` - Behavior when output file already exists (default: `Error`)
 - `--output` / `-o` - Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used.
 - `--quiet` / `-q` - Suppress progress messages
 - `--recursive` / `-r` - Include files from subdirectories

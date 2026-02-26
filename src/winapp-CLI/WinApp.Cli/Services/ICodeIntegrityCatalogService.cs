@@ -7,5 +7,5 @@ namespace WinApp.Cli.Services;
 
 internal interface ICodeIntegrityCatalogService
 {
-    Task CreateExternalCatalog(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output);
+    Task CreateExternalCatalogAsync(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output);
 }

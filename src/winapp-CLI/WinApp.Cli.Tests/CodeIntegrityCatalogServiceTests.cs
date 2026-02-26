@@ -53,7 +53,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
     private static void CopyExecutablesForTest(string destPath)
     {
         File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), Path.Combine(destPath, "cmd.exe"));
-        File.Copy(Path.Combine(Environment.SystemDirectory, "bash.exe"), Path.Combine(destPath, "bash.exe"));
+        File.Copy(Path.Combine(Environment.SystemDirectory, "sort.exe"), Path.Combine(destPath, "sort.exe"));
         File.Copy(Path.Combine(Environment.SystemDirectory, "cacls.exe"), Path.Combine(destPath, "cacls.exe"));
 
         var subDirectory1 = Path.Combine(destPath, "1");
@@ -163,7 +163,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var output = new FileInfo(Path.Combine(_tempDirectory.FullName, "test.cat"));
 
         await Assert.ThrowsExactlyAsync<ArgumentException>(() =>
-            _codeIntegrityCatalogService.CreateExternalCatalog(null!, false, false, false, IfExists.Error, output));
+            _codeIntegrityCatalogService.CreateExternalCatalogAsync(null!, false, false, false, IfExists.Error, output));
     }
 
     [TestMethod]
@@ -172,7 +172,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var output = new FileInfo(Path.Combine(_tempDirectory.FullName, "test.cat"));
 
         await Assert.ThrowsExactlyAsync<ArgumentException>(() =>
-            _codeIntegrityCatalogService.CreateExternalCatalog([], false, false, false, IfExists.Error, output));
+            _codeIntegrityCatalogService.CreateExternalCatalogAsync([], false, false, false, IfExists.Error, output));
     }
 
     [TestMethod]
@@ -182,7 +182,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var dirs = new List<string> { Path.Combine(_tempDirectory.FullName, "nonexistent") };
 
         await Assert.ThrowsExactlyAsync<DirectoryNotFoundException>(() =>
-            _codeIntegrityCatalogService.CreateExternalCatalog(dirs, false, false, false, IfExists.Error, output));
+            _codeIntegrityCatalogService.CreateExternalCatalogAsync(dirs, false, false, false, IfExists.Error, output));
     }
 
     [TestMethod]
@@ -192,7 +192,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var output = new FileInfo(Path.Combine(_tempDirectory.FullName, "test.cat"));
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
-            _codeIntegrityCatalogService.CreateExternalCatalog([_testInputDirectory], false, false, false, IfExists.Error, output));
+            _codeIntegrityCatalogService.CreateExternalCatalogAsync([_testInputDirectory], false, false, false, IfExists.Error, output));
     }
 
     [TestMethod]
@@ -204,7 +204,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var output = new FileInfo(outputPath);
 
         await Assert.ThrowsExactlyAsync<IOException>(() =>
-            _codeIntegrityCatalogService.CreateExternalCatalog([_testInputDirectory], false, false, false, IfExists.Error, output));
+            _codeIntegrityCatalogService.CreateExternalCatalogAsync([_testInputDirectory], false, false, false, IfExists.Error, output));
     }
 
     #endregion
@@ -217,7 +217,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         CopyExecutablesForTest(_testInputDirectory);
         var outputPath = Path.Combine(_tempDirectory.FullName, "test.cat");
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [_testInputDirectory], false, false, false, IfExists.Error, new FileInfo(outputPath));
 
         Assert.IsTrue(File.Exists(outputPath), "Catalog file should be generated");
@@ -232,7 +232,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         File.WriteAllText(outputPath, "old content");
         var oldFileLength = new FileInfo(outputPath).Length;
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [_testInputDirectory], false, false, false, IfExists.Overwrite, new FileInfo(outputPath));
 
         Assert.IsTrue(File.Exists(outputPath), "Catalog file should exist");
@@ -252,7 +252,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
             files.Add(file);
         }
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [_testInputDirectory], true, false, false, IfExists.Error, new FileInfo(outputPath), ref cdfPath);
 
         var cdfContent = File.ReadAllText(cdfPath!);
@@ -281,7 +281,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
             }
         }
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [_testInputDirectory], false, false, false, IfExists.Error, new FileInfo(outputPath), ref cdfPath);
 
         var cdfContent = File.ReadAllText(cdfPath!);
@@ -322,7 +322,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var cdfPath = string.Empty;
         var outputPath = Path.Combine(_tempDirectory.FullName, "test.cat");
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [_testInputDirectory], false, false, false, IfExists.Error, new FileInfo(outputPath), ref cdfPath);
 
         var cdfContent = File.ReadAllText(cdfPath!);
@@ -353,7 +353,7 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
             files.Add(file);
         }
 
-        await _codeIntegrityCatalogService.CreateExternalCatalog(
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
             [dir1, dir2], false, false, false, IfExists.Error, new FileInfo(outputPath), ref cdfPath);
 
         var cdfContent = File.ReadAllText(cdfPath!);

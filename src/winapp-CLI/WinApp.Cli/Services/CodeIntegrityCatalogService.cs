@@ -19,7 +19,7 @@ namespace WinApp.Cli.Services;
 internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> logger) : ICodeIntegrityCatalogService
 {
     public const string DefaultCatalogFileName = "CodeIntegrityExternal.cat";
-    private const string CatalogFileExtension = ".cat";
+    public const string CatalogFileExtension = ".cat";
     private const string CatalogVersion = "2";
     private const string PublicVersion = "1";
     private const string HashAlgorithms = "SHA256";
@@ -68,30 +68,10 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
             _ => $"Unknown ({localError})"
         };
 
+        //GetRequiredService<ILogger<CodeIntegrityCatalogService>>();
+        //logger.LogInformation("{UISymbol} Adding executable file: {File}", UiSymbols.Info, file);
+
         throw new InvalidOperationException($"CDF Parsing Error - Area: {errorArea} : {areaDescription}, Error: {localError} : {errorDescription}, Line: {lineStr}");
-    }
-
-    private static string ResolveOutputCatalogPath(string outputPath)
-    {
-        if (string.IsNullOrWhiteSpace(outputPath))
-        {
-            return Path.GetFullPath(DefaultCatalogFileName);
-        }
-
-        var trimmedPath = outputPath.Trim();
-        var endsWithSeparator = trimmedPath.EndsWith(Path.DirectorySeparatorChar) || trimmedPath.EndsWith(Path.AltDirectorySeparatorChar);
-
-        if (Directory.Exists(trimmedPath) || endsWithSeparator)
-        {
-            return Path.GetFullPath(Path.Combine(trimmedPath, DefaultCatalogFileName));
-        }
-
-        if (!Path.HasExtension(trimmedPath))
-        {
-            return Path.GetFullPath(Path.ChangeExtension(trimmedPath, CatalogFileExtension));
-        }
-
-        return Path.GetFullPath(trimmedPath);
     }
 
     private List<string> CollectExecutableFiles(IReadOnlyCollection<string> directories, SearchOption searchOption)
@@ -239,23 +219,31 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
         }
     }
 
-    public unsafe Task CreateExternalCatalog(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output)
+    public unsafe Task CreateExternalCatalogAsync(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output)
     {
         string? cdfOutputPath = null;
-        return CreateExternalCatalog(directories, recursive, usePageHashes, computeFlatHashes, ifExists, output, ref cdfOutputPath);
+        return CreateExternalCatalogAsync(directories, recursive, usePageHashes, computeFlatHashes, ifExists, output, ref cdfOutputPath);
     }
 
-    public unsafe Task CreateExternalCatalog(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output, ref string? cdfOutputPath)
+    public unsafe Task CreateExternalCatalogAsync(List<string> directories, bool recursive, bool usePageHashes, bool computeFlatHashes, IfExists ifExists, FileInfo output, ref string? cdfOutputPath)
     {
         if ((directories == null) || (directories.Count == 0))
         {
             throw new ArgumentException("At least one directory path must be provided.", nameof(directories));
         }
 
-        var outputCatalogPath = ResolveOutputCatalogPath(output.FullName);
-        if (File.Exists(outputCatalogPath) && (ifExists != IfExists.Overwrite))
+        var outputCatalogPath = output.FullName;
+        if (File.Exists(outputCatalogPath))
         {
-            throw new IOException($"Output catalog already exists: {outputCatalogPath}");
+            if (ifExists == IfExists.Skip)
+            {
+                logger.LogInformation("{UISymbol} Output catalog already exists, skipping generation: {File}", UiSymbols.Info, outputCatalogPath);
+                return Task.CompletedTask;
+            }
+            if (ifExists == IfExists.Error)
+            {
+                throw new IOException($"Output catalog already exists: {outputCatalogPath}");
+            }
         }
 
         logger.LogInformation("{UISymbol} Collecting executable files...", UiSymbols.Info);
@@ -271,36 +259,46 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
 
         var cdfPath = CreateCatalogDefinitionFile(outputCatalogPath, files, usePageHashes, computeFlatHashes);
 
-        fixed (char* pCdfPath = cdfPath)
+        try
         {
-            var cdfHandle = PInvoke.CryptCATCDFOpen(pCdfPath, &ParseErrorCallback);
-
-            if (cdfHandle == null)
+            fixed (char* pCdfPath = cdfPath)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to open the generated CDF.");
-            }
+                var cdfHandle = PInvoke.CryptCATCDFOpen(pCdfPath, &ParseErrorCallback);
 
-            try
-            {
-                EnumerateCdfAttributes(cdfHandle);
-                EnumerateCdfMembers(cdfHandle);
-            }
-            finally
-            {
-                PInvoke.CryptCATCDFClose(cdfHandle);
-
-                if (cdfOutputPath == null)
+                if (cdfHandle == null)
                 {
-                    try
-                    {
-                        File.Delete(cdfPath);
-                    }
-                    catch { }
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to open the generated CDF.");
                 }
-                else
+
+                try
                 {
-                    cdfOutputPath = cdfPath;
+                    EnumerateCdfAttributes(cdfHandle);
+                    EnumerateCdfMembers(cdfHandle);
                 }
+                finally
+                {
+                    PInvoke.CryptCATCDFClose(cdfHandle);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            cdfOutputPath = null;
+            throw;
+        }
+        finally
+        {
+            if (cdfOutputPath == null)
+            {
+                try
+                {
+                    File.Delete(cdfPath);
+                }
+                catch { }
+            }
+            else
+            {
+                cdfOutputPath = cdfPath;
             }
         }
 
