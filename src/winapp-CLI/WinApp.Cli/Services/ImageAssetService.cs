@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using SkiaSharp;
+using Svg.Skia;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using Svg;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
@@ -209,25 +210,45 @@ internal class ImageAssetService : IImageAssetService
 
         if (sourceImagePath.Extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
         {
-            var svgDoc = SvgDocument.Open(sourceImagePath.FullName);
+            var svg = new SKSvg();
+            using var stream = File.OpenRead(sourceImagePath.FullName);
+            svg.Load(stream);
+
+            var picture = svg.Picture ?? throw new InvalidOperationException($"Failed to render SVG image: {sourceImagePath.FullName}. The file may be corrupted or contain unsupported SVG features.");
+            var bounds = picture.CullRect;
+
+            int width = (int)Math.Ceiling(bounds.Width);
+            int height = (int)Math.Ceiling(bounds.Height);
 
             // Ensure SVG renders at a reasonable minimum size for quality when scaling down
             const float minRenderDimension = 1024f;
-            var currentWidth = svgDoc.Width.Value;
-            var currentHeight = svgDoc.Height.Value;
-
-            if (currentWidth > 0 && currentHeight > 0 && (currentWidth < minRenderDimension || currentHeight < minRenderDimension))
+            float scaleFactor = 1f;
+            if (width > 0 && height > 0 && (width < minRenderDimension || height < minRenderDimension))
             {
-                var scaleFactor = Math.Max(minRenderDimension / currentWidth, minRenderDimension / currentHeight);
-                svgDoc.Width = new SvgUnit(currentWidth * scaleFactor);
-                svgDoc.Height = new SvgUnit(currentHeight * scaleFactor);
+                scaleFactor = Math.Max(minRenderDimension / width, minRenderDimension / height);
+                width = (int)Math.Ceiling(bounds.Width * scaleFactor);
+                height = (int)Math.Ceiling(bounds.Height * scaleFactor);
             }
 
-            var bitmap = svgDoc.Draw();
-            if (bitmap == null || bitmap.Width == 0 || bitmap.Height == 0)
+            // Render to SKBitmap
+            using var skBitmap = new SKBitmap(width, height);
+            using (var canvas = new SKCanvas(skBitmap))
             {
-                throw new InvalidOperationException("SVG rendered to an empty bitmap.");
+                canvas.Clear(SKColors.Transparent);
+                if (scaleFactor > 1f)
+                {
+                    canvas.Scale(scaleFactor);
+                }
+                canvas.DrawPicture(picture);
+                canvas.Flush();
             }
+
+            // Convert SKBitmap → System.Drawing.Bitmap
+            using var image = SKImage.FromBitmap(skBitmap);
+            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+            using var ms = new MemoryStream(data.ToArray());
+
+            var bitmap = new Bitmap(ms);
 
             return bitmap;
         }
