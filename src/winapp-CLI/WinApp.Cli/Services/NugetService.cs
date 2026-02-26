@@ -357,7 +357,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                     continue;
                 }
 
-                leafItems = fetchedItems;
+                leafItems = fetchedItems.Clone();
             }
 
             foreach (var leaf in leafItems.EnumerateArray())
