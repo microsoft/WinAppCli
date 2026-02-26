@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -230,11 +229,8 @@ public partial class NugetServiceTests : BaseCommandTests
     /// </summary>
     private static async Task<bool> IsVersionListedAsync(string packageName, string version, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient(new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-        });
-        var url = $"https://api.nuget.org/v3/registration5-gz-semver2/{packageName.ToLowerInvariant()}/index.json";
+        using var http = new HttpClient();
+        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
         using var resp = await http.GetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
@@ -335,11 +331,8 @@ public partial class NugetServiceTests : BaseCommandTests
     /// </summary>
     private static async Task<HashSet<string>> GetListedVersionsFromRegistrationAsync(string packageName, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient(new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-        });
-        var url = $"https://api.nuget.org/v3/registration5-gz-semver2/{packageName.ToLowerInvariant()}/index.json";
+        using var http = new HttpClient();
+        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
         using var resp = await http.GetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
