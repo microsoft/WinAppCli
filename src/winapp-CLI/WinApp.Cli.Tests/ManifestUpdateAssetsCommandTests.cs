@@ -255,7 +255,78 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Update-assets command should complete successfully when manifest is inferred");
 
         // Verify Assets directory was created
-        var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
-        Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
-    }
-}
+                         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+                         Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
+                     }
+
+                     [TestMethod]
+                     public async Task ManifestUpdateAssetsCommandShouldGenerateAssetsFromSvg()
+                     {
+                         // Arrange
+                         var svgImagePath = Path.Combine(_tempDirectory.FullName, "testlogo.svg");
+                         PngHelper.CreateTestSvgImage(svgImagePath);
+
+                         var updateAssetsCommand = GetRequiredService<ManifestUpdateAssetsCommand>();
+                         var args = new[]
+                         {
+                             svgImagePath,
+                             "--manifest", _testManifestPath
+                         };
+
+                         // Act
+                         var parseResult = updateAssetsCommand.Parse(args);
+                         var exitCode = await parseResult.InvokeAsync();
+
+                         // Assert
+                         Assert.AreEqual(0, exitCode, "Update-assets command should complete successfully with SVG source");
+
+                         // Verify Assets directory was created
+                         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+                         Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
+
+                         // Verify assets referenced in manifest were generated
+                         var expectedAssets = new[]
+                         {
+                             "Square44x44Logo.png",
+                             "Square150x150Logo.png",
+                             "Wide310x150Logo.png",
+                             "StoreLogo.png"
+                         };
+
+                         foreach (var asset in expectedAssets)
+                         {
+                             var assetPath = Path.Combine(assetsDir, asset);
+                             Assert.IsTrue(File.Exists(assetPath), $"Asset {asset} should be generated from SVG source");
+                         }
+                     }
+
+                     [TestMethod]
+                     public async Task ManifestUpdateAssetsCommandShouldGenerateCorrectSizesFromSvg()
+                     {
+                         // Arrange
+                         var svgImagePath = Path.Combine(_tempDirectory.FullName, "testlogo.svg");
+                         PngHelper.CreateTestSvgImage(svgImagePath);
+
+                         var updateAssetsCommand = GetRequiredService<ManifestUpdateAssetsCommand>();
+                         var args = new[]
+                         {
+                             svgImagePath,
+                             "--manifest", _testManifestPath
+                         };
+
+                         // Act
+                         var parseResult = updateAssetsCommand.Parse(args);
+                         var exitCode = await parseResult.InvokeAsync();
+
+                         // Assert
+                         Assert.AreEqual(0, exitCode, "Update-assets command should complete successfully with SVG source");
+
+                         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+
+                         // Check that scale-200 assets exist (which should be 2x the base size)
+                         Assert.IsTrue(File.Exists(Path.Combine(assetsDir, "Square44x44Logo.scale-200.png")),
+                             "Square44x44Logo.scale-200.png should exist when generated from SVG");
+                         Assert.IsTrue(File.Exists(Path.Combine(assetsDir, "Square150x150Logo.scale-200.png")),
+                             "Square150x150Logo.scale-200.png should exist when generated from SVG");
+                     }
+                 }

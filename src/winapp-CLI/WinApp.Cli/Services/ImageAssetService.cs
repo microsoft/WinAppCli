@@ -4,6 +4,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using Svg;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
@@ -47,15 +48,7 @@ internal class ImageAssetService : IImageAssetService
         Bitmap sourceImage;
         try
         {
-            if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
-            {
-                using var icon = new Icon(sourceImagePath.FullName);
-                sourceImage = icon.ToBitmap();
-            }
-            else
-            {
-                sourceImage = new Bitmap(sourceImagePath.FullName);
-            }
+            sourceImage = LoadSourceImage(sourceImagePath);
         }
         catch (Exception ex)
         {
@@ -123,15 +116,7 @@ internal class ImageAssetService : IImageAssetService
         Bitmap sourceImage;
         try
         {
-            if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
-            {
-                using var icon = new Icon(sourceImagePath.FullName);
-                sourceImage = icon.ToBitmap();
-            }
-            else
-            {
-                sourceImage = new Bitmap(sourceImagePath.FullName);
-            }
+            sourceImage = LoadSourceImage(sourceImagePath);
         }
         catch (Exception ex)
         {
@@ -212,6 +197,42 @@ internal class ImageAssetService : IImageAssetService
                 taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {successCount} of {totalCount} image assets");
             }
         }
+    }
+
+    private static Bitmap LoadSourceImage(FileInfo sourceImagePath)
+    {
+        if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
+        {
+            using var icon = new Icon(sourceImagePath.FullName);
+            return icon.ToBitmap();
+        }
+
+        if (sourceImagePath.Extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            var svgDoc = SvgDocument.Open(sourceImagePath.FullName);
+
+            // Ensure SVG renders at a reasonable minimum size for quality when scaling down
+            const float minRenderDimension = 1024f;
+            var currentWidth = svgDoc.Width.Value;
+            var currentHeight = svgDoc.Height.Value;
+
+            if (currentWidth > 0 && currentHeight > 0 && (currentWidth < minRenderDimension || currentHeight < minRenderDimension))
+            {
+                var scaleFactor = Math.Max(minRenderDimension / currentWidth, minRenderDimension / currentHeight);
+                svgDoc.Width = new SvgUnit(currentWidth * scaleFactor);
+                svgDoc.Height = new SvgUnit(currentHeight * scaleFactor);
+            }
+
+            var bitmap = svgDoc.Draw();
+            if (bitmap == null || bitmap.Width == 0 || bitmap.Height == 0)
+            {
+                throw new InvalidOperationException("SVG rendered to an empty bitmap.");
+            }
+
+            return bitmap;
+        }
+
+        return new Bitmap(sourceImagePath.FullName);
     }
 
     private static async Task GenerateAssetAsync(Bitmap sourceImage, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
