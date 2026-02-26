@@ -27,8 +27,6 @@ internal partial class MsixService(
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
-    [GeneratedRegex(@"PublicFolder\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex PublicFolderRegex();
     [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+\.\d+.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex WindowsAppRuntimeMsixRegex();
     [GeneratedRegex(@"<Identity[^>]*>", RegexOptions.IgnoreCase, "en-US")]
@@ -502,8 +500,10 @@ internal partial class MsixService(
     /// Creates a PRI configuration file for the given package directory
     /// </summary>
     /// <param name="packageDir">Path to the package directory</param>
+    /// <param name="taskContext">Task context for logging and progress reporting</param>
     /// <param name="language">Default language qualifier (default: 'en-US')</param>
     /// <param name="platformVersion">Platform version (default: '10.0.0')</param>
+    /// <param name="precomputedPriResourceCandidates">Pre-computed list of manifest-referenced resource file paths (relative to the package directory) to include in the PRI. Must be provided by the caller via <see cref="GetExpandedManifestReferencedFilesAsync"/>.</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Path to the created configuration file</returns>
     public async Task<FileInfo> CreatePriConfigAsync(
@@ -511,7 +511,7 @@ internal partial class MsixService(
         TaskContext taskContext,
         string language = "en-US",
         string platformVersion = "10.0.0",
-        IEnumerable<string>? precomputedPriResourceCandidates = null,
+        IEnumerable<string> precomputedPriResourceCandidates = null!,
         CancellationToken cancellationToken = default)
     {
         if (!packageDir.Exists)
@@ -519,10 +519,7 @@ internal partial class MsixService(
             throw new DirectoryNotFoundException($"Package directory not found: {packageDir}");
         }
 
-        if (precomputedPriResourceCandidates == null)
-        {
-            throw new ArgumentNullException(nameof(precomputedPriResourceCandidates), "PRI resource candidates must be pre-computed before calling CreatePriConfigAsync.");
-        }
+        ArgumentNullException.ThrowIfNull(precomputedPriResourceCandidates);
 
         var resfilesPath = Path.Combine(packageDir.FullName, "pri.resfiles");
         var priResourceCandidates = precomputedPriResourceCandidates.ToList();
@@ -624,6 +621,8 @@ internal partial class MsixService(
         ".png",
         ".jpg",
         ".jpeg",
+        ".gif",
+        ".bmp",
         ".ico",
         ".svg"
     };
@@ -633,87 +632,195 @@ internal partial class MsixService(
         var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
         var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var generalFilePatterns = new[]
+        var xmlDocument = new XmlDocument
         {
-            @"(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)\s*=\s*[""']([^""']*)[""']",
-            @"<(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)>\s*([^<]*)\s*</(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)>",
-            @"Source\s*=\s*[""']([^""']*)[""']",
-            @"Icon\s*=\s*[""']([^""']*)[""']",
-            @"<File[^>]*Name\s*=\s*[""']([^""']*)[""'][^>]*>",
-            @"ResourceFile\s*=\s*[""']([^""']*)[""']"
+            PreserveWhitespace = true
         };
 
-        foreach (var pattern in generalFilePatterns)
+        xmlDocument.LoadXml(manifestContent);
+
+        var logoElementAndAttributeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            var matches = Regex.Matches(manifestContent, pattern, RegexOptions.IgnoreCase);
-            foreach (Match match in matches)
+            "Logo",
+            "BackgroundImage",
+            "SplashScreen",
+            "Square30x30Logo",
+            "Square44x44Logo",
+            "Square71x71Logo",
+            "Square150x150Logo",
+            "Square310x310Logo",
+            "Wide310x150Logo",
+            "LockScreenLogo",
+            "BadgeLogo",
+            "StoreLogo"
+        };
+
+        var allElements = xmlDocument.SelectNodes("//*");
+        if (allElements != null)
+        {
+            foreach (XmlElement element in allElements)
             {
-                if (match.Groups.Count > 1)
+                if (element.HasAttributes)
                 {
-                    var filePath = match.Groups[1].Value.Trim();
-                    if (!string.IsNullOrEmpty(filePath))
+                    foreach (XmlAttribute attribute in element.Attributes)
                     {
-                        referencedFiles.Add(filePath.Replace('\\', Path.DirectorySeparatorChar));
+                        var attributeName = attribute.LocalName;
+
+                        if (logoElementAndAttributeNames.Contains(attributeName) ||
+                            attributeName.Equals("Source", StringComparison.OrdinalIgnoreCase) ||
+                            attributeName.Equals("Icon", StringComparison.OrdinalIgnoreCase) ||
+                            attributeName.Equals("ResourceFile", StringComparison.OrdinalIgnoreCase) ||
+                            (attributeName.Equals("Name", StringComparison.OrdinalIgnoreCase) &&
+                             element.LocalName.Equals("File", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            AddFileReference(attribute.Value, referencedFiles);
+                        }
                     }
+                }
+
+                if (logoElementAndAttributeNames.Contains(element.LocalName))
+                {
+                    AddFileReference(element.InnerText, referencedFiles);
                 }
             }
         }
 
-        var appExtensionPattern = @"<(\w+:)?AppExtension[^>]*>(.*?)</(\w+:)?AppExtension>";
-        var appExtensionMatches = Regex.Matches(manifestContent, appExtensionPattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-        foreach (Match appExtMatch in appExtensionMatches)
+        var appExtensionNodes = xmlDocument.SelectNodes("//*[local-name()='AppExtension']");
+        if (appExtensionNodes != null)
         {
-            var appExtensionElement = appExtMatch.Value;
-            var appExtensionContent = appExtMatch.Groups[2].Value;
-
-            var publicFolderMatch = PublicFolderRegex().Match(appExtensionElement);
-            var publicFolder = publicFolderMatch.Success ? publicFolderMatch.Groups[1].Value.Trim() : string.Empty;
-
-            var internalFilePatterns = new[]
+            foreach (XmlElement appExtension in appExtensionNodes)
             {
-                @"<Registration>\s*([^<]*)\s*</Registration>",
-                @"<([^>]+)>\s*([^<]*\.(?:json|xml|txt|config|ini|dll|exe|png|jpg|jpeg|gif|svg|ico|bmp))\s*</\1>",
-                @"[""']([^""']*\.(?:json|xml|txt|config|ini|dll|exe|png|jpg|jpeg|gif|svg|ico|bmp))[""']"
-            };
+                var publicFolder = string.Empty;
 
-            foreach (var pattern in internalFilePatterns)
-            {
-                var matches = Regex.Matches(appExtensionContent, pattern, RegexOptions.IgnoreCase);
-                foreach (Match match in matches)
+                if (appExtension.HasAttributes)
                 {
-                    string? filePath;
-                    if (pattern.Contains("Registration"))
+                    foreach (XmlAttribute attribute in appExtension.Attributes)
                     {
-                        filePath = match.Groups[1].Value.Trim();
+                        if (attribute.LocalName.Equals("PublicFolder", StringComparison.OrdinalIgnoreCase))
+                        {
+                            publicFolder = attribute.Value.Trim();
+                            break;
+                        }
                     }
-                    else if (pattern.Contains(@"</\1>"))
+                }
+
+                var descendantElements = appExtension.SelectNodes(".//*");
+                if (descendantElements == null)
+                {
+                    continue;
+                }
+
+                foreach (XmlElement descendant in descendantElements)
+                {
+                    if (descendant.LocalName.Equals("Registration", StringComparison.OrdinalIgnoreCase))
                     {
-                        filePath = match.Groups[2].Value.Trim();
+                        AddAppExtensionFile(descendant.InnerText, publicFolder, referencedFiles, filterByExtension: false);
                     }
                     else
                     {
-                        filePath = match.Groups[1].Value.Trim();
+                        AddAppExtensionFile(descendant.InnerText, publicFolder, referencedFiles, filterByExtension: true);
                     }
 
-                    if (!string.IsNullOrEmpty(filePath))
+                    if (descendant.HasAttributes)
                     {
-                        if (!string.IsNullOrEmpty(publicFolder))
+                        foreach (XmlAttribute attribute in descendant.Attributes)
                         {
-                            filePath = Path.Combine(publicFolder, filePath).Replace('\\', Path.DirectorySeparatorChar);
+                            AddAppExtensionFile(attribute.Value, publicFolder, referencedFiles, filterByExtension: true);
                         }
-                        else
-                        {
-                            filePath = filePath.Replace('\\', Path.DirectorySeparatorChar);
-                        }
-
-                        referencedFiles.Add(filePath);
                     }
                 }
             }
         }
 
         return referencedFiles;
+
+        static bool LooksLikeFile(string? value, bool restrictExtensions, out string normalized)
+        {
+            normalized = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var trimmed = value.Trim();
+
+            if (trimmed.IndexOfAny(['<', '>']) >= 0)
+            {
+                return false;
+            }
+
+            if (restrictExtensions && trimmed.Contains(' ', StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!restrictExtensions)
+            {
+                normalized = trimmed;
+                return true;
+            }
+
+            var allowedExtensions = new[]
+            {
+                ".json",
+                ".xml",
+                ".txt",
+                ".config",
+                ".ini",
+                ".dll",
+                ".exe",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".svg",
+                ".ico",
+                ".bmp"
+            };
+
+            var extension = Path.GetExtension(trimmed);
+            if (string.IsNullOrEmpty(extension))
+            {
+                return false;
+            }
+
+            foreach (var allowed in allowedExtensions)
+            {
+                if (extension.Equals(allowed, StringComparison.OrdinalIgnoreCase))
+                {
+                    normalized = trimmed;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        static void AddFileReference(string? value, HashSet<string> referencedFiles)
+        {
+            if (!LooksLikeFile(value, restrictExtensions: true, out var filePath))
+            {
+                return;
+            }
+
+            referencedFiles.Add(filePath.Replace('\\', Path.DirectorySeparatorChar));
+        }
+
+        static void AddAppExtensionFile(string? value, string publicFolder, HashSet<string> referencedFiles, bool filterByExtension)
+        {
+            if (!LooksLikeFile(value, filterByExtension, out var filePath))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(publicFolder))
+            {
+                filePath = Path.Combine(publicFolder, filePath);
+            }
+
+            referencedFiles.Add(filePath.Replace('\\', Path.DirectorySeparatorChar));
+        }
     }
 
     private static List<(FileInfo SourceFile, string RelativePath)> ExpandManifestReferencedFiles(
@@ -2084,6 +2191,11 @@ $1");
     /// </summary>
     private static bool IsMrtVariantName(string logicalBaseName, string candidateNameWithoutExtension)
     {
+        if (string.IsNullOrWhiteSpace(logicalBaseName) || string.IsNullOrWhiteSpace(candidateNameWithoutExtension))
+        {
+            return false;
+        }
+
         // Split by '.'; "Logo.scale-200.theme-dark" -> ["Logo", "scale-200", "theme-dark"]
         var parts = candidateNameWithoutExtension.Split('.');
 
@@ -2123,6 +2235,8 @@ $1");
     /// </summary>
     private static string GetMrtVariantBaseName(string logicalBaseName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalBaseName);
+
         var parts = logicalBaseName.Split('.');
         if (parts.Length <= 1)
         {

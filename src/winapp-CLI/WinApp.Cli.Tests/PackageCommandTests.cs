@@ -147,43 +147,43 @@ public class PackageCommandTests : BaseCommandTests
 </Package>";
     }
 
-        private static string CreateExternalTestManifestWithScaledVisualLogos()
-        {
-                return @"<?xml version=""1.0"" encoding=""utf-8""?>
+    private static string CreateExternalTestManifestWithScaledVisualLogos()
+    {
+        return @"<?xml version=""1.0"" encoding=""utf-8""?>
 <Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
-                 xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
-                 xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
-                 IgnorableNamespaces=""uap rescap"">
-    <Identity Name=""ExternalTestPackage""
-                        Publisher=""CN=ExternalTestPublisher""
-                        Version=""1.0.0.0"" />
-    <Properties>
-        <DisplayName>External Test Package</DisplayName>
-        <PublisherDisplayName>External Test Publisher</PublisherDisplayName>
-        <Description>Test package with external manifest</Description>
-        <Logo>Assets\StoreLogo.png</Logo>
-    </Properties>
-    <Dependencies>
-        <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
-    </Dependencies>
-    <Applications>
-        <Application Id=""ExternalTestApp"" Executable=""TestApp.exe"" EntryPoint=""ExternalTestApp.App"">
-            <uap:VisualElements DisplayName=""External Test App"" Description=""Test application with external manifest""
-                                                    BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.scale-200.png"" Square44x44Logo=""Assets\Logo.scale-200.png"" />
-        </Application>
-    </Applications>
-    <Capabilities>
-        <rescap:Capability Name=""runFullTrust"" />
-    </Capabilities>
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap rescap"">
+  <Identity Name=""ExternalTestPackage""
+            Publisher=""CN=ExternalTestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>External Test Package</DisplayName>
+    <PublisherDisplayName>External Test Publisher</PublisherDisplayName>
+    <Description>Test package with external manifest</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""ExternalTestApp"" Executable=""TestApp.exe"" EntryPoint=""ExternalTestApp.App"">
+      <uap:VisualElements DisplayName=""External Test App"" Description=""Test application with external manifest""
+                          BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.scale-200.png"" Square44x44Logo=""Assets\Logo.scale-200.png"" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
 </Package>";
-        }
+    }
 
-        private static string CreateExternalTestManifestWithScaledVisualLogosInImagesFolder()
-        {
-                return CreateExternalTestManifestWithScaledVisualLogos()
-                        .Replace("Assets\\StoreLogo.png", "Images\\StoreLogo.png", StringComparison.Ordinal)
-                        .Replace("Assets\\Logo.scale-200.png", "Images\\Logo.scale-200.png", StringComparison.Ordinal);
-        }
+    private static string CreateExternalTestManifestWithScaledVisualLogosInImagesFolder()
+    {
+        return CreateExternalTestManifestWithScaledVisualLogos()
+            .Replace("Assets\\StoreLogo.png", "Images\\StoreLogo.png", StringComparison.Ordinal)
+            .Replace("Assets\\Logo.scale-200.png", "Images\\Logo.scale-200.png", StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Removes test certificates from the CurrentUser\My certificate store
