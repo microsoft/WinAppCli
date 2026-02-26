@@ -20,8 +20,13 @@ public class CustomHelpTests : BaseCommandTests
         var helpAction = helpOption.Action as CustomHelpAction;
 
         Assert.IsNotNull(helpAction, "Root command help action should be a CustomHelpAction");
+        if (helpAction is null)
+        {
+            Assert.Fail("Root command help action should be a CustomHelpAction");
+            return;
+        }
 
-        var categorizedTypes = new HashSet<Type>(helpAction.CategorizedCommandTypes);
+        var categorizedTypes = new HashSet<Type>(helpAction!.CategorizedCommandTypes);
 
         // Assert — every registered subcommand must be present in a help category
         foreach (var subcommand in rootCommand.Subcommands)
