@@ -12,7 +12,7 @@ namespace WinApp.Cli.Commands;
 
 internal class CreateExternalCatalogCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Commands for creating external catalogs.";
+    public string ShortDescription => "Command for creating external catalogs.";
 
     public static Argument<string> InputFolderArgument { get; }
     public static Option<bool> RecursiveOption { get; }

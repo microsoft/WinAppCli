@@ -44,7 +44,6 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
     [TestInitialize]
     public void Setup()
     {
-        Guid.NewGuid().ToString();
         _testInputDirectory = Path.Combine(_tempDirectory.FullName, Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testInputDirectory);
         _codeIntegrityCatalogService = new CodeIntegrityCatalogService(GetRequiredService<ILogger<CodeIntegrityCatalogService>>());

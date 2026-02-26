@@ -23,7 +23,6 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
     private const string CatalogVersion = "2";
     private const string PublicVersion = "1";
     private const string HashAlgorithms = "SHA256";
-    private const string PageHashes = "false";
     private const string CatAttr1 = "0x10010001:OSAttr:2:6.2";
     private static readonly byte[] SECTION_NAME_TEXT = { (byte)'.', (byte)'t', (byte)'e', (byte)'x', (byte)'t', 0, 0, 0 };
 
