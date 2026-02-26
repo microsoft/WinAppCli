@@ -123,7 +123,7 @@
     ============================================================================
   -->
   <Target Name="RunPackagedApp"
-          DependsOnTargets="_WinAppBuildRunArgs"
+          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout"
           Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
     
     <Message Text="[WinAppRunSupport] Launching packaged application..." Importance="high" />
@@ -146,13 +146,64 @@
   </Target>
 
   <!--
+    ============================================================================
+    _WinAppCopyContentToLooseLayout Target
+    
+    Copies Content and None items to the loose-layout AppX directory.
+    
+    The MSIX packaging targets (Microsoft.Windows.SDK.BuildTools.MSIX) override
+    GetCopyToOutputDirectoryItemsOutputGroup to return ALL items from
+    @(AllItemsFullPathWithTargetPath) — including Content items without
+    CopyToOutputDirectory set. These items flow into @(PackagingOutputs) →
+    @(AppxPackagePayload) and ultimately into the .appxrecipe file, which
+    Visual Studio reads to deploy files from their source locations.
+    
+    Outside VS, the recipe mechanism doesn't apply. This target physically
+    copies those Content/None items to the AppX layout folder so the
+    packaged app can access them at runtime.
+    ============================================================================
+  -->
+  <Target Name="_WinAppCopyContentToLooseLayout"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+          DependsOnTargets="AssignTargetPaths">
+
+    <MakeDir Directories="$(WinAppLooseLayoutPath)" />
+
+    <!--
+      Copy Content items to the AppX loose layout. ContentWithTargetPath is
+      populated by AssignTargetPaths and includes ALL Content items regardless
+      of CopyToOutputDirectory. Items already in the output dir are harmlessly
+      skipped by SkipUnchangedFiles.
+    -->
+    <Copy SourceFiles="@(ContentWithTargetPath)"
+          DestinationFiles="@(ContentWithTargetPath->'$(WinAppLooseLayoutPath)%(TargetPath)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(ContentWithTargetPath)' != ''" />
+
+    <!--
+      Copy None items that have CopyToOutputDirectory set. These are typically
+      loose files (config, data) that should also appear in the package. None
+      items WITHOUT CopyToOutputDirectory are intentionally excluded — they are
+      not runtime-relevant.
+    -->
+    <Copy SourceFiles="@(_NoneWithTargetPath)"
+          DestinationFiles="@(_NoneWithTargetPath->'$(WinAppLooseLayoutPath)%(TargetPath)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_NoneWithTargetPath)' != '' And '%(_NoneWithTargetPath.CopyToOutputDirectory)' != ''" />
+
+    <Message Text="[WinAppRunSupport] Copied content items to loose layout: $(WinAppLooseLayoutPath)"
+             Importance="normal"
+             Condition="'@(ContentWithTargetPath)' != ''" />
+  </Target>
+
+  <!--
     Override the ComputeRunArguments target from Microsoft.NET.Sdk.targets.
     This is the official extensibility point for customizing 'dotnet run'.
     For packaged apps, this sets RunCommand to use our CLI-based launcher.
   -->
   <Target Name="_WinAppPrepareRunArguments"
           BeforeTargets="ComputeRunArguments"
-          DependsOnTargets="_WinAppBuildRunArgs">
+          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout">
     
     <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
       <RunCommand>cmd</RunCommand>

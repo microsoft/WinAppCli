@@ -463,6 +463,9 @@ internal partial class MsixService(
 
         var identity = ParseAppxManifestAsync(manifestContent);
 
+        // Install the Windows App Runtime framework packages if not already present
+        await EnsureWindowsAppRuntimeInstalledAsync(taskContext, cancellationToken);
+
         // Unregister any existing package first
         await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
 
@@ -470,6 +473,32 @@ internal partial class MsixService(
         await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
 
         return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+    }
+
+    /// <summary>
+    /// Ensures that the Windows App Runtime framework MSIX packages are installed on the machine.
+    /// Locates the runtime MSIX directory from the NuGet package cache and installs any
+    /// missing or outdated packages (Framework, DDLM, Singleton, Main) via Add-AppxPackage.
+    /// </summary>
+    private async Task EnsureWindowsAppRuntimeInstalledAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        var msixDir = await GetRuntimeMsixDirAsync(taskContext, cancellationToken);
+        if (msixDir == null)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not locate Windows App Runtime MSIX packages. The runtime may need to be installed manually.");
+            return;
+        }
+
+        var (installedCount, errorCount) = await workspaceSetupService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+
+        if (errorCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} {errorCount} runtime package(s) failed to install. The app may not launch correctly.");
+        }
+        else if (installedCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} Windows App Runtime package(s)");
+        }
     }
 
     private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityResult identityInfo, TaskContext taskContext, CancellationToken cancellationToken)
