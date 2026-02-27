@@ -57,6 +57,7 @@ node cli.js help
 | `package` | Build MSIX from app's output directory. Combines makeappx + optional signing. |
 | `sign` | Code-sign a package or executable with a certificate. |
 | `create-debug-identity` | Register app with Windows for identity-requiring APIs during dev. Re-run after manifest/asset changes. |
+| `create-external-catalog` | Generate `CodeIntegrityExternal.cat` for TrustedLaunch sparse packages. Hashes executables in specified directories for code integrity verification. |
 | `tool` | Execute Windows SDK build tools (makeappx, signtool, makepri). Auto-downloads Build Tools if needed. |
 | `get-winapp-path` | Print `.winapp` directory path. Use `--global` for shared cache. |
 | `--cli-schema` | Output complete CLI structure as JSON for tooling/LLM integration. |
