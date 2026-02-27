@@ -12,7 +12,7 @@ namespace WinApp.Cli.Commands;
 
 internal class CreateExternalCatalogCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Command for creating external catalogs.";
+    public string ShortDescription => "Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages";
 
     public static Argument<string> InputFolderArgument { get; }
     public static Option<bool> RecursiveOption { get; }
@@ -51,7 +51,7 @@ internal class CreateExternalCatalogCommand : Command, IShortDescription
         OutputOption.AcceptLegalFilePathsOnly();
     }
 
-    public CreateExternalCatalogCommand() : base("create-external-catalog", "Generates CodeIntegrityExternal.cat catalog file with hashes of executable files from the given directory.")
+    public CreateExternalCatalogCommand() : base("create-external-catalog", "Generates a CodeIntegrityExternal.cat catalog file with hashes of executable files from specified directories. Used with the TrustedLaunch flag in MSIX sparse package manifests (AllowExternalContent) to allow execution of external files not included in the package.")
     {
         Arguments.Add(InputFolderArgument);
         Options.Add(RecursiveOption);

@@ -61,7 +61,6 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
-                .ConfigureCommand<SparseCommand>()
                 .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>();
     }
 
