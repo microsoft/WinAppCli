@@ -202,8 +202,21 @@ try {
         Write-Info "Updated version.json: $releaseVersion -> $nextVersion"
     }
 
-    # Commit and push
-    Invoke-GitOrDryRun -Description "Stage version.json" -Arguments @("add", "version.json")
+    # Run a full build to regenerate LLM docs and any other version-dependent files
+    Write-Info "Running full build to regenerate version-dependent files..."
+    $buildScript = Join-Path $PSScriptRoot "build-cli.ps1"
+    if ($DryRun) {
+        Write-Warn "[DRY RUN] Would run: $buildScript -SkipTests"
+    } else {
+        & $buildScript -SkipTests -SkipNpm -SkipMsix
+        if ($LASTEXITCODE -ne 0) {
+            throw "Build failed with exit code $LASTEXITCODE"
+        }
+        Write-Ok "Build completed successfully"
+    }
+
+    # Stage all changes (version.json + regenerated docs/artifacts)
+    Invoke-GitOrDryRun -Description "Stage all changes" -Arguments @("add", "--all")
     Invoke-GitOrDryRun -Description "Commit version bump" -Arguments @("commit", "-m", "Bump version to $nextVersion for development")
 
     Confirm-Step "Push version bump branch '$bumpBranch' to origin and create PR?"
