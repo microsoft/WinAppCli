@@ -884,10 +884,10 @@ internal class WorkspaceSetupService(
                 ? [BuildToolsService.WINAPP_SDK_PACKAGE]
                 : new[] { BuildToolsService.CPP_SDK_PACKAGE, BuildToolsService.WINAPP_SDK_PACKAGE };
 
-            // Fetch versions for all modes in parallel
+            // Fetch versions for all modes in parallel (failures are non-fatal)
             var modes = new[] { SdkInstallMode.Stable, SdkInstallMode.Preview, SdkInstallMode.Experimental };
             var versionTasks = modes
-                .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: nugetService.GetLatestVersionAsync(pkg, sdkInstallMode: mode, cancellationToken: cancellationToken))))
+                .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, cancellationToken))))
                 .ToList();
             await Task.WhenAll(versionTasks.Select(v => v.Task));
 
@@ -897,16 +897,23 @@ internal class WorkspaceSetupService(
                 mode =>
                 {
                     var parts = versionTasks
-                        .Where(v => v.Mode == mode)
+                        .Where(v => v.Mode == mode && v.Task.Result != null)
                         .Select(v => $"{(v.Package == BuildToolsService.CPP_SDK_PACKAGE ? "Windows SDK" : "Windows App SDK")} [green]{v.Task.Result}[/]");
                     return string.Join(", ", parts);
                 });
 
             var label = isDotNetProject ? "Windows App SDK" : "SDKs";
+            string FormatChoice(string modeLabel, SdkInstallMode mode)
+            {
+                var versions = versionsByMode[mode];
+                return string.IsNullOrEmpty(versions)
+                    ? $"Setup {modeLabel} {label}"
+                    : $"Setup {modeLabel} {label} ({versions})";
+            }
             string[] sdkChoices = [
-                $"Setup Stable {label} ({versionsByMode[SdkInstallMode.Stable]})",
-                $"Setup Preview {label} ({versionsByMode[SdkInstallMode.Preview]})",
-                $"Setup Experimental {label} ({versionsByMode[SdkInstallMode.Experimental]})",
+                FormatChoice("Stable", SdkInstallMode.Stable),
+                FormatChoice("Preview", SdkInstallMode.Preview),
+                FormatChoice("Experimental", SdkInstallMode.Experimental),
                 $"Do not setup {label}"
             ];
 
@@ -939,6 +946,19 @@ internal class WorkspaceSetupService(
             }
 
             ansiConsole.MarkupLine($"Setup {label}: [underline]{Markup.Remove(sdkChoice["Setup ".Length..])}[/]");
+        }
+    }
+
+    private async Task<string?> SafeGetLatestVersionAsync(string packageName, SdkInstallMode mode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode: mode, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug("Failed to fetch latest version for {PackageName} ({Mode}): {ErrorMessage}", packageName, mode, ex.Message);
+            return null;
         }
     }
 

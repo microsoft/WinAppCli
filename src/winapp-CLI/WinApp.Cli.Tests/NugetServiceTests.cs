@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using WinApp.Cli.Services;
@@ -139,6 +140,267 @@ public partial class NugetServiceTests : BaseCommandTests
             "Should contain transitive dependency Microsoft.Extensions.DependencyInjection.Abstractions");
         Assert.IsTrue(result.ContainsKey("Microsoft.Extensions.Logging.Abstractions"),
             "Should contain direct dependency Microsoft.Extensions.Logging.Abstractions");
+    }
+
+    #endregion
+
+    #region GetLatestVersionAsync Integration Tests
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_StableVersion_ReturnsNonEmptyVersion()
+    {
+        // Arrange - use a well-known package
+        var packageName = "Newtonsoft.Json";
+
+        // Act
+        var result = await _nugetService.GetLatestVersionAsync(packageName, SdkInstallMode.Stable, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(result), "Should return a non-empty version string");
+        Assert.IsFalse(result.Contains('-', StringComparison.Ordinal), "Stable version should not contain prerelease suffix");
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_ReturnedVersionIsListed()
+    {
+        // Arrange - use a well-known package and verify the returned version is actually listed on NuGet
+        var packageName = "Newtonsoft.Json";
+
+        // Act
+        var version = await _nugetService.GetLatestVersionAsync(packageName, SdkInstallMode.Stable, TestContext.CancellationToken);
+
+        // Assert - verify the version is listed by checking the registration API directly
+        Assert.IsNotNull(version);
+        var isListed = await IsVersionListedAsync(packageName, version, TestContext.CancellationToken);
+        Assert.IsTrue(isListed, $"Returned version {version} should be listed on NuGet, but it appears to be unlisted");
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_DoesNotReturnUnlistedVersions()
+    {
+        // Arrange - query all listed versions from the registration API and compare against GetLatestVersionAsync result
+        var packageName = "Newtonsoft.Json";
+
+        // Act
+        var latestVersion = await _nugetService.GetLatestVersionAsync(packageName, SdkInstallMode.Stable, TestContext.CancellationToken);
+
+        // Also get the flat container versions (which include unlisted) to verify filtering is happening
+        var allVersions = await GetFlatContainerVersionsAsync(packageName, TestContext.CancellationToken);
+        var listedVersions = await GetListedVersionsFromRegistrationAsync(packageName, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(latestVersion);
+        Assert.Contains(latestVersion, listedVersions,
+            $"GetLatestVersionAsync returned '{latestVersion}' which is not in the listed versions set");
+
+        // If unlisted versions exist, verify the returned version isn't one of them
+        var unlistedVersions = allVersions.Except(listedVersions).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain(latestVersion, unlistedVersions,
+            $"GetLatestVersionAsync returned '{latestVersion}' which is an unlisted version");
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_WindowsAppSdk_StableVersion_ReturnsStableVersion()
+    {
+        // Arrange
+        var packageName = "Microsoft.WindowsAppSDK";
+
+        // Act
+        var result = await _nugetService.GetLatestVersionAsync(packageName, SdkInstallMode.Stable, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsFalse(result.Contains('-', StringComparison.Ordinal), "Stable version should not contain prerelease suffix");
+        var isListed = await IsVersionListedAsync(packageName, result, TestContext.CancellationToken);
+        Assert.IsTrue(isListed, $"Returned version {result} should be listed on NuGet");
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_NoneMode_ThrowsArgumentException()
+    {
+        // Act & Assert
+        await Assert.ThrowsExactlyAsync<ArgumentException>(
+            () => _nugetService.GetLatestVersionAsync("Newtonsoft.Json", SdkInstallMode.None, TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// Checks whether a specific version is listed on NuGet by querying the registration API.
+    /// </summary>
+    private static async Task<bool> IsVersionListedAsync(string packageName, string version, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await http.GetAsync(url, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (!doc.RootElement.TryGetProperty("items", out var pages))
+        {
+            return false;
+        }
+
+        foreach (var page in pages.EnumerateArray())
+        {
+            JsonElement leafItems;
+            if (page.TryGetProperty("items", out var inlineItems) && inlineItems.ValueKind == JsonValueKind.Array)
+            {
+                leafItems = inlineItems;
+            }
+            else
+            {
+                if (!page.TryGetProperty("@id", out var pageIdElem))
+                {
+                    continue;
+                }
+
+                var pageUrl = pageIdElem.GetString();
+                if (string.IsNullOrEmpty(pageUrl))
+                {
+                    continue;
+                }
+
+                using var pageResp = await http.GetAsync(pageUrl, cancellationToken);
+                pageResp.EnsureSuccessStatusCode();
+                using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
+                using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
+
+                if (!pageDoc.RootElement.TryGetProperty("items", out var fetchedItems))
+                {
+                    continue;
+                }
+
+                leafItems = fetchedItems;
+            }
+
+            foreach (var leaf in leafItems.EnumerateArray())
+            {
+                if (!leaf.TryGetProperty("catalogEntry", out var entry))
+                {
+                    continue;
+                }
+
+                if (entry.TryGetProperty("version", out var vProp) &&
+                    string.Equals(vProp.GetString(), version, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Default to listed=true if property is missing
+                    if (entry.TryGetProperty("listed", out var listedProp))
+                    {
+                        return listedProp.GetBoolean();
+                    }
+
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets all versions (including unlisted) from the flat container API.
+    /// </summary>
+    private static async Task<HashSet<string>> GetFlatContainerVersionsAsync(string packageName, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        var url = $"https://api.nuget.org/v3-flatcontainer/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await http.GetAsync(url, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var versions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (doc.RootElement.TryGetProperty("versions", out var arr))
+        {
+            foreach (var el in arr.EnumerateArray())
+            {
+                var v = el.GetString();
+                if (!string.IsNullOrWhiteSpace(v))
+                {
+                    versions.Add(v);
+                }
+            }
+        }
+
+        return versions;
+    }
+
+    /// <summary>
+    /// Gets only listed versions from the registration API.
+    /// </summary>
+    private static async Task<HashSet<string>> GetListedVersionsFromRegistrationAsync(string packageName, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await http.GetAsync(url, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var versions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!doc.RootElement.TryGetProperty("items", out var pages))
+        {
+            return versions;
+        }
+
+        foreach (var page in pages.EnumerateArray())
+        {
+            JsonElement leafItems;
+            if (page.TryGetProperty("items", out var inlineItems) && inlineItems.ValueKind == JsonValueKind.Array)
+            {
+                leafItems = inlineItems;
+            }
+            else
+            {
+                if (!page.TryGetProperty("@id", out var pageIdElem))
+                {
+                    continue;
+                }
+
+                var pageUrl = pageIdElem.GetString();
+                if (string.IsNullOrEmpty(pageUrl))
+                {
+                    continue;
+                }
+
+                using var pageResp = await http.GetAsync(pageUrl, cancellationToken);
+                pageResp.EnsureSuccessStatusCode();
+                using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
+                using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
+
+                if (!pageDoc.RootElement.TryGetProperty("items", out var fetchedItems))
+                {
+                    continue;
+                }
+
+                leafItems = fetchedItems;
+            }
+
+            foreach (var leaf in leafItems.EnumerateArray())
+            {
+                if (!leaf.TryGetProperty("catalogEntry", out var entry))
+                {
+                    continue;
+                }
+
+                if (entry.TryGetProperty("listed", out var listedProp) && !listedProp.GetBoolean())
+                {
+                    continue;
+                }
+
+                if (entry.TryGetProperty("version", out var vProp))
+                {
+                    var v = vProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        versions.Add(v);
+                    }
+                }
+            }
+        }
+
+        return versions;
     }
 
     #endregion

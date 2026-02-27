@@ -1,13 +1,13 @@
 ---
 name: winapp-cli
 description: CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
-version: 0.2.0
+version: 0.2.1
 schema_version: 1.0
 ---
 
 # winapp CLI Context for LLMs
 
-> Auto-generated from CLI v0.2.0 (schema version 1.0)
+> Auto-generated from CLI v0.2.1 (schema version 1.0)
 > 
 > This file provides structured context about the winapp CLI for AI assistants and LLMs.
 > For the raw JSON schema, see [cli-schema.json](cli-schema.json).
@@ -80,6 +80,21 @@ Enable package identity for debugging without creating full MSIX. Required for t
 - `--manifest` - Path to the appxmanifest.xml
 - `--no-install` - Do not install the package after creation.
 - `--quiet` / `-q` - Suppress progress messages
+- `--verbose` / `-v` - Enable verbose output
+### `winapp create-external-catalog`
+
+Generates a CodeIntegrityExternal.cat catalog file with hashes of executable files from specified directories. Used with the TrustedLaunch flag in MSIX sparse package manifests (AllowExternalContent) to allow execution of external files not included in the package.
+
+**Arguments:**
+- `<input-folder>` *(required)* - List of input folders with executable files to process (separated by semicolons)
+
+**Options:**
+- `--compute-flat-hashes` - Include flat hashes when generating the catalog
+- `--if-exists` - Behavior when output file already exists (default: `Error`)
+- `--output` / `-o` - Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used.
+- `--quiet` / `-q` - Suppress progress messages
+- `--recursive` / `-r` - Include files from subdirectories
+- `--use-page-hashes` - Include page hashes when generating the catalog
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp get-winapp-path`
 
