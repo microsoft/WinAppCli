@@ -211,6 +211,13 @@ runs:
             body += '\n';
           }
 
+          // --- Footer with timestamp, commit, and run link ---
+          const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.[0-9]+Z$/, ' UTC');
+          const shortSha = context.sha.substring(0, 7);
+          const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}`;
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          body += `\n---\n*Updated ${timestamp} · commit [\`${shortSha}\`](${commitUrl}) · [workflow run](${runUrl})*\n`;
+
           body += '\n<!-- build-metrics-report -->';
 
           // Find and update existing comment to avoid spam

@@ -36,6 +36,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
+            .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
             .AddSingleton<IAppLauncherService, AppLauncherService>()
             .AddSingleton<IDotNetService, DotNetService>()
             .AddSingleton(AnsiConsole.Console)
@@ -62,7 +63,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
-                .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false);
+                .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
+                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)

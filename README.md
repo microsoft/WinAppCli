@@ -176,6 +176,7 @@ npx winapp --help
 
 - [`cert`](./docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
+- [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
 **Development Tools:**
 
