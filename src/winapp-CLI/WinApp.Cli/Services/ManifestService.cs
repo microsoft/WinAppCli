@@ -267,7 +267,7 @@ internal partial class ManifestService(
     /// Parses the manifest to find Logo, Square150x150Logo, Square44x44Logo, Wide310x150Logo, 
     /// and other image asset attributes, then determines their expected dimensions.
     /// </summary>
-    private static List<ManifestAssetReference> ExtractAssetReferencesFromManifest(FileInfo manifestPath, TaskContext taskContext)
+    internal static List<ManifestAssetReference> ExtractAssetReferencesFromManifest(FileInfo manifestPath, TaskContext taskContext)
     {
         var assetReferences = new List<ManifestAssetReference>();
 

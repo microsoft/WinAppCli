@@ -27,8 +27,6 @@ internal partial class MsixService(
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
-    [GeneratedRegex(@"PublicFolder\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex PublicFolderRegex();
     [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+\.\d+.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex WindowsAppRuntimeMsixRegex();
     [GeneratedRegex(@"<Identity[^>]*>", RegexOptions.IgnoreCase, "en-US")]
@@ -502,22 +500,40 @@ internal partial class MsixService(
     /// Creates a PRI configuration file for the given package directory
     /// </summary>
     /// <param name="packageDir">Path to the package directory</param>
+    /// <param name="taskContext">Task context for logging and progress reporting</param>
     /// <param name="language">Default language qualifier (default: 'en-US')</param>
     /// <param name="platformVersion">Platform version (default: '10.0.0')</param>
+    /// <param name="precomputedPriResourceCandidates">Pre-computed list of manifest-referenced resource file paths (relative to the package directory) to include in the PRI. Must be provided by the caller via <see cref="GetExpandedManifestReferencedFilesAsync"/>.</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Path to the created configuration file</returns>
-    public async Task<FileInfo> CreatePriConfigAsync(DirectoryInfo packageDir, TaskContext taskContext, string language = "en-US", string platformVersion = "10.0.0", CancellationToken cancellationToken = default)
+    public async Task<FileInfo> CreatePriConfigAsync(
+        DirectoryInfo packageDir,
+        TaskContext taskContext,
+        string language = "en-US",
+        string platformVersion = "10.0.0",
+        IEnumerable<string> precomputedPriResourceCandidates = null!,
+        CancellationToken cancellationToken = default)
     {
         if (!packageDir.Exists)
         {
             throw new DirectoryNotFoundException($"Package directory not found: {packageDir}");
         }
 
+        ArgumentNullException.ThrowIfNull(precomputedPriResourceCandidates);
+
         var resfilesPath = Path.Combine(packageDir.FullName, "pri.resfiles");
-        var priFiles = (packageDir.EnumerateFiles("*.pri").Select(di => di.FullName)).ToList();
+        var priResourceCandidates = precomputedPriResourceCandidates.ToList();
+
+        priResourceCandidates = [.. priResourceCandidates
+            .Where(path => PriIncludedExtensions.Contains(Path.GetExtension(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+
+        taskContext.AddDebugMessage($"PRI resource candidates discovered: {priResourceCandidates.Count}");
+
         using (var writer = new StreamWriter(resfilesPath))
         {
-            foreach (var priFile in priFiles)
+            foreach (var priFile in priResourceCandidates)
             {
                 await writer.WriteLineAsync(priFile);
             }
@@ -540,10 +556,54 @@ internal partial class MsixService(
             if (resourcesNode != null)
             {
                 var indexNode = resourcesNode.SelectSingleNode("index");
-                if (indexNode?.Attributes?["startIndexAt"]?.Value != null)
+                if (indexNode != null)
                 {
-                    // set to relative path
-                    indexNode!.Attributes!["startIndexAt"]!.Value = ".\\pri.resfiles";
+                    if (indexNode.Attributes?["startIndexAt"]?.Value != null)
+                    {
+                        // set to relative path
+                        indexNode.Attributes["startIndexAt"]!.Value = ".\\pri.resfiles";
+                    }
+
+                    var resfilesIndexerNode = xmlDoc.CreateElement("indexer-config");
+                    var typeAttr = xmlDoc.CreateAttribute("type");
+                    typeAttr.Value = "resfiles";
+                    resfilesIndexerNode.Attributes.Append(typeAttr);
+
+                    var delimiterAttr = xmlDoc.CreateAttribute("qualifierDelimiter");
+                    delimiterAttr.Value = ".";
+                    resfilesIndexerNode.Attributes.Append(delimiterAttr);
+
+                    indexNode.AppendChild(resfilesIndexerNode);
+
+                    // Ensure folder-based indexer is configured to parse qualifiers from
+                    // both folder names and file names (e.g. targetsize-48_altform-unplated).
+                    var folderIndexerNode = indexNode
+                        .SelectNodes("indexer-config")
+                        ?.OfType<XmlNode>()
+                        .FirstOrDefault(node =>
+                            node.Attributes?["type"]?.Value?.Equals("folder", StringComparison.OrdinalIgnoreCase) == true);
+
+                    if (folderIndexerNode?.Attributes != null)
+                    {
+                        var folderAttributes = folderIndexerNode.Attributes;
+
+                        var folderNameAsQualifierAttr = folderAttributes["foldernameAsQualifier"];
+                        if (folderNameAsQualifierAttr == null)
+                        {
+                            folderNameAsQualifierAttr = xmlDoc.CreateAttribute("foldernameAsQualifier");
+                            folderAttributes.Append(folderNameAsQualifierAttr);
+                        }
+                        folderNameAsQualifierAttr.Value = "true";
+
+                        var fileNameAsQualifierAttr = folderAttributes["filenameAsQualifier"];
+                        if (fileNameAsQualifierAttr == null)
+                        {
+                            fileNameAsQualifierAttr = xmlDoc.CreateAttribute("filenameAsQualifier");
+                            folderAttributes.Append(fileNameAsQualifierAttr);
+                        }
+                        fileNameAsQualifierAttr.Value = "true";
+                    }
+
                     xmlDoc.Save(configPath.FullName);
                 }
             }
@@ -554,6 +614,99 @@ internal partial class MsixService(
         {
             throw new InvalidOperationException($"Failed to create PRI configuration: {ex.Message}", ex);
         }
+    }
+
+    private static readonly HashSet<string> PriIncludedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".svg"
+    };
+
+    private static List<(FileInfo SourceFile, string RelativePath)> ExpandManifestReferencedFiles(
+        DirectoryInfo manifestDir,
+        IEnumerable<string> referencedFiles,
+        TaskContext? taskContext,
+        Func<FileInfo, bool>? includeFile = null)
+    {
+        var expandedFilesByRelativePath = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var relativeFilePath in referencedFiles)
+        {
+            var logicalSourceFile = new FileInfo(Path.Combine(manifestDir.FullName, relativeFilePath));
+            var sourceDir = logicalSourceFile.Directory;
+
+            if (sourceDir is null || !sourceDir.Exists)
+            {
+                taskContext?.AddDebugMessage($"{UiSymbols.Warning} Source directory not found for referenced file: {relativeFilePath}");
+                continue;
+            }
+
+            var logicalBaseName = Path.GetFileNameWithoutExtension(logicalSourceFile.Name);
+            var variantBaseName = GetMrtVariantBaseName(logicalBaseName);
+            var extension = logicalSourceFile.Extension;
+
+            var searchPattern = variantBaseName + "*" + extension;
+            var candidates = sourceDir.EnumerateFiles(searchPattern);
+            var anyIncludedForLogical = false;
+
+            foreach (var candidateFile in candidates)
+            {
+                if (includeFile != null && !includeFile(candidateFile))
+                {
+                    continue;
+                }
+
+                var candidateNameWithoutExtension = Path.GetFileNameWithoutExtension(candidateFile.Name);
+                if (!IsMrtVariantName(variantBaseName, candidateNameWithoutExtension))
+                {
+                    continue;
+                }
+
+                var relativeDir = Path.GetDirectoryName(relativeFilePath);
+                var candidateRelativePath = string.IsNullOrEmpty(relativeDir)
+                    ? candidateFile.Name
+                    : Path.Combine(relativeDir, candidateFile.Name);
+
+                expandedFilesByRelativePath[candidateRelativePath] = candidateFile;
+                anyIncludedForLogical = true;
+            }
+
+            if (!anyIncludedForLogical && logicalSourceFile.Exists && (includeFile == null || includeFile(logicalSourceFile)))
+            {
+                expandedFilesByRelativePath[relativeFilePath] = logicalSourceFile;
+            }
+            else if (!anyIncludedForLogical && !logicalSourceFile.Exists)
+            {
+                taskContext?.AddDebugMessage($"{UiSymbols.Warning} Referenced file not found (no MRT variants): {logicalSourceFile}");
+            }
+        }
+
+        return [.. expandedFilesByRelativePath
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => (pair.Value, pair.Key))];
+    }
+
+    private static List<(FileInfo SourceFile, string RelativePath)> GetExpandedManifestReferencedFiles(
+        FileInfo manifestPath,
+        TaskContext taskContext)
+    {
+        var manifestDir = manifestPath.Directory;
+        if (manifestDir == null)
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest directory not found for: {manifestPath}");
+            return [];
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Reading manifest: {manifestPath}");
+
+        var assetReferences = ManifestService.ExtractAssetReferencesFromManifest(manifestPath, taskContext);
+        var referencedFiles = assetReferences.Select(a => a.RelativePath);
+        return ExpandManifestReferencedFiles(manifestDir, referencedFiles, taskContext);
     }
 
     /// <summary>
@@ -859,11 +1012,21 @@ internal partial class MsixService(
             // Resolve executable path relative to the staging directory
             FileInfo? executablePath = executableMatch.Success ? new FileInfo(Path.Combine(stagingDir.FullName, executableMatch.Groups[1].Value)) : null;
 
-            // If manifest is outside input folder, copy its referenced assets into the staging directory
-            if (!inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
-                .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            // Pre-compute expanded manifest resources from the original manifest
+            var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
+                .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+
+            List<(FileInfo SourceFile, string RelativePath)>? expandedFiles = null;
+            if (manifestIsOutsideInputFolder || !skipPri)
             {
-                await CopyAllAssetsAsync(resolvedManifestPath, stagingDir, taskContext, cancellationToken);
+                // Pre-compute the expanded list of manifest-referenced files here.
+                expandedFiles = GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
+            }
+
+            // If manifest is outside input folder, copy its referenced assets into the staging directory
+            if (manifestIsOutsideInputFolder)
+            {
+                CopyAllAssets(expandedFiles!, stagingDir, taskContext);
             }
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
@@ -874,7 +1037,12 @@ internal partial class MsixService(
             {
                 taskContext.AddDebugMessage("Generating PRI configuration and files...");
 
-                await CreatePriConfigAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
+                var priResourceCandidates = expandedFiles!.Select(file => file.RelativePath);
+                await CreatePriConfigAsync(
+                    stagingDir,
+                    taskContext,
+                    precomputedPriResourceCandidates: priResourceCandidates,
+                    cancellationToken: cancellationToken);
                 var resourceFiles = await GeneratePriFileAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
                 if (resourceFiles.Count > 0 && logger.IsEnabled(LogLevel.Debug))
                 {
@@ -1373,7 +1541,17 @@ internal partial class MsixService(
         if (!string.IsNullOrEmpty(entryPointDir))
         {
             var entryPointDirInfo = new DirectoryInfo(entryPointDir);
-            await CopyAllAssetsAsync(originalManifestPath, entryPointDirInfo, taskContext, cancellationToken);
+            var originalManifestDir = originalManifestPath.DirectoryName;
+
+            if (!string.Equals(originalManifestDir, entryPointDirInfo.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                var expandedFiles = GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
+                CopyAllAssets(expandedFiles, entryPointDirInfo, taskContext);
+            }
+            else
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
+            }
         }
 
         return (debugManifestPath, debugIdentity);
@@ -1744,203 +1922,24 @@ $1");
     }
 
     /// <summary>
-    /// Copies files referenced in the manifest to the target directory
+    /// Copies files referenced in the manifest to the target directory.
     /// </summary>
-    private static async Task CopyAllAssetsAsync(FileInfo manifestPath, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
-    {
-        var originalManifestDir = manifestPath.DirectoryName;
-
-        if (string.Equals(originalManifestDir, targetDir.FullName, StringComparison.OrdinalIgnoreCase))
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
-            return;
-        }
-
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Copying manifest-referenced files from: {originalManifestDir}");
-
-        var filesCopied = await CopyManifestReferencedFilesAsync(manifestPath, targetDir, taskContext, cancellationToken);
-
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
-    }
-
-    /// <summary>
-    /// Copies files that are referenced in the manifest using regex pattern matching
-    /// </summary>
-    private static async Task<int> CopyManifestReferencedFilesAsync(FileInfo manifestPath, DirectoryInfo targetDir, TaskContext taskContext, CancellationToken cancellationToken)
+    private static void CopyAllAssets(List<(FileInfo SourceFile, string RelativePath)> expandedFiles, DirectoryInfo targetDir, TaskContext taskContext)
     {
         var filesCopied = 0;
-        var manifestDir = manifestPath.Directory;
-        if (manifestDir == null)
+
+        foreach (var (sourceFile, relativePath) in expandedFiles)
         {
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest directory not found for: {manifestPath}");
-            return filesCopied;
+            var targetFile = new FileInfo(Path.Combine(targetDir.FullName, relativePath));
+
+            targetFile.Directory?.Create();
+            sourceFile.CopyTo(targetFile.FullName, overwrite: true);
+            filesCopied++;
+
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied manifest resource: {relativePath}");
         }
 
-        // Read the manifest content
-        var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
-
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Reading manifest: {manifestPath}");
-
-        var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // First, extract general file references (not within AppExtensions)
-        var generalFilePatterns = new[]
-        {
-            // Logo and image files (e.g., Logo="Assets\Logo.png")
-            @"(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)\s*=\s*[""']([^""']*)[""']",
-            // Logo elements (e.g., <Logo>Assets\StoreLogo.png</Logo>)
-            @"<(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)>\s*([^<]*)\s*</(?:Logo|BackgroundImage|SplashScreen|Square\d+x\d+Logo|Wide\d+x\d+Logo|LockScreenLogo|BadgeLogo|StoreLogo)>",
-            // General Source attributes
-            @"Source\s*=\s*[""']([^""']*)[""']",
-            // Icon attributes
-            @"Icon\s*=\s*[""']([^""']*)[""']",
-            // Content references (e.g., in File elements)
-            @"<File[^>]*Name\s*=\s*[""']([^""']*)[""'][^>]*>",
-            // Resource files
-            @"ResourceFile\s*=\s*[""']([^""']*)[""']"
-        };
-
-        // Extract general file references
-        foreach (var pattern in generalFilePatterns)
-        {
-            var matches = Regex.Matches(manifestContent, pattern, RegexOptions.IgnoreCase);
-            foreach (Match match in matches)
-            {
-                if (match.Groups.Count > 1)
-                {
-                    var filePath = match.Groups[1].Value.Trim();
-                    if (!string.IsNullOrEmpty(filePath))
-                    {
-                        filePath = filePath.Replace('\\', Path.DirectorySeparatorChar);
-                        referencedFiles.Add(filePath);
-                    }
-                }
-            }
-        }
-
-        // Handle AppExtension elements with potential PublicFolder
-        var appExtensionPattern = @"<(\w+:)?AppExtension[^>]*>(.*?)</(\w+:)?AppExtension>";
-        var appExtensionMatches = Regex.Matches(manifestContent, appExtensionPattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-        foreach (Match appExtMatch in appExtensionMatches)
-        {
-            var appExtensionElement = appExtMatch.Value; // Full AppExtension element
-            var appExtensionContent = appExtMatch.Groups[2].Value; // Content inside AppExtension
-
-            // Extract PublicFolder from the AppExtension element attributes
-            var publicFolderMatch = PublicFolderRegex().Match(appExtensionElement);
-            var publicFolder = publicFolderMatch.Success ? publicFolderMatch.Groups[1].Value.Trim() : string.Empty;
-
-            // Extract file references within this AppExtension
-            var internalFilePatterns = new[]
-            {
-                @"<Registration>\s*([^<]*)\s*</Registration>",
-                @"<([^>]+)>\s*([^<]*\.(?:json|xml|txt|config|ini|dll|exe|png|jpg|jpeg|gif|svg|ico|bmp))\s*</\1>",
-                @"[""']([^""']*\.(?:json|xml|txt|config|ini|dll|exe|png|jpg|jpeg|gif|svg|ico|bmp))[""']"
-            };
-
-            foreach (var pattern in internalFilePatterns)
-            {
-                var matches = Regex.Matches(appExtensionContent, pattern, RegexOptions.IgnoreCase);
-                foreach (Match match in matches)
-                {
-                    string? filePath;
-                    if (pattern.Contains("Registration"))
-                    {
-                        filePath = match.Groups[1].Value.Trim();
-                    }
-                    else if (pattern.Contains(@"</\1>")) // Element pattern
-                    {
-                        filePath = match.Groups[2].Value.Trim();
-                    }
-                    else // Quoted file pattern
-                    {
-                        filePath = match.Groups[1].Value.Trim();
-                    }
-
-                    if (!string.IsNullOrEmpty(filePath))
-                    {
-                        // If PublicFolder is specified, prepend it to the file path
-                        if (!string.IsNullOrEmpty(publicFolder))
-                        {
-                            filePath = Path.Combine(publicFolder, filePath).Replace('\\', Path.DirectorySeparatorChar);
-                            taskContext.AddDebugMessage($"{UiSymbols.Folder} Found file in PublicFolder '{publicFolder}': {filePath}");
-                        }
-                        else
-                        {
-                            filePath = filePath.Replace('\\', Path.DirectorySeparatorChar);
-                        }
-                        referencedFiles.Add(filePath);
-                    }
-                }
-            }
-        }
-
-        // Copy MRT variants for each referenced file
-        foreach (var relativeFilePath in referencedFiles)
-        {
-            var logicalSourceFile = new FileInfo(Path.Combine(manifestDir.FullName, relativeFilePath));
-            var sourceDir = logicalSourceFile.Directory;
-
-            if (sourceDir is null || !sourceDir.Exists)
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Warning} Source directory not found for referenced file: {relativeFilePath}");
-                continue;
-            }
-
-            var logicalBaseName = Path.GetFileNameWithoutExtension(logicalSourceFile.Name);
-            var extension = logicalSourceFile.Extension; // includes the dot, e.g. ".png"
-
-            // Enumerate candidates: same directory, same extension, starting with base name
-            // e.g. Logo.png, Logo.scale-200.png, Logo.scale-200.theme-dark.en-US.png, etc.
-            var searchPattern = logicalBaseName + "*" + extension;
-            var candidates = sourceDir.EnumerateFiles(searchPattern);
-            var anyCopiedForLogical = false;
-
-            foreach (var candidateFile in candidates)
-            {
-                var candidateName = candidateFile.Name;
-                var candidateNameWithoutExtension = Path.GetFileNameWithoutExtension(candidateName);
-
-                if (!IsMrtVariantName(logicalBaseName, candidateNameWithoutExtension))
-                {
-                    // e.g. Logo.old.png or Logo.scale-200.backup.png -> ignore
-                    continue;
-                }
-
-                // Build target relative path preserving subdirectory & actual filename
-                var relativeDir = Path.GetDirectoryName(relativeFilePath);
-                string candidateRelativePath = string.IsNullOrEmpty(relativeDir)
-                    ? candidateName
-                    : Path.Combine(relativeDir, candidateName);
-
-                var targetFile = new FileInfo(Path.Combine(targetDir.FullName, candidateRelativePath));
-
-                targetFile.Directory?.Create();
-                candidateFile.CopyTo(targetFile.FullName, overwrite: true);
-                filesCopied++;
-                anyCopiedForLogical = true;
-
-                taskContext.AddDebugMessage($"{UiSymbols.Files} Copied MRT variant: {relativeFilePath} -> {candidateRelativePath}");
-            }
-
-            // Fallback: if we didn't find any MRT variants but the logical file itself exists, copy it
-            if (!anyCopiedForLogical && logicalSourceFile.Exists)
-            {
-                var targetFile = new FileInfo(Path.Combine(targetDir.FullName, relativeFilePath));
-                targetFile.Directory?.Create();
-                logicalSourceFile.CopyTo(targetFile.FullName, overwrite: true);
-                filesCopied++;
-
-                taskContext.AddDebugMessage($"{UiSymbols.Files} Copied (no MRT variants found): {relativeFilePath}");
-            }
-            else if (!anyCopiedForLogical && !logicalSourceFile.Exists)
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Warning} Referenced file not found (no MRT variants): {logicalSourceFile}");
-            }
-        }
-
-        return filesCopied;
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
     }
 
     // ltr / rtl
@@ -1996,6 +1995,11 @@ $1");
     /// </summary>
     private static bool IsMrtVariantName(string logicalBaseName, string candidateNameWithoutExtension)
     {
+        if (string.IsNullOrWhiteSpace(logicalBaseName) || string.IsNullOrWhiteSpace(candidateNameWithoutExtension))
+        {
+            return false;
+        }
+
         // Split by '.'; "Logo.scale-200.theme-dark" -> ["Logo", "scale-200", "theme-dark"]
         var parts = candidateNameWithoutExtension.Split('.');
 
@@ -2026,6 +2030,43 @@ $1");
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// For a qualified logical name like "Logo.scale-100" or "Logo.targetsize-24_altform-unplated",
+    /// returns the unqualified asset family base (e.g. "Logo").
+    /// If the name has no trailing qualifier tokens, returns the original name unchanged.
+    /// </summary>
+    private static string GetMrtVariantBaseName(string logicalBaseName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalBaseName);
+
+        var parts = logicalBaseName.Split('.');
+        if (parts.Length <= 1)
+        {
+            return logicalBaseName;
+        }
+
+        // Find the earliest segment where every remaining segment is a valid qualifier token.
+        for (int i = 1; i < parts.Length; i++)
+        {
+            var allRemainingAreQualifiers = true;
+            for (int j = i; j < parts.Length; j++)
+            {
+                if (!IsQualifierToken(parts[j]))
+                {
+                    allRemainingAreQualifiers = false;
+                    break;
+                }
+            }
+
+            if (allRemainingAreQualifiers)
+            {
+                return string.Join('.', parts[..i]);
+            }
+        }
+
+        return logicalBaseName;
     }
 
     /// <summary>
