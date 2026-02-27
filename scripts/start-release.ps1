@@ -215,18 +215,27 @@ try {
 
     Write-Step "Step 3/3: Creating pull request..."
 
+    # Build the PR details
+    $prTitle = "Bump version to $nextVersion for development"
+    $prBody  = "Auto-generated version bump after releasing v$releaseVersion.`n`nThis PR bumps the patch version in ``version.json`` from ``$releaseVersion`` to ``$nextVersion`` so that prerelease builds pick up the new version number."
+
     # Check that gh CLI is available
     $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
     if (-not $ghAvailable -and -not $DryRun) {
-        Write-Warn "GitHub CLI (gh) is not installed. Please create the PR manually:"
-        Write-Warn "  gh pr create --base main --head $bumpBranch --title 'Bump version to $nextVersion' --body 'Auto-generated version bump after releasing v$releaseVersion.'"
+        $encodedTitle = [System.Uri]::EscapeDataString($prTitle)
+        $encodedBody  = [System.Uri]::EscapeDataString($prBody)
+        $prUrl = "https://github.com/microsoft/winappcli/compare/main...$($bumpBranch)?expand=1&title=$encodedTitle&body=$encodedBody"
+        Write-Warn "GitHub CLI (gh) is not installed. Open this link to create the PR:"
+        Write-Host ""
+        Write-Host "    $prUrl" -ForegroundColor Yellow
+        Write-Host ""
     } else {
         Invoke-GhOrDryRun -Description "Create pull request" -Arguments @(
             "pr", "create",
             "--base", "main",
             "--head", $bumpBranch,
-            "--title", "Bump version to $nextVersion for development",
-            "--body", "Auto-generated version bump after releasing v$releaseVersion.`n`nThis PR bumps the patch version in ``version.json`` from ``$releaseVersion`` to ``$nextVersion`` so that prerelease builds pick up the new version number."
+            "--title", $prTitle,
+            "--body", $prBody
         )
         Write-Ok "Pull request created"
     }
