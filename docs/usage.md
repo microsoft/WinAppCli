@@ -417,6 +417,73 @@ winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
 
 ---
 
+### create-external-catalog
+
+Generate a `CodeIntegrityExternal.cat` catalog file containing hashes of executable files from specified directories. This catalog is used with the [TrustedLaunch](https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-trustedlaunch-trustedlaunch) flag in MSIX sparse package manifests ([AllowExternalContent](https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-uap10-allowexternalcontent)) to allow execution of external files not included in the package itself.
+
+This is similar to how `signtool.exe` creates `AppxMetadata\CodeIntegrity.cat` when signing an MSIX package, but generates an external catalog for use with [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps).
+
+```bash
+winapp create-external-catalog <input-folder> [options]
+```
+
+**Arguments:**
+
+- `input-folder` - One or more directories containing executable files to process. Separate multiple directories with semicolons (e.g., `"dir1;dir2"`)
+
+**Options:**
+
+- `--recursive`, `-r` - Include files from subdirectories
+- `--use-page-hashes` - Include page hashes when generating the catalog (produces a larger catalog with per-page hash data)
+- `--compute-flat-hashes` - Include flat file hashes when generating the catalog
+- `--if-exists <Error|Overwrite|Skip>` - Behavior when the output file already exists (default: `Error`)
+- `--output`, `-o` - Output catalog file path. If not specified, `CodeIntegrityExternal.cat` is created in the current directory. If a directory is specified, the default filename is appended.
+
+**What it does:**
+
+- Scans specified directories for executable files (PE binaries with code sections)
+- Generates a Catalog Definition File (CDF) with hashes of all found executables
+- Uses Windows CryptoCAT APIs to produce the `.cat` catalog file
+- Non-executable files (e.g., `.txt`, `.dll` without code sections) are automatically skipped
+
+**Examples:**
+
+```bash
+# Generate catalog for all executables in a directory
+winapp create-external-catalog ./bin
+
+# Include files in subdirectories
+winapp create-external-catalog ./bin --recursive
+
+# Specify a custom output path
+winapp create-external-catalog ./bin --output ./dist/CodeIntegrityExternal.cat
+
+# Overwrite existing catalog
+winapp create-external-catalog ./bin --if-exists Overwrite
+
+# Skip generation if catalog already exists
+winapp create-external-catalog ./bin --if-exists Skip
+
+# Include page hashes (for stricter code integrity validation)
+winapp create-external-catalog ./bin --use-page-hashes
+
+# Process multiple directories
+winapp create-external-catalog "./bin;./lib" --recursive
+
+# Combine multiple options
+winapp create-external-catalog ./bin --recursive --use-page-hashes --compute-flat-hashes --output ./dist/CodeIntegrityExternal.cat --if-exists Overwrite
+```
+
+**When to use:**
+
+Use this command when building a sparse MSIX package that uses TrustedLaunch to verify external executables. The typical workflow is:
+
+1. `winapp manifest generate --template sparse` — Create a sparse manifest with `AllowExternalContent`
+2. `winapp create-external-catalog ./bin` — Generate the code integrity catalog for your app's executables  
+3. `winapp pack` — Package the manifest, assets, and catalog into an MSIX
+
+---
+
 ### tool
 
 Access Windows SDK tools directly. Uses tools available in [Microsoft.Windows.SDK.BuildTools](https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools/)
