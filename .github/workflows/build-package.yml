@@ -101,6 +101,50 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Mark existing metrics comment as stale immediately on PR push
+  # This job has no dependencies so it starts instantly, before the build finishes
+  mark-metrics-stale:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+    - name: Mark metrics comment as stale
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const existing = comments.find(c => c.body &&
+            (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
+
+          if (!existing) {
+            core.info('No existing metrics comment found, nothing to mark stale.');
+            return;
+          }
+
+          // Skip if already marked stale
+          if (existing.body.includes('<!-- build-metrics-stale -->')) {
+            core.info('Comment is already marked stale.');
+            return;
+          }
+
+          const staleBanner = '> :hourglass_flowing_sand: **Build in progress** — metrics below are from a previous commit and will update when the current build finishes.\n>\n<!-- build-metrics-stale -->\n\n';
+          const updatedBody = staleBanner + existing.body;
+
+          await github.rest.issues.updateComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            comment_id: existing.id,
+            body: updatedBody,
+          });
+          core.info(`Marked comment ${existing.id} as stale.`);
+
   # E2E test for Electron workflow - runs after build completes
   e2e-test:
     runs-on: windows-latest
