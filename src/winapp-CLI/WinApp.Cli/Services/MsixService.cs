@@ -627,202 +627,6 @@ internal partial class MsixService(
         ".svg"
     };
 
-    private static async Task<HashSet<string>> GetManifestReferencedFilePathsAsync(FileInfo manifestPath, CancellationToken cancellationToken)
-    {
-        var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
-        var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var xmlDocument = new XmlDocument
-        {
-            PreserveWhitespace = true
-        };
-
-        xmlDocument.LoadXml(manifestContent);
-
-        var logoElementAndAttributeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Logo",
-            "BackgroundImage",
-            "SplashScreen",
-            "Square30x30Logo",
-            "Square44x44Logo",
-            "Square71x71Logo",
-            "Square150x150Logo",
-            "Square310x310Logo",
-            "Wide310x150Logo",
-            "LockScreenLogo",
-            "BadgeLogo",
-            "StoreLogo"
-        };
-
-        var allElements = xmlDocument.SelectNodes("//*");
-        if (allElements != null)
-        {
-            foreach (XmlElement element in allElements)
-            {
-                if (element.HasAttributes)
-                {
-                    foreach (XmlAttribute attribute in element.Attributes)
-                    {
-                        var attributeName = attribute.LocalName;
-
-                        if (logoElementAndAttributeNames.Contains(attributeName) ||
-                            attributeName.Equals("Source", StringComparison.OrdinalIgnoreCase) ||
-                            attributeName.Equals("Icon", StringComparison.OrdinalIgnoreCase) ||
-                            attributeName.Equals("ResourceFile", StringComparison.OrdinalIgnoreCase) ||
-                            (attributeName.Equals("Name", StringComparison.OrdinalIgnoreCase) &&
-                             element.LocalName.Equals("File", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            AddFileReference(attribute.Value, referencedFiles);
-                        }
-                    }
-                }
-
-                if (logoElementAndAttributeNames.Contains(element.LocalName))
-                {
-                    AddFileReference(element.InnerText, referencedFiles);
-                }
-            }
-        }
-
-        var appExtensionNodes = xmlDocument.SelectNodes("//*[local-name()='AppExtension']");
-        if (appExtensionNodes != null)
-        {
-            foreach (XmlElement appExtension in appExtensionNodes)
-            {
-                var publicFolder = string.Empty;
-
-                if (appExtension.HasAttributes)
-                {
-                    foreach (XmlAttribute attribute in appExtension.Attributes)
-                    {
-                        if (attribute.LocalName.Equals("PublicFolder", StringComparison.OrdinalIgnoreCase))
-                        {
-                            publicFolder = attribute.Value.Trim();
-                            break;
-                        }
-                    }
-                }
-
-                var descendantElements = appExtension.SelectNodes(".//*");
-                if (descendantElements == null)
-                {
-                    continue;
-                }
-
-                foreach (XmlElement descendant in descendantElements)
-                {
-                    if (descendant.LocalName.Equals("Registration", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddAppExtensionFile(descendant.InnerText, publicFolder, referencedFiles, filterByExtension: false);
-                    }
-                    else
-                    {
-                        AddAppExtensionFile(descendant.InnerText, publicFolder, referencedFiles, filterByExtension: true);
-                    }
-
-                    if (descendant.HasAttributes)
-                    {
-                        foreach (XmlAttribute attribute in descendant.Attributes)
-                        {
-                            AddAppExtensionFile(attribute.Value, publicFolder, referencedFiles, filterByExtension: true);
-                        }
-                    }
-                }
-            }
-        }
-
-        return referencedFiles;
-
-        static bool LooksLikeFile(string? value, bool restrictExtensions, out string normalized)
-        {
-            normalized = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return false;
-            }
-
-            var trimmed = value.Trim();
-
-            if (trimmed.IndexOfAny(['<', '>']) >= 0)
-            {
-                return false;
-            }
-
-            if (restrictExtensions && trimmed.Contains(' ', StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (!restrictExtensions)
-            {
-                normalized = trimmed;
-                return true;
-            }
-
-            var allowedExtensions = new[]
-            {
-                ".json",
-                ".xml",
-                ".txt",
-                ".config",
-                ".ini",
-                ".dll",
-                ".exe",
-                ".png",
-                ".jpg",
-                ".jpeg",
-                ".gif",
-                ".svg",
-                ".ico",
-                ".bmp"
-            };
-
-            var extension = Path.GetExtension(trimmed);
-            if (string.IsNullOrEmpty(extension))
-            {
-                return false;
-            }
-
-            foreach (var allowed in allowedExtensions)
-            {
-                if (extension.Equals(allowed, StringComparison.OrdinalIgnoreCase))
-                {
-                    normalized = trimmed;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        static void AddFileReference(string? value, HashSet<string> referencedFiles)
-        {
-            if (!LooksLikeFile(value, restrictExtensions: true, out var filePath))
-            {
-                return;
-            }
-
-            referencedFiles.Add(filePath.Replace('\\', Path.DirectorySeparatorChar));
-        }
-
-        static void AddAppExtensionFile(string? value, string publicFolder, HashSet<string> referencedFiles, bool filterByExtension)
-        {
-            if (!LooksLikeFile(value, filterByExtension, out var filePath))
-            {
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(publicFolder))
-            {
-                filePath = Path.Combine(publicFolder, filePath);
-            }
-
-            referencedFiles.Add(filePath.Replace('\\', Path.DirectorySeparatorChar));
-        }
-    }
-
     private static List<(FileInfo SourceFile, string RelativePath)> ExpandManifestReferencedFiles(
         DirectoryInfo manifestDir,
         IEnumerable<string> referencedFiles,
@@ -887,10 +691,9 @@ internal partial class MsixService(
             .Select(pair => (pair.Value, pair.Key))];
     }
 
-    private static async Task<List<(FileInfo SourceFile, string RelativePath)>> GetExpandedManifestReferencedFilesAsync(
+    private static List<(FileInfo SourceFile, string RelativePath)> GetExpandedManifestReferencedFiles(
         FileInfo manifestPath,
-        TaskContext taskContext,
-        CancellationToken cancellationToken)
+        TaskContext taskContext)
     {
         var manifestDir = manifestPath.Directory;
         if (manifestDir == null)
@@ -901,7 +704,8 @@ internal partial class MsixService(
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Reading manifest: {manifestPath}");
 
-        var referencedFiles = await GetManifestReferencedFilePathsAsync(manifestPath, cancellationToken);
+        var assetReferences = ManifestService.ExtractAssetReferencesFromManifest(manifestPath, taskContext);
+        var referencedFiles = assetReferences.Select(a => a.RelativePath);
         return ExpandManifestReferencedFiles(manifestDir, referencedFiles, taskContext);
     }
 
@@ -1216,7 +1020,7 @@ internal partial class MsixService(
             if (manifestIsOutsideInputFolder || !skipPri)
             {
                 // Pre-compute the expanded list of manifest-referenced files here.
-                expandedFiles = await GetExpandedManifestReferencedFilesAsync(resolvedManifestPath, taskContext, cancellationToken);
+                expandedFiles = GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
             }
 
             // If manifest is outside input folder, copy its referenced assets into the staging directory
@@ -1741,7 +1545,7 @@ internal partial class MsixService(
 
             if (!string.Equals(originalManifestDir, entryPointDirInfo.FullName, StringComparison.OrdinalIgnoreCase))
             {
-                var expandedFiles = await GetExpandedManifestReferencedFilesAsync(originalManifestPath, taskContext, cancellationToken);
+                var expandedFiles = GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
                 CopyAllAssets(expandedFiles, entryPointDirInfo, taskContext);
             }
             else
