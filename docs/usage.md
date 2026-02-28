@@ -164,8 +164,18 @@ winapp pack <input-folder> [options]
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
+- Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+**WinRT component discovery:**
+
+When packaging, `winapp pack` automatically scans NuGet packages in the `.winapp/packages` cache for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
+
+- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
+- **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
+
+Infrastructure packages (e.g., `Microsoft.Windows.SDK.CPP`, `Microsoft.Windows.SDK.BuildTools`) are automatically excluded.
 
 **Placeholder resolution during packaging:**
 
