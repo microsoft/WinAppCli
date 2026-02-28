@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -417,7 +418,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             "Should query for BuildTools package version");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK package version");
-        Assert.Contains(DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
+        Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK BuildTools Extras package version");
 
         // Verify that the correct NuGet packages were added to the project
@@ -428,7 +429,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             "Should add BuildTools as PackageReference");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, addedNames,
             "Should add WindowsAppSDK as PackageReference");
-        Assert.Contains(DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, addedNames,
+        Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, addedNames,
             "Should add WindowsAppSDK BuildTools Extras as PackageReference");
 
         // Verify the version used matches what the fake NuGet service returned
@@ -537,9 +538,11 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
-        // Verify no packages were queried or added (SdkInstallMode.None skips everything)
-        Assert.IsEmpty(_fakeDotNetService.AddedPackages,
-            "With SdkInstallMode.None, no packages should be added");
+        // Verify build tools packages were still added, but WinAppSDK was not (SdkInstallMode.None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added when SdkInstallMode is None");
+        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
+            "Build tools package should always be added for .NET projects");
     }
 
     #endregion
@@ -687,6 +690,109 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             Assert.Contains("MyApp.csproj", csprojPath,
                 $"Package should be added to MyApp.csproj, but was added to {csprojPath}");
         }
+    }
+
+    #endregion
+
+    #region SDK install mode auto-detection tests
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_SkipsSdkVersionPrompt_WhenCsprojAlreadyReferencesWinAppSdk()
+    {
+        // When a .csproj already has a PackageReference for Microsoft.WindowsAppSDK,
+        // the SDK version selection prompt should be skipped and default to None.
+
+        // Arrange - Create a .csproj that already references WinAppSDK
+        var csprojPath = Path.Combine(_tempDirectory.FullName, "TestApp.csproj");
+        await File.WriteAllTextAsync(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.6.0"" />
+  </ItemGroup>
+</Project>");
+
+        // Configure the fake to report WinAppSDK as an existing package reference
+        _fakeDotNetService.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework("net10.0-windows10.0.26100.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")],
+                    [])
+            ])
+        ]);
+
+        DefaultAnswers();
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            // SdkInstallMode is NOT set — normally this would trigger the interactive prompt
+            UseDefaults = false,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act - Should NOT prompt for SDK version selection because the project already has the SDK
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully without prompting");
+
+        // Verify build tools packages were still added, but WinAppSDK was not (SdkInstallMode auto-set to None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added because SDK install mode was auto-defaulted to None");
+        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
+            "Build tools package should always be added for .NET projects");
+    }
+
+    #endregion
+
+    #region TFM update with SdkInstallMode.None tests
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_UpdatesTfm_WhenSdkModeNone()
+    {
+        // Bug fix verification: when the user selects "Do not setup SDK", the
+        // TargetFramework should still be updated if the user agreed to it.
+
+        // Arrange - Create a .csproj with an unsupported TFM
+        var csproj = await CreateCsprojAsync(_tempDirectory, "TestApp", "net8.0");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,  // UseDefaults auto-accepts TFM update
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully");
+
+        // Verify TFM was updated even though SDK install was skipped
+        var updatedContent = await File.ReadAllTextAsync(csproj.FullName);
+        Assert.Contains("-windows", updatedContent,
+            "TFM should be updated to include -windows even when SDK installation is skipped");
+        Assert.DoesNotContain(">net8.0<", updatedContent,
+            "Original unsupported TFM should be replaced");
+
+        // Verify build tools packages were still added, but WinAppSDK was not (SDK install was None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added when SdkInstallMode is None");
+        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
+            "Build tools package should always be added for .NET projects");
     }
 
     #endregion

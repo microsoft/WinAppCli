@@ -262,15 +262,16 @@ internal class WorkspaceSetupService(
                 (int, string) partialResult;
                 var sdkInstallMode = options.SdkInstallMode ?? SdkInstallMode.Stable;
 
-                // .NET-specific: Update TargetFramework + add NuGet package references
-                if (isDotNetProject && options.SdkInstallMode != SdkInstallMode.None && csprojFile != null)
+                // .NET-specific: Update TargetFramework (independent of SDK install mode)
+                if (isDotNetProject && csprojFile != null && recommendedTfm != null)
                 {
-                    if (recommendedTfm != null)
-                    {
-                        dotNetService.SetTargetFramework(csprojFile, recommendedTfm);
-                        taskContext.AddStatusMessage($"{UiSymbols.Check} Updated TargetFramework to {recommendedTfm}");
-                    }
+                    dotNetService.SetTargetFramework(csprojFile, recommendedTfm);
+                    taskContext.AddStatusMessage($"{UiSymbols.Check} Updated TargetFramework to {recommendedTfm}");
+                }
 
+                // .NET-specific: Add NuGet package references and configure project
+                if (isDotNetProject && csprojFile != null)
+                {
                     if (await dotNetService.UpdatePublishProfileAsync(csprojFile, cancellationToken))
                     {
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Updated PublishProfile with existence condition");
@@ -281,15 +282,25 @@ internal class WorkspaceSetupService(
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Added default RuntimeIdentifier");
                     }
 
+                    // Build dynamic package list: build tools are always needed,
+                    // Windows App SDK is only added when the user chose to install SDKs
+                    var packages = new List<(string Name, bool Required)>
+                    {
+                        (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
+                        (DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, false)
+                    };
+
+                    if (options.SdkInstallMode != SdkInstallMode.None)
+                    {
+                        packages.Add((DotNetService.WINAPP_SDK_NUGET_PACKAGE, true));
+                    }
+
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
                         usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        var packages = new (string Name, bool Required)[]
-                        {
-                            (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
-                            (DotNetService.WINAPP_SDK_NUGET_PACKAGE, true),
-                            (DotNetService.WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE, false)
-                        };
+
+                        // When SdkInstallMode is None, still use Stable versions for build tools packages
+                        var versionQueryMode = sdkInstallMode == SdkInstallMode.None ? SdkInstallMode.Stable : sdkInstallMode;
 
                         foreach (var (packageName, required) in packages)
                         {
@@ -297,7 +308,7 @@ internal class WorkspaceSetupService(
                             string? version = null;
                             try
                             {
-                                version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken: cancellationToken);
+                                version = await nugetService.GetLatestVersionAsync(packageName, versionQueryMode, cancellationToken: cancellationToken);
                                 if (version != null)
                                 {
                                     taskContext.AddDebugMessage($"{UiSymbols.Package} {packageName} → {version}");
@@ -759,7 +770,7 @@ internal class WorkspaceSetupService(
                     }
                     else
                     {
-                        await AskSdkInstallModeAsync(options, isDotNetProject, cancellationToken);
+                        await AskSdkInstallModeAsync(options, isDotNetProject, csprojFile, cancellationToken);
                     }
                 }
             }
@@ -772,7 +783,7 @@ internal class WorkspaceSetupService(
                 manifestGenerationInfo = await PromptForManifestInfoAsync(options, cancellationToken);
             }
 
-            await AskSdkInstallModeAsync(options, isDotNetProject, cancellationToken);
+            await AskSdkInstallModeAsync(options, isDotNetProject, csprojFile, cancellationToken);
             if (options.SdkInstallMode != SdkInstallMode.None)
             {
                 config = new WinappConfig();
@@ -906,11 +917,18 @@ internal class WorkspaceSetupService(
         return true;
     }
 
-    private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, bool isDotNetProject, CancellationToken cancellationToken)
+    private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
     {
         // For init (not restore), prompt for SDK installation choice if not specified
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null)
         {
+            // If the .NET project already references WinAppSDK, skip the prompt and default to None
+            if (isDotNetProject && csprojFile != null && await dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, cancellationToken))
+            {
+                options.SdkInstallMode = SdkInstallMode.None;
+                logger.LogDebug("{UISymbol} Project already references {PackageName}, skipping SDK setup", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
+                return;
+            }
             // Determine which packages to show versions for
             var packages = isDotNetProject
                 ? [BuildToolsService.WINAPP_SDK_PACKAGE]

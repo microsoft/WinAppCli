@@ -1993,7 +1993,7 @@ $1");
             if (csproj != null)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Found .csproj: {csproj.Name}, querying NuGet package list...");
-                var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
+                var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken: cancellationToken);
 
                 var allPackages = packageList?.Projects?
                     .SelectMany(p => p.Frameworks ?? [])

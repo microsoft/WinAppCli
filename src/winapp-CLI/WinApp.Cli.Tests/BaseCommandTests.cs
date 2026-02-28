@@ -126,4 +126,15 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
     {
         return _serviceProvider.GetRequiredService<T>();
     }
+
+    /// <summary>
+    /// Push default (Enter) answers for manifest prompts (packageName, publisherName, version, description)
+    /// </summary>
+    protected void DefaultAnswers()
+    {
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+    }
 }

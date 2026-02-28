@@ -28,7 +28,7 @@ internal partial class DotNetService : IDotNetService
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
-    internal const string WINAPP_SDK_BUILD_TOOLS_NUGET_PACKAGE = "Microsoft.Windows.SDK.BuildTools.WinApp";
+    internal const string WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE = "Microsoft.Windows.SDK.BuildTools.WinApp";
 
     [GeneratedRegex(@"^net(\d+\.\d+)-windows([\d.]+)$", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsTfmRegex();
@@ -402,15 +402,29 @@ internal partial class DotNetService : IDotNetService
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }
 
+    public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
+    {
+        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
+        if (packageList?.Projects is null)
+        {
+            return false;
+        }
+
+        return packageList.Projects
+            .SelectMany(p => p.Frameworks ?? [])
+            .SelectMany(f => f.TopLevelPackages ?? [])
+            .Any(pkg => string.Equals(pkg.Id, packageName, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <inheritdoc />
-    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default)
+    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
     {
         if (!csprojFile.Exists)
         {
             return null;
         }
 
-        var args = $"list \"{csprojFile.FullName}\" package --include-transitive --format json";
+        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))

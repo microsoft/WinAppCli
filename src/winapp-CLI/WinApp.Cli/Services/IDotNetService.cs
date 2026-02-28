@@ -78,7 +78,16 @@ internal interface IDotNetService
     Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs `dotnet list package --include-transitive --format json` and returns the parsed result.
+    /// Checks whether a .csproj file contains a PackageReference for the specified package
+    /// by querying the dotnet CLI package list.
     /// </summary>
-    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default);
+    Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs `dotnet list package --format json` and returns the parsed result.
+    /// </summary>
+    /// <param name="csprojFile">The .csproj file to query.</param>
+    /// <param name="includeTransitive">When true, includes transitive package references in the output.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default);
 }

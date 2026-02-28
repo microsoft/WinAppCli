@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -863,6 +864,154 @@ public class DotNetServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsTrue(result, "Should insert RuntimeIdentifier — RuntimeIdentifierGraph is not RuntimeIdentifier");
+    }
+
+    #endregion
+
+    #region HasPackageReferenceAsync Tests
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FileDoesNotExist_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NonExistent.csproj");
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false for non-existent file");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_WithMatchingPackage_ReturnsTrue()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should detect existing PackageReference");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_CaseInsensitive_ReturnsTrue()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("microsoft.windowsappsdk", "1.6.0", "1.6.0")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Package name comparison should be case-insensitive");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_DifferentPackage_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("Newtonsoft.Json", "13.0.3", "13.0.3")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when a different package is referenced");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_NullPackageListResult_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService { PackageListResult = null };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when package list is null");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_EmptyProjects_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson([])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when project list is empty");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_TransitiveOnly_ReturnsFalse()
+    {
+        // Arrange — package exists only as a transitive dependency, not a top-level reference
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [],
+                        [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");
     }
 
     #endregion

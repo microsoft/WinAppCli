@@ -35,6 +35,20 @@ internal class FakeDotNetService : IDotNetService
     public void SetTargetFramework(FileInfo csprojPath, string newTargetFramework) => _real.SetTargetFramework(csprojPath, newTargetFramework);
     public Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default) => _real.UpdatePublishProfileAsync(csprojPath, cancellationToken);
     public Task<bool> EnsureRuntimeIdentifierAsync(FileInfo csprojPath, CancellationToken cancellationToken = default) => _real.EnsureRuntimeIdentifierAsync(csprojPath, cancellationToken);
+    public Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
+    {
+        if (PackageListResult?.Projects is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        var found = PackageListResult.Projects
+            .SelectMany(p => p.Frameworks ?? [])
+            .SelectMany(f => f.TopLevelPackages ?? [])
+            .Any(pkg => string.Equals(pkg.Id, packageName, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(found);
+    }
 
     // Fake CLI-based operations
     public Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
@@ -48,7 +62,7 @@ internal class FakeDotNetService : IDotNetService
         return Task.FromResult((0, "Fake dotnet command executed successfully.", string.Empty));
     }
 
-    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default)
+    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(PackageListResult);
     }
