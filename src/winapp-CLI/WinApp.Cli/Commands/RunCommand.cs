@@ -181,14 +181,14 @@ internal partial class RunCommand : Command, IShortDescription
                 return success;
             }
 
-            // Wait for the launched process to exit before returning
-            using var process = Process.GetProcessById((int)processId);
-            await process.WaitForExitAsync(cancellationToken);
-
             if (isJson)
             {
                 PrintJson(aumid, processId, errorMessage: null);
             }
+
+            // Wait for the launched process to exit before returning
+            using var process = Process.GetProcessById((int)processId);
+            await process.WaitForExitAsync(cancellationToken);
 
             return process.ExitCode;
         }
