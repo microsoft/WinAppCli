@@ -7,14 +7,7 @@
 			"group": "build",
 			"isBackground": true,
 			"label": "npm: watch",
-			"problemMatcher": {
-				"base": "$esbuild-watch",
-				"background": {
-					"activeOnStart": true,
-					"beginsPattern": "^\\[esbuild\\] watching",
-					"endsPattern": "^\\[esbuild\\] build"
-				}
-			}
+			"problemMatcher": []
 		},
 		{
 			"type": "npm",

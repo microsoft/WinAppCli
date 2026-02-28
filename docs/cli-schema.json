@@ -1135,8 +1135,21 @@
       }
     },
     "run": {
-      "description": "Create debug identity and launch the packaged application. Returns the process ID for debugger attachment.",
+      "description": "Creates packaged layout, registers the Application, and launches the packaged application.",
       "hidden": false,
+      "arguments": {
+        "input-folder": {
+          "description": "Input folder containing the app to run",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
       "options": {
         "--args": {
           "description": "Command-line arguments to pass to the application",
@@ -1150,13 +1163,39 @@
           "required": false,
           "recursive": false
         },
+        "--json": {
+          "description": "Output in JSON format",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml",
+          "description": "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--no-launch": {
+          "description": "Only create the debug identity and register the package without launching the application",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
             "maximum": 1
           },
           "required": false,

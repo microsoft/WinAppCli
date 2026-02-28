@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { glob } from 'glob';
-
-const execAsync = promisify(exec);
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
@@ -24,7 +21,7 @@ async function runWinappCommand(extensionPath: string, command: string, cwd: str
 		terminal.show();
 	}
 
-	terminal.sendText(`"${cliPath}" ${command}`);
+	terminal.sendText(`& "${cliPath}" ${command}`);
 	return '';
 }
 
@@ -156,7 +153,10 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 			}
 
 			// Build the command with mapped arguments
-			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run'];
+			// The run command requires an input-folder positional argument;
+			// use the directory containing the discovered manifest.
+			const inputFolder = config.inputFolder || path.dirname(manifest);
+			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run', `"${inputFolder}"`];
 			cmdParts.push('--manifest', `"${manifest}"`);
 
 			if (config.outputAppxDirectory) {
@@ -175,10 +175,12 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 				cmdParts.push('--args', `"${args.trim()}"`);
 			}
 
+			cmdParts.push('--json');
 			const command = cmdParts.join(' ');
 
-			// Run "winapp run" which returns the process ID
-			const processId = await vscode.window.withProgress({
+			// Spawn winapp run --json. The process stays alive while the app runs,
+			// so we stream stdout to parse the JSON with the PID before waiting for exit.
+			const { processId, runProcess } = await vscode.window.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: 'Launching package...',
 				cancellable: false
@@ -190,21 +192,49 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 					cwd = config.workingDirectory;
 				}
 
-				const { stdout, stderr } = await execAsync(command, {
-					cwd,
-					env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE }
+				return new Promise<{ processId: number; runProcess: ReturnType<typeof spawn> }>((resolve, reject) => {
+					const child = spawn(command, {
+						cwd,
+						env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE },
+						shell: true
+					});
+
+					let stdout = '';
+					let stderr = '';
+					let resolved = false;
+
+					child.stdout!.on('data', (data: Buffer) => {
+						stdout += data.toString();
+						if (resolved) { return; }
+
+						const pid = parseProcessIdFromJson(stdout);
+						if (pid) {
+							resolved = true;
+							resolve({ processId: pid, runProcess: child });
+						}
+					});
+
+					child.stderr!.on('data', (data: Buffer) => {
+						stderr += data.toString();
+						console.warn('winapp run stderr:', data.toString());
+					});
+
+					child.on('error', (err) => {
+						if (!resolved) {
+							reject(new Error(`Failed to start winapp run: ${err.message}`));
+						}
+					});
+
+					child.on('close', (code) => {
+						if (!resolved) {
+							if (code !== 0) {
+								reject(new Error(`winapp run exited with code ${code}. stderr: ${stderr}\nstdout: ${stdout}`));
+							} else {
+								reject(new Error(`winapp run exited before returning a process ID. stdout: ${stdout}`));
+							}
+						}
+					});
 				});
-
-				if (stderr) {
-					console.warn('winapp run stderr:', stderr);
-				}
-
-				const pid = parseProcessId(stdout);
-				if (!pid) {
-					throw new Error(`Could not parse process ID from winapp run output: ${stdout}`);
-				}
-
-				return pid;
 			});
 
 			// Build the attach debug configuration
@@ -223,13 +253,19 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 			// Start the real debug session as a child of the winapp session
 			await vscode.debug.startDebugging(folder, debugConfiguration, { parentSession: session });
 
-			// When the child debug session ends, stop the parent winapp session
+			// When the child debug session ends, kill the winapp run process and stop the parent session
 			const parentSession = session;
 			const disposable = vscode.debug.onDidTerminateDebugSession((ended) => {
 				if (ended.parentSession === parentSession) {
 					disposable.dispose();
+					runProcess.kill();
 					vscode.debug.stopDebugging(parentSession);
 				}
+			});
+
+			// When the winapp run process exits (app closed), stop the debug session
+			runProcess.on('close', () => {
+				vscode.debug.stopDebugging(parentSession);
 			});
 
 			// Return an inline no-op adapter — the real debugging happens in the child session above
@@ -389,7 +425,12 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, 'run', workspacePath);
+			const inputFolder = await selectFolder('Select input folder containing the app to run');
+			if (!inputFolder) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, `run "${inputFolder}"`, workspacePath);
 		})
 	);
 
@@ -400,9 +441,8 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!workspacePath) {
 				return;
 			}
-			const entrypoint = await selectFile('Select executable or script', {
+			const entrypoint = await selectFile('Select executable', {
 				'Executables': ['exe'],
-				'Scripts': ['py', 'js'],
 				'All files': ['*']
 			});
 
@@ -424,7 +464,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const template = await vscode.window.showQuickPick(
-				['packaged', 'sparse', 'hostedapp'],
+				['packaged', 'sparse'],
 				{ placeHolder: 'Select manifest template type' }
 			);
 
@@ -541,13 +581,28 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			const toolName = await vscode.window.showQuickPick(
-				['makeappx', 'signtool', 'mt', 'makepri'],
+			const toolSelection = await vscode.window.showQuickPick(
+				['makeappx', 'signtool', 'mt', 'makepri', 'other'],
 				{ placeHolder: 'Select Windows SDK tool' }
 			);
 
-			if (!toolName) {
+			if (!toolSelection) {
 				return;
+			}
+
+			let toolName: string;
+			if (toolSelection === 'other') {
+				const customTool = await vscode.window.showInputBox({
+					prompt: 'Enter the Windows SDK tool name',
+					placeHolder: 'e.g., custom-tool'
+				});
+
+				if (!customTool) {
+					return;
+				}
+				toolName = customTool;
+			} else {
+				toolName = toolSelection;
 			}
 
 			const args = await vscode.window.showInputBox({
@@ -588,35 +643,19 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 /**
- * Parse the process ID from the winapp run output.
- * Expects the output to contain the process ID (e.g., just the number or in a known format).
+ * Parse the process ID from the winapp run --json output.
+ * Expects a JSON object with a processId (or pid) field.
  */
-function parseProcessId(output: string): number | undefined {
-	const trimmed = output.trim();
-
-	// Try to parse the output directly as a number
-	const directParse = parseInt(trimmed, 10);
-	if (!isNaN(directParse) && directParse > 0) {
-		return directParse;
-	}
-
-	// Try to find a process ID in common formats like "PID: 1234" or "Process ID: 1234"
-	const patterns = [
-		/(?:pid|process\s*id)\s*[=:]\s*(\d+)/i,
-		/^(\d+)$/m,
-		/started\s+.*?(?:pid|process)\s*[=:]\s*(\d+)/i,
-	];
-
-	for (const pattern of patterns) {
-		const match = trimmed.match(pattern);
-		if (match) {
-			const pid = parseInt(match[1], 10);
-			if (!isNaN(pid) && pid > 0) {
-				return pid;
-			}
+function parseProcessIdFromJson(output: string): number | undefined {
+	try {
+		const json = JSON.parse(output.trim());
+		const pid = json.processId ?? json.pid ?? json.ProcessId ?? json.PID;
+		if (typeof pid === 'number' && pid > 0) {
+			return pid;
 		}
+	} catch {
+		// JSON not complete yet or invalid
 	}
-
 	return undefined;
 }
 

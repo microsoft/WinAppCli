@@ -175,11 +175,16 @@ Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK pack
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp run`
 
-Create debug identity and launch the packaged application. Returns the process ID for debugger attachment.
+Creates packaged layout, registers the Application, and launches the packaged application.
+
+**Arguments:**
+- `<input-folder>` *(required)* - Input folder containing the app to run
 
 **Options:**
 - `--args` - Command-line arguments to pass to the application
-- `--manifest` - Path to the appxmanifest.xml
+- `--json` - Output in JSON format
+- `--manifest` - Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)
+- `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--output-appx-directory` - Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
