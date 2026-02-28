@@ -40,6 +40,15 @@ $NugetDir      = Join-Path $ScriptDir "nuget"
 $NuGetFeedName = "WinAppCLI-Local"
 $NuGetFeedPath = Join-Path $env:USERPROFILE ".winapp\local-nuget-feed"
 
+# ── Trap for nice error output in elevated window ───────────────────────────
+
+trap {
+    Write-Host ""
+    Write-Err $_
+    if ($Elevated) { Read-Host "`nPress Enter to close" }
+    exit 1
+}
+
 # ── Unblock all files (they may have a "downloaded from internet" mark) ──────
 
 Write-Step "Unblocking downloaded files"
@@ -82,14 +91,6 @@ if (-not $isAdmin) {
     }
 }
 
-# ── Trap for nice error output in elevated window ───────────────────────────
-
-trap {
-    Write-Host ""
-    Write-Err $_
-    if ($Elevated) { Read-Host "`nPress Enter to close" }
-    exit 1
-}
 
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
@@ -131,8 +132,10 @@ $cert = $null
 
 if ($signature -and $signature.SignerCertificate) {
     $cert = $signature.SignerCertificate
+    Write-Detail "Found certificate in package signature"
 } else {
     # Fall back to extracting from the AppxSignature.p7x inside the MSIX
+    Write-Detail "No signature in package, extracting from AppxSignature.p7x..."
     $tmpDir = Join-Path $env:TEMP "winapp-cert-$(Get-Random)"
     New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
     try {
@@ -145,6 +148,7 @@ if ($signature -and $signature.SignerCertificate) {
             $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
             $cms.Decode([System.IO.File]::ReadAllBytes($p7x.FullName))
             $cert = $cms.Certificates[0]
+            Write-Detail "Extracted certificate from AppxSignature.p7x"
         }
     } finally {
         Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -169,6 +173,25 @@ if ($existing) {
     $store.Add($cert)
     $store.Close()
     Write-Ok "Certificate installed into TrustedPeople store"
+}
+
+# ── Check for existing winapp packages that could conflict ──────────────────
+$existingPackages = Get-AppxPackage | Where-Object { $_.Name -eq 'winapp' -or $_.Name -eq 'winapp-dev' }
+if ($existingPackages) {
+    Write-Detail ""
+    Write-Detail "Found existing winapp package(s):"
+    foreach ($pkg in $existingPackages) {
+        Write-Detail "  - $($pkg.Name) v$($pkg.Version)"
+    }
+    $response = Read-Host "Uninstall existing package(s) before installing? (Y/N)"
+    if ($response -eq 'Y' -or $response -eq 'y') {
+        foreach ($pkg in $existingPackages) {
+            Write-Detail "Removing $($pkg.Name)..."
+            Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction SilentlyContinue
+            Write-Detail "  - Removed $($pkg.Name)"
+        }
+        Write-Detail ""
+    }
 }
 
 # ── Install / upgrade the MSIX ──────────────────────────────────────────────
