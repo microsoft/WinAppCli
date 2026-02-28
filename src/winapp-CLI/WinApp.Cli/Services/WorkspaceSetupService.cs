@@ -747,7 +747,7 @@ internal class WorkspaceSetupService(
                 }
                 else
                 {
-                    var overwriteConfig = await ansiConsole.PromptAsync(new ConfirmationPrompt("winapp.yaml exists with pinned versions. Overwrite?"), cancellationToken);
+                    var overwriteConfig = await ShowConfirmationPromptAsync(ansiConsole, "winapp.yaml exists with pinned versions. Overwrite?", cancellationToken);
                     shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
                     if (shouldGenerateManifest)
                     {
@@ -804,9 +804,7 @@ internal class WorkspaceSetupService(
                         ? " (Required for Windows App SDK)"
                         : "";
 
-                    var shouldUpdate = await ansiConsole.PromptAsync(
-                        new ConfirmationPrompt($"Update TargetFramework to \"{recommendedTfm}\"{promptSuffix}?"),
-                        cancellationToken);
+                    var shouldUpdate = await ShowConfirmationPromptAsync(ansiConsole, $"Update TargetFramework to \"{recommendedTfm}\"{promptSuffix}?", cancellationToken);
 
                     if (!shouldUpdate)
                     {
@@ -841,6 +839,17 @@ internal class WorkspaceSetupService(
         return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
     }
 
+    private static async Task<bool> ShowConfirmationPromptAsync(IAnsiConsole ansiConsole, string prompt, CancellationToken cancellationToken)
+    {
+        var result = await ansiConsole.PromptAsync(new ConfirmationPrompt(prompt), cancellationToken);
+
+        ansiConsole.Cursor.MoveUp();
+        ansiConsole.Write("\x1b[2K"); // Clear line
+        ansiConsole.MarkupLine($"{prompt}: [underline]{(result ? "Yes" : "No")}[/]");
+
+        return result;
+    }
+
     private async Task<ManifestGenerationInfo?> PromptForManifestInfoAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
     {
         if (options.ConfigOnly)
@@ -868,9 +877,7 @@ internal class WorkspaceSetupService(
             return false;
         }
 
-        return await ansiConsole.PromptAsync(
-            new ConfirmationPrompt("Enable Developer Mode (requires elevation and you will be prompted by User Account Control)"),
-            cancellationToken);
+        return await ShowConfirmationPromptAsync(ansiConsole, "Enable Developer Mode (requires elevation and you will be prompted by User Account Control)", cancellationToken);
     }
 
     private async Task<bool> AskShouldGenerateManifestAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
@@ -892,7 +899,7 @@ internal class WorkspaceSetupService(
             }
             else
             {
-                return await ansiConsole.PromptAsync(new ConfirmationPrompt($"{manifestPath.Name} already exists. Overwrite?"), cancellationToken);
+                return await ShowConfirmationPromptAsync(ansiConsole, $"{manifestPath.Name} already exists. Overwrite?", cancellationToken);
             }
         }
 

@@ -2,8 +2,12 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -13,16 +17,26 @@ internal partial class RunCommand : Command, IShortDescription
 {
     public string ShortDescription => "Create debug identity and launch the packaged application.";
 
-    public static Option<FileInfo?> ManifestOption { get; }
+    public static Argument<DirectoryInfo> InputFolderArgument { get; }
+    public static Option<FileInfo> ManifestOption { get; }
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
+    public static Option<bool> NoLaunchOption { get; }
 
     static RunCommand()
     {
-        ManifestOption = new Option<FileInfo?>("--manifest")
+        InputFolderArgument = new Argument<DirectoryInfo>("input-folder")
         {
-            Description = "Path to the appxmanifest.xml"
+            Description = "Input folder containing the app to run",
+            Arity = ArgumentArity.ExactlyOne
         };
+        InputFolderArgument.AcceptExistingOnly();
+
+        ManifestOption = new Option<FileInfo>("--manifest")
+        {
+            Description = "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)"
+        };
+        ManifestOption.AcceptExistingOnly();
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
@@ -33,139 +47,188 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Command-line arguments to pass to the application"
         };
+
+        NoLaunchOption = new Option<bool>("--no-launch")
+        {
+            Description = "Only create the debug identity and register the package without launching the application"
+        };
     }
 
-    public RunCommand() : base("run", "Create debug identity and launch the packaged application. Returns the process ID for debugger attachment.")
+    public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
     {
+        Arguments.Add(InputFolderArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
+        Options.Add(NoLaunchOption);
+        Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
         ICurrentDirectoryProvider currentDirectoryProvider,
-        IStatusService statusService,
-        ILogger<RunCommand> logger) : AsynchronousCommandLineAction
+        IAnsiConsole ansiConsole,
+        IStatusService statusService) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
             var manifest = parseResult.GetValue(ManifestOption);
-            if (manifest != null && !manifest.Exists)
-            {
-                logger.LogError("Manifest not found: {ManifestPath}. Use --manifest to specify the path.", manifest.FullName);
-                return 1;
-            }
-
-            DirectoryInfo GetDefaultAppXDirectory(FileInfo? manifest)
-            {
-                var directoryName = manifest?.DirectoryName;
-                directoryName ??= currentDirectoryProvider.GetCurrentDirectory();
-                return new DirectoryInfo(Path.Combine(directoryName, "AppX"));
-            }
-
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
+            var noLaunch = parseResult.GetValue(NoLaunchOption);
+            var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
-            return await statusService.ExecuteWithStatusAsync("Launching packaged application...", async (taskContext, cancellationToken) =>
+            uint processId = 0;
+            string? packageFamilyName = null;
+            string? publisher = null;
+            string? applicationId = null;
+            string? aumid = null;
+            string? errorMessage = null;
+            var statusMessage = noLaunch ? "Registering packaged application..." : "Launching packaged application...";
+            var success = await statusService.ExecuteWithStatusAsync(statusMessage, async (taskContext, cancellationToken) =>
             {
                 try
                 {
-                    var currentDirectoryInfo = currentDirectoryProvider.GetCurrentDirectoryInfo();
-                    DirectoryInfo? outputDirectory = null;
-
-                    DirectoryInfo inputDirectory;
-
+                    // Resolve manifest with priority: --manifest → input folder → cwd
+                    FileInfo resolvedManifest;
                     if (manifest != null)
                     {
-                        inputDirectory = manifest.Directory!;
-                    }
-                    else if (outputDirectory != null)
-                    {
-                        inputDirectory = outputDirectory;
-
-                        manifest = new FileInfo(Path.Combine(inputDirectory.FullName, "AppxManifest.xml"));
-                        if (!manifest.Exists)
-                        {
-                            var fileInfo = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "appxmanifest.xml"));
-                            if (fileInfo.Exists)
-                            {
-                                manifest = fileInfo;
-                                if (outputAppXDirectory == null)
-                                {
-                                    outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputDirectory.FullName, "AppX"));
-                                }
-                            }
-                        }
-                        if (!manifest.Exists)
-                        {
-                            var fileInfo = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.appxmanifest"));
-                            if (!fileInfo.Exists)
-                            {
-                                throw new Exception("AppxManifest.xml/Package.appxmanifest not found in the current directory. Use --manifest to specify the path.");
-                            }
-                            manifest = fileInfo;
-                            if (outputAppXDirectory == null)
-                            {
-                                outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputDirectory.FullName, "AppX"));
-                            }
-                        }
+                        resolvedManifest = manifest;
+                        taskContext.AddDebugMessage($"{UiSymbols.Note} Using specified manifest: {resolvedManifest}");
                     }
                     else
                     {
-                        // No manifest specified - try to find manifest in current directory
-                        inputDirectory = currentDirectoryInfo;
-
-                        manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "appxmanifest.xml"));
-                        if (!manifest.Exists)
+                        var folderManifest = FindManifest(inputFolder.FullName);
+                        if (folderManifest.Exists)
                         {
-                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "AppxManifest.xml"));
+                            resolvedManifest = folderManifest;
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Using manifest from input folder: {resolvedManifest}");
                         }
-                        if (!manifest.Exists)
+                        else
                         {
-                            manifest = new FileInfo(Path.Combine(currentDirectoryInfo.FullName, "Package.appxmanifest"));
-                        }
-                        if (!manifest.Exists)
-                        {
-                            throw new Exception("AppxManifest.xml/Package.appxmanifest not found in the current directory. Use --manifest to specify the path.");
+                            var cwdManifest = FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+                            if (cwdManifest.Exists)
+                            {
+                                resolvedManifest = cwdManifest;
+                                taskContext.AddDebugMessage($"{UiSymbols.Note} Using manifest from current directory: {resolvedManifest}");
+                            }
+                            else
+                            {
+                                throw new FileNotFoundException(
+                                    $"Manifest file not found. Searched in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()}). Use --manifest to specify the path.");
+                            }
                         }
                     }
 
-                    outputAppXDirectory ??= GetDefaultAppXDirectory(manifest);
+                    outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
 
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
-                        manifest,
-                        inputDirectory,
+                        resolvedManifest,
+                        inputFolder,
                         outputAppXDirectory,
                         taskContext,
                         cancellationToken);
 
-                    taskContext.AddDebugMessage($"{UiSymbols.Package} Package: {identityResult.PackageName}");
-                    taskContext.AddDebugMessage($"{UiSymbols.User} Publisher: {identityResult.Publisher}");
-                    taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {identityResult.ApplicationId}");
-
-                    // Step 3: Compute the AUMID (Application User Model ID)
-                    var packageFamilyName = appLauncherService.ComputePackageFamilyName(
+                    packageFamilyName = appLauncherService.ComputePackageFamilyName(
                         identityResult.PackageName,
                         identityResult.Publisher);
-                    var aumid = $"{packageFamilyName}!{identityResult.ApplicationId}";
+                    publisher = identityResult.Publisher;
+                    applicationId = identityResult.ApplicationId;
+                    aumid = $"{packageFamilyName}!{applicationId}";
 
+                    taskContext.AddDebugMessage($"{UiSymbols.Package} Package: {identityResult.PackageName}");
+                    taskContext.AddDebugMessage($"{UiSymbols.User} Publisher: {publisher}");
+                    taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {applicationId}");
                     taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
 
-                    // Step 4: Launch the application using IApplicationActivationManager
-                    taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
-                    var processId = appLauncherService.LaunchByAumid(aumid, appArgs);
+                    if (noLaunch)
+                    {
+                        return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
+                    }
 
-                    return (0, $"Application launched successfully (PID: {processId})");
+                    // Step 3: Launch the application using IApplicationActivationManager
+                    taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
+                    processId = appLauncherService.LaunchByAumid(aumid, appArgs);
+
+                    return (0, $"{packageFamilyName} launched (PID: {processId})");
                 }
                 catch (Exception error)
                 {
+                    errorMessage = error.Message;
                     return (1, $"{UiSymbols.Error} Failed to launch application: {error.Message}");
                 }
             }, cancellationToken);
+
+            if (success != 0)
+            {
+                if (isJson)
+                {
+                    PrintJson(aumid, processId: null, errorMessage);
+                }
+                return success;
+            }
+
+            if (noLaunch)
+            {
+                if (isJson)
+                {
+                    PrintJson(aumid, processId: null, errorMessage: null);
+                }
+                return success;
+            }
+
+            // Wait for the launched process to exit before returning
+            using var process = Process.GetProcessById((int)processId);
+            await process.WaitForExitAsync(cancellationToken);
+
+            if (isJson)
+            {
+                PrintJson(aumid, processId, errorMessage: null);
+            }
+
+            return process.ExitCode;
+        }
+
+        void PrintJson(string? aumid, uint? processId, string? errorMessage)
+        {
+            var result = new RunCommandResult
+            {
+                AUMID = aumid,
+                ProcessId = processId,
+                Error = errorMessage
+            };
+
+            var json = JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);
+            ansiConsole.WriteLine(json);
+        }
+
+        private static FileInfo FindManifest(string directory)
+        {
+            var manifestPath = Path.Combine(directory, "appxmanifest.xml");
+            if (File.Exists(manifestPath))
+            {
+                return new FileInfo(manifestPath);
+            }
+            manifestPath = Path.Combine(directory, "Package.appxmanifest");
+            return new FileInfo(manifestPath);
         }
     }
 }
+
+internal sealed class RunCommandResult
+{
+    public string? AUMID { get; set; }
+    public uint? ProcessId { get; set; }
+    public string? Error { get; set; }
+}
+
+[JsonSerializable(typeof(RunCommandResult))]
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    NewLine = "\n",
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class RunCommandJsonContext : JsonSerializerContext;
