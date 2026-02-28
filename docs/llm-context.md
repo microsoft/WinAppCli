@@ -1,13 +1,13 @@
 ---
 name: winapp-cli
 description: CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows
-version: 0.2.0
+version: 0.2.1
 schema_version: 1.0
 ---
 
 # winapp CLI Context for LLMs
 
-> Auto-generated from CLI v0.2.0 (schema version 1.0)
+> Auto-generated from CLI v0.2.1 (schema version 1.0)
 > 
 > This file provides structured context about the winapp CLI for AI assistants and LLMs.
 > For the raw JSON schema, see [cli-schema.json](cli-schema.json).
