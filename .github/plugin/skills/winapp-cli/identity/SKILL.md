@@ -67,10 +67,10 @@ After running, launch your exe normally — Windows will recognize it as having 
 ## Recommended workflow
 
 1. **Setup** — `winapp init --use-defaults` (creates `appxmanifest.xml`)
-3. **Build** your app
-4. **Register identity** — `winapp create-debug-identity ./bin/myapp.exe`
-5. **Run** your app — identity-requiring APIs now work
-6. **Re-run step 4** whenever you change `appxmanifest.xml` or `Assets/`
+2. **Build** your app
+3. **Register identity** — `winapp create-debug-identity ./bin/myapp.exe`
+4. **Run** your app — identity-requiring APIs now work
+5. **Re-run step 4** whenever you change `appxmanifest.xml` or `Assets/`
 
 ## Tips
 

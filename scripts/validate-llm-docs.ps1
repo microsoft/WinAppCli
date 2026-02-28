@@ -170,6 +170,9 @@ try {
                 Write-Host "::error::skill '$skillName' is out of sync!" -ForegroundColor Red
                 $SkillsDrift = $true
             }
+        } else {
+            Write-Host "::error::freshly generated skill '$skillName' not found at $FreshSkill (generation or template issue?)" -ForegroundColor Red
+            $SkillsDrift = $true
         }
     }
     
