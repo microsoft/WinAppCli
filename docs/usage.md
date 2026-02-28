@@ -20,6 +20,7 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--no-skills` - Don't generate AI agent skill files (for Copilot, Claude, etc.)
 
 **What it does:**
 
@@ -29,6 +30,7 @@ winapp init [base-directory] [options]
 - Creates AppxManifest.xml
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
+- Generates AI agent skill files for coding assistants (GitHub Copilot, Claude, Cursor, etc.) — prompts to confirm unless skills already exist or `--no-skills` is passed
 - Stores sharable files in the global cache directory
 
 **Automatic .NET project detection:**
@@ -534,6 +536,40 @@ winapp store app list
 
 # Publish a package to the Microsoft Store
 winapp store publish ./myapp.msix --appId <your-app-id>
+```
+
+---
+
+### agents generate
+
+Generate AI agent skill files (SKILL.md) that help coding assistants like GitHub Copilot and Claude Code understand your winapp project.
+
+```bash
+winapp agents generate [options]
+```
+
+**Options:**
+
+- `--skills-dir <path>` - Skills directory override (default: auto-detect from `.github/skills`, `.agents/skills`, or `.claude/skills`)
+- `--directory <path>` - Project root directory (default: current directory)
+
+**What it does:**
+
+- Detects existing skills directories (`.github/skills/`, `.agents/skills/`, `.claude/skills/`) or creates `.github/skills/` by default
+- Writes 7 skill files covering setup, packaging, identity, signing, manifests, troubleshooting, and framework guides
+- Skills are also generated automatically during `winapp init` (unless `--no-skills` is passed)
+
+**Examples:**
+
+```bash
+# Generate skills in auto-detected directory
+winapp agents generate
+
+# Specify a custom skills directory
+winapp agents generate --skills-dir ./my-skills
+
+# Generate skills for a different project
+winapp agents generate --directory ./my-project
 ```
 
 ---

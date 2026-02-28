@@ -178,6 +178,10 @@ npx winapp --help
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
 - [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
+**AI Agent Integration:**
+
+- [`agents generate`](./docs/usage.md#agents-generate) - Generate AI agent skill files for coding assistants (Copilot, Claude, Cursor)
+
 **Development Tools:**
 
 - [`tool`](./docs/usage.md#tool) - Access Windows SDK tools
@@ -208,38 +212,23 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
-## 🤖 Using with AI Assistants and Agents
+## 🤖 Using with AI Coding Agents
 
-The winapp CLI is designed to work well with AI coding assistants like GitHub Copilot, Cursor, Claude, and other LLM-powered tools.
+AI coding agents (GitHub Copilot, Claude Code, etc) auto-discover skill files in your project. Two ways to set this up:
 
-### Quick Start Prompt
-
-Copy and paste this into your AI coding assistant:
-
-```
-I'm working with winapp CLI - a CLI for generating and managing appxmanifest.xml, 
-image assets, test certificates, Windows (App) SDK projections, package identity, 
-and packaging for any app framework targeting Windows.
-
-Please read and reference the official LLM context documentation:
-https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md
-
-My specific task: [describe what you need help with]
-```
-
-### Resources for AI Assistants
-
-- **[LLM Context Guide](./docs/llm-context.md)** - Comprehensive command reference with workflows and prerequisites
-- **[CLI Schema (JSON)](./docs/cli-schema.json)** - Machine-readable command structure for tooling
-- **[Using with LLMs Guide](./docs/using-with-llms.md)** - Detailed prompts for GitHub Copilot, Cursor, Claude, and framework-specific templates
-
-### Programmatic Access
-
-Get the complete CLI structure as JSON for tooling or analysis:
-
+**Option 1: GitHub Copilot CLI Plugin** (global — works across all projects)
 ```bash
-winapp --cli-schema
+copilot plugin install microsoft/WinAppCli
 ```
+
+**Option 2: Project-level skills** (checked into your repo)
+```bash
+winapp agents generate
+```
+This creates skill files (`SKILL.md`) in your project that AI agents auto-discover. Skills are also generated automatically during `winapp init`.
+
+Both options give agents full understanding of winapp commands, workflows, and troubleshooting.
+
 
 ## 🔧 Feedback and Support
 

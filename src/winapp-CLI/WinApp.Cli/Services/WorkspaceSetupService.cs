@@ -24,6 +24,7 @@ internal class WorkspaceSetupOptions
     public bool RequireExistingConfig { get; set; }
     public bool ForceLatestBuildTools { get; set; }
     public bool ConfigOnly { get; set; }
+    public bool NoSkills { get; set; }
 }
 
 /// <summary>
@@ -43,6 +44,7 @@ internal class WorkspaceSetupService(
     IGitignoreService gitignoreService,
     IDirectoryPackagesService directoryPackagesService,
     IDotNetService dotNetService,
+    IAgentContextService agentContextService,
     IStatusService statusService,
     ICurrentDirectoryProvider currentDirectoryProvider,
     IAnsiConsole ansiConsole,
@@ -81,8 +83,9 @@ internal class WorkspaceSetupService(
         ManifestGenerationInfo? manifestGenerationInfo;
         bool shouldEnableDeveloperMode;
         string? recommendedTfm;
+        bool shouldGenerateSkills;
 
-        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm) = await InitializeConfigurationAsync(options, isDotNetProject, csprojFile, cancellationToken);
+        (var initializationResult, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills) = await InitializeConfigurationAsync(options, isDotNetProject, csprojFile, cancellationToken);
         if (initializationResult != 0)
         {
             return initializationResult;
@@ -589,6 +592,30 @@ internal class WorkspaceSetupService(
                     }, cancellationToken);
                 }
 
+                // Generate agent skill files (for setup only, not restore)
+                if (shouldGenerateSkills)
+                {
+                    await taskContext.AddSubTaskAsync("Generating AI agent skills", async (taskContext, cancellationToken) =>
+                    {
+                        try
+                        {
+                            var result = await agentContextService.GenerateSkillsAsync(options.BaseDirectory, skillsDir: null, cancellationToken);
+                            if (result.Success)
+                            {
+                                return (0, $"Agent skills generated in [underline]{result.SkillsDirectory}[/]");
+                            }
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} No embedded skill files found in CLI binary");
+                            return (0, "Agent skills generation skipped");
+                        }
+                        catch (Exception ex)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Failed to generate agent skills: {ex.Message}");
+                            // Don't fail init if skills generation fails
+                            return (0, "Agent skills generation skipped");
+                        }
+                    }, cancellationToken);
+                }
+
                 // We're done
                 string successMessage;
                 if (isDotNetProject)
@@ -670,7 +697,7 @@ internal class WorkspaceSetupService(
         }, cancellationToken);
     }
 
-    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
+    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldEnableDeveloperMode, string? RecommendedTfm, bool ShouldGenerateSkills)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
     {
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null && options.UseDefaults)
         {
@@ -681,6 +708,7 @@ internal class WorkspaceSetupService(
         var hadExistingConfig = configService.Exists();
         bool shouldGenerateManifest = true;
         bool shouldEnableDeveloperMode = false;
+        bool shouldGenerateSkills = false;
         string? recommendedTfm = null;
         ManifestGenerationInfo? manifestGenerationInfo = null;
         WinappConfig? config = null;
@@ -690,7 +718,7 @@ internal class WorkspaceSetupService(
         {
             logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
             logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills);
         }
 
         // Step 2: Load or prepare configuration
@@ -702,7 +730,7 @@ internal class WorkspaceSetupService(
             {
                 logger.LogInformation("{UISymbol} winapp.yaml found but contains no packages. Nothing to restore.", UiSymbols.Note);
                 shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
-                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills);
             }
 
             var operation = options.RequireExistingConfig ? "Found" : "Found existing";
@@ -761,7 +789,7 @@ internal class WorkspaceSetupService(
             if (dotNetService.IsMultiTargeted(csprojFile))
             {
                 logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
-                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills);
             }
 
             var currentTfm = dotNetService.GetTargetFramework(csprojFile);
@@ -788,7 +816,7 @@ internal class WorkspaceSetupService(
                         if (options.SdkInstallMode != SdkInstallMode.None)
                         {
                             logger.LogError("TargetFramework '{Tfm}' is not supported for Windows App SDK. Cannot continue.", currentDisplay);
-                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills);
                         }
 
                         // Not installing SDKs, so TFM update is not required — skip it
@@ -812,8 +840,9 @@ internal class WorkspaceSetupService(
         }
 
         shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
+        shouldGenerateSkills = await AskShouldGenerateSkillsAsync(options, cancellationToken);
 
-        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm, shouldGenerateSkills);
     }
 
     private async Task<ManifestGenerationInfo?> PromptForManifestInfoAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
@@ -845,6 +874,31 @@ internal class WorkspaceSetupService(
 
         return await ansiConsole.PromptAsync(
             new ConfirmationPrompt("Enable Developer Mode (requires elevation and you will be prompted by User Account Control)"),
+            cancellationToken);
+    }
+
+    private async Task<bool> AskShouldGenerateSkillsAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    {
+        // Only for init (not restore), and only if --no-skills and --config-only are not set
+        if (options.RequireExistingConfig || options.NoSkills || options.ConfigOnly)
+        {
+            return false;
+        }
+
+        // If skills already exist, silently update them
+        if (agentContextService.SkillsExistInProject(options.BaseDirectory))
+        {
+            return true;
+        }
+
+        // No existing skills — ask the user (default to yes with --use-defaults)
+        if (options.UseDefaults)
+        {
+            return true;
+        }
+
+        return await ansiConsole.PromptAsync(
+            new ConfirmationPrompt("Generate AI agent skill files (for Copilot, Claude, etc.)?"),
             cancellationToken);
     }
 

@@ -1,0 +1,22 @@
+{
+  "name": "winapp-cli",
+  "description": "Skills for Windows app development with winapp CLI, MSIX packaging, package identity, certificates, SDK projections, and more.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Microsoft",
+    "url": "https://github.com/microsoft/WinAppCli"
+  },
+  "license": "MIT",
+  "keywords": [
+    "windows",
+    "msix",
+    "packaging",
+    "identity",
+    "electron",
+    "winapp",
+    "windows app sdk",
+    "appxmanifest.xml"
+  ],
+  "agents": "agents/",
+  "skills": "skills/winapp-cli/"
+}
