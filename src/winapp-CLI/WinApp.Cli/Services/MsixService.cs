@@ -24,6 +24,7 @@ internal partial class MsixService(
     IDevModeService devModeService,
     IDotNetService dotNetService,
     INugetService nugetService,
+    IWinmdService winmdService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
@@ -43,6 +44,8 @@ internal partial class MsixService(
     private static partial Regex AppxPackageIdentityNameRegex();
     [GeneratedRegex(@"<Identity[^>]*Publisher\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageIdentityPublisherRegex();
+    [GeneratedRegex(@"<Identity[^>]*Version\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityVersionRegex();
     [GeneratedRegex(@"<Application[^>]*Executable\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageApplicationExecutableRegex();
     [GeneratedRegex(@"(<Identity[^>]*Name\s*=\s*)[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
@@ -775,6 +778,7 @@ internal partial class MsixService(
         // Determine package name and publisher
         var finalPackageName = packageName;
         var extractedPublisher = publisher;
+        string? extractedVersion = null;
 
         var manifestContent = await File.ReadAllTextAsync(resolvedManifestPath.FullName, Encoding.UTF8, cancellationToken);
 
@@ -799,6 +803,12 @@ internal partial class MsixService(
                     var publisherMatch = AppxPackageIdentityPublisherRegex().Match(manifestContent);
                     extractedPublisher = publisherMatch.Success ? publisherMatch.Groups[1].Value : null;
                 }
+
+                if (string.IsNullOrWhiteSpace(extractedVersion))
+                {
+                    var versionMatch = AppxPackageIdentityVersionRegex().Match(manifestContent);
+                    extractedVersion = versionMatch.Success ? versionMatch.Groups[1].Value : null;
+                }
             }
             catch
             {
@@ -811,12 +821,16 @@ internal partial class MsixService(
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
 
+        var defaultMsixFileName = !string.IsNullOrWhiteSpace(extractedVersion)
+            ? $"{finalPackageName}_{extractedVersion}.msix"
+            : $"{finalPackageName}.msix";
+
         FileInfo outputMsixPath;
         DirectoryInfo outputFolder;
         if (outputPath == null)
         {
             outputFolder = currentDirectoryProvider.GetCurrentDirectoryInfo();
-            outputMsixPath = new FileInfo(Path.Combine(outputFolder.FullName, $"{finalPackageName}.msix"));
+            outputMsixPath = new FileInfo(Path.Combine(outputFolder.FullName, defaultMsixFileName));
         }
         else
         {
@@ -828,7 +842,7 @@ internal partial class MsixService(
             else
             {
                 outputFolder = new DirectoryInfo(outputPath.FullName);
-                outputMsixPath = new FileInfo(Path.Combine(outputPath.FullName, $"{finalPackageName}.msix"));
+                outputMsixPath = new FileInfo(Path.Combine(outputPath.FullName, defaultMsixFileName));
             }
         }
 
@@ -985,6 +999,11 @@ internal partial class MsixService(
                 outAppManifestPath: tempManifestPath,
                 cancellationToken: cancellationToken);
 
+            // Phase 3: Discover and register third-party WinRT components (e.g., Win2D, WebView2)
+            // These packages ship .winmd files + native DLLs but no package.appxfragment
+            await AppendThirdPartyWinRTManifestEntriesAsync(
+                tempManifestPath, architecture, packageDependencies, taskContext, cancellationToken);
+
             // Use mt.exe to merge manifests
             await EmbedManifestFileToExeAsync(exePath, tempManifestPath, taskContext, cancellationToken);
         }
@@ -1003,6 +1022,225 @@ internal partial class MsixService(
             .Select(package => new FileInfo(Path.Combine(nugetCacheDir.FullName, package.Key.ToLowerInvariant(), package.Value, "runtimes-framework", "package.appxfragment")))
             .Where(f => f.Exists);
         return appxFragments;
+    }
+
+    /// <summary>
+    /// Collects all user NuGet packages from winapp.yaml or .csproj.
+    /// Returns the full package dictionary (name → version) for WinRT component scanning.
+    /// </summary>
+    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Path 1: Try winapp.yaml
+        if (configService.Exists())
+        {
+            var config = configService.Load();
+            foreach (var pkg in config.Packages)
+            {
+                packages.TryAdd(pkg.Name, pkg.Version);
+            }
+        }
+        else
+        {
+            // Path 2: Try .csproj via `dotnet list package --format json`
+            var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
+            var csprojFiles = dotNetService.FindCsproj(cwd);
+            var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+            if (csproj != null)
+            {
+                try
+                {
+                    var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
+                    var allPackages = packageList?.Projects?
+                        .SelectMany(p => p.Frameworks ?? [])
+                        .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+                    if (allPackages != null)
+                    {
+                        foreach (var pkg in allPackages)
+                        {
+                            if (!string.IsNullOrEmpty(pkg.Id) && !string.IsNullOrEmpty(pkg.ResolvedVersion))
+                            {
+                                packages.TryAdd(pkg.Id, pkg.ResolvedVersion);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not retrieve package list from .csproj: {ex.Message}");
+                }
+            }
+        }
+
+        return packages;
+    }
+
+    /// <summary>
+    /// Discovers third-party WinRT components and appends their activatable class
+    /// entries to an existing SxS manifest file (for self-contained deployment).
+    /// </summary>
+    private async Task AppendThirdPartyWinRTManifestEntriesAsync(
+        FileInfo manifestPath,
+        string architecture,
+        Dictionary<string, string>? winAppSDKPackages,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        var allPackages = await GetAllUserPackagesAsync(taskContext, cancellationToken);
+        if (allPackages.Count == 0)
+        {
+            return;
+        }
+
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+
+        // Note: We do NOT pass the full WinAppSDK dependency tree as an exclude set.
+        // DiscoverWinRTComponents already handles exclusions via:
+        //   1. IsExcludedPackage() — skips SDK infrastructure packages
+        //   2. package.appxfragment check — skips WinAppSDK sub-packages with existing fragments
+        // Passing the full dep tree would incorrectly exclude packages like WebView2
+        // that are transitive WinAppSDK deps but need their own InProcessServer entries.
+        var components = winmdService.DiscoverWinRTComponents(nugetCacheDir, allPackages, architecture);
+        if (components.Count == 0)
+        {
+            return;
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Package} Found {components.Count} third-party WinRT component(s) to register");
+
+        // Read the existing manifest content and strip the closing </assembly> tag
+        // so we can append new entries before re-closing it
+        var existingContent = await File.ReadAllTextAsync(manifestPath.FullName, cancellationToken);
+        var closingTag = "</assembly>";
+        var closingIndex = existingContent.LastIndexOf(closingTag, StringComparison.OrdinalIgnoreCase);
+
+        var sb = new StringBuilder();
+        if (closingIndex >= 0)
+        {
+            sb.Append(existingContent, 0, closingIndex);
+        }
+        else
+        {
+            sb.Append(existingContent);
+        }
+
+        foreach (var component in components)
+        {
+            var classes = winmdService.GetActivatableClasses(component.WinmdPath);
+            if (classes.Count == 0)
+            {
+                continue;
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Registering {classes.Count} activatable class(es) from {component.ImplementationDll}");
+
+            sb.AppendLine($"    <asmv3:file name='{component.ImplementationDll}'>");
+            foreach (var className in classes)
+            {
+                sb.AppendLine($"        <winrtv1:activatableClass name='{className}' threadingModel='both'/>");
+            }
+            sb.AppendLine("    </asmv3:file>");
+        }
+
+        sb.AppendLine(closingTag);
+
+        await File.WriteAllTextAsync(
+            manifestPath.FullName,
+            sb.ToString(),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Discovers third-party WinRT components and generates InProcessServer
+    /// extension entries for AppxManifest.xml (for packaged apps).
+    /// </summary>
+    private async Task<string> AddThirdPartyWinRTExtensionsToAppxManifestAsync(
+        string manifestContent,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        var allPackages = await GetAllUserPackagesAsync(taskContext, cancellationToken);
+        if (allPackages.Count == 0)
+        {
+            return manifestContent;
+        }
+
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+        var architecture = WorkspaceSetupService.GetSystemArchitecture();
+
+        // Note: We do NOT pass the full WinAppSDK dependency tree as an exclude set.
+        // DiscoverWinRTComponents already handles exclusions via:
+        //   1. IsExcludedPackage() — skips SDK infrastructure packages
+        //   2. package.appxfragment check — skips WinAppSDK sub-packages with existing fragments
+        // Passing the full dep tree would incorrectly exclude packages like WebView2
+        // that are transitive WinAppSDK deps but need their own InProcessServer entries.
+        var components = winmdService.DiscoverWinRTComponents(nugetCacheDir, allPackages, architecture);
+        if (components.Count == 0)
+        {
+            return manifestContent;
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Package} Adding InProcessServer entries for {components.Count} third-party WinRT component(s)");
+
+        var extensionsSb = new StringBuilder();
+        foreach (var component in components)
+        {
+            var classes = winmdService.GetActivatableClasses(component.WinmdPath);
+            if (classes.Count == 0)
+            {
+                continue;
+            }
+
+            // Check if entries for this DLL already exist in the manifest or in entries we've already generated
+            if (manifestContent.Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase)
+                || extensionsSb.ToString().Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Skipping {component.ImplementationDll} — already in manifest");
+                continue;
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Adding {classes.Count} activatable class(es) for {component.ImplementationDll}");
+
+            extensionsSb.AppendLine(@"    <Extension Category=""windows.activatableClass.inProcessServer"">");
+            extensionsSb.AppendLine(@"      <InProcessServer>");
+            extensionsSb.AppendLine($@"        <Path>{component.ImplementationDll}</Path>");
+            foreach (var className in classes)
+            {
+                extensionsSb.AppendLine($@"        <ActivatableClass ActivatableClassId=""{className}"" ThreadingModel=""both""/>");
+            }
+            extensionsSb.AppendLine(@"      </InProcessServer>");
+            extensionsSb.AppendLine(@"    </Extension>");
+        }
+
+        if (extensionsSb.Length == 0)
+        {
+            return manifestContent;
+        }
+
+        // Insert the extensions into the manifest
+        // Try to find an existing <Extensions> block to append into
+        var extensionsCloseTag = "</Extensions>";
+        var extensionsCloseIndex = manifestContent.LastIndexOf(extensionsCloseTag, StringComparison.OrdinalIgnoreCase);
+
+        if (extensionsCloseIndex >= 0)
+        {
+            // Insert before </Extensions>
+            return manifestContent.Insert(extensionsCloseIndex, extensionsSb.ToString());
+        }
+
+        // No <Extensions> block exists — create one before </Package>
+        var packageCloseTag = "</Package>";
+        var packageCloseIndex = manifestContent.LastIndexOf(packageCloseTag, StringComparison.OrdinalIgnoreCase);
+        if (packageCloseIndex >= 0)
+        {
+            var extensionsBlock = $"  <Extensions>\n{extensionsSb}  </Extensions>\n";
+            return manifestContent.Insert(packageCloseIndex, extensionsBlock);
+        }
+
+        return manifestContent;
     }
 
     /// <summary>
@@ -1494,6 +1732,14 @@ $1");
         if (!selfContained && (entryPointPath == null || isExe))
         {
             modifiedContent = await UpdateWindowsAppSdkDependencyAsync(modifiedContent, taskContext, cancellationToken);
+        }
+
+        // Add InProcessServer entries for third-party WinRT components (e.g., Win2D, WebView2)
+        // In self-contained mode, activation entries go in the SxS manifest embedded in the exe,
+        // so we skip them here to avoid duplication.
+        if (!selfContained)
+        {
+            modifiedContent = await AddThirdPartyWinRTExtensionsToAppxManifestAsync(modifiedContent, taskContext, cancellationToken);
         }
 
         return modifiedContent;
