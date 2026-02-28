@@ -271,7 +271,7 @@ internal partial class MsixService(
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
 
-    public async Task<MsixIdentityResult> AddMsixIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddMsixIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, bool selfContained = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -326,6 +326,7 @@ internal partial class MsixService(
             entryPointPath,
             keepIdentity,
             taskContext,
+            selfContained,
             cancellationToken);
 
         // Update executable with debug identity
@@ -333,6 +334,21 @@ internal partial class MsixService(
         {
             var exePath = new FileInfo(entryPointPath);
             await EmbedMsixIdentityToExeAsync(exePath, debugIdentity, taskContext, cancellationToken);
+
+            // For self-contained: copy WinAppSDK runtime DLLs and embed SxS activation manifest
+            if (selfContained)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Package} Preparing self-contained Windows App SDK runtime for debug identity...");
+
+                var entryPointDir = new DirectoryInfo(exePath.DirectoryName!);
+                var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(entryPointDir, taskContext, cancellationToken);
+
+                var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
+                var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
+                await EmbedWindowsAppSDKManifestToExeAsync(exePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
+
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Self-contained runtime deployed and activation manifest embedded");
+            }
         }
 
         if (noInstall)
@@ -1707,6 +1723,7 @@ internal partial class MsixService(
         string entryPointPath,
         bool keepIdentity,
         TaskContext taskContext,
+        bool selfContained = false,
         CancellationToken cancellationToken = default)
     {
         var winappDir = winappDirectoryService.GetLocalWinappDirectory();
@@ -1762,7 +1779,7 @@ internal partial class MsixService(
             debugIdentity,
             entryPointPath,
             sparse: true,
-            selfContained: false,
+            selfContained: selfContained,
             taskContext,
             cancellationToken);
 

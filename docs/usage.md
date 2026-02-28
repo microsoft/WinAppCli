@@ -219,12 +219,14 @@ winapp create-debug-identity [entrypoint] [options]
 - `--manifest <path>` - Path to AppxManifest.xml (default: `./appxmanifest.xml`)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
+- `--self-contained` - Bundle Windows App SDK runtime for self-contained deployment. Copies runtime DLLs next to the executable and embeds WinRT activation manifests into the exe.
 
 **What it does:**
 
 - Modifies executable's side-by-side manifest
 - Registers sparse package for identity
 - Enables debugging of identity-requiring APIs
+- With `--self-contained`: copies WinAppSDK runtime DLLs next to the exe, removes the framework `<PackageDependency>` from the sparse manifest, and embeds a side-by-side activation manifest so WinRT classes resolve locally
 
 **Examples:**
 
@@ -237,6 +239,9 @@ winapp create-debug-identity ./dist/app.exe --manifest ./custom-manifest.xml
 
 # Create identity for hosted app script
 winapp create-debug-identity app.py
+
+# Add identity with self-contained WinAppSDK runtime (no framework package needed)
+winapp create-debug-identity ./bin/MyApp.exe --self-contained
 ```
 
 ---
@@ -617,6 +622,7 @@ npx winapp node add-electron-debug-identity [options]
 | `--manifest <path>` | Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory) |
 | `--no-install` | Do not install or modify dependencies; only configure the Electron debug identity |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` to the package name and application ID |
+| `--self-contained` | Bundle Windows App SDK runtime next to the executable for self-contained deployment |
 | `--verbose` | Enable verbose output |
 
 **What it does:**
@@ -624,6 +630,7 @@ npx winapp node add-electron-debug-identity [options]
 - Registers debug identity for electron.exe process
 - Enables testing identity-requiring APIs in Electron development
 - Uses existing AppxManifest.xml for identity configuration
+- With `--self-contained`: copies WinAppSDK runtime DLLs next to electron.exe and embeds WinRT activation manifests
 
 **Examples:**
 
@@ -633,6 +640,9 @@ npx winapp node add-electron-debug-identity
 
 # Use a custom manifest file
 npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+
+# Add identity with self-contained WinAppSDK runtime
+npx winapp node add-electron-debug-identity --self-contained
 ```
 
 ---

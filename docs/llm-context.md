@@ -65,6 +65,7 @@ Enable package identity for debugging without creating full MSIX. Required for t
 - `--manifest` - Path to the appxmanifest.xml
 - `--no-install` - Do not install the package after creation.
 - `--quiet` / `-q` - Suppress progress messages
+- `--self-contained` - Copies Windows App SDK Runtime DLLs next to the executable and embeds activation manifests for self-contained deployment.
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp create-external-catalog`
 

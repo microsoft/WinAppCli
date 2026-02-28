@@ -8,6 +8,7 @@ export interface MsixIdentityOptions {
   noInstall?: boolean;
   keepIdentity?: boolean;
   manifest?: string;
+  selfContained?: boolean;
 }
 
 export interface MsixIdentityResult {
@@ -56,6 +57,9 @@ export async function addMsixIdentityToExe(
   args.push('--no-install');
 
   // Add optional arguments
+  if (options.selfContained) {
+    args.push('--self-contained');
+  }
   if (verbose) {
     args.push('--verbose');
   }
@@ -75,7 +79,7 @@ export async function addMsixIdentityToExe(
 export async function addElectronDebugIdentity(
   options: MsixIdentityOptions = {}
 ): Promise<ElectronDebugIdentityResult> {
-  const { verbose = false, noInstall = false, keepIdentity = false, manifest } = options;
+  const { verbose = false, noInstall = false, keepIdentity = false, manifest, selfContained = false } = options;
 
   if (verbose) {
     console.log('🔐 Adding MSIX debug identity to Electron...');
@@ -174,6 +178,9 @@ export async function addElectronDebugIdentity(
     }
     if (keepIdentity) {
       args.push('--keep-identity');
+    }
+    if (selfContained) {
+      args.push('--self-contained');
     }
     if (verbose) {
       args.push('--verbose');

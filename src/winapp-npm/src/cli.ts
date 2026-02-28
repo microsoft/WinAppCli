@@ -341,6 +341,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     verbose: false,
     'no-install': false,
     'keep-identity': false,
+    'self-contained': false,
     manifest: undefined,
   });
 
@@ -363,6 +364,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     );
     console.log('  --no-install          Do not install the package after creation (will require manual registration)');
     console.log('  --keep-identity       Keep the manifest identity as-is, without appending .debug suffix');
+    console.log('  --self-contained      Bundle Windows App SDK runtime next to the electron.exe executable');
     console.log('  --verbose             Enable verbose output (default: false)');
     console.log('  --help                Show this help');
     console.log('');
@@ -376,6 +378,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
       verbose: options.verbose as boolean,
       noInstall: options['no-install'] as boolean,
       keepIdentity: options['keep-identity'] as boolean,
+      selfContained: options['self-contained'] as boolean,
       manifest: options.manifest as string | undefined,
     });
 

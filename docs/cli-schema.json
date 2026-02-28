@@ -330,6 +330,19 @@
           "required": false,
           "recursive": false
         },
+        "--self-contained": {
+          "description": "Copies Windows App SDK Runtime DLLs next to the executable and embeds activation manifests for self-contained deployment.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--verbose": {
           "description": "Enable verbose output",
           "hidden": false,

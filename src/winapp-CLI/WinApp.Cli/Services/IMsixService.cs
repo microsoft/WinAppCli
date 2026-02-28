@@ -31,5 +31,6 @@ internal interface IMsixService
         bool noInstall,
         bool keepIdentity,
         TaskContext taskContext,
+        bool selfContained = false,
         CancellationToken cancellationToken = default);
 }
