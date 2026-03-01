@@ -297,7 +297,7 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 
 ### run
 
-Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
+Create debug identity and launch the packaged application. By default, the app is launched via an execution alias which enables capturing debug output (`Debug.WriteLine`, `OutputDebugString`), stdout/stderr, and exception events directly in the terminal. This works regardless of IDE — no Visual Studio required.
 
 ```bash
 winapp run [options]
@@ -308,23 +308,49 @@ winapp run [options]
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect in build output or current directory)
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside manifest's directory)
 - `--args <string>` - Command-line arguments to pass to the application
+- `--no-launch` - Only create the debug identity and register the package without launching the application
+- `--aumid-launch` - Launch the application using COM activation (AUMID) instead of the default execution alias launch. Disables output capture. Use this when you need to attach a VS Code or Visual Studio debugger
+- `--output-filter <categories>` - Filter which output categories to display. Comma-separated values: `stdout`, `stderr`, `debug`, `debug-all`, `exception`. Default: `stdout,stderr,debug,exception`. Use `debug-all` to include system/runtime debug noise
+- `--json` - Output in JSON format
 
 **What it does:**
 
 - Locates or generates the AppxManifest.xml
 - Creates and registers a debug identity using a loose layout package
+- Injects an AppExecutionAlias for output capture (unless `--aumid-launch` is specified)
 - Computes the Application User Model ID (AUMID)
-- Launches the application using the registered identity
+- Launches the application and streams debug output to the terminal
 - Prints the process ID (PID) for debugger attachment
+
+**Output categories:**
+
+| Category | Default | Description |
+|---|---|---|
+| `stdout` | ✅ | Application's standard output |
+| `stderr` | ✅ | Application's standard error |
+| `debug` | ✅ | App-level `Debug.WriteLine` / `OutputDebugString` (system noise filtered) |
+| `debug-all` | ❌ | All `OutputDebugString` including system/runtime internals |
+| `exception` | ✅ | First-chance and unhandled exception events |
+
+> **Note:** Output capture uses the Win32 Debug API. Only one debugger can attach to a process at a time — if you need to attach Visual Studio or VS Code's debugger, use `--aumid-launch` to disable output capture.
 
 **Examples:**
 
 ```bash
-# Register debug identity, and launch app (auto-detect manifest)
+# Register debug identity, launch app, and stream output (default)
 winapp run
 
 # Launch with custom manifest and arguments
 winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value"
+
+# Show only stdout and debug output
+winapp run --output-filter stdout,debug
+
+# Show all debug output including system/runtime noise
+winapp run --output-filter debug-all
+
+# Launch via COM activation (for debugger attachment)
+winapp run --aumid-launch
 
 # Specify output directory for loose layout package
 winapp run --output-appx-directory ./AppXDebug

@@ -64,7 +64,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         OutputFilterOption = new Option<string[]>("--output-filter")
         {
-            Description = "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.",
+            Description = "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, debug-all, exception. Default: stdout,stderr,debug,exception. Use debug-all to include system/runtime debug output.",
             AllowMultipleArgumentsPerToken = true
         };
     }
@@ -275,7 +275,7 @@ internal partial class RunCommand : Command, IShortDescription
             var output = Console.Error;
 
             // Start Win32 Debug API capture on a dedicated thread (handles debug + exception categories)
-            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, filter.Debug, filter.Exception, cancellationToken);
+            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, filter.Debug, filter.DebugAll, filter.Exception, cancellationToken);
 
             // If launched via alias, pipe stdout/stderr from the original Process object
             Task? stdoutTask = null;
@@ -393,22 +393,19 @@ internal sealed class RunCommandResult
 internal partial class RunCommandJsonContext : JsonSerializerContext;
 
 /// <summary>
-/// Parsed output filter from --output-filter. All categories default to true.
+/// Parsed output filter from --output-filter. All categories default to true except debug-all.
 /// </summary>
 internal sealed class OutputFilter
 {
     public bool Stdout { get; init; } = true;
     public bool Stderr { get; init; } = true;
     public bool Debug { get; init; } = true;
+    public bool DebugAll { get; init; }
     public bool Exception { get; init; } = true;
 
-    private static readonly HashSet<string> ValidCategories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "stdout", "stderr", "debug", "exception"
-    };
-
     /// <summary>
-    /// Parses comma-separated filter values. If null/empty, returns all-enabled.
+    /// Parses comma-separated filter values. If null/empty, returns defaults.
+    /// When explicit values are provided, only those categories are enabled.
     /// </summary>
     public static OutputFilter Parse(string[]? values)
     {
@@ -422,11 +419,14 @@ internal sealed class OutputFilter
             .SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var hasDebugAll = categories.Contains("debug-all");
+
         return new OutputFilter
         {
             Stdout = categories.Contains("stdout"),
             Stderr = categories.Contains("stderr"),
-            Debug = categories.Contains("debug"),
+            Debug = categories.Contains("debug") || hasDebugAll,
+            DebugAll = hasDebugAll,
             Exception = categories.Contains("exception")
         };
     }

@@ -1227,7 +1227,7 @@
           "recursive": false
         },
         "--output-filter": {
-          "description": "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.",
+          "description": "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, debug-all, exception. Default: stdout,stderr,debug,exception. Use debug-all to include system/runtime debug output.",
           "hidden": false,
           "valueType": "System.String[]",
           "hasDefaultValue": false,

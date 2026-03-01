@@ -149,8 +149,13 @@ Understanding the architecture helps when troubleshooting or customizing your se
 
 1. Creates a **loose-layout package** — a folder structure with your app binaries and manifest, registered with Windows via the same APIs that Visual Studio uses.
 2. Registers the package identity with the system using `Add-AppxPackage`.
-3. Launches the app through the Windows Application Activation Manager.
-4. Prints the **process ID** to stdout, which callers (the VS Code extension, MSBuild targets, Electron Forge, etc.) use to attach a debugger.
+3. Injects an **AppExecutionAlias** into the manifest for output capture.
+4. Launches the app through the execution alias and attaches the Win32 Debug API.
+5. Streams **debug output** (`Debug.WriteLine`, `OutputDebugString`), **stdout/stderr**, and **exception events** directly to the terminal.
+
+This means you get Visual Studio-like debug output without needing Visual Studio — it works from any terminal, with any build system.
+
+> Use `--aumid-launch` to switch to traditional COM activation (e.g., when you need to attach a separate debugger). Use `--output-filter` to control which output categories are shown (e.g., `--output-filter stdout,debug` to hide exceptions and stderr).
 
 This works regardless of how the app was built — whether from `dotnet build`, `cmake`, `npm run make`, or any other build system.
 

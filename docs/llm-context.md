@@ -187,7 +187,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 - `--manifest` - Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--output-appx-directory` - Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.
-- `--output-filter` - Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.
+- `--output-filter` - Filter which output categories to display. Comma-separated values: stdout, stderr, debug, debug-all, exception. Default: stdout,stderr,debug,exception. Use debug-all to include system/runtime debug output.
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp sign`

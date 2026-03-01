@@ -17,6 +17,10 @@ internal static partial class ManifestAliasHelper
     [GeneratedRegex(@"(\s*</Application>)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex ApplicationCloseTagRegex();
 
+    // Matches closing </Extensions> tag inside Application (before </Application>)
+    [GeneratedRegex(@"(\s*</Extensions>\s*</Application>)", RegexOptions.IgnoreCase | RegexOptions.Singleline, "en-US")]
+    private static partial Regex ApplicationExtensionsCloseTagRegex();
+
     /// <summary>
     /// Generates a deterministic execution alias name from a package name.
     /// </summary>
@@ -27,6 +31,7 @@ internal static partial class ManifestAliasHelper
 
     /// <summary>
     /// Injects an AppExecutionAlias extension into the manifest content.
+    /// Handles manifests that already have an Extensions block inside Application.
     /// Returns the modified manifest content.
     /// </summary>
     public static string InjectExecutionAlias(string manifestContent, string aliasName, string executableName)
@@ -41,18 +46,29 @@ internal static partial class ManifestAliasHelper
         // Add uap5 to IgnorableNamespaces if present
         manifestContent = AddToIgnorableNamespaces(manifestContent, "uap5");
 
-        // Inject the AppExecutionAlias extension before </Application>
-        var extensionXml = $@"
-        <Extensions>
+        var aliasExtensionXml = $@"
           <uap5:Extension Category=""windows.appExecutionAlias"" Executable=""{executableName}"" EntryPoint=""Windows.FullTrustApplication"">
             <uap5:AppExecutionAlias>
               <uap5:ExecutionAlias Alias=""{aliasName}"" />
             </uap5:AppExecutionAlias>
-          </uap5:Extension>
+          </uap5:Extension>";
+
+        // If Application already has an <Extensions> block, add our extension inside it
+        if (ApplicationExtensionsCloseTagRegex().IsMatch(manifestContent))
+        {
+            manifestContent = ApplicationExtensionsCloseTagRegex().Replace(manifestContent,
+                $"{aliasExtensionXml}$1", 1);
+        }
+        else
+        {
+            // No <Extensions> inside <Application> — create one
+            var extensionsBlock = $@"
+        <Extensions>{aliasExtensionXml}
         </Extensions>";
 
-        manifestContent = ApplicationCloseTagRegex().Replace(manifestContent,
-            $"{extensionXml}$1", 1);
+            manifestContent = ApplicationCloseTagRegex().Replace(manifestContent,
+                $"{extensionsBlock}$1", 1);
+        }
 
         return manifestContent;
     }

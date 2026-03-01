@@ -22,9 +22,10 @@ internal class DebugOutputService : IDebugOutputService
     private const uint EXCEPTION_BREAKPOINT = 0x80000003;
     private const uint EXCEPTION_SINGLE_STEP = 0x80000004;
     private const uint CLR_NOTIFICATION_EXCEPTION = 0x04242420;
+    private const uint WINRT_ORIGINATE_ERROR = 0x40080201;
 
     /// <inheritdoc />
-    public Task RunDebugEventLoopAsync(uint processId, TextWriter output, bool captureDebug = true, bool captureExceptions = true, CancellationToken cancellationToken = default)
+    public Task RunDebugEventLoopAsync(uint processId, TextWriter output, bool captureDebug = true, bool captureDebugAll = false, bool captureExceptions = true, CancellationToken cancellationToken = default)
     {
         // The debug event loop must run on its own dedicated thread because
         // WaitForDebugEventEx requires the same thread that called DebugActiveProcess.
@@ -73,12 +74,15 @@ internal class DebugOutputService : IDebugOutputService
                                 break;
 
                             case DEBUG_EVENT_CODE.OUTPUT_DEBUG_STRING_EVENT:
-                                if (captureDebug)
+                                if (captureDebug || captureDebugAll)
                                 {
                                     var message = ReadDebugString(processHandle, debugEvent.u.DebugString);
                                     if (!string.IsNullOrEmpty(message))
                                     {
-                                        output.WriteLine($"[DEBUG] {message}");
+                                        if (captureDebugAll || !IsSystemDebugNoise(message))
+                                        {
+                                            output.WriteLine($"[DEBUG] {message}");
+                                        }
                                     }
                                 }
                                 break;
@@ -88,7 +92,7 @@ internal class DebugOutputService : IDebugOutputService
                                 bool firstChance = debugEvent.u.Exception.dwFirstChance != 0;
 
                                 // Suppress internal runtime exceptions; show user-visible ones if filter allows
-                                if (captureExceptions && exCode != EXCEPTION_BREAKPOINT && exCode != EXCEPTION_SINGLE_STEP && exCode != CLR_NOTIFICATION_EXCEPTION)
+                                if (captureExceptions && exCode != EXCEPTION_BREAKPOINT && exCode != EXCEPTION_SINGLE_STEP && exCode != CLR_NOTIFICATION_EXCEPTION && exCode != WINRT_ORIGINATE_ERROR)
                                 {
                                     var label = firstChance ? "First-chance" : "Unhandled";
                                     output.WriteLine($"[EXCEPTION] {label} exception 0x{exCode:X8}");
@@ -190,5 +194,34 @@ internal class DebugOutputService : IDebugOutputService
 
         // Trim null terminators and trailing whitespace
         return result.TrimEnd('\0', '\r', '\n');
+    }
+
+    // Known system source path prefixes in OutputDebugString from Windows/runtime components
+    private static readonly string[] SystemDebugPrefixes =
+    [
+        @"onecore\",
+        @"onecoreuap\",
+        @"C:\__w\",           // Windows App Runtime build agent paths
+        @"minkernel\",
+        @"dxg\",
+        @"shell\",
+        @"windows\",
+    ];
+
+    /// <summary>
+    /// Detects OutputDebugString messages from system/runtime components by source path prefix.
+    /// These messages typically have the format: "source\path.cpp(line)\module.dll!addr: ..."
+    /// App-level Debug.WriteLine produces plain text with no source prefix.
+    /// </summary>
+    private static bool IsSystemDebugNoise(string message)
+    {
+        foreach (var prefix in SystemDebugPrefixes)
+        {
+            if (message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
