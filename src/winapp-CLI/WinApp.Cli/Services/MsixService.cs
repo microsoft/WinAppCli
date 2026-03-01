@@ -352,7 +352,7 @@ internal partial class MsixService(
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, Func<string, DirectoryInfo, string>? manifestTransform = null, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -446,6 +446,13 @@ internal partial class MsixService(
         }
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+
+        // Apply optional manifest transform (e.g., injecting execution alias for --debug-output)
+        if (manifestTransform != null)
+        {
+            manifestContent = manifestTransform(manifestContent, outputAppXDirectory);
+            await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        }
 
         // Copy all assets
         var originalManifestDir = appxManifestPath.DirectoryName;

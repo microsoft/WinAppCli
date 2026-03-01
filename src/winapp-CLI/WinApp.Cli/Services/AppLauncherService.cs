@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,6 +22,27 @@ internal class AppLauncherService : IAppLauncherService
         var aam = ApplicationActivationManager.CreateInstance<IApplicationActivationManager>();
         aam.ActivateApplication(aumid, arguments ?? string.Empty, ACTIVATEOPTIONS.AO_NONE, out uint pid);
         return pid;
+    }
+
+    /// <inheritdoc />
+    public Process LaunchByAlias(string aliasName, string? arguments = null)
+    {
+        // The execution alias stub is created in WindowsApps on the user's PATH.
+        // Launching via Process.Start with UseShellExecute=false enables stdio redirection
+        // while the alias mechanism provides package identity.
+        var psi = new ProcessStartInfo
+        {
+            FileName = aliasName,
+            Arguments = arguments ?? string.Empty,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to launch app via execution alias '{aliasName}'.");
+        return process;
     }
 
     /// <inheritdoc />

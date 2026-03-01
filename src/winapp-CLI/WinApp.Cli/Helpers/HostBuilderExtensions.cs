@@ -15,6 +15,7 @@ internal static class StoreHostBuilderExtensions
 {
     public static IServiceCollection ConfigureServices(this IServiceCollection services)
     {
+#pragma warning disable CA1416 // DebugOutputService requires Windows 10+ but DI registration is unconditional
         return services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(Directory.GetCurrentDirectory()))
             .AddSingleton<IBuildToolsService, BuildToolsService>()
@@ -38,10 +39,12 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
             .AddSingleton<IAppLauncherService, AppLauncherService>()
+            .AddSingleton<IDebugOutputService, DebugOutputService>()
             .AddSingleton<IDotNetService, DotNetService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
+#pragma warning restore CA1416
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)

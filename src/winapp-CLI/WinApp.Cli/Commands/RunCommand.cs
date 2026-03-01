@@ -6,8 +6,10 @@ using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -22,6 +24,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
+    public static Option<bool> DebugOutputOption { get; }
 
     static RunCommand()
     {
@@ -52,6 +55,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Only create the debug identity and register the package without launching the application"
         };
+
+        DebugOutputOption = new Option<bool>("--debug-output")
+        {
+            Description = "Capture and display debug output (Debug.WriteLine, OutputDebugString) and stdout/stderr from the launched application. Note: only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -61,12 +69,14 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
+        Options.Add(DebugOutputOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
+        IDebugOutputService debugOutputService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         IStatusService statusService) : AsynchronousCommandLineAction
@@ -78,14 +88,19 @@ internal partial class RunCommand : Command, IShortDescription
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
+            var debugOutput = parseResult.GetValue(DebugOutputOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             uint processId = 0;
+            Process? aliasProcess = null;
             string? packageFamilyName = null;
             string? publisher = null;
             string? applicationId = null;
+            string? packageName = null;
             string? aumid = null;
+            string? aliasName = null;
             string? errorMessage = null;
+            DirectoryInfo? resolvedOutputDir = null;
             var statusMessage = noLaunch ? "Registering packaged application..." : "Launching packaged application...";
             var success = await statusService.ExecuteWithStatusAsync(statusMessage, async (taskContext, cancellationToken) =>
             {
@@ -122,17 +137,43 @@ internal partial class RunCommand : Command, IShortDescription
                         }
                     }
 
-                    outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    resolvedOutputDir = outputAppXDirectory ?? new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    outputAppXDirectory = resolvedOutputDir;
 
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
+
+                    // If --debug-output, prepare a manifest transform to inject execution alias before registration
+                    Func<string, DirectoryInfo, string>? manifestTransform = null;
+                    if (debugOutput && !noLaunch)
+                    {
+                        manifestTransform = (content, outDir) =>
+                        {
+                            // Find the executable name from the manifest
+                            var exeMatch = ApplicationExecutableRegex().Match(content);
+                            var executableName = exeMatch.Success ? exeMatch.Groups[1].Value : "app.exe";
+
+                            // Extract package name from the manifest Identity element
+                            var identity = MsixService.ParseAppxManifestAsync(content);
+
+                            // Generate alias and inject into manifest
+                            aliasName = ManifestAliasHelper.GenerateAliasName(identity.PackageName);
+                            content = ManifestAliasHelper.InjectExecutionAlias(content, aliasName, executableName);
+
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Injected execution alias '{aliasName}'");
+                            return content;
+                        };
+                    }
+
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
                         resolvedManifest,
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        manifestTransform,
                         cancellationToken);
 
+                    packageName = identityResult.PackageName;
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
                         identityResult.PackageName,
                         identityResult.Publisher);
@@ -145,14 +186,30 @@ internal partial class RunCommand : Command, IShortDescription
                     taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {applicationId}");
                     taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
 
+                    if (debugOutput && !noLaunch && aliasName != null)
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Execution alias: {aliasName}");
+                    }
+
                     if (noLaunch)
                     {
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
-                    // Step 3: Launch the application using IApplicationActivationManager
-                    taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
-                    processId = appLauncherService.LaunchByAumid(aumid, appArgs);
+                    if (debugOutput && aliasName != null)
+                    {
+                        // Launch via execution alias for stdio capture
+                        taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application via execution alias...");
+                        aliasProcess = appLauncherService.LaunchByAlias(aliasName, appArgs);
+                        processId = (uint)aliasProcess.Id;
+                        taskContext.AddDebugMessage($"{UiSymbols.Note} Debug output enabled. Only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously.");
+                    }
+                    else
+                    {
+                        // Standard COM activation launch
+                        taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
+                        processId = appLauncherService.LaunchByAumid(aumid, appArgs);
+                    }
 
                     return (0, $"{packageFamilyName} launched (PID: {processId})");
                 }
@@ -167,7 +224,7 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage);
+                    PrintJson(aumid, processId: null, errorMessage, debugOutput);
                 }
                 return success;
             }
@@ -176,30 +233,109 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage: null);
+                    PrintJson(aumid, processId: null, errorMessage: null, debugOutput);
                 }
                 return success;
             }
 
             if (isJson)
             {
-                PrintJson(aumid, processId, errorMessage: null);
+                PrintJson(aumid, processId, errorMessage: null, debugOutput);
             }
 
-            // Wait for the launched process to exit before returning
-            using var process = Process.GetProcessById((int)processId);
-            await process.WaitForExitAsync(cancellationToken);
+            if (debugOutput)
+            {
+                return await RunWithDebugOutputAsync(processId, aliasProcess, cancellationToken);
+            }
 
-            return process.ExitCode;
+            // Standard flow: wait for the launched process to exit
+            using var proc = Process.GetProcessById((int)processId);
+            await proc.WaitForExitAsync(cancellationToken);
+            return proc.ExitCode;
         }
 
-        void PrintJson(string? aumid, uint? processId, string? errorMessage)
+        /// <summary>
+        /// Runs the launched app while capturing debug output (OutputDebugString) and stdio.
+        /// </summary>
+        private async Task<int> RunWithDebugOutputAsync(uint processId, Process? aliasProcess, CancellationToken cancellationToken)
+        {
+            var output = Console.Error;
+
+            // Start Win32 Debug API capture on a dedicated thread
+            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, cancellationToken);
+
+            // If launched via alias, pipe stdout/stderr from the original Process object
+            Task? stdoutTask = null;
+            Task? stderrTask = null;
+
+            if (aliasProcess != null)
+            {
+                stdoutTask = PipeStreamAsync(aliasProcess.StandardOutput, output, "[STDOUT]", cancellationToken);
+                stderrTask = PipeStreamAsync(aliasProcess.StandardError, output, "[STDERR]", cancellationToken);
+            }
+
+            // Wait for the debug event loop to complete (EXIT_PROCESS_DEBUG_EVENT)
+            await debugTask;
+
+            // Give stdio streams a short time to flush after process exit
+            if (stdoutTask != null || stderrTask != null)
+            {
+                var streamTasks = new List<Task>();
+                if (stdoutTask != null)
+                {
+                    streamTasks.Add(stdoutTask);
+                }
+                if (stderrTask != null)
+                {
+                    streamTasks.Add(stderrTask);
+                }
+                await Task.WhenAny(Task.WhenAll(streamTasks), Task.Delay(2000, cancellationToken));
+            }
+
+            try
+            {
+                if (aliasProcess != null)
+                {
+                    aliasProcess.WaitForExit(0);
+                    return aliasProcess.ExitCode;
+                }
+                using var proc = Process.GetProcessById((int)processId);
+                return proc.ExitCode;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static async Task PipeStreamAsync(StreamReader reader, TextWriter output, string prefix, CancellationToken cancellationToken)
+        {
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    var line = await reader.ReadLineAsync(cancellationToken);
+                    if (line == null)
+                    {
+                        break;
+                    }
+                    await output.WriteLineAsync($"{prefix} {line}");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on cancellation
+            }
+        }
+
+        void PrintJson(string? aumid, uint? processId, string? errorMessage, bool debugOutput)
         {
             var result = new RunCommandResult
             {
                 AUMID = aumid,
                 ProcessId = processId,
-                Error = errorMessage
+                Error = errorMessage,
+                DebugOutput = debugOutput ? true : null
             };
 
             var json = JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);
@@ -217,6 +353,9 @@ internal partial class RunCommand : Command, IShortDescription
             return new FileInfo(manifestPath);
         }
     }
+
+    [GeneratedRegex(@"<Application[^>]*Executable\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex ApplicationExecutableRegex();
 }
 
 internal sealed class RunCommandResult
@@ -224,6 +363,7 @@ internal sealed class RunCommandResult
     public string? AUMID { get; set; }
     public uint? ProcessId { get; set; }
     public string? Error { get; set; }
+    public bool? DebugOutput { get; set; }
 }
 
 [JsonSerializable(typeof(RunCommandResult))]

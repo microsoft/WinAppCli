@@ -1163,6 +1163,19 @@
           "required": false,
           "recursive": false
         },
+        "--debug-output": {
+          "description": "Capture and display debug output (Debug.WriteLine, OutputDebugString) and stdout/stderr from the launched application. Note: only one debugger can attach ΓÇö VS Code/Visual Studio debugger cannot attach simultaneously.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Output in JSON format",
           "hidden": false,

@@ -38,5 +38,6 @@ internal interface IMsixService
         DirectoryInfo inputDirectory,
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
+        Func<string, DirectoryInfo, string>? manifestTransform = null,
         CancellationToken cancellationToken = default);
 }

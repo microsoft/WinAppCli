@@ -31,3 +31,10 @@ CryptCATCDFEnumMembersByCDFTagEx
 CryptCATCDFEnumAttributesWithCDFTag
 IApplicationActivationManager
 ApplicationActivationManager
+DebugActiveProcess
+DebugActiveProcessStop
+WaitForDebugEventEx
+ContinueDebugEvent
+ReadProcessMemory
+DEBUG_EVENT
+OUTPUT_DEBUG_STRING_INFO
