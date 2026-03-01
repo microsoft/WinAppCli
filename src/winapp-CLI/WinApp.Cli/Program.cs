@@ -106,6 +106,13 @@ internal static class Program
 
         var parseResult = rootCommand.Parse(args);
 
+        // If --caller was passed, set the env var so telemetry picks it up
+        var callerValue = parseResult.GetValue(WinAppRootCommand.CallerOption);
+        if (!string.IsNullOrEmpty(callerValue))
+        {
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", callerValue);
+        }
+
         try
         {
             CommandInvokedEvent.Log(parseResult.CommandResult);

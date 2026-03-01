@@ -53,10 +53,20 @@
     https://github.com/microsoft/vscode-dotnettools/issues/1018
   -->
   <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
+    <Compile Remove="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs" />
     <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
       <AutoGen>True</AutoGen>
       <Visible>False</Visible>
     </Compile>
+  </ItemGroup>
+
+  <!--
+    Exclude obj/ from dotnet watch file monitoring.
+    Build-generated files (XAML codegen .g.cs/.g.i.cs) are regenerated every build,
+    which would otherwise cause dotnet watch to trigger infinite restart loops.
+  -->
+  <ItemGroup Condition="'$(UseWinUI)' == 'true'">
+    <Watch Remove="$(MSBuildProjectDirectory)\obj\**" />
   </ItemGroup>
 
   <!--
@@ -107,7 +117,7 @@
       <_WinAppLooseLayoutPathArg>$(WinAppLooseLayoutPath.TrimEnd('\'))</_WinAppLooseLayoutPathArg>
       <_WinAppInputFolderArg>$(OutputPath.TrimEnd('\'))</_WinAppInputFolderArg>
       <!-- Build command with input-folder positional argument -->
-      <_WinAppRunArgs>run "$(_WinAppInputFolderArg)"</_WinAppRunArgs>
+      <_WinAppRunArgs>run "$(_WinAppInputFolderArg)" --caller nuget-package</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
@@ -208,8 +218,8 @@
           DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout">
     
     <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
-      <RunCommand>cmd</RunCommand>
-      <RunArguments>/c "set WINAPP_CLI_CALLER=nuget-package &amp;&amp; &quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"</RunArguments>
+      <RunCommand>$(WinAppCliPath)</RunCommand>
+      <RunArguments>$(_WinAppRunArgs)</RunArguments>
       <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
     </PropertyGroup>
     

@@ -27,6 +27,12 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Description = "Output in JSON format"
     };
 
+    internal static readonly Option<string?> CallerOption = new("--caller")
+    {
+        Description = "Identifies the calling tool for telemetry (e.g., nuget-package, vscode-extension).",
+        Hidden = true
+    };
+
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")
     {
         Description = "Output the complete CLI command structure as JSON for tooling, scripting, and LLM integration. Includes all commands, options, arguments, and their descriptions.",
@@ -78,6 +84,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(createExternalCatalogCommand);
 
         Options.Add(CliSchemaOption);
+        Options.Add(CallerOption);
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
