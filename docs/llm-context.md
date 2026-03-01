@@ -182,11 +182,12 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 
 **Options:**
 - `--args` - Command-line arguments to pass to the application
-- `--debug-output` - Capture and display debug output (Debug.WriteLine, OutputDebugString) and stdout/stderr from the launched application. Note: only one debugger can attach ΓÇö VS Code/Visual Studio debugger cannot attach simultaneously.
+- `--aumid-launch` - Launch the application using COM activation (AUMID) instead of the default execution alias launch. Disables debug output and stdio capture.
 - `--json` - Output in JSON format
 - `--manifest` - Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--output-appx-directory` - Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.
+- `--output-filter` - Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.
 - `--quiet` / `-q` - Suppress progress messages
 - `--verbose` / `-v` - Enable verbose output
 ### `winapp sign`

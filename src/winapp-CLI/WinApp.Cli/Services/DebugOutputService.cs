@@ -24,7 +24,7 @@ internal class DebugOutputService : IDebugOutputService
     private const uint CLR_NOTIFICATION_EXCEPTION = 0x04242420;
 
     /// <inheritdoc />
-    public Task RunDebugEventLoopAsync(uint processId, TextWriter output, CancellationToken cancellationToken = default)
+    public Task RunDebugEventLoopAsync(uint processId, TextWriter output, bool captureDebug = true, bool captureExceptions = true, CancellationToken cancellationToken = default)
     {
         // The debug event loop must run on its own dedicated thread because
         // WaitForDebugEventEx requires the same thread that called DebugActiveProcess.
@@ -73,10 +73,13 @@ internal class DebugOutputService : IDebugOutputService
                                 break;
 
                             case DEBUG_EVENT_CODE.OUTPUT_DEBUG_STRING_EVENT:
-                                var message = ReadDebugString(processHandle, debugEvent.u.DebugString);
-                                if (!string.IsNullOrEmpty(message))
+                                if (captureDebug)
                                 {
-                                    output.WriteLine($"[DEBUG] {message}");
+                                    var message = ReadDebugString(processHandle, debugEvent.u.DebugString);
+                                    if (!string.IsNullOrEmpty(message))
+                                    {
+                                        output.WriteLine($"[DEBUG] {message}");
+                                    }
                                 }
                                 break;
 
@@ -84,8 +87,8 @@ internal class DebugOutputService : IDebugOutputService
                                 var exCode = debugEvent.u.Exception.ExceptionRecord.ExceptionCode;
                                 bool firstChance = debugEvent.u.Exception.dwFirstChance != 0;
 
-                                // Suppress initial breakpoint and single-step exceptions
-                                if (exCode != EXCEPTION_BREAKPOINT && exCode != EXCEPTION_SINGLE_STEP && exCode != CLR_NOTIFICATION_EXCEPTION)
+                                // Suppress internal runtime exceptions; show user-visible ones if filter allows
+                                if (captureExceptions && exCode != EXCEPTION_BREAKPOINT && exCode != EXCEPTION_SINGLE_STEP && exCode != CLR_NOTIFICATION_EXCEPTION)
                                 {
                                     var label = firstChance ? "First-chance" : "Unhandled";
                                     output.WriteLine($"[EXCEPTION] {label} exception 0x{exCode:X8}");

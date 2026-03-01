@@ -24,7 +24,8 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
-    public static Option<bool> DebugOutputOption { get; }
+    public static Option<bool> AumidLaunchOption { get; }
+    public static Option<string[]> OutputFilterOption { get; }
 
     static RunCommand()
     {
@@ -56,9 +57,15 @@ internal partial class RunCommand : Command, IShortDescription
             Description = "Only create the debug identity and register the package without launching the application"
         };
 
-        DebugOutputOption = new Option<bool>("--debug-output")
+        AumidLaunchOption = new Option<bool>("--aumid-launch")
         {
-            Description = "Capture and display debug output (Debug.WriteLine, OutputDebugString) and stdout/stderr from the launched application. Note: only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously."
+            Description = "Launch the application using COM activation (AUMID) instead of the default execution alias launch. Disables debug output and stdio capture."
+        };
+
+        OutputFilterOption = new Option<string[]>("--output-filter")
+        {
+            Description = "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.",
+            AllowMultipleArgumentsPerToken = true
         };
     }
 
@@ -69,7 +76,8 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
-        Options.Add(DebugOutputOption);
+        Options.Add(AumidLaunchOption);
+        Options.Add(OutputFilterOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -88,8 +96,13 @@ internal partial class RunCommand : Command, IShortDescription
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
-            var debugOutput = parseResult.GetValue(DebugOutputOption);
+            var aumidLaunch = parseResult.GetValue(AumidLaunchOption);
+            var outputFilterValues = parseResult.GetValue(OutputFilterOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Default: alias launch with all output. --aumid-launch disables output capture.
+            var useAliasLaunch = !aumidLaunch;
+            var outputFilter = OutputFilter.Parse(outputFilterValues);
 
             uint processId = 0;
             Process? aliasProcess = null;
@@ -145,7 +158,7 @@ internal partial class RunCommand : Command, IShortDescription
 
                     // If --debug-output, prepare a manifest transform to inject execution alias before registration
                     Func<string, DirectoryInfo, string>? manifestTransform = null;
-                    if (debugOutput && !noLaunch)
+                    if (useAliasLaunch && !noLaunch)
                     {
                         manifestTransform = (content, outDir) =>
                         {
@@ -186,7 +199,7 @@ internal partial class RunCommand : Command, IShortDescription
                     taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {applicationId}");
                     taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
 
-                    if (debugOutput && !noLaunch && aliasName != null)
+                    if (useAliasLaunch && !noLaunch && aliasName != null)
                     {
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Execution alias: {aliasName}");
                     }
@@ -196,13 +209,13 @@ internal partial class RunCommand : Command, IShortDescription
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
-                    if (debugOutput && aliasName != null)
+                    if (useAliasLaunch && aliasName != null)
                     {
                         // Launch via execution alias for stdio capture
                         taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application via execution alias...");
                         aliasProcess = appLauncherService.LaunchByAlias(aliasName, appArgs);
                         processId = (uint)aliasProcess.Id;
-                        taskContext.AddDebugMessage($"{UiSymbols.Note} Debug output enabled. Only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously.");
+                        taskContext.AddDebugMessage($"{UiSymbols.Note} Output capture enabled. Only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously.");
                     }
                     else
                     {
@@ -224,7 +237,7 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage, debugOutput);
+                    PrintJson(aumid, processId: null, errorMessage, useAliasLaunch);
                 }
                 return success;
             }
@@ -233,19 +246,19 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage: null, debugOutput);
+                    PrintJson(aumid, processId: null, errorMessage: null, useAliasLaunch);
                 }
                 return success;
             }
 
             if (isJson)
             {
-                PrintJson(aumid, processId, errorMessage: null, debugOutput);
+                PrintJson(aumid, processId, errorMessage: null, useAliasLaunch);
             }
 
-            if (debugOutput)
+            if (useAliasLaunch)
             {
-                return await RunWithDebugOutputAsync(processId, aliasProcess, cancellationToken);
+                return await RunWithDebugOutputAsync(processId, aliasProcess, outputFilter, cancellationToken);
             }
 
             // Standard flow: wait for the launched process to exit
@@ -257,12 +270,12 @@ internal partial class RunCommand : Command, IShortDescription
         /// <summary>
         /// Runs the launched app while capturing debug output (OutputDebugString) and stdio.
         /// </summary>
-        private async Task<int> RunWithDebugOutputAsync(uint processId, Process? aliasProcess, CancellationToken cancellationToken)
+        private async Task<int> RunWithDebugOutputAsync(uint processId, Process? aliasProcess, OutputFilter filter, CancellationToken cancellationToken)
         {
             var output = Console.Error;
 
-            // Start Win32 Debug API capture on a dedicated thread
-            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, cancellationToken);
+            // Start Win32 Debug API capture on a dedicated thread (handles debug + exception categories)
+            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, filter.Debug, filter.Exception, cancellationToken);
 
             // If launched via alias, pipe stdout/stderr from the original Process object
             Task? stdoutTask = null;
@@ -270,8 +283,14 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (aliasProcess != null)
             {
-                stdoutTask = PipeStreamAsync(aliasProcess.StandardOutput, output, "[STDOUT]", cancellationToken);
-                stderrTask = PipeStreamAsync(aliasProcess.StandardError, output, "[STDERR]", cancellationToken);
+                if (filter.Stdout)
+                {
+                    stdoutTask = PipeStreamAsync(aliasProcess.StandardOutput, output, "[STDOUT]", cancellationToken);
+                }
+                if (filter.Stderr)
+                {
+                    stderrTask = PipeStreamAsync(aliasProcess.StandardError, output, "[STDERR]", cancellationToken);
+                }
             }
 
             // Wait for the debug event loop to complete (EXIT_PROCESS_DEBUG_EVENT)
@@ -328,14 +347,14 @@ internal partial class RunCommand : Command, IShortDescription
             }
         }
 
-        void PrintJson(string? aumid, uint? processId, string? errorMessage, bool debugOutput)
+        void PrintJson(string? aumid, uint? processId, string? errorMessage, bool outputCapture)
         {
             var result = new RunCommandResult
             {
                 AUMID = aumid,
                 ProcessId = processId,
                 Error = errorMessage,
-                DebugOutput = debugOutput ? true : null
+                OutputCapture = outputCapture ? true : null
             };
 
             var json = JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);
@@ -363,7 +382,7 @@ internal sealed class RunCommandResult
     public string? AUMID { get; set; }
     public uint? ProcessId { get; set; }
     public string? Error { get; set; }
-    public bool? DebugOutput { get; set; }
+    public bool? OutputCapture { get; set; }
 }
 
 [JsonSerializable(typeof(RunCommandResult))]
@@ -372,3 +391,43 @@ internal sealed class RunCommandResult
     NewLine = "\n",
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class RunCommandJsonContext : JsonSerializerContext;
+
+/// <summary>
+/// Parsed output filter from --output-filter. All categories default to true.
+/// </summary>
+internal sealed class OutputFilter
+{
+    public bool Stdout { get; init; } = true;
+    public bool Stderr { get; init; } = true;
+    public bool Debug { get; init; } = true;
+    public bool Exception { get; init; } = true;
+
+    private static readonly HashSet<string> ValidCategories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "stdout", "stderr", "debug", "exception"
+    };
+
+    /// <summary>
+    /// Parses comma-separated filter values. If null/empty, returns all-enabled.
+    /// </summary>
+    public static OutputFilter Parse(string[]? values)
+    {
+        if (values == null || values.Length == 0)
+        {
+            return new OutputFilter();
+        }
+
+        // Flatten comma-separated values (e.g. ["stdout,debug"] → ["stdout", "debug"])
+        var categories = values
+            .SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new OutputFilter
+        {
+            Stdout = categories.Contains("stdout"),
+            Stderr = categories.Contains("stderr"),
+            Debug = categories.Contains("debug"),
+            Exception = categories.Contains("exception")
+        };
+    }
+}

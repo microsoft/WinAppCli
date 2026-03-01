@@ -1163,8 +1163,8 @@
           "required": false,
           "recursive": false
         },
-        "--debug-output": {
-          "description": "Capture and display debug output (Debug.WriteLine, OutputDebugString) and stdout/stderr from the launched application. Note: only one debugger can attach ΓÇö VS Code/Visual Studio debugger cannot attach simultaneously.",
+        "--aumid-launch": {
+          "description": "Launch the application using COM activation (AUMID) instead of the default execution alias launch. Disables debug output and stdio capture.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -1222,6 +1222,17 @@
           "arity": {
             "minimum": 1,
             "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--output-filter": {
+          "description": "Filter which output categories to display. Comma-separated values: stdout, stderr, debug, exception. Default: all.",
+          "hidden": false,
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1
           },
           "required": false,
           "recursive": false
