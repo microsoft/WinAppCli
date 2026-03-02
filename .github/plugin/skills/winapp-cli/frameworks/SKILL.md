@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-frameworks
-description: Framework-specific guidance and links to detailed guides for Electron, .NET, C++, Rust, Flutter, and Tauri. Use when working with a specific app framework.
+description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
+version: 0.2.1
 ---
 ## When to use
 

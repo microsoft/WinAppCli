@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-manifest
-description: Generate and modify appxmanifest.xml files for package identity and MSIX packaging with winapp CLI.
+description: Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets. Use when creating a Windows app manifest, adding Windows capabilities, or updating app icons and assets.
+version: 0.2.1
 ---
 ## When to use
 

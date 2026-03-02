@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-identity
-description: Add package identity for debugging Windows APIs that require it (push notifications, background tasks, etc.) without creating a full MSIX package.
+description: Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app.
+version: 0.2.1
 ---
 ## When to use
 
@@ -67,10 +67,11 @@ After running, launch your exe normally — Windows will recognize it as having 
 ## Recommended workflow
 
 1. **Setup** — `winapp init --use-defaults` (creates `appxmanifest.xml`)
-2. **Build** your app
-3. **Register identity** — `winapp create-debug-identity ./bin/myapp.exe`
-4. **Run** your app — identity-requiring APIs now work
-5. **Re-run step 4** whenever you change `appxmanifest.xml` or `Assets/`
+2. **Generate development certificate** — `winapp cert generate`
+3. **Build** your app
+4. **Register identity** — `winapp create-debug-identity ./bin/myapp.exe`
+5. **Run** your app — identity-requiring APIs now work
+6. **Re-run step 4** whenever you change `appxmanifest.xml` or `Assets/`
 
 ## Tips
 

@@ -233,13 +233,13 @@ function Format-CommandSections {
 # Generate each skill
 $SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks")
 $SkillDescriptions = @{
-    "setup"        = "Project setup with winapp CLI: init, restore, update. Use when setting up a new project, restoring after clone, or updating SDK versions."
-    "package"      = "Create an MSIX installer package from a built Windows app using winapp CLI. Use when the user needs to package, distribute, or test their Windows app as an MSIX."
-    "identity"     = "Add package identity for debugging Windows APIs that require it (push notifications, background tasks, etc.) without creating a full MSIX package."
-    "signing"      = "Generate, install, and manage development certificates for code signing MSIX packages and executables with winapp CLI."
-    "manifest"     = "Generate and modify appxmanifest.xml files for package identity and MSIX packaging with winapp CLI."
-    "troubleshoot" = "Diagnose and fix common errors with winapp CLI. Use when the user encounters errors or needs help choosing the right command."
-    "frameworks"   = "Framework-specific guidance and links to detailed guides for Electron, .NET, C++, Rust, Flutter, and Tauri. Use when working with a specific app framework."
+    "setup"        = "Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning."
+    "package"      = "Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, or distributing a desktop app."
+    "identity"     = "Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app."
+    "signing"      = "Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues."
+    "manifest"     = "Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets. Use when creating a Windows app manifest, adding Windows capabilities, or updating app icons and assets."
+    "troubleshoot" = "Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation."
+    "frameworks"   = "Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app."
 }
 
 foreach ($skillName in $SkillNames) {
@@ -256,10 +256,10 @@ foreach ($skillName in $SkillNames) {
     
     # Build the SKILL.md content
     $skillContent = @"
-<!-- winapp-cli: version=$CliVersion -->
 ---
 name: winapp-$skillName
 description: $description
+version: $CliVersion
 ---
 
 "@

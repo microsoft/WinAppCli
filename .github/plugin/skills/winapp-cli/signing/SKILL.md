@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-signing
-description: Generate, install, and manage development certificates for code signing MSIX packages and executables with winapp CLI.
+description: Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues.
+version: 0.2.1
 ---
 ## When to use
 

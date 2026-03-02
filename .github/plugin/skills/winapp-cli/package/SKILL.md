@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-package
-description: Create an MSIX installer package from a built Windows app using winapp CLI. Use when the user needs to package, distribute, or test their Windows app as an MSIX.
+description: Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, or distributing a desktop app.
+version: 0.2.1
 ---
 ## When to use
 

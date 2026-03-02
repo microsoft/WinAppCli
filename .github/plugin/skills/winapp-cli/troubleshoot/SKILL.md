@@ -1,7 +1,7 @@
-<!-- winapp-cli: version=0.2.0 -->
 ---
 name: winapp-troubleshoot
-description: Diagnose and fix common errors with winapp CLI. Use when the user encounters errors or needs help choosing the right command.
+description: Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation.
+version: 0.2.1
 ---
 ## When to use
 
