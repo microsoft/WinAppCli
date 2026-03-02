@@ -41,17 +41,32 @@ MSBuild Build Target
 _WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
     │
     ▼
-_WinAppInterceptRun (overrides RunCommand with CLI path)
+_WinAppPrepareRunArguments (overrides RunCommand with CLI path)
     │
     ▼
-Run Target (invokes: winapp run --manifest ...)
+Run Target (invokes: winapp run <output-path> --caller nuget-package ...)
     │
     ▼
 WinAppCLI
-    ├── Creates loose-layout package
-    ├── Registers debug identity
-    └── Launches via Application Activation Manager
+    ├── Locates/auto-detects AppxManifest.xml
+    ├── Injects AppExecutionAlias into manifest
+    ├── Creates and registers loose-layout package
+    ├── Enables package debugging (PLM disabled)
+    ├── Launches app via execution alias (Process.Start)
+    ├── Captures stdout/stderr via redirected streams
+    ├── Captures Debug.WriteLine/OutputDebugString via Win32 Debug API
+    ├── Streams all output to terminal until app exits
+    └── Cleans up (DisableDebugging, process cleanup)
 ```
+
+#### Output Capture Architecture
+
+The default alias-based launch provides two independent capture mechanisms:
+
+- **Stdio capture** (always available): The execution alias process is launched via `Process.Start` with redirected stdout/stderr streams. Environment variables (including `DOTNET_*` for hot-reload) are inherited automatically.
+- **Debug API capture** (optional): `DebugActiveProcess` attaches to capture `OutputDebugString` calls and first-chance exceptions. This is mutually exclusive with managed debuggers (VS/VS Code).
+
+When `--output-filter stdout,stderr` is specified (or `WinAppOutputFilter` MSBuild property), the Debug API is not attached, leaving the process free for managed debugger attachment while still capturing stdio.
 
 ## File Structure
 
@@ -98,6 +113,7 @@ samples/
 | `WinAppManifestPath` | Auto-detected | Path to the AppxManifest file |
 | `WinAppLooseLayoutPath` | `$(OutputPath)AppX\` | Output directory for loose-layout package |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
+| `WinAppOutputFilter` | (empty = all) | Output categories to capture: `stdout`, `stderr`, `debug`, `debug-all`, `exception`. Set to `stdout,stderr` to allow VS/VS Code debugger attachment |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
 
 ### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
@@ -106,8 +122,10 @@ samples/
 |--------|-------------|
 | `_WinAppValidateRunSupport` | Validates prerequisites (CLI exists, manifest exists) |
 | `_WinAppBuildRunArgs` | Builds CLI command arguments (shared by run targets) |
-| `_WinAppInterceptRun` | Overrides RunCommand to use CLI |
-| `RunPackagedApp` | Direct target to run packaged app |
+| `_WinAppPrepareRunArguments` | Overrides RunCommand/RunArguments to use CLI via `ComputeRunArguments` |
+| `_WinAppDeduplicateDesignTimeCompile` | Deduplicates XAML-generated .g.cs files for C# DevKit IntelliSense |
+| `_WinAppCopyContentToLooseLayout` | Copies Content/None items to the loose-layout AppX directory |
+| `RunPackagedApp` | Direct target to run packaged app (alternative to `dotnet run`) |
 | `WinAppRunSupportInfo` | Diagnostic target showing all properties |
 
 ### Detection Logic
@@ -180,6 +198,18 @@ Pass launch arguments:
 </PropertyGroup>
 ```
 
+Allow VS/VS Code debugger attachment (disable debug API capture):
+```xml
+<PropertyGroup>
+  <WinAppOutputFilter>stdout,stderr</WinAppOutputFilter>
+</PropertyGroup>
+```
+
+Or from the command line for a single run:
+```bash
+dotnet run -p:WinAppOutputFilter=stdout,stderr
+```
+
 ## Outstanding Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
@@ -243,8 +273,6 @@ dotnet run -v:detailed
 
 ## Future Enhancements
 
-1. **Hot Reload Support**: Integrate with `dotnet watch` for live reloading
-2. **Debug Attachment**: Return process ID for debugger attachment in IDEs
-3. **Unpackaged Mode**: Auto-detect and use unpackaged mode when appropriate
-4. **Certificate Management**: Template could include cert generation post-action
-5. **Multiple Apps**: Support projects with multiple Application entries in manifest
+1. **Unpackaged Mode**: Auto-detect and use unpackaged mode when appropriate
+2. **Certificate Management**: Template could include cert generation post-action
+3. **Multiple Apps**: Support projects with multiple Application entries in manifest

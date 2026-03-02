@@ -13,6 +13,8 @@ internal class FakeAppLauncherService : IAppLauncherService
 {
     public List<(string Aumid, string? Arguments)> LaunchCalls { get; } = [];
     public List<(string AliasName, string? Arguments)> AliasLaunchCalls { get; } = [];
+    public List<string> EnableDebuggingCalls { get; } = [];
+    public List<string> DisableDebuggingCalls { get; } = [];
     public uint FakeProcessId { get; set; } = 12345;
 
     public uint LaunchByAumid(string aumid, string? arguments = null)
@@ -31,5 +33,15 @@ internal class FakeAppLauncherService : IAppLauncherService
     public string ComputePackageFamilyName(string packageName, string publisher)
     {
         return $"{packageName}_fakefamily";
+    }
+
+    public void EnablePackageDebugging(string packageFullName)
+    {
+        EnableDebuggingCalls.Add(packageFullName);
+    }
+
+    public void DisablePackageDebugging(string packageFullName)
+    {
+        DisableDebuggingCalls.Add(packageFullName);
     }
 }

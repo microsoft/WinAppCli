@@ -30,7 +30,8 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
     internal static readonly Option<string?> CallerOption = new("--caller")
     {
         Description = "Identifies the calling tool for telemetry (e.g., nuget-package, vscode-extension).",
-        Hidden = true
+        Hidden = true,
+        Recursive = true
     };
 
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")

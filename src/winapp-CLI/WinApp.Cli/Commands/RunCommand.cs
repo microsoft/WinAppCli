@@ -107,6 +107,7 @@ internal partial class RunCommand : Command, IShortDescription
             uint processId = 0;
             Process? aliasProcess = null;
             string? packageFamilyName = null;
+            string? packageFullName = null;
             string? publisher = null;
             string? applicationId = null;
             string? packageName = null;
@@ -209,13 +210,35 @@ internal partial class RunCommand : Command, IShortDescription
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
+                    // Query the full package name for IPackageDebugSettings
+                    packageFullName = GetPackageFullName(packageFamilyName);
+
+                    // Enable package debugging: disables PLM suspension so the app
+                    // isn't suspended when it loses focus during development.
+                    // DOTNET_* env vars are inherited by the alias-launched process automatically.
+                    if (packageFullName != null)
+                    {
+                        try
+                        {
+                            appLauncherService.EnablePackageDebugging(packageFullName);
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Package debugging enabled (PLM disabled)");
+                        }
+                        catch (Exception ex)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Warning} Package debugging not available: {ex.GetBaseException().Message}");
+                        }
+                    }
+
                     if (useAliasLaunch && aliasName != null)
                     {
                         // Launch via execution alias for stdio capture
                         taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application via execution alias...");
                         aliasProcess = appLauncherService.LaunchByAlias(aliasName, appArgs);
                         processId = (uint)aliasProcess.Id;
-                        taskContext.AddDebugMessage($"{UiSymbols.Note} Output capture enabled. Only one debugger can attach — VS Code/Visual Studio debugger cannot attach simultaneously.");
+                        if (outputFilter.Debug || outputFilter.DebugAll || outputFilter.Exception)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Debug output capture enabled. VS/VS Code debugger cannot attach simultaneously. Use --output-filter stdout,stderr to allow debugger attachment.");
+                        }
                     }
                     else
                     {
@@ -256,15 +279,33 @@ internal partial class RunCommand : Command, IShortDescription
                 PrintJson(aumid, processId, errorMessage: null, useAliasLaunch);
             }
 
-            if (useAliasLaunch)
+            try
             {
-                return await RunWithDebugOutputAsync(processId, aliasProcess, outputFilter, cancellationToken);
-            }
+                if (useAliasLaunch)
+                {
+                    return await RunWithDebugOutputAsync(processId, aliasProcess, outputFilter, cancellationToken);
+                }
 
-            // Standard flow: wait for the launched process to exit
-            using var proc = Process.GetProcessById((int)processId);
-            await proc.WaitForExitAsync(cancellationToken);
-            return proc.ExitCode;
+                // Standard flow: wait for the launched process to exit
+                using var proc = Process.GetProcessById((int)processId);
+                await proc.WaitForExitAsync(cancellationToken);
+                return proc.ExitCode;
+            }
+            finally
+            {
+                // Disable debugging mode to re-enable normal PLM behavior
+                if (packageFullName != null)
+                {
+                    try
+                    {
+                        appLauncherService.DisablePackageDebugging(packageFullName);
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup — don't fail the command if this fails
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -273,9 +314,15 @@ internal partial class RunCommand : Command, IShortDescription
         private async Task<int> RunWithDebugOutputAsync(uint processId, Process? aliasProcess, OutputFilter filter, CancellationToken cancellationToken)
         {
             var output = Console.Error;
+            var needsDebugApi = filter.Debug || filter.DebugAll || filter.Exception;
 
-            // Start Win32 Debug API capture on a dedicated thread (handles debug + exception categories)
-            var debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, filter.Debug, filter.DebugAll, filter.Exception, cancellationToken);
+            // Only attach the Win32 Debug API when debug/exception categories are requested.
+            // Skipping it leaves the process free for VS/VS Code managed debugger attachment.
+            Task? debugTask = null;
+            if (needsDebugApi)
+            {
+                debugTask = debugOutputService.RunDebugEventLoopAsync(processId, output, filter.Debug, filter.DebugAll, filter.Exception, cancellationToken);
+            }
 
             // If launched via alias, pipe stdout/stderr from the original Process object
             Task? stdoutTask = null;
@@ -293,8 +340,21 @@ internal partial class RunCommand : Command, IShortDescription
                 }
             }
 
-            // Wait for the debug event loop to complete (EXIT_PROCESS_DEBUG_EVENT)
-            await debugTask;
+            if (debugTask != null)
+            {
+                // Wait for the debug event loop to complete (EXIT_PROCESS_DEBUG_EVENT)
+                await debugTask;
+            }
+            else if (aliasProcess != null)
+            {
+                // No debug API — wait for the process to exit directly
+                await aliasProcess.WaitForExitAsync(cancellationToken);
+            }
+            else
+            {
+                using var proc = Process.GetProcessById((int)processId);
+                await proc.WaitForExitAsync(cancellationToken);
+            }
 
             // Give stdio streams a short time to flush after process exit
             if (stdoutTask != null || stderrTask != null)
@@ -371,6 +431,18 @@ internal partial class RunCommand : Command, IShortDescription
             manifestPath = Path.Combine(directory, "Package.appxmanifest");
             return new FileInfo(manifestPath);
         }
+
+        /// <summary>
+        /// Queries the full package name from a registered package using the WinRT PackageManager API.
+        /// </summary>
+#pragma warning disable CA1416 // Validate platform compatibility
+        private static string? GetPackageFullName(string packageFamilyName)
+        {
+            var pm = new Windows.Management.Deployment.PackageManager();
+            var package = pm.FindPackagesForUser(string.Empty, packageFamilyName).FirstOrDefault();
+            return package?.Id.FullName;
+        }
+#pragma warning restore CA1416 // Validate platform compatibility
     }
 
     [GeneratedRegex(@"<Application[^>]*Executable\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]

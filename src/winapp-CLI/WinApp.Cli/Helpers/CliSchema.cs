@@ -138,12 +138,13 @@ internal static class CliSchema
 
     private static Dictionary<string, OptionDetails>? CreateOptionsDictionary(IList<Option> options)
     {
-        if (options.Count == 0)
+        var visible = options.Where(o => !o.Hidden).ToList();
+        if (visible.Count == 0)
         {
             return null;
         }
         var dict = new Dictionary<string, OptionDetails>();
-        foreach (var option in options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var option in visible.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
         {
             dict[option.Name] = CreateOptionDetails(option);
         }

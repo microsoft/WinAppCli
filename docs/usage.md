@@ -332,7 +332,19 @@ winapp run [options]
 | `debug-all` | ❌ | All `OutputDebugString` including system/runtime internals |
 | `exception` | ✅ | First-chance and unhandled exception events |
 
-> **Note:** Output capture uses the Win32 Debug API. Only one debugger can attach to a process at a time — if you need to attach Visual Studio or VS Code's debugger, use `--aumid-launch` to disable output capture.
+> **Note:** Output capture uses the Win32 Debug API. Only one debugger can attach to a process at a time. To allow Visual Studio or VS Code debugger attachment, use `--output-filter stdout,stderr` (keeps stdio capture but frees the debug slot) or `--aumid-launch` (disables all output capture).
+
+**Debugger attachment:**
+
+When running with the default output capture, the Win32 Debug API is attached to the process. This prevents VS/VS Code managed debuggers from attaching. There are two options for debugging:
+
+| Approach | Command | Stdio | Debug output | VS debugger |
+|---|---|:---:|:---:|:---:|
+| Default | `winapp run` | ✅ | ✅ | ❌ |
+| Debugger-friendly | `winapp run --output-filter stdout,stderr` | ✅ | ❌ | ✅ |
+| COM activation | `winapp run --aumid-launch` | ❌ | ❌ | ✅ |
+
+Using `--output-filter stdout,stderr` is recommended when you need debugger attachment — you keep stdout/stderr capture while freeing the debug API slot for VS/VS Code.
 
 **Examples:**
 
@@ -349,7 +361,10 @@ winapp run --output-filter stdout,debug
 # Show all debug output including system/runtime noise
 winapp run --output-filter debug-all
 
-# Launch via COM activation (for debugger attachment)
+# Allow VS/VS Code debugger attachment (no debug API capture)
+winapp run --output-filter stdout,stderr
+
+# Launch via COM activation (for debugger attachment, no output capture)
 winapp run --aumid-launch
 
 # Specify output directory for loose layout package

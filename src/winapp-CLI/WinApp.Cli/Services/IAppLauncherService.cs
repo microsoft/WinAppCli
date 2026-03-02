@@ -15,4 +15,16 @@ internal interface IAppLauncherService
     /// Returns the Process object so the caller can read stdout/stderr.
     /// </summary>
     Process LaunchByAlias(string aliasName, string? arguments = null);
+
+    /// <summary>
+    /// Enables debugging mode for a package using IPackageDebugSettings.
+    /// Disables PLM (Process Lifecycle Management) suspension so the app isn't
+    /// suspended when it loses focus during development.
+    /// </summary>
+    void EnablePackageDebugging(string packageFullName);
+
+    /// <summary>
+    /// Disables debugging mode for a package, re-enabling normal PLM behavior.
+    /// </summary>
+    void DisablePackageDebugging(string packageFullName);
 }

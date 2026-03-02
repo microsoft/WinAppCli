@@ -155,7 +155,7 @@ Understanding the architecture helps when troubleshooting or customizing your se
 
 This means you get Visual Studio-like debug output without needing Visual Studio — it works from any terminal, with any build system.
 
-> Use `--aumid-launch` to switch to traditional COM activation (e.g., when you need to attach a separate debugger). Use `--output-filter` to control which output categories are shown (e.g., `--output-filter stdout,debug` to hide exceptions and stderr).
+> Use `--aumid-launch` to switch to traditional COM activation (no output capture). Use `--output-filter` to control which output categories are shown (e.g., `--output-filter stdout,debug` to hide exceptions and stderr). To allow VS/VS Code managed debugger attachment while keeping stdio capture, use `--output-filter stdout,stderr` — this skips the Win32 Debug API so the debug slot is free. From `dotnet run`, set `WinAppOutputFilter`: `dotnet run -p:WinAppOutputFilter=stdout,stderr`.
 
 This works regardless of how the app was built — whether from `dotnet build`, `cmake`, `npm run make`, or any other build system.
 

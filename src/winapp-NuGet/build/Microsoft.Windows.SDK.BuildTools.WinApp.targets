@@ -46,28 +46,26 @@
   </PropertyGroup>
 
   <!--
-    Design-time build support:
-    When DesignTimeBuild is true, include all .cs files in the obj folder to enable features like IntelliSense and XAML designer.
-    This is necessary because the targets may generate source files in the obj directory that need to be included during design-time builds
-    Also, there is a bug in C# DevKit where generated files in obj are not included during design-time builds, so we need to explicitly include them here.
-    https://github.com/microsoft/vscode-dotnettools/issues/1018
+    Design-time build support for C# DevKit IntelliSense (vscode-dotnettools#1018):
+    Include generated .g.cs files from obj/ during design-time builds so IntelliSense
+    sees XAML-generated code (InitializeComponent, x:Name fields, etc.).
+    
+    This runs inside a Target (not a static ItemGroup) so that Remove+Include executes
+    after all static evaluation — including XAML codegen — ensuring exactly one copy.
+    Watch=false prevents dotnet watch from monitoring these build-generated files.
   -->
-  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
-    <Compile Remove="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs" />
-    <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
-      <AutoGen>True</AutoGen>
-      <Visible>False</Visible>
-    </Compile>
-  </ItemGroup>
-
-  <!--
-    Exclude obj/ from dotnet watch file monitoring.
-    Build-generated files (XAML codegen .g.cs/.g.i.cs) are regenerated every build,
-    which would otherwise cause dotnet watch to trigger infinite restart loops.
-  -->
-  <ItemGroup Condition="'$(UseWinUI)' == 'true'">
-    <Watch Remove="$(MSBuildProjectDirectory)\obj\**" />
-  </ItemGroup>
+  <Target Name="_WinAppDeduplicateDesignTimeCompile"
+          BeforeTargets="CoreCompile"
+          Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
+    <ItemGroup>
+      <Compile Remove="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
+        <AutoGen>True</AutoGen>
+        <Visible>False</Visible>
+        <Watch>false</Watch>
+      </Compile>
+    </ItemGroup>
+  </Target>
 
   <!--
     Temporary: Include this for non-WinUI projects as well, to ensure appxmanifest is included 
@@ -121,6 +119,7 @@
       <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppOutputFilter)' != ''">$(_WinAppRunArgs) --output-filter $(WinAppOutputFilter)</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 
@@ -246,6 +245,7 @@
     <Message Text="WinAppCliArch: $(WinAppCliArch)" Importance="high" />
     <Message Text="WinAppManifestPath: $(WinAppManifestPath)" Importance="high" />
     <Message Text="WinAppLooseLayoutPath: $(WinAppLooseLayoutPath)" Importance="high" />
+    <Message Text="WinAppOutputFilter: $(WinAppOutputFilter)" Importance="high" />
     <Message Text="======================================" Importance="high" />
   </Target>
 

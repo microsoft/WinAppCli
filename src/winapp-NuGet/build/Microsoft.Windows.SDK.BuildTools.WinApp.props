@@ -34,6 +34,21 @@
       Additional arguments to pass to the application on launch.
     -->
     <WinAppLaunchArgs Condition="'$(WinAppLaunchArgs)' == ''"></WinAppLaunchArgs>
+
+    <!--
+      Controls which output categories are captured when running the packaged app.
+      Comma-separated values: stdout, stderr, debug, debug-all, exception
+      
+      Default (empty): all categories — captures stdout, stderr, debug output, and exceptions.
+      This attaches the Win32 Debug API, which prevents VS/VS Code managed debugger attachment.
+      
+      To allow debugger attachment, set to "stdout,stderr":
+        <WinAppOutputFilter>stdout,stderr</WinAppOutputFilter>
+      
+      Can also be set from the command line:
+        dotnet run -p:WinAppOutputFilter=stdout,stderr
+    -->
+    <WinAppOutputFilter Condition="'$(WinAppOutputFilter)' == ''"></WinAppOutputFilter>
   </PropertyGroup>
 
 </Project>

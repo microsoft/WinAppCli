@@ -6,6 +6,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using Windows.Win32;
+using Windows.Win32.Foundation;
 using Windows.Win32.UI.Shell;
 
 namespace WinApp.Cli.Services;
@@ -44,6 +45,38 @@ internal class AppLauncherService : IAppLauncherService
             ?? throw new InvalidOperationException($"Failed to launch app via execution alias '{aliasName}'.");
         return process;
     }
+
+    /// <inheritdoc />
+#pragma warning disable CA1416 // Validate platform compatibility
+    public void EnablePackageDebugging(string packageFullName)
+    {
+        // EnableDebugging disables PLM (Process Lifecycle Management) suspension
+        // for the packaged app, preventing it from being suspended when it loses focus.
+        // Environment variables are inherited by the alias-launched process automatically
+        // via Process.Start — no IPackageDebugSettings env forwarding needed.
+        var pds = PackageDebugSettings.CreateInstance<IPackageDebugSettings>();
+        unsafe
+        {
+            fixed (char* pkgNamePtr = packageFullName)
+            {
+                pds.EnableDebugging(new PCWSTR(pkgNamePtr), default, default);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void DisablePackageDebugging(string packageFullName)
+    {
+        var pds = PackageDebugSettings.CreateInstance<IPackageDebugSettings>();
+        unsafe
+        {
+            fixed (char* pkgNamePtr = packageFullName)
+            {
+                pds.DisableDebugging(new PCWSTR(pkgNamePtr));
+            }
+        }
+    }
+#pragma warning restore CA1416 // Validate platform compatibility
 
     /// <inheritdoc />
     public string ComputePackageFamilyName(string packageName, string publisher)
