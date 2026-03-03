@@ -22,6 +22,11 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Description = "Suppress progress messages"
     };
 
+    internal static Option<bool> JsonOption = new Option<bool>("--json")
+    {
+        Description = "Output in JSON format"
+    };
+
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")
     {
         Description = "Output the complete CLI command structure as JSON for tooling, scripting, and LLM integration. Includes all commands, options, arguments, and their descriptions.",
@@ -49,6 +54,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         ManifestCommand manifestCommand,
         UpdateCommand updateCommand,
         CreateDebugIdentityCommand createDebugIdentityCommand,
+        RunCommand runCommand,
         GetWinappPathCommand getWinappPathCommand,
         CertCommand certCommand,
         SignCommand signCommand,
@@ -63,6 +69,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(manifestCommand);
         Subcommands.Add(updateCommand);
         Subcommands.Add(createDebugIdentityCommand);
+        Subcommands.Add(runCommand);
         Subcommands.Add(getWinappPathCommand);
         Subcommands.Add(certCommand);
         Subcommands.Add(signCommand);
@@ -77,7 +84,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand)])
         );
     }
 }

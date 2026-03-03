@@ -268,7 +268,7 @@ internal partial class MsixService(
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
 
-    public async Task<MsixIdentityResult> AddMsixIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -350,6 +350,154 @@ internal partial class MsixService(
         }
 
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
+    }
+
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        // Validate inputs
+        if (!appxManifestPath.Exists)
+        {
+            throw new FileNotFoundException($"AppX manifest not found at: {appxManifestPath}. You can generate one using 'winapp manifest generate'.");
+        }
+
+        if (!devModeService.IsEnabled())
+        {
+            throw new InvalidOperationException("Developer Mode is not enabled on this machine. Please enable Developer Mode and try again.");
+        }
+
+        taskContext.AddDebugMessage($"Using AppX manifest: {appxManifestPath}");
+
+        // If there is a csproj, warn the user that they should use `dotnet run` instead of `winapp run`
+        var csprojFiles = dotNetService.FindCsproj(inputDirectory);
+        var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+        if (csproj != null)
+        {
+            throw new InvalidOperationException(
+                $"A .csproj file was found in the input directory: {csproj.FullName}. " +
+                $"Please use 'dotnet run' to run your application instead of 'winapp run'.");
+        }
+
+        if (!outputAppXDirectory.Exists)
+        {
+            outputAppXDirectory.Create();
+        }
+
+        // Recursive copy all files to output directory, but exclude the outputAppXFolder itself if it's inside the input directory
+        if (inputDirectory != null && !string.Equals(inputDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar),
+            outputAppXDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+        {
+            var outputFullPath = outputAppXDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            foreach (var file in inputDirectory.EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                // Skip files that are inside the output folder (if output is nested inside input)
+                if (file.FullName.StartsWith(outputFullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(inputDirectory.FullName, file.FullName);
+                var destFile = new FileInfo(Path.Combine(outputAppXDirectory.FullName, relativePath));
+
+                destFile.Directory?.Create();
+                file.CopyTo(destFile.FullName, overwrite: true);
+
+                taskContext.AddDebugMessage($"{UiSymbols.Files} Copied: {relativePath}");
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Copied files to output directory: {outputAppXDirectory.FullName}");
+        }
+
+        // Copy the appxmanifest to the output directory, if not already present
+        appxManifestPath.CopyTo(Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name), overwrite: true);
+
+        // If its Package.appxmanifest, rename to appxmanifest.xml
+        if (string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase))
+        {
+            var renamedPath = Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml");
+            var originalPath = Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name);
+            File.Move(originalPath, renamedPath, true);
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed Package.appxmanifest to appxmanifest.xml");
+            appxManifestPath = new FileInfo(renamedPath);
+        }
+
+        var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name));
+        var manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
+        var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
+            .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
+
+        if (executableMatch == null)
+        {
+            throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
+        }
+
+        manifestContent = manifestContent.Replace("$targetnametoken$", Path.GetFileNameWithoutExtension(executableMatch.Name), StringComparison.OrdinalIgnoreCase);
+        manifestContent = manifestContent.Replace("$targetentrypoint$", "Windows.FullTrustApplication", StringComparison.OrdinalIgnoreCase);
+        manifestContent = manifestContent.Replace("x-generate", "EN-US");
+        manifestContent = await UpdateWindowsAppSdkDependencyAsync(manifestContent, taskContext, cancellationToken);
+
+        // If there is a pri file named after the executable, rename it to resources.pri
+        var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
+        if (File.Exists(priFilePath))
+        {
+            var resourcesPriPath = Path.Combine(outputAppXDirectory.FullName, "resources.pri");
+            File.Move(priFilePath, resourcesPriPath, overwrite: true);
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {Path.GetFileName(priFilePath)} to resources.pri");
+        }
+
+        await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+
+        // Copy all assets
+        var originalManifestDir = appxManifestPath.DirectoryName;
+
+        if (!string.Equals(originalManifestDir, outputAppXDirectory.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            var expandedFiles = GetExpandedManifestReferencedFiles(appxManifestPath, taskContext);
+            CopyAllAssets(expandedFiles, outputAppXDirectory, taskContext);
+        }
+        else
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
+        }
+
+        var identity = ParseAppxManifestAsync(manifestContent);
+
+        // Install the Windows App Runtime framework packages if not already present
+        await EnsureWindowsAppRuntimeInstalledAsync(taskContext, cancellationToken);
+
+        // Unregister any existing package first
+        await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+
+        // Register the new debug manifest with external location
+        await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
+
+        return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+    }
+
+    /// <summary>
+    /// Ensures that the Windows App Runtime framework MSIX packages are installed on the machine.
+    /// Locates the runtime MSIX directory from the NuGet package cache and installs any
+    /// missing or outdated packages (Framework, DDLM, Singleton, Main) via Add-AppxPackage.
+    /// </summary>
+    private async Task EnsureWindowsAppRuntimeInstalledAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        var msixDir = await GetRuntimeMsixDirAsync(taskContext, cancellationToken);
+        if (msixDir == null)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not locate Windows App Runtime MSIX packages. The runtime may need to be installed manually.");
+            return;
+        }
+
+        var (installedCount, errorCount) = await workspaceSetupService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+
+        if (errorCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} {errorCount} runtime package(s) failed to install. The app may not launch correctly.");
+        }
+        else if (installedCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} Windows App Runtime package(s)");
+        }
     }
 
     private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityResult identityInfo, TaskContext taskContext, CancellationToken cancellationToken)
@@ -911,7 +1059,7 @@ internal partial class MsixService(
         }
         else
         {
-            var inputFolderManifest = new FileInfo(Path.Combine(inputFolder.FullName, "appxmanifest.xml"));
+            var inputFolderManifest = GetManifest(inputFolder.FullName);
             if (inputFolderManifest.Exists)
             {
                 resolvedManifestPath = inputFolderManifest;
@@ -919,7 +1067,7 @@ internal partial class MsixService(
             }
             else
             {
-                var currentDirManifest = new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "appxmanifest.xml"));
+                var currentDirManifest = GetManifest(currentDirectoryProvider.GetCurrentDirectory());
                 if (currentDirManifest.Exists)
                 {
                     resolvedManifestPath = currentDirManifest;
@@ -1119,6 +1267,17 @@ internal partial class MsixService(
         }
 
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
+    }
+
+    private static FileInfo GetManifest(string inputDirectory)
+    {
+        var manifestPath = Path.Combine(inputDirectory, "appxmanifest.xml");
+        if (File.Exists(manifestPath))
+        {
+            return new FileInfo(manifestPath);
+        }
+        manifestPath = Path.Combine(inputDirectory, "Package.appxmanifest");
+        return new FileInfo(manifestPath);
     }
 
     private async Task EmbedWindowsAppSDKManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
@@ -1457,10 +1616,16 @@ internal partial class MsixService(
 
         while (directory != null)
         {
-            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-            if (manifestPath.Exists)
+            var appxmanifestXmlPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
+            if (appxmanifestXmlPath.Exists)
             {
-                return manifestPath;
+                return appxmanifestXmlPath;
+            }
+            
+            var packageAppxManifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+            if (packageAppxManifestPath.Exists)
+            {
+                return packageAppxManifestPath;
             }
 
             directory = directory.Parent;
@@ -1840,7 +2005,7 @@ $1");
             if (csproj != null)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Found .csproj: {csproj.Name}, querying NuGet package list...");
-                var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
+                var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken: cancellationToken);
 
                 var allPackages = packageList?.Projects?
                     .SelectMany(p => p.Frameworks ?? [])
@@ -2154,6 +2319,34 @@ $1");
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Failed to register sparse package: {ex.Message}", ex);
+        }
+    }
+
+    public async Task RegisterLooseLayoutPackageAsync(FileInfo manifestPath, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering loose layout package...");
+
+        var registerCommand = $"Add-AppxPackage -Register '{manifestPath.FullName}'";
+
+        try
+        {
+            var (exitCode, output, _) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
+
+            if (exitCode != 0)
+            {
+                if (string.IsNullOrWhiteSpace(output))
+                {
+                    throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
+                }
+
+                throw new InvalidOperationException(output.Trim());
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Package registered successfully");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to register package: {ex.Message}", ex);
         }
     }
 

@@ -1,0 +1,26 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>
+/// Fake app launcher service that records launch calls without actually launching applications.
+/// </summary>
+internal class FakeAppLauncherService : IAppLauncherService
+{
+    public List<(string Aumid, string? Arguments)> LaunchCalls { get; } = [];
+    public uint FakeProcessId { get; set; } = 12345;
+
+    public uint LaunchByAumid(string aumid, string? arguments = null)
+    {
+        LaunchCalls.Add((aumid, arguments));
+        return FakeProcessId;
+    }
+
+    public string ComputePackageFamilyName(string packageName, string publisher)
+    {
+        return $"{packageName}_fakefamily";
+    }
+}

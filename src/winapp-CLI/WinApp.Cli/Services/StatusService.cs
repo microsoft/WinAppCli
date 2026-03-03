@@ -25,7 +25,7 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         IRenderable rendered;
 
         (int ReturnCode, T CompletedMessage)? result = null;
-        if (Environment.UserInteractive && !Console.IsOutputRedirected)
+        if (Environment.UserInteractive && !Console.IsOutputRedirected && logger.IsEnabled(LogLevel.Information))
         {
             rendered = task.Render();
             // Run the Live display until task completes
@@ -61,13 +61,16 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
             }
         }
 
-        // Final render to show completed state
-        lock (renderLock)
+        if (logger.IsEnabled(LogLevel.Information))
         {
-            rendered = task.Render();
-        }
+            // Final render to show completed state
+            lock (renderLock)
+            {
+                rendered = task.Render(true);
+            }
 
-        ansiConsole.Write(rendered);
+            ansiConsole.Write(rendered);
+        }
 
         // Get the result
         try

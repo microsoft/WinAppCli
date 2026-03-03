@@ -292,6 +292,46 @@ winapp manifest generate
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite
 ```
 
+
+---
+
+### run
+
+Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
+
+```bash
+winapp run [options]
+```
+
+**Options:**
+
+- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect in build output or current directory)
+- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside manifest's directory)
+- `--args <string>` - Command-line arguments to pass to the application
+
+**What it does:**
+
+- Locates or generates the AppxManifest.xml
+- Creates and registers a debug identity using a loose layout package
+- Computes the Application User Model ID (AUMID)
+- Launches the application using the registered identity
+- Prints the process ID (PID) for debugger attachment
+
+**Examples:**
+
+```bash
+# Register debug identity, and launch app (auto-detect manifest)
+winapp run
+
+# Launch with custom manifest and arguments
+winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value"
+
+# Specify output directory for loose layout package
+winapp run --output-appx-directory ./AppXDebug
+```
+
+---
+
 #### manifest update-assets
 
 Generate all required MSIX image assets from a single source image.

@@ -1,17 +1,20 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Build script for Windows App Development CLI, npm package, and MSIX packages
+    Build script for Windows App Development CLI, npm package, NuGet packages, and MSIX packages
 .DESCRIPTION
     This script builds the Windows App Development CLI for both x64 and arm64 architectures,
-    creates the npm package, creates MSIX packages with distribution package, and 
-    places all artifacts in an artifacts folder. Run this script from the root of the project.
+    creates the npm package, NuGet package (BuildTools.WinApp), creates MSIX packages 
+    with distribution package, and places all artifacts in an artifacts folder. 
+    Run this script from the root of the project.
 .PARAMETER SkipTests
     Skip running unit tests
 .PARAMETER FailOnTestFailure
     Exit with error code if tests fail (default: true, stops build on test failures)
 .PARAMETER SkipNpm
     Skip npm package creation
+.PARAMETER SkipNuGet
+    Skip NuGet package creation (BuildTools.WinApp)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
@@ -25,6 +28,8 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipNpm
 .EXAMPLE
+    .\scripts\build-cli.ps1 -SkipNuGet
+.EXAMPLE
     .\scripts\build-cli.ps1 -SkipMsix
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
@@ -35,6 +40,7 @@ param(
     [switch]$SkipTests = $false,
     [switch]$FailOnTestFailure = $true,
     [switch]$SkipNpm = $false,
+    [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
     [switch]$Stable = $false
@@ -235,7 +241,26 @@ try
         Write-Host "[NPM] Skipping npm package creation (use -SkipNpm:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 8: Create MSIX packages (optional)
+    # Step 8: Create NuGet packages (optional)
+    if (-not $SkipNuGet) {
+        Write-Host ""
+        Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
+    
+        $PackageNuGetScript = Join-Path $PSScriptRoot "package-nuget.ps1"
+
+        & $PackageNuGetScript -Version $FullVersion -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "NuGet packages creation failed, but continuing..."
+        } else {
+            Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Step 9: Create MSIX packages (optional)
     if (-not $SkipMsix) {
         Write-Host ""
         Write-Host "[MSIX] Creating MSIX packages..." -ForegroundColor Blue
@@ -268,6 +293,17 @@ try
     }
 
     # Build process complete - all artifacts are ready
+
+    # Copy install-dev script into artifacts so the folder is self-contained
+    Write-Host ""
+    Write-Host "[INSTALL] Copying setup-winapprun.ps1 to artifacts..." -ForegroundColor Blue
+    $InstallDevScript = Join-Path $PSScriptRoot "setup-winapprun.ps1"
+    if (Test-Path $InstallDevScript) {
+        Copy-Item $InstallDevScript -Destination $ArtifactsPath -Force
+        Write-Host "[INSTALL] setup-winapprun.ps1 copied to artifacts" -ForegroundColor Green
+    } else {
+        Write-Warning "setup-winapprun.ps1 not found at $InstallDevScript"
+    }
 
     # Display results
     Write-Host ""

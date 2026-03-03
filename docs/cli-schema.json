@@ -1134,6 +1134,119 @@
         }
       }
     },
+    "run": {
+      "description": "Creates packaged layout, registers the Application, and launches the packaged application.",
+      "hidden": false,
+      "arguments": {
+        "input-folder": {
+          "description": "Input folder containing the app to run",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--args": {
+          "description": "Command-line arguments to pass to the application",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--json": {
+          "description": "Output in JSON format",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--manifest": {
+          "description": "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)",
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--no-launch": {
+          "description": "Only create the debug identity and register the package without launching the application",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--output-appx-directory": {
+          "description": "Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used.",
+          "hidden": false,
+          "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "sign": {
       "description": "Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.",
       "hidden": false,

@@ -13,7 +13,7 @@ namespace WinApp.Cli.Helpers;
 
 internal static class StoreHostBuilderExtensions
 {
-    public static IServiceCollection ConfigureServices(this IServiceCollection services, TextWriter consoleOut)
+    public static IServiceCollection ConfigureServices(this IServiceCollection services)
     {
         return services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(Directory.GetCurrentDirectory()))
@@ -37,6 +37,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
+            .AddSingleton<IAppLauncherService, AppLauncherService>()
+            .AddSingleton<IDotNetService, DotNetService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
@@ -54,6 +56,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<ManifestUpdateAssetsCommand, ManifestUpdateAssetsCommand.Handler>()
                 .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
+                .UseCommandHandler<RunCommand, RunCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()

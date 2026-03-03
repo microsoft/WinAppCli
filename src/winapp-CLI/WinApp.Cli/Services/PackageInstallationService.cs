@@ -118,8 +118,8 @@ internal sealed class PackageInstallationService(
 
                 // Add the main package to installed versions
                 allInstalledVersions[packageName] = version;
-
-                // Try to get cached information about what else was installed with this package
+                
+                // Try to get package information about what else is installed with this package
                 try
                 {
                     var cachedPackages = await nugetService.GetPackageDependenciesAsync(packageName, version, cancellationToken);

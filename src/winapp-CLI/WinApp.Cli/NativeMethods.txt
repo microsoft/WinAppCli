@@ -29,3 +29,5 @@ CryptCATCDFClose
 CryptCATCDFEnumCatAttributes
 CryptCATCDFEnumMembersByCDFTagEx
 CryptCATCDFEnumAttributesWithCDFTag
+IApplicationActivationManager
+ApplicationActivationManager
