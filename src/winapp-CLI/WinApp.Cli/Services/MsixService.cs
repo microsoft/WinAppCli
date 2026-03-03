@@ -887,6 +887,18 @@ internal partial class MsixService(
             throw new DirectoryNotFoundException($"Input folder not found: {inputFolder}");
         }
 
+        // Warn if the input folder contains .pfx certificate files, which are likely
+        // development certificates that should not be included in the package payload.
+        var pfxFiles = inputFolder.EnumerateFiles("*.pfx", SearchOption.AllDirectories).ToList();
+        if (pfxFiles.Count > 0)
+        {
+            foreach (var pfxFile in pfxFiles)
+            {
+                var relativePath = Path.GetRelativePath(inputFolder.FullName, pfxFile.FullName);
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} PFX certificate file found in input folder: {relativePath}. Consider removing it before packaging.");
+            }
+        }
+
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
         // 2. Check for appxmanifest.xml in input folder
