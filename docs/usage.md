@@ -226,7 +226,7 @@ winapp create-debug-identity [entrypoint] [options]
 - Modifies executable's side-by-side manifest
 - Registers sparse package for identity
 - Enables debugging of identity-requiring APIs
-- With `--self-contained`: copies WinAppSDK runtime DLLs next to the exe, removes the framework `<PackageDependency>` from the sparse manifest, and embeds a side-by-side activation manifest so WinRT classes resolve locally
+- With `--self-contained`: copies WinAppSDK runtime DLLs next to the exe and embeds a side-by-side activation manifest so WinRT classes resolve locally
 
 **Examples:**
 
