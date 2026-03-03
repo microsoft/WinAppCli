@@ -1082,7 +1082,7 @@ internal partial class MsixService(
                 // Add WindowsAppSDK.manifest to existing manifest
                 var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
                 var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
-                await EmbedWindowsAppSDKManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
+                await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
             }
 
             await CreateMsixPackageFromFolderAsync(stagingDir, outputMsixPath, taskContext, cancellationToken);
@@ -1123,54 +1123,69 @@ internal partial class MsixService(
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
     }
 
-    private async Task EmbedWindowsAppSDKManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task EmbedActivationManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Use applicationLocation for DLL content (where runtime files were copied by PrepareRuntimeForPackagingAsync)
         var exeDir = exePath.Directory!;
 
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Generating Windows App SDK manifest from: {windowsAppSDKAppXManifestPath}");
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Generating activation manifest from: {windowsAppSDKAppXManifestPath}");
         taskContext.AddDebugMessage($"{UiSymbols.Package} Using DLL content from: {winAppSDKDeploymentDir}");
-
-        var dllFiles = (winAppSDKDeploymentDir.EnumerateFiles("*.dll").Select(di => di.Name)).ToList();
 
         // Create a temporary manifest file
         var tempManifestPath = new FileInfo(Path.Combine(exeDir.FullName, "WindowsAppSDK_temp.manifest"));
 
         try
         {
-            // Generate the manifest content
-            await GenerateAppManifestFromAppxAsync(
-                redirectDlls: false,
-                inDllFiles: dllFiles,
-                inAppxManifests: [windowsAppSDKAppXManifestPath],
-                fragments: false,
-                outAppManifestPath: tempManifestPath,
-                cancellationToken: cancellationToken);
+            // Build the entire manifest in memory, then write to disk once
+            var sb = new StringBuilder();
+            sb.AppendLine("<?xml version='1.0' encoding='utf-8' standalone='yes'?>");
+            sb.AppendLine("<assembly manifestVersion='1.0'");
+            sb.AppendLine("    xmlns:asmv3='urn:schemas-microsoft-com:asm.v3'");
+            sb.AppendLine("    xmlns:winrtv1='urn:schemas-microsoft-com:winrt.v1'");
+            sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
 
+            // Collect all AppX manifests (main package + component fragments) and their DLLs
             (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
             if (packageDependencies == null || packageDependencies.Count == 0)
             {
                 throw new InvalidOperationException("No Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
             }
 
-            IEnumerable<FileInfo> appxFragments = GetComponents(packageDependencies);
             var architecture = WorkspaceSetupService.GetSystemArchitecture();
-            dllFiles = [.. appxFragments.Select(fragment => Path.Combine(fragment.DirectoryName!, $"win-{architecture}\\native"))
-                .Where(Directory.Exists)
-                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.dll"))];
+            IEnumerable<FileInfo> appxFragments = GetComponents(packageDependencies);
 
-            await GenerateAppManifestFromAppxAsync(
+            // Combine all manifests: main AppxManifest.xml (Package root) + fragments (Fragment root)
+            var allManifests = new List<FileInfo> { windowsAppSDKAppXManifestPath };
+            allManifests.AddRange(appxFragments);
+
+            // Combine all DLL file names from deployment dir and fragment native dirs
+            var allDllFiles = new List<string>(winAppSDKDeploymentDir.EnumerateFiles("*.dll").Select(di => di.Name));
+            allDllFiles.AddRange(appxFragments
+                .Select(fragment => Path.Combine(fragment.DirectoryName!, $"win-{architecture}\\native"))
+                .Where(Directory.Exists)
+                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.dll"))
+                .Select(Path.GetFileName)!);
+
+            // Single pass: process all AppX manifests (auto-detects Package vs Fragment root)
+            AppendAppManifestFromAppx(
+                sb,
                 redirectDlls: false,
-                inDllFiles: dllFiles,
-                inAppxManifests: appxFragments,
-                fragments: true,
-                outAppManifestPath: tempManifestPath,
-                cancellationToken: cancellationToken);
+                inDllFiles: allDllFiles,
+                inAppxManifests: allManifests);
 
             // Phase 3: Discover and register third-party WinRT components (e.g., Win2D, WebView2)
             // These packages ship .winmd files + native DLLs but no package.appxfragment
             await AppendThirdPartyWinRTManifestEntriesAsync(
-                tempManifestPath, architecture, packageDependencies, taskContext, cancellationToken);
+                sb, architecture, packageDependencies, taskContext, cancellationToken);
+
+            sb.AppendLine("</assembly>");
+
+            // Single write to disk
+            await File.WriteAllTextAsync(
+                tempManifestPath.FullName,
+                sb.ToString(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken);
 
             // Use mt.exe to merge manifests
             await EmbedManifestFileToExeAsync(exePath, tempManifestPath, taskContext, cancellationToken);
@@ -1247,10 +1262,10 @@ internal partial class MsixService(
 
     /// <summary>
     /// Discovers third-party WinRT components and appends their activatable class
-    /// entries to an existing SxS manifest file (for self-contained deployment).
+    /// entries to the in-memory SxS manifest (for self-contained deployment).
     /// </summary>
     private async Task AppendThirdPartyWinRTManifestEntriesAsync(
-        FileInfo manifestPath,
+        StringBuilder sb,
         string architecture,
         Dictionary<string, string>? winAppSDKPackages,
         TaskContext taskContext,
@@ -1264,12 +1279,10 @@ internal partial class MsixService(
 
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
 
-        // Note: We do NOT pass the full WinAppSDK dependency tree as an exclude set.
-        // DiscoverWinRTComponents already handles exclusions via:
-        //   1. IsExcludedPackage() — skips SDK infrastructure packages
-        //   2. package.appxfragment check — skips WinAppSDK sub-packages with existing fragments
-        // Passing the full dep tree would incorrectly exclude packages like WebView2
-        // that are transitive WinAppSDK deps but need their own InProcessServer entries.
+        // DiscoverWinRTComponents filters out packages that have a package.appxfragment
+        // (WinAppSDK sub-packages), and only returns packages with both a .winmd and a matching DLL.
+        // We do NOT exclude the full WinAppSDK dependency tree because packages like WebView2
+        // are transitive WinAppSDK deps but need their own InProcessServer entries.
         var components = winmdService.DiscoverWinRTComponents(nugetCacheDir, allPackages, architecture);
         if (components.Count == 0)
         {
@@ -1277,22 +1290,6 @@ internal partial class MsixService(
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found {components.Count} third-party WinRT component(s) to register");
-
-        // Read the existing manifest content and strip the closing </assembly> tag
-        // so we can append new entries before re-closing it
-        var existingContent = await File.ReadAllTextAsync(manifestPath.FullName, cancellationToken);
-        var closingTag = "</assembly>";
-        var closingIndex = existingContent.LastIndexOf(closingTag, StringComparison.OrdinalIgnoreCase);
-
-        var sb = new StringBuilder();
-        if (closingIndex >= 0)
-        {
-            sb.Append(existingContent, 0, closingIndex);
-        }
-        else
-        {
-            sb.Append(existingContent);
-        }
 
         foreach (var component in components)
         {
@@ -1311,14 +1308,6 @@ internal partial class MsixService(
             }
             sb.AppendLine("    </asmv3:file>");
         }
-
-        sb.AppendLine(closingTag);
-
-        await File.WriteAllTextAsync(
-            manifestPath.FullName,
-            sb.ToString(),
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            cancellationToken);
     }
 
     /// <summary>
@@ -1339,12 +1328,10 @@ internal partial class MsixService(
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
         var architecture = WorkspaceSetupService.GetSystemArchitecture();
 
-        // Note: We do NOT pass the full WinAppSDK dependency tree as an exclude set.
-        // DiscoverWinRTComponents already handles exclusions via:
-        //   1. IsExcludedPackage() — skips SDK infrastructure packages
-        //   2. package.appxfragment check — skips WinAppSDK sub-packages with existing fragments
-        // Passing the full dep tree would incorrectly exclude packages like WebView2
-        // that are transitive WinAppSDK deps but need their own InProcessServer entries.
+        // DiscoverWinRTComponents filters out packages that have a package.appxfragment
+        // (WinAppSDK sub-packages), and only returns packages with both a .winmd and a matching DLL.
+        // We do NOT exclude the full WinAppSDK dependency tree because packages like WebView2
+        // are transitive WinAppSDK deps but need their own InProcessServer entries.
         var components = winmdService.DiscoverWinRTComponents(nugetCacheDir, allPackages, architecture);
         if (components.Count == 0)
         {
@@ -1412,43 +1399,39 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Generates a Win32 manifest from an AppX manifest, similar to the GenerateAppManifestFromAppx MSBuild task.
+    /// Generates Win32 SxS manifest entries from AppX manifests (Package or Fragment format).
+    /// Auto-detects the root element name (Package vs Fragment) per document.
     /// </summary>
+    /// <param name="sb">StringBuilder to append manifest entries to</param>
     /// <param name="redirectDlls">Whether to redirect DLLs to %MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY%</param>
-    /// <param name="inDllFiles">List of DLL files to include</param>
-    /// <param name="inAppxManifests">List of paths to the input AppX manifest files, or fragments</param>
-    /// <param name="fragments">Whether the input manifests are fragments (false), or full manifests (true)</param>
-    /// <param name="outAppManifestPath">Path to write the generated manifest</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    private static async Task GenerateAppManifestFromAppxAsync(
+    /// <param name="inDllFiles">List of DLL file names to track</param>
+    /// <param name="inAppxManifests">List of paths to the input AppX manifest files or fragments</param>
+    internal static void AppendAppManifestFromAppx(
+        StringBuilder sb,
         bool redirectDlls,
         IEnumerable<string> inDllFiles,
-        IEnumerable<FileInfo> inAppxManifests,
-        bool fragments,
-        FileInfo outAppManifestPath,
-        CancellationToken cancellationToken)
+        IEnumerable<FileInfo> inAppxManifests)
     {
-        var sb = new StringBuilder();
-
-        // Write manifest header
-        sb.AppendLine("<?xml version='1.0' encoding='utf-8' standalone='yes'?>");
-        sb.AppendLine("<assembly manifestVersion='1.0'");
-        sb.AppendLine("    xmlns:asmv3='urn:schemas-microsoft-com:asm.v3'");
-        sb.AppendLine("    xmlns:winrtv1='urn:schemas-microsoft-com:winrt.v1'");
-        sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
-
-        var prefix = fragments ? "Fragment" : "Package";
-
         var dllFileFormat = redirectDlls ?
             @"    <asmv3:file name='{0}' loadFrom='%MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY%{0}'>" :
             @"    <asmv3:file name='{0}'>";
 
         var dllFiles = inDllFiles.ToList();
+        var hasPackageManifest = false;
 
         foreach (var inAppxManifest in inAppxManifests)
         {
             XmlDocument doc = new();
             doc.Load(inAppxManifest.FullName);
+
+            // Auto-detect root element name (Package or Fragment)
+            var prefix = doc.DocumentElement?.LocalName ?? "Package";
+            var isPackage = prefix == "Package";
+            if (isPackage)
+            {
+                hasPackageManifest = true;
+            }
+
             var nsmgr = new XmlNamespaceManager(doc.NameTable);
             nsmgr.AddNamespace("m", "http://schemas.microsoft.com/appx/manifest/foundation/windows10");
             // Add InProcessServer elements to the generated appxmanifest
@@ -1488,8 +1471,8 @@ internal partial class MsixService(
                 }
             }
 
-            // Only if packages
-            if (!fragments && redirectDlls)
+            // Only for Package manifests with redirect
+            if (isPackage && redirectDlls)
             {
                 foreach (var dllFile in dllFiles)
                 {
@@ -1533,7 +1516,7 @@ internal partial class MsixService(
 
                                 if (classID != null)
                                 {
-                                    var xmlEntryFormat = @"        <asmv3:comClass clsid='{{{0}}}'/>";
+                                    var xmlEntryFormat = @"        <asmv3:comClass clsid='{{{0}}}'/>"; 
                                     sb.AppendFormat(xmlEntryFormat, classID);
                                     classIDAdded = true;
                                 }
@@ -1547,7 +1530,7 @@ internal partial class MsixService(
                                 ?.OfType<XmlAttribute>()
                                 ?.SingleOrDefault(x => x.Name == "Name")
                                 ?.InnerText;
-                            var xmlEntryFormatForStubs = @"        <asmv3:comInterfaceProxyStub name='{0}' iid='{{{1}}}'/>";
+                            var xmlEntryFormatForStubs = @"        <asmv3:comInterfaceProxyStub name='{0}' iid='{{{1}}}'/>"; 
                             if (typeNames != null && typeID != null)
                             {
                                 sb.AppendFormat(xmlEntryFormatForStubs, typeNames, typeID);
@@ -1561,7 +1544,7 @@ internal partial class MsixService(
             }
         }
 
-        if (!fragments && redirectDlls)
+        if (hasPackageManifest && redirectDlls)
         {
             foreach (var dllFile in dllFiles)
             {
@@ -1569,11 +1552,6 @@ internal partial class MsixService(
                 sb.AppendLine(@"</asmv3:file>");
             }
         }
-
-        sb.AppendLine(@"</assembly>");
-        var manifestContent = sb.ToString();
-
-        await File.WriteAllTextAsync(outAppManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
     }
 
     private async Task SignMsixPackageAsync(DirectoryInfo outputFolder, string certificatePassword, bool generateDevCert, bool installDevCert, string finalPackageName, string? extractedPublisher, FileInfo outputMsixPath, FileInfo? certPath, FileInfo resolvedManifestPath, TaskContext taskContext, CancellationToken cancellationToken)

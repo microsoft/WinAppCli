@@ -34,9 +34,21 @@ public class WinmdServiceTests : BaseCommandTests
 
     /// <summary>
     /// Creates a minimal valid .winmd (PE with ECMA-335 metadata) containing
-    /// the specified activatable class names. This avoids downloading real NuGet packages.
+    /// the specified activatable class names. Each class is marked with
+    /// [Windows.Foundation.Metadata.ActivatableAttribute] so that
+    /// GetActivatableClasses correctly discovers them.
     /// </summary>
     private static void CreateTestWinmd(string path, params string[] activatableClassNames)
+    {
+        CreateTestWinmd(path, activatableClassNames, nonActivatableClassNames: []);
+    }
+
+    /// <summary>
+    /// Creates a minimal valid .winmd with both activatable and non-activatable classes.
+    /// Activatable classes get the [ActivatableAttribute] custom attribute;
+    /// non-activatable classes are plain public types (e.g., event args).
+    /// </summary>
+    private static void CreateTestWinmd(string path, string[] activatableClassNames, string[] nonActivatableClassNames)
     {
         var metadata = new MetadataBuilder();
 
@@ -59,6 +71,34 @@ public class WinmdServiceTests : BaseCommandTests
             metadata.GetOrAddString("System"),
             metadata.GetOrAddString("Object"));
 
+        // Reference Windows.Foundation.Metadata.ActivatableAttribute for marking activatable classes
+        var wfmAssemblyRef = metadata.AddAssemblyReference(
+            metadata.GetOrAddString("Windows.Foundation.FoundationContract"),
+            new Version(4, 0, 0, 0),
+            default, default, default, default);
+
+        var activatableAttrTypeRef = metadata.AddTypeReference(
+            wfmAssemblyRef,
+            metadata.GetOrAddString("Windows.Foundation.Metadata"),
+            metadata.GetOrAddString("ActivatableAttribute"));
+
+        // Build a minimal signature for the ActivatableAttribute .ctor (parameterless)
+        // Blob: prolog (0x0001) + no params
+        var ctorSigBlob = new BlobBuilder();
+        ctorSigBlob.WriteByte(0x20); // HASTHIS
+        ctorSigBlob.WriteByte(0x00); // param count = 0
+        ctorSigBlob.WriteByte(0x01); // return type = void
+
+        var activatableAttrCtor = metadata.AddMemberReference(
+            activatableAttrTypeRef,
+            metadata.GetOrAddString(".ctor"),
+            metadata.GetOrAddBlob(ctorSigBlob));
+
+        // Minimal custom attribute value: just prolog (0x0001) + NumNamed (0x0000)
+        var attrValueBlob = new BlobBuilder();
+        attrValueBlob.WriteUInt16(0x0001); // prolog
+        attrValueBlob.WriteUInt16(0x0000); // NumNamed = 0
+
         // <Module> type
         metadata.AddTypeDefinition(
             default,
@@ -68,8 +108,27 @@ public class WinmdServiceTests : BaseCommandTests
             MetadataTokens.FieldDefinitionHandle(1),
             MetadataTokens.MethodDefinitionHandle(1));
 
-        // Add each activatable class as a public type extending System.Object
+        // Add each activatable class with [ActivatableAttribute]
         foreach (var fullName in activatableClassNames)
+        {
+            var lastDot = fullName.LastIndexOf('.');
+            var ns = lastDot > 0 ? fullName[..lastDot] : "";
+            var name = lastDot > 0 ? fullName[(lastDot + 1)..] : fullName;
+
+            var typeDefHandle = metadata.AddTypeDefinition(
+                TypeAttributes.Public | TypeAttributes.Class,
+                metadata.GetOrAddString(ns),
+                metadata.GetOrAddString(name),
+                objectTypeRef,
+                MetadataTokens.FieldDefinitionHandle(1),
+                MetadataTokens.MethodDefinitionHandle(1));
+
+            // Add [ActivatableAttribute] custom attribute
+            metadata.AddCustomAttribute(typeDefHandle, activatableAttrCtor, metadata.GetOrAddBlob(attrValueBlob));
+        }
+
+        // Add non-activatable classes (no custom attribute — e.g., event args, settings types)
+        foreach (var fullName in nonActivatableClassNames)
         {
             var lastDot = fullName.LastIndexOf('.');
             var ns = lastDot > 0 ? fullName[..lastDot] : "";
@@ -156,6 +215,47 @@ public class WinmdServiceTests : BaseCommandTests
         var result = _winmdService.GetActivatableClasses(new FileInfo(@"C:\nonexistent\fake.winmd"));
         Assert.IsNotNull(result);
         Assert.IsEmpty(result);
+    }
+
+    [TestMethod]
+    public void GetActivatableClasses_FiltersOutNonActivatableClasses()
+    {
+        // Arrange: create a .winmd with both activatable and non-activatable classes
+        // (simulates WebView2 which has ~6 activatable classes but ~70 event args / settings types)
+        var winmdPath = Path.Combine(_tempDir.FullName, "Mixed.winmd");
+        var activatable = new[]
+        {
+            "MyNamespace.CoreWebView2Environment",
+            "MyNamespace.CoreWebView2Controller",
+            "MyNamespace.CoreWebView2EnvironmentOptions"
+        };
+        var nonActivatable = new[]
+        {
+            "MyNamespace.CoreWebView2NavigationStartingEventArgs",
+            "MyNamespace.CoreWebView2Settings",
+            "MyNamespace.CoreWebView2HttpResponseHeaders",
+            "MyNamespace.CoreWebView2WebResourceRequest",
+            "MyNamespace.CoreWebView2ProcessFailedEventArgs"
+        };
+
+        CreateTestWinmd(winmdPath, activatable, nonActivatable);
+
+        // Act
+        var classes = _winmdService.GetActivatableClasses(new FileInfo(winmdPath));
+
+        // Assert: only activatable classes should be returned
+        Assert.HasCount(activatable.Length, classes,
+            $"Should return exactly {activatable.Length} activatable classes, got {classes.Count}: [{string.Join(", ", classes)}]");
+
+        foreach (var expected in activatable)
+        {
+            Assert.IsTrue(classes.Contains(expected), $"Should contain activatable class {expected}");
+        }
+
+        foreach (var excluded in nonActivatable)
+        {
+            Assert.IsFalse(classes.Contains(excluded), $"Should NOT contain non-activatable class {excluded}");
+        }
     }
 
     #endregion
