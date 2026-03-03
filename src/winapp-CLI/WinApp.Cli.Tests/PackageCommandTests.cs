@@ -4,6 +4,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -1115,6 +1116,84 @@ public class PackageCommandTests : BaseCommandTests
 
         Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
         Assert.Contains("no", ex.Message, "Error message should mention no exe files found");
+    }
+
+    #endregion
+
+    #region PFX Certificate Warning Tests
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PfxFileInInputFolder_EmitsWarning()
+    {
+        // Arrange - Create a valid package structure with a .pfx file inside
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithPfx"));
+        CreateTestPackageStructure(packageDir);
+
+        // Place a fake .pfx file in the input folder
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "dev-cert.pfx"), "fake pfx content", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - Package should still be created (warning, not blocking)
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should still be created when .pfx is present");
+
+        // Verify warning was emitted as a status message on the task context
+        var statusMessages = TestTask.SubTasks
+            .OfType<StatusMessageTask>()
+            .Select(t => t.CompletedMessage ?? string.Empty)
+            .ToList();
+        Assert.IsTrue(
+            statusMessages.Any(m => m.Contains("PFX certificate file found", StringComparison.OrdinalIgnoreCase)),
+            $"Status messages should contain PFX warning. Messages:\n{string.Join("\n", statusMessages)}");
+        Assert.IsTrue(
+            statusMessages.Any(m => m.Contains("dev-cert.pfx", StringComparison.OrdinalIgnoreCase)),
+            $"Warning should mention the specific PFX file name. Messages:\n{string.Join("\n", statusMessages)}");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PfxFileInSubdirectory_EmitsWarning()
+    {
+        // Arrange - Create a valid package structure with a .pfx file in a subdirectory
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithNestedPfx"));
+        CreateTestPackageStructure(packageDir);
+
+        // Place a fake .pfx file in a subdirectory
+        var certsDir = Path.Combine(packageDir.FullName, "certs");
+        Directory.CreateDirectory(certsDir);
+        await File.WriteAllTextAsync(Path.Combine(certsDir, "test.pfx"), "fake pfx content", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - Package should still be created
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should still be created when .pfx is in subdirectory");
+
+        // Verify warning includes the relative path
+        var statusMessages = TestTask.SubTasks
+            .OfType<StatusMessageTask>()
+            .Select(t => t.CompletedMessage ?? string.Empty)
+            .ToList();
+        Assert.IsTrue(
+            statusMessages.Any(m => m.Contains("certs\\test.pfx", StringComparison.OrdinalIgnoreCase)
+                                    || m.Contains("certs/test.pfx", StringComparison.OrdinalIgnoreCase)),
+            $"Warning should mention the relative path to the PFX file. Messages:\n{string.Join("\n", statusMessages)}");
     }
 
     #endregion

@@ -62,6 +62,10 @@ internal class TaskContext
         {
             message = message.Insert(UiSymbols.Info.Length, " ");
         }
+        if (message.StartsWith(UiSymbols.Warning))
+        {
+            message = message.Insert(UiSymbols.Warning.Length, " ");
+        }
         var subTask = new StatusMessageTask(message, _task, _ansiConsole, _logger, _renderLock);
         lock (_renderLock)
         {
