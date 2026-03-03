@@ -73,6 +73,22 @@ internal partial class MsixService(
     [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AssemblyIdentityNameRegex();
 
+    // build:Metadata regexes
+    [GeneratedRegex(@"(<Package\b[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataPackageOpenTagRegex();
+    [GeneratedRegex(@"IgnorableNamespaces\s*=\s*""[^""]*\bbuild\b", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataIgnorableNamespacesCheckRegex();
+    [GeneratedRegex(@"(IgnorableNamespaces\s*=\s*""[^""]*)("")", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataIgnorableNamespacesAssignRegex();
+    [GeneratedRegex(@"<build:Item\s[^>]*Name\s*=\s*""Microsoft\.WinAppCli""", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataWinAppCliItemCheckRegex();
+    [GeneratedRegex(@"<build:Item\s[^>]*Name\s*=\s*""Microsoft\.WinAppCli""[^/]*/\s*>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataWinAppCliItemReplaceRegex();
+    [GeneratedRegex(@"([ \t]*)(</build:Metadata>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataCloseTagRegex();
+    [GeneratedRegex(@"([ \t]*)(</Package>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataPackageCloseTagRegex();
+
     // Language (en, en-US, pt-BR, zh-Hans, etc.) – bare token
     [GeneratedRegex(@"^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
     private static partial Regex LanguageQualifierRegex();
@@ -1898,7 +1914,60 @@ $1");
             modifiedContent = await AddThirdPartyWinRTExtensionsToAppxManifestAsync(modifiedContent, taskContext, cancellationToken);
         }
 
+        // Stamp build metadata with CLI version
+        modifiedContent = AddBuildMetadata(modifiedContent);
+
         return modifiedContent;
+    }
+
+    /// <summary>
+    /// Adds or updates build:Metadata in the manifest with the CLI tool name and version.
+    /// Inserts the build namespace and IgnorableNamespaces entry if not already present.
+    /// </summary>
+    internal static string AddBuildMetadata(string manifestContent)
+    {
+        var version = VersionHelper.GetVersionString();
+
+        // Add xmlns:build namespace to <Package> if not present
+        if (!manifestContent.Contains("xmlns:build"))
+        {
+            manifestContent = BuildMetadataPackageOpenTagRegex().Replace(manifestContent,
+                @"$1 xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""$2");
+        }
+
+        // Add 'build' to IgnorableNamespaces if not already listed
+        if (!BuildMetadataIgnorableNamespacesCheckRegex().IsMatch(manifestContent))
+        {
+            manifestContent = BuildMetadataIgnorableNamespacesAssignRegex().Replace(manifestContent,
+                @"$1 build""");
+        }
+
+        var buildItemEntry = $@"<build:Item Name=""Microsoft.WinAppCli"" Version=""{version}"" />";
+
+        if (manifestContent.Contains("<build:Metadata"))
+        {
+            // build:Metadata section already exists
+            if (BuildMetadataWinAppCliItemCheckRegex().IsMatch(manifestContent))
+            {
+                // Update existing WinAppCli entry with current version
+                manifestContent = BuildMetadataWinAppCliItemReplaceRegex().Replace(manifestContent,
+                    buildItemEntry);
+            }
+            else
+            {
+                // Append new entry inside existing build:Metadata
+                manifestContent = BuildMetadataCloseTagRegex().Replace(manifestContent,
+                    $"$1  {buildItemEntry}\n$1$2");
+            }
+        }
+        else
+        {
+            // Create new build:Metadata section before </Package>
+            manifestContent = BuildMetadataPackageCloseTagRegex().Replace(manifestContent,
+                $"\n$1<build:Metadata>\n$1  {buildItemEntry}\n$1</build:Metadata>\n$2");
+        }
+
+        return manifestContent;
     }
 
     /// <summary>

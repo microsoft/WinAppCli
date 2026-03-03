@@ -529,6 +529,130 @@ public class MsixServiceTests
 
     #endregion
 
+    #region AddBuildMetadata Tests
+
+    [TestMethod]
+    public void AddBuildMetadata_CreatesSection_WhenNoneExists()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=", result, "Should add build namespace");
+        Assert.Contains("build:Metadata", result, "Should create build:Metadata section");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+        Assert.Contains("Version=", result, "Should include version");
+        // build should be in IgnorableNamespaces
+        Assert.Contains("IgnorableNamespaces=\"uap build\"", result,
+            "Should add 'build' to IgnorableNamespaces");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_AddsNamespace_WhenBuildNamespaceMissing()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap rescap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=\"http://schemas.microsoft.com/developer/appx/2015/build\"", result);
+        Assert.Contains("IgnorableNamespaces=\"uap rescap build\"", result,
+            "Should append 'build' to existing IgnorableNamespaces");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_PreservesExistingBuildNamespace()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        // Should not duplicate the namespace
+        Assert.AreEqual(1, CountOccurrences(result, "xmlns:build="),
+            "Should not duplicate build namespace");
+        Assert.AreEqual(1, CountOccurrences(result, "<build:Metadata>"),
+            "Should create exactly one build:Metadata section");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_AppendsToExistingSection()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+  <build:Metadata>
+    <build:Item Name=""SomeOtherTool"" Version=""2.0.0"" />
+  </build:Metadata>
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains(@"Name=""SomeOtherTool""", result, "Should preserve existing items");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+        Assert.AreEqual(1, CountOccurrences(result, "<build:Metadata>"),
+            "Should not duplicate build:Metadata section");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_UpdatesExistingWinAppCliEntry()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+  <build:Metadata>
+    <build:Item Name=""Microsoft.WinAppCli"" Version=""0.0.1"" />
+  </build:Metadata>
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        // Should have exactly one WinAppCli entry (updated, not duplicated)
+        Assert.AreEqual(1, CountOccurrences(result, @"Name=""Microsoft.WinAppCli"""),
+            "Should not duplicate WinAppCli entry");
+        // Old version should be gone
+        Assert.DoesNotContain(@"Version=""0.0.1""", result,
+            "Should replace old version");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_IsIdempotent()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var first = MsixService.AddBuildMetadata(manifest);
+        var second = MsixService.AddBuildMetadata(first);
+
+        Assert.AreEqual(first, second, "Calling AddBuildMetadata twice should produce the same result");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static int CountOccurrences(string text, string pattern)
