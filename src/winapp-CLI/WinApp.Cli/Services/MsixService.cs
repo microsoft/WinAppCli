@@ -136,18 +136,10 @@ internal partial class MsixService(
     private static partial Regex AltFormQualifierRegex();
 
     /// <summary>
-    /// Cached result of <c>dotnet list package --format json</c> to avoid
-    /// spawning the same expensive process multiple times per CLI invocation.
-    /// Null means "not yet fetched"; a non-null Task whose result is null means
-    /// "fetched, but no packages were found".
-    /// </summary>
-    private Task<DotNetPackageListJson?>? _cachedDotNetPackageListTask;
-
-    /// <summary>
     /// Sets up Windows App SDK for self-contained deployment by extracting MSIX content
     /// and preparing the necessary files for embedding in applications.
     /// </summary>
-    public async Task SetupSelfContainedAsync(DirectoryInfo winappDir, string architecture, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task SetupSelfContainedAsync(DirectoryInfo winappDir, string architecture, TaskContext taskContext, DotNetPackageListJson? dotNetPackageList = null, CancellationToken cancellationToken = default)
     {
         await taskContext.AddSubTaskAsync("Setting up Self Contained", async (taskContext, cancellationToken) =>
         {
@@ -155,7 +147,7 @@ internal partial class MsixService(
             var selfContainedDir = winappDir.CreateSubdirectory("self-contained");
             var archSelfContainedDir = selfContainedDir.CreateSubdirectory(architecture);
 
-            var msixDir = await GetRuntimeMsixDirAsync(taskContext, cancellationToken) ?? throw new DirectoryNotFoundException("Windows App SDK Runtime MSIX directory not found. Ensure Windows App SDK is installed.");
+            var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken) ?? throw new DirectoryNotFoundException("Windows App SDK Runtime MSIX directory not found. Ensure Windows App SDK is installed.");
 
             // Look for the MSIX file in the tools/MSIX folder
             var msixToolsDir = new DirectoryInfo(Path.Combine(msixDir.FullName, $"win10-{architecture}"));
@@ -351,10 +343,14 @@ internal partial class MsixService(
         taskContext.AddDebugMessage($"Using AppX manifest: {appxManifestPath}");
 
         // Generate sparse package structure
+        // Fetch dotnet package list once for all downstream operations
+        var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+
         var (debugManifestPath, debugIdentity) = await GenerateSparsePackageStructureAsync(
             appxManifestPath,
             entryPointPath,
             keepIdentity,
+            dotNetPackageList,
             taskContext,
             cancellationToken);
 
@@ -920,6 +916,18 @@ internal partial class MsixService(
             throw new DirectoryNotFoundException($"Input folder not found: {inputFolder}");
         }
 
+        // Warn if the input folder contains .pfx certificate files, which are likely
+        // development certificates that should not be included in the package payload.
+        var pfxFiles = inputFolder.EnumerateFiles("*.pfx", SearchOption.AllDirectories).ToList();
+        if (pfxFiles.Count > 0)
+        {
+            foreach (var pfxFile in pfxFiles)
+            {
+                var relativePath = Path.GetRelativePath(inputFolder.FullName, pfxFile.FullName);
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} PFX certificate file found in input folder: {relativePath}. Consider removing it before packaging.");
+            }
+        }
+
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
         // 2. Check for appxmanifest.xml in input folder
@@ -969,7 +977,10 @@ internal partial class MsixService(
         manifestContent = ResolveManifestPlaceholders(manifestContent, executable, inputFolder, taskContext);
 
         // Update manifest content to ensure it's either referencing Windows App SDK or is self-contained
-        manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, taskContext, cancellationToken);
+        // Fetch dotnet package list once for all downstream operations
+        var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+
+        manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
 
         try
         {
@@ -1104,12 +1115,12 @@ internal partial class MsixService(
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Preparing self-contained Windows App SDK runtime...");
 
-                var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, taskContext, cancellationToken);
+                var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, dotNetPackageList, taskContext, cancellationToken);
 
                 // Add WindowsAppSDK.manifest to existing manifest
                 var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
                 var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
-                await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
+                await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, dotNetPackageList, taskContext, cancellationToken);
             }
 
             await CreateMsixPackageFromFolderAsync(stagingDir, outputMsixPath, taskContext, cancellationToken);
@@ -1150,7 +1161,7 @@ internal partial class MsixService(
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
     }
 
-    private async Task EmbedActivationManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task EmbedActivationManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Use applicationLocation for DLL content (where runtime files were copied by PrepareRuntimeForPackagingAsync)
         var exeDir = exePath.Directory!;
@@ -1172,7 +1183,7 @@ internal partial class MsixService(
             sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
 
             // Collect all AppX manifests (main package + component fragments) and their DLLs
-            (var packageDependencies, _) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
+            (var packageDependencies, _) = await GetWinAppSDKPackageDependenciesAsync(dotNetPackageList, taskContext, cancellationToken);
             if (packageDependencies == null || packageDependencies.Count == 0)
             {
                 throw new InvalidOperationException("No Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
@@ -1203,7 +1214,7 @@ internal partial class MsixService(
             // Phase 3: Discover and register third-party WinRT components (e.g., Win2D, WebView2)
             // These packages ship .winmd files + native DLLs but no package.appxfragment
             await AppendThirdPartyWinRTManifestEntriesAsync(
-                sb, architecture, taskContext, cancellationToken);
+                sb, architecture, dotNetPackageList, taskContext, cancellationToken);
 
             sb.AppendLine("</assembly>");
 
@@ -1238,7 +1249,7 @@ internal partial class MsixService(
     /// Collects all user NuGet packages from winapp.yaml or .csproj.
     /// Returns the full package dictionary (name → version) for WinRT component scanning.
     /// </summary>
-    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -1256,8 +1267,7 @@ internal partial class MsixService(
             // Path 2: Try .csproj via `dotnet list package --format json` (cached)
             try
             {
-                var packageList = await GetCachedDotNetPackageListAsync(cancellationToken);
-                var allPackages = packageList?.Projects?
+                var allPackages = dotNetPackageList?.Projects?
                     .SelectMany(p => p.Frameworks ?? [])
                     .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
 
@@ -1281,16 +1291,6 @@ internal partial class MsixService(
         return packages;
     }
 
-    /// <summary>
-    /// Returns the cached <c>dotnet list package --format json</c> result,
-    /// invoking the CLI at most once per MsixService lifetime.
-    /// </summary>
-    private Task<DotNetPackageListJson?> GetCachedDotNetPackageListAsync(CancellationToken cancellationToken)
-    {
-        _cachedDotNetPackageListTask ??= FetchDotNetPackageListAsync(cancellationToken);
-        return _cachedDotNetPackageListTask;
-    }
-
     private async Task<DotNetPackageListJson?> FetchDotNetPackageListAsync(CancellationToken cancellationToken)
     {
         var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
@@ -1311,10 +1311,11 @@ internal partial class MsixService(
     private async Task AppendThirdPartyWinRTManifestEntriesAsync(
         StringBuilder sb,
         string architecture,
+        DotNetPackageListJson? dotNetPackageList,
         TaskContext taskContext,
         CancellationToken cancellationToken)
     {
-        var allPackages = await GetAllUserPackagesAsync(taskContext, cancellationToken);
+        var allPackages = await GetAllUserPackagesAsync(dotNetPackageList, taskContext, cancellationToken);
         if (allPackages.Count == 0)
         {
             return;
@@ -1375,10 +1376,11 @@ internal partial class MsixService(
     /// </summary>
     private async Task<string> AddThirdPartyWinRTExtensionsToAppxManifestAsync(
         string manifestContent,
+        DotNetPackageListJson? dotNetPackageList,
         TaskContext taskContext,
         CancellationToken cancellationToken)
     {
-        var allPackages = await GetAllUserPackagesAsync(taskContext, cancellationToken);
+        var allPackages = await GetAllUserPackagesAsync(dotNetPackageList, taskContext, cancellationToken);
         if (allPackages.Count == 0)
         {
             return manifestContent;
@@ -1750,6 +1752,7 @@ internal partial class MsixService(
         FileInfo originalManifestPath,
         string entryPointPath,
         bool keepIdentity,
+        DotNetPackageListJson? dotNetPackageList,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
@@ -1807,6 +1810,7 @@ internal partial class MsixService(
             entryPointPath,
             sparse: true,
             selfContained: false,
+            dotNetPackageList,
             taskContext,
             cancellationToken);
 
@@ -1864,6 +1868,7 @@ internal partial class MsixService(
         string? entryPointPath,
         bool sparse,
         bool selfContained,
+        DotNetPackageListJson? dotNetPackageList,
         TaskContext taskContext,
         CancellationToken cancellationToken)
     {
@@ -1953,7 +1958,7 @@ $1");
         // Update or insert Windows App SDK dependency (skip for self-contained packages)
         if (!selfContained && (entryPointPath == null || isExe))
         {
-            modifiedContent = await UpdateWindowsAppSdkDependencyAsync(modifiedContent, taskContext, cancellationToken);
+            modifiedContent = await UpdateWindowsAppSdkDependencyAsync(modifiedContent, dotNetPackageList, taskContext, cancellationToken);
         }
 
         // Add InProcessServer entries for third-party WinRT components (e.g., Win2D, WebView2)
@@ -1961,7 +1966,7 @@ $1");
         // so we skip them here to avoid duplication.
         if (!selfContained)
         {
-            modifiedContent = await AddThirdPartyWinRTExtensionsToAppxManifestAsync(modifiedContent, taskContext, cancellationToken);
+            modifiedContent = await AddThirdPartyWinRTExtensionsToAppxManifestAsync(modifiedContent, dotNetPackageList, taskContext, cancellationToken);
         }
 
         // Stamp build metadata with CLI version
@@ -2035,10 +2040,10 @@ $1");
     /// </summary>
     /// <param name="manifestContent">The manifest content to modify</param>
     /// <returns>The modified manifest content</returns>
-    private async Task<string> UpdateWindowsAppSdkDependencyAsync(string manifestContent, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<string> UpdateWindowsAppSdkDependencyAsync(string manifestContent, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Get the Windows App SDK version from the locked winapp.yaml config
-        var winAppSdkInfo = await GetWindowsAppSdkDependencyInfoAsync(taskContext, cancellationToken);
+        var winAppSdkInfo = await GetWindowsAppSdkDependencyInfoAsync(dotNetPackageList, taskContext, cancellationToken);
 
         if (winAppSdkInfo == null)
         {
@@ -2092,11 +2097,11 @@ $1");
     /// Gets the Windows App SDK dependency information from the locked winapp.yaml config and package source
     /// </summary>
     /// <returns>The dependency information, or null if not found</returns>
-    private async Task<WindowsAppRuntimePackageInfo?> GetWindowsAppSdkDependencyInfoAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<WindowsAppRuntimePackageInfo?> GetWindowsAppSdkDependencyInfoAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         try
         {
-            var msixDir = await GetRuntimeMsixDirAsync(taskContext, cancellationToken);
+            var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken);
             if (msixDir == null)
             {
                 return null;
@@ -2119,9 +2124,9 @@ $1");
         }
     }
 
-    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
-        (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
+        (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(dotNetPackageList, taskContext, cancellationToken);
         if (packageDependencies == null || mainVersion == null)
         {
             return null;
@@ -2163,7 +2168,7 @@ $1");
         return msixDir;
     }
 
-    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? mainVersion = null;
         // Path 1: Try winapp.yaml (C++ / native projects)
@@ -2174,11 +2179,10 @@ $1");
         }
         else
         {
-            // Path 2: Try .csproj via `dotnet list package --format json` (cached)
+            // Path 2: Try .csproj via `dotnet list package --format json`
             taskContext.AddDebugMessage($"{UiSymbols.Package} Querying NuGet package list...");
-            var packageList = await GetCachedDotNetPackageListAsync(cancellationToken);
 
-            var allPackages = packageList?.Projects?
+            var allPackages = dotNetPackageList?.Projects?
                 .SelectMany(p => p.Frameworks ?? [])
                 .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
 
@@ -2529,14 +2533,14 @@ $1");
     /// <param name="inputFolder">The folder where runtime files should be copied</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the self-contained deployment directory</returns>
-    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var arch = WorkspaceSetupService.GetSystemArchitecture();
 
         var winappDir = winappDirectoryService.GetLocalWinappDirectory();
 
         // Extract runtime files using the existing method
-        await SetupSelfContainedAsync(winappDir, arch, taskContext, cancellationToken);
+        await SetupSelfContainedAsync(winappDir, arch, taskContext, dotNetPackageList, cancellationToken);
 
         // Copy runtime files from .winapp/self-contained to input folder
         var runtimeSourceDir = new DirectoryInfo(Path.Combine(winappDir.FullName, "self-contained", arch, "deployment"));
