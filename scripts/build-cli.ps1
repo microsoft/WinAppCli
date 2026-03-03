@@ -85,14 +85,14 @@ try
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx
+        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --collect "XPlat Code Coverage"
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
         Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
+        New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
         $TrxFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.trx" -Recurse -File
         if ($TrxFiles) {
-            New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
             foreach ($trxFile in $TrxFiles) {
                 Copy-Item $trxFile.FullName "$ArtifactsPath\TestResults\" -Force
                 Write-Host "[TEST] Copied: $($trxFile.Name)" -ForegroundColor Gray
@@ -100,6 +100,18 @@ try
             Write-Host "[TEST] Test results copied successfully ($($TrxFiles.Count) file(s))" -ForegroundColor Green
         } else {
             Write-Warning "No TRX test result files found in $CliSolutionDir"
+        }
+
+        # Copy coverage XML files to artifacts
+        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "coverage.cobertura.xml" -Recurse -File
+        if ($CoverageFiles) {
+            foreach ($coverageFile in $CoverageFiles) {
+                Copy-Item $coverageFile.FullName "$ArtifactsPath\TestResults\" -Force
+                Write-Host "[TEST] Copied coverage: $($coverageFile.Name)" -ForegroundColor Gray
+            }
+            Write-Host "[TEST] Coverage results copied successfully ($($CoverageFiles.Count) file(s))" -ForegroundColor Green
+        } else {
+            Write-Warning "No coverage XML files found in $CliSolutionDir"
         }
 
         # Now check test results and decide whether to exit
