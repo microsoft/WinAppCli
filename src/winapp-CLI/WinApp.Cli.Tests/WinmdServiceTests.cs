@@ -218,6 +218,20 @@ public class WinmdServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void GetActivatableClasses_CorruptWinmd_ReturnsEmpty()
+    {
+        // Arrange: write garbage bytes that are not a valid PE/winmd
+        var corruptPath = Path.Combine(_tempDir.FullName, "Corrupt.winmd");
+        File.WriteAllBytes(corruptPath, [0x00, 0xFF, 0xFE, 0xAB, 0xCD, 0x12, 0x34]);
+
+        // Act: should not throw — returns empty list
+        var result = _winmdService.GetActivatableClasses(new FileInfo(corruptPath));
+
+        Assert.IsNotNull(result);
+        Assert.IsEmpty(result);
+    }
+
+    [TestMethod]
     public void GetActivatableClasses_FiltersOutNonActivatableClasses()
     {
         // Arrange: create a .winmd with both activatable and non-activatable classes

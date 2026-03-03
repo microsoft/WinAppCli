@@ -651,6 +651,26 @@ public class MsixServiceTests
         Assert.AreEqual(first, second, "Calling AddBuildMetadata twice should produce the same result");
     }
 
+    [TestMethod]
+    public void AddBuildMetadata_CreatesIgnorableNamespaces_WhenAttributeMissing()
+    {
+        // Minimal manifest with no IgnorableNamespaces attribute at all
+        // (matches the test manifest in SignCommandWithMismatchedMsixPublishers)
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=", result, "Should add build namespace");
+        Assert.Contains("IgnorableNamespaces=\"build\"", result,
+            "Should create IgnorableNamespaces attribute with 'build' when none existed");
+        Assert.Contains("<build:Metadata>", result, "Should create build:Metadata section");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+    }
+
     #endregion
 
     #region Helpers

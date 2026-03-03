@@ -146,7 +146,7 @@ winapp pack <input-folder> [options]
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>.msix`)
+- `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)

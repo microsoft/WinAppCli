@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 
 namespace WinApp.Cli.Services;
 
-internal sealed class WinmdService : IWinmdService
+internal sealed class WinmdService(ILogger<WinmdService> logger) : IWinmdService
 {
     /// <summary>
     /// WinRT metadata attribute names that indicate a class needs an activation factory
@@ -24,9 +25,23 @@ internal sealed class WinmdService : IWinmdService
     {
         if (!winmdPath.Exists)
         {
+            logger.LogDebug("Winmd file not found: {Path}", winmdPath.FullName);
             return [];
         }
 
+        try
+        {
+            return ReadActivatableClasses(winmdPath);
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or IOException or InvalidOperationException)
+        {
+            logger.LogWarning("Skipping invalid or unreadable winmd file {Path}: {Message}", winmdPath.FullName, ex.Message);
+            return [];
+        }
+    }
+
+    private static List<string> ReadActivatableClasses(FileInfo winmdPath)
+    {
         var classes = new List<string>();
 
         using var stream = File.OpenRead(winmdPath.FullName);
@@ -189,29 +204,28 @@ internal sealed class WinmdService : IWinmdService
     {
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Search in metadata/ directories
-        foreach (var metadataDir in SafeEnumDirs(packageDir, "metadata"))
+        // Probe known top-level directories directly (NuGet packages have a well-defined layout)
+        var metadataDir = new DirectoryInfo(Path.Combine(packageDir.FullName, "metadata"));
+        if (metadataDir.Exists)
         {
             AddWinmdFiles(results, metadataDir);
             var v18362 = new DirectoryInfo(Path.Combine(metadataDir.FullName, "10.0.18362.0"));
             AddWinmdFiles(results, v18362);
         }
 
-        // Search in lib/ directories (common location for .winmd files)
-        foreach (var libDir in SafeEnumDirs(packageDir, "lib"))
+        // Search in lib/ directory (common location for .winmd files, recurse into TFM subdirs)
+        var libDir = new DirectoryInfo(Path.Combine(packageDir.FullName, "lib"));
+        if (libDir.Exists)
         {
-            // Search all TFM subdirectories for .winmd files
-            if (libDir.Exists)
+            foreach (var f in SafeEnumFiles(libDir, "*.winmd", SearchOption.AllDirectories))
             {
-                foreach (var f in SafeEnumFiles(libDir, "*.winmd", SearchOption.AllDirectories))
-                {
-                    results.Add(f.FullName);
-                }
+                results.Add(f.FullName);
             }
         }
 
-        // Search in References/ directories
-        foreach (var refDir in SafeEnumDirs(packageDir, "References"))
+        // Search in References/ directory
+        var refDir = new DirectoryInfo(Path.Combine(packageDir.FullName, "References"));
+        if (refDir.Exists)
         {
             foreach (var f in SafeEnumFiles(refDir, "*.winmd", SearchOption.AllDirectories))
             {
@@ -274,12 +288,6 @@ internal sealed class WinmdService : IWinmdService
 
         var typeRef = reader.GetTypeReference((TypeReferenceHandle)memberRef.Parent);
         return reader.GetString(typeRef.Name);
-    }
-
-    private static IEnumerable<DirectoryInfo> SafeEnumDirs(DirectoryInfo root, string searchPattern)
-    {
-        try { return root.Exists ? root.EnumerateDirectories(searchPattern, SearchOption.AllDirectories) : []; }
-        catch { return []; }
     }
 
     private static IEnumerable<FileInfo> SafeEnumFiles(DirectoryInfo root, string searchPattern, SearchOption option)

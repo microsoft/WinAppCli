@@ -130,6 +130,14 @@ internal partial class MsixService(
     private static partial Regex AltFormQualifierRegex();
 
     /// <summary>
+    /// Cached result of <c>dotnet list package --format json</c> to avoid
+    /// spawning the same expensive process multiple times per CLI invocation.
+    /// Null means "not yet fetched"; a non-null Task whose result is null means
+    /// "fetched, but no packages were found".
+    /// </summary>
+    private Task<DotNetPackageListJson?>? _cachedDotNetPackageListTask;
+
+    /// <summary>
     /// Sets up Windows App SDK for self-contained deployment by extracting MSIX content
     /// and preparing the necessary files for embedding in applications.
     /// </summary>
@@ -957,32 +965,29 @@ internal partial class MsixService(
         // Update manifest content to ensure it's either referencing Windows App SDK or is self-contained
         manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, taskContext, cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(finalPackageName) || string.IsNullOrWhiteSpace(extractedPublisher))
+        try
         {
-            try
+            if (string.IsNullOrWhiteSpace(finalPackageName))
             {
-                if (string.IsNullOrWhiteSpace(finalPackageName))
-                {
-                    var nameMatch = AppxPackageIdentityNameRegex().Match(manifestContent);
-                    finalPackageName = nameMatch.Success ? nameMatch.Groups[1].Value : "Package";
-                }
-
-                if (string.IsNullOrWhiteSpace(extractedPublisher))
-                {
-                    var publisherMatch = AppxPackageIdentityPublisherRegex().Match(manifestContent);
-                    extractedPublisher = publisherMatch.Success ? publisherMatch.Groups[1].Value : null;
-                }
-
-                if (string.IsNullOrWhiteSpace(extractedVersion))
-                {
-                    var versionMatch = AppxPackageIdentityVersionRegex().Match(manifestContent);
-                    extractedVersion = versionMatch.Success ? versionMatch.Groups[1].Value : null;
-                }
+                var nameMatch = AppxPackageIdentityNameRegex().Match(manifestContent);
+                finalPackageName = nameMatch.Success ? nameMatch.Groups[1].Value : "Package";
             }
-            catch
+
+            if (string.IsNullOrWhiteSpace(extractedPublisher))
             {
-                finalPackageName ??= "Package";
+                var publisherMatch = AppxPackageIdentityPublisherRegex().Match(manifestContent);
+                extractedPublisher = publisherMatch.Success ? publisherMatch.Groups[1].Value : null;
             }
+
+            if (string.IsNullOrWhiteSpace(extractedVersion))
+            {
+                var versionMatch = AppxPackageIdentityVersionRegex().Match(manifestContent);
+                extractedVersion = versionMatch.Success ? versionMatch.Groups[1].Value : null;
+            }
+        }
+        catch
+        {
+            finalPackageName ??= "Package";
         }
 
         var executableMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
@@ -1192,7 +1197,7 @@ internal partial class MsixService(
             // Phase 3: Discover and register third-party WinRT components (e.g., Win2D, WebView2)
             // These packages ship .winmd files + native DLLs but no package.appxfragment
             await AppendThirdPartyWinRTManifestEntriesAsync(
-                sb, architecture, packageDependencies, taskContext, cancellationToken);
+                sb, architecture, taskContext, cancellationToken);
 
             sb.AppendLine("</assembly>");
 
@@ -1242,38 +1247,55 @@ internal partial class MsixService(
         }
         else
         {
-            // Path 2: Try .csproj via `dotnet list package --format json`
-            var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
-            var csprojFiles = dotNetService.FindCsproj(cwd);
-            var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
-            if (csproj != null)
+            // Path 2: Try .csproj via `dotnet list package --format json` (cached)
+            try
             {
-                try
-                {
-                    var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
-                    var allPackages = packageList?.Projects?
-                        .SelectMany(p => p.Frameworks ?? [])
-                        .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+                var packageList = await GetCachedDotNetPackageListAsync(cancellationToken);
+                var allPackages = packageList?.Projects?
+                    .SelectMany(p => p.Frameworks ?? [])
+                    .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
 
-                    if (allPackages != null)
+                if (allPackages != null)
+                {
+                    foreach (var pkg in allPackages)
                     {
-                        foreach (var pkg in allPackages)
+                        if (!string.IsNullOrEmpty(pkg.Id) && !string.IsNullOrEmpty(pkg.ResolvedVersion))
                         {
-                            if (!string.IsNullOrEmpty(pkg.Id) && !string.IsNullOrEmpty(pkg.ResolvedVersion))
-                            {
-                                packages.TryAdd(pkg.Id, pkg.ResolvedVersion);
-                            }
+                            packages.TryAdd(pkg.Id, pkg.ResolvedVersion);
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not retrieve package list from .csproj: {ex.Message}");
-                }
+            }
+            catch (Exception ex)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not retrieve package list from .csproj: {ex.Message}");
             }
         }
 
         return packages;
+    }
+
+    /// <summary>
+    /// Returns the cached <c>dotnet list package --format json</c> result,
+    /// invoking the CLI at most once per MsixService lifetime.
+    /// </summary>
+    private Task<DotNetPackageListJson?> GetCachedDotNetPackageListAsync(CancellationToken cancellationToken)
+    {
+        _cachedDotNetPackageListTask ??= FetchDotNetPackageListAsync(cancellationToken);
+        return _cachedDotNetPackageListTask;
+    }
+
+    private async Task<DotNetPackageListJson?> FetchDotNetPackageListAsync(CancellationToken cancellationToken)
+    {
+        var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
+        var csprojFiles = dotNetService.FindCsproj(cwd);
+        var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
+        if (csproj == null)
+        {
+            return null;
+        }
+
+        return await dotNetService.GetPackageListAsync(csproj, cancellationToken);
     }
 
     /// <summary>
@@ -1283,7 +1305,6 @@ internal partial class MsixService(
     private async Task AppendThirdPartyWinRTManifestEntriesAsync(
         StringBuilder sb,
         string architecture,
-        Dictionary<string, string>? winAppSDKPackages,
         TaskContext taskContext,
         CancellationToken cancellationToken)
     {
@@ -1307,11 +1328,23 @@ internal partial class MsixService(
 
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found {components.Count} third-party WinRT component(s) to register");
 
+        // Snapshot the existing content so we can detect DLLs already registered
+        // by AppendAppManifestFromAppx (e.g., WinAppSDK sub-packages).
+        var existingContent = sb.ToString();
+
         foreach (var component in components)
         {
             var classes = winmdService.GetActivatableClasses(component.WinmdPath);
             if (classes.Count == 0)
             {
+                continue;
+            }
+
+            // Skip components whose DLL is already in the manifest (from WinAppSDK fragments
+            // or a previous iteration) to avoid duplicate activatableClass entries.
+            if (existingContent.Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Skipping {component.ImplementationDll} — already in manifest");
                 continue;
             }
 
@@ -1938,8 +1971,18 @@ $1");
         // Add 'build' to IgnorableNamespaces if not already listed
         if (!BuildMetadataIgnorableNamespacesCheckRegex().IsMatch(manifestContent))
         {
-            manifestContent = BuildMetadataIgnorableNamespacesAssignRegex().Replace(manifestContent,
-                @"$1 build""");
+            if (manifestContent.Contains("IgnorableNamespaces"))
+            {
+                // Append 'build' to the existing IgnorableNamespaces value
+                manifestContent = BuildMetadataIgnorableNamespacesAssignRegex().Replace(manifestContent,
+                    @"$1 build""");
+            }
+            else
+            {
+                // No IgnorableNamespaces attribute exists — add one to <Package>
+                manifestContent = BuildMetadataPackageOpenTagRegex().Replace(manifestContent,
+                    @"$1 IgnorableNamespaces=""build""$2");
+            }
         }
 
         var buildItemEntry = $@"<build:Item Name=""Microsoft.WinAppCli"" Version=""{version}"" />";
@@ -2114,26 +2157,20 @@ $1");
         }
         else
         {
-            // Path 2: Try .csproj via `dotnet list package --format json`
-            var cwd = new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
-            var csprojFiles = dotNetService.FindCsproj(cwd);
-            var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
-            if (csproj != null)
+            // Path 2: Try .csproj via `dotnet list package --format json` (cached)
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Querying NuGet package list...");
+            var packageList = await GetCachedDotNetPackageListAsync(cancellationToken);
+
+            var allPackages = packageList?.Projects?
+                .SelectMany(p => p.Frameworks ?? [])
+                .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+            var winAppSdkPkg = allPackages?
+                .FirstOrDefault(p => string.Equals(p.Id, BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase));
+
+            if (winAppSdkPkg != null && !string.IsNullOrEmpty(winAppSdkPkg.ResolvedVersion))
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Package} Found .csproj: {csproj.Name}, querying NuGet package list...");
-                var packageList = await dotNetService.GetPackageListAsync(csproj, cancellationToken);
-
-                var allPackages = packageList?.Projects?
-                    .SelectMany(p => p.Frameworks ?? [])
-                    .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
-
-                var winAppSdkPkg = allPackages?
-                    .FirstOrDefault(p => string.Equals(p.Id, BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase));
-
-                if (winAppSdkPkg != null && !string.IsNullOrEmpty(winAppSdkPkg.ResolvedVersion))
-                {
-                    mainVersion = winAppSdkPkg.ResolvedVersion;
-                }
+                mainVersion = winAppSdkPkg.ResolvedVersion;
             }
         }
 
