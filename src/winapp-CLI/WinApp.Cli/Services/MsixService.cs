@@ -369,7 +369,7 @@ internal partial class MsixService(
 
                 var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
                 var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
-                await EmbedWindowsAppSDKManifestToExeAsync(exePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
+                await EmbedActivationManifestToExeAsync(exePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, taskContext, cancellationToken);
 
                 taskContext.AddDebugMessage($"{UiSymbols.Check} Self-contained runtime deployed and activation manifest embedded");
             }
