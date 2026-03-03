@@ -40,8 +40,6 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp create-debug-identity <exe-path>
    ├─ Need to sign an existing MSIX or exe?
    │  └─ winapp sign <file> <cert>
-   ├─ Need to update AI agent skill files?
-   │  └─ winapp agents generate
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
       └─ winapp tool <toolname> <args>
 ```
@@ -74,8 +72,7 @@ Does the project already have an appxmanifest.xml?
 - `--setup-sdks stable|preview|experimental|none` — control SDK installation (default: prompts user)
 - `--config-only` — only create `winapp.yaml`, skip package installation
 - `--no-gitignore` — don't update `.gitignore`
-- `--no-skills` — skip AI agent skill file generation
-**Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed), `.github/skills/winapp-cli/` (unless `--no-skills`)
+**Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
 
 ### `winapp restore [base-directory]`
 **Purpose:** Reinstall SDK packages from existing config without changing versions.
@@ -153,14 +150,6 @@ Does the project already have an appxmanifest.xml?
 ### `winapp tool <toolname> [args...]` (alias: `winapp run-buildtool`)
 **Purpose:** Run Windows SDK tools directly (makeappx, signtool, makepri, etc.).
 **When to use:** When you need low-level SDK tool access. Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like `package` or `sign`.
-
-### `winapp agents generate`
-**Purpose:** Generate AI agent skill files for coding assistants (GitHub Copilot, Claude, etc.).
-**When to use:** To set up or refresh AI coding assistant context in a project.
-**Key options:**
-- `--skills-dir <path>` — override skills directory location
-- `--directory <path>` — project root directory (default: cwd)
-**Behavior:** Auto-detects existing skills directories (`.github/skills/`, `.agents/skills/`, `.claude/skills/`), or creates `.github/skills/winapp-cli/` if none exist.
 
 ### `winapp get-winapp-path`
 **Purpose:** Print the path to the `.winapp` directory.

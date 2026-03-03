@@ -44,8 +44,6 @@ Does the project have an appxmanifest.xml?
    │  └─ winapp manifest update-assets ./logo.png
    ├─ Need to run SDK tools directly?
    │  └─ winapp tool <toolname> <args>
-   ├─ Want AI agent skills in your repo?
-   │  └─ winapp agents generate
    ├─ Need to publish to Microsoft Store?
    │  └─ winapp store <args> (passthrough to Store Developer CLI)
    └─ Need the .winapp directory path for build scripts?
@@ -74,7 +72,6 @@ Does the project have an appxmanifest.xml?
 | `package` | Build output + `appxmanifest.xml` | `.msix` file |
 | `sign` | File + certificate | Signed file (in-place) |
 | `create-external-catalog` | Directory with executables | `CodeIntegrityExternal.cat` |
-| `agents generate` | Nothing | `.github/skills/winapp-cli/` (or detected skills dir) |
 | `tool <name>` | Nothing (auto-downloads tools) | Runs SDK tool directly |
 | `store` | Nothing (auto-downloads Store CLI) | Passthrough to Microsoft Store Developer CLI |
 | `get-winapp-path` | Nothing | Prints `.winapp` directory path |

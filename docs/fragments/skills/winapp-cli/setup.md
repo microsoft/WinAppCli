@@ -84,23 +84,10 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 4. **Debug with identity** — `winapp create-debug-identity ./bin/myapp.exe` to test Windows APIs
 5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
 
-### Generate AI agent skills
-
-```powershell
-# Generate SKILL.md files for AI coding assistants (Copilot, Claude, Cursor, etc.)
-winapp agents generate
-
-# Specify a custom skills directory
-winapp agents generate --skills-dir ./my-skills
-```
-
-This is also run automatically during `winapp init` (unless `--no-skills` is passed).
-
 ## Tips
 
 - Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts
 - If you only need `appxmanifest.xml` without SDK setup, use `winapp manifest generate` instead of `init`
-- The `--no-skills` flag skips AI agent skill file generation if you don't use Copilot/Claude/Cursor
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
