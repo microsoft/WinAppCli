@@ -18,7 +18,6 @@ internal class InitCommand : Command, IShortDescription
     public static Option<bool> NoGitignoreOption { get; }
     public static Option<bool> UseDefaults { get; }
     public static Option<bool> ConfigOnlyOption { get; }
-    public static Option<bool> NoSkillsOption { get; }
 
     static InitCommand()
     {
@@ -54,10 +53,6 @@ internal class InitCommand : Command, IShortDescription
         {
             Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
         };
-        NoSkillsOption = new Option<bool>("--no-skills")
-        {
-            Description = "Don't generate AI agent skill files (for Copilot, Claude, etc.)"
-        };
     }
 
     public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.")
@@ -69,7 +64,6 @@ internal class InitCommand : Command, IShortDescription
         Options.Add(NoGitignoreOption);
         Options.Add(UseDefaults);
         Options.Add(ConfigOnlyOption);
-        Options.Add(NoSkillsOption);
     }
 
     public class Handler(IWorkspaceSetupService workspaceSetupService, ICurrentDirectoryProvider currentDirectoryProvider) : AsynchronousCommandLineAction
@@ -83,7 +77,6 @@ internal class InitCommand : Command, IShortDescription
             var noGitignore = parseResult.GetValue(NoGitignoreOption);
             var useDefaults = parseResult.GetValue(UseDefaults);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
-            var noSkills = parseResult.GetValue(NoSkillsOption);
 
             var options = new WorkspaceSetupOptions
             {
@@ -95,8 +88,7 @@ internal class InitCommand : Command, IShortDescription
                 UseDefaults = useDefaults,
                 RequireExistingConfig = false,
                 ForceLatestBuildTools = true,
-                ConfigOnly = configOnly,
-                NoSkills = noSkills
+                ConfigOnly = configOnly
             };
 
             return await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);

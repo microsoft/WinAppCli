@@ -44,10 +44,6 @@
     <!-- Embed templates and default MSIX assets -->
     <EmbeddedResource Include="Templates\**\*.*" />
     <EmbeddedResource Include="Assets\msix_default_assets\**\*.*" />
-    <!-- Embed agent skills from the single source in .github/plugin/skills/ -->
-    <!-- Link maps them into Templates\AgentContext\skills\ so the embedded resource namespace is preserved -->
-    <EmbeddedResource Include="..\..\..\.github\plugin\skills\**\*.*"
-                      Link="Templates\AgentContext\skills\%(RecursiveDir)%(FileName)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

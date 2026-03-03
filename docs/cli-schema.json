@@ -50,74 +50,6 @@
     }
   },
   "subcommands": {
-    "agents": {
-      "description": "Manage AI agent context for coding assistants (GitHub Copilot, Claude Code, etc.). Use 'agents generate' to create SKILL.md files that help AI agents understand your winapp project.",
-      "hidden": false,
-      "subcommands": {
-        "generate": {
-          "description": "Generate SKILL.md files that help AI coding agents (GitHub Copilot, Claude Code, etc.) understand your winapp project. Skills are placed in the detected skills directory (.github/skills/, .agents/skills/, or .claude/skills/). Use --skills-dir to override.",
-          "hidden": false,
-          "options": {
-            "--directory": {
-              "description": "Project root directory (default: current directory)",
-              "hidden": false,
-              "valueType": "System.IO.DirectoryInfo",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--skills-dir": {
-              "description": "Skills directory override (default: auto-detect from .github/skills, .agents/skills, or .claude/skills)",
-              "hidden": false,
-              "valueType": "System.IO.DirectoryInfo",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        }
-      }
-    },
     "cert": {
       "description": "Manage development certificates for code signing. Use 'cert generate' to create a self-signed certificate for testing, or 'cert install' (requires elevation) to trust an existing certificate on this machine.",
       "hidden": false,
@@ -648,19 +580,6 @@
         },
         "--no-gitignore": {
           "description": "Don't update .gitignore file",
-          "hidden": false,
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
-        "--no-skills": {
-          "description": "Don't generate AI agent skill files (for Copilot, Claude, etc.)",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,

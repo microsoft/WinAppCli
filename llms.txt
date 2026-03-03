@@ -7,7 +7,6 @@ winapp helps developers add Windows-specific features (MSIX packaging, push noti
 ## AI Coding Agents
 
 - **Copilot CLI Plugin:** `copilot plugin install microsoft/WinAppCli`
-- **Project-level skills:** `winapp agents generate` (also runs during `winapp init`)
 
 ### Copilot Plugin Structure
 

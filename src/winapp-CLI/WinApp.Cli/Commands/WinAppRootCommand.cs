@@ -54,7 +54,6 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         SignCommand signCommand,
         ToolCommand toolCommand,
         MSStoreCommand msStoreCommand,
-        AgentsCommand agentsCommand,
         IAnsiConsole ansiConsole,
         CreateExternalCatalogCommand createExternalCatalogCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
@@ -69,7 +68,6 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(signCommand);
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
-        Subcommands.Add(agentsCommand);
         Subcommands.Add(createExternalCatalogCommand);
 
         Options.Add(CliSchemaOption);
@@ -79,7 +77,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(AgentsCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
         );
     }
 }

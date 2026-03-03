@@ -59,10 +59,6 @@ npx winapp --help
 - [`tool`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#tool) - Access Windows SDK tools
 - [`get-winapp-path`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#get-winapp-path) - Get paths to installed SDK components
 
-**AI Agent Integration:**
-
-- [`agents generate`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#agents-generate) - Generate AI agent skill files for coding assistants (Copilot, Claude, Cursor)
-
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-create-addon) - Generate native C# or C++ addons

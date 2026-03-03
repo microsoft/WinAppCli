@@ -178,10 +178,6 @@ npx winapp --help
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
 - [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
-**AI Agent Integration:**
-
-- [`agents generate`](./docs/usage.md#agents-generate) - Generate AI agent skill files for coding assistants (Copilot, Claude, Cursor)
-
 **Development Tools:**
 
 - [`tool`](./docs/usage.md#tool) - Access Windows SDK tools
@@ -214,20 +210,14 @@ This repository includes samples demonstrating how to use the CLI with various f
 
 ## 🤖 Using with AI Coding Agents
 
-AI coding agents (GitHub Copilot, Claude Code, etc) auto-discover skill files in your project. Two ways to set this up:
+AI coding agents (GitHub Copilot, Claude Code, etc) auto-discover skill files in your project.
 
-**Option 1: GitHub Copilot CLI Plugin** (global — works across all projects)
+**GitHub Copilot CLI Plugin** (global — works across all projects)
 ```bash
 copilot plugin install microsoft/WinAppCli
 ```
 
-**Option 2: Project-level skills** (checked into your repo)
-```bash
-winapp agents generate
-```
-This creates skill files (`SKILL.md`) in your project that AI agents auto-discover. Skills are also generated automatically during `winapp init`.
-
-Both options give agents full understanding of winapp commands, workflows, and troubleshooting.
+This gives agents full understanding of winapp commands, workflows, and troubleshooting.
 
 
 ## 🔧 Feedback and Support
