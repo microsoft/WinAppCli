@@ -73,6 +73,12 @@ internal partial class MsixService(
     [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AssemblyIdentityNameRegex();
 
+    // DLL dedup regexes — extract registered file/path names for HashSet-based dedup
+    [GeneratedRegex(@"<asmv3:file\s+name='([^']+)'", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex SxsFileNameRegex();
+    [GeneratedRegex(@"<Path>([^<]+)</Path>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxManifestPathElementRegex();
+
     // build:Metadata regexes
     [GeneratedRegex(@"(<Package\b[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex BuildMetadataPackageOpenTagRegex();
@@ -1166,7 +1172,7 @@ internal partial class MsixService(
             sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
 
             // Collect all AppX manifests (main package + component fragments) and their DLLs
-            (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
+            (var packageDependencies, _) = await GetWinAppSDKPackageDependenciesAsync(taskContext, cancellationToken);
             if (packageDependencies == null || packageDependencies.Count == 0)
             {
                 throw new InvalidOperationException("No Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
@@ -1328,9 +1334,13 @@ internal partial class MsixService(
 
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found {components.Count} third-party WinRT component(s) to register");
 
-        // Snapshot the existing content so we can detect DLLs already registered
-        // by AppendAppManifestFromAppx (e.g., WinAppSDK sub-packages).
-        var existingContent = sb.ToString();
+        // Build a set of DLL names already registered in the manifest (from WinAppSDK fragments)
+        // so we can do exact-name dedup instead of substring matching.
+        var registeredDlls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in SxsFileNameRegex().Matches(sb.ToString()))
+        {
+            registeredDlls.Add(match.Groups[1].Value);
+        }
 
         foreach (var component in components)
         {
@@ -1342,7 +1352,7 @@ internal partial class MsixService(
 
             // Skip components whose DLL is already in the manifest (from WinAppSDK fragments
             // or a previous iteration) to avoid duplicate activatableClass entries.
-            if (existingContent.Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase))
+            if (!registeredDlls.Add(component.ImplementationDll))
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Note} Skipping {component.ImplementationDll} — already in manifest");
                 continue;
@@ -1389,6 +1399,14 @@ internal partial class MsixService(
 
         taskContext.AddDebugMessage($"{UiSymbols.Package} Adding InProcessServer entries for {components.Count} third-party WinRT component(s)");
 
+        // Build a set of DLL names already registered in the manifest
+        // so we can do exact-name dedup instead of substring matching.
+        var registeredDlls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in AppxManifestPathElementRegex().Matches(manifestContent))
+        {
+            registeredDlls.Add(match.Groups[1].Value);
+        }
+
         var extensionsSb = new StringBuilder();
         foreach (var component in components)
         {
@@ -1398,9 +1416,8 @@ internal partial class MsixService(
                 continue;
             }
 
-            // Check if entries for this DLL already exist in the manifest or in entries we've already generated
-            if (manifestContent.Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase)
-                || extensionsSb.ToString().Contains(component.ImplementationDll, StringComparison.OrdinalIgnoreCase))
+            // Skip components whose DLL is already in the manifest or in entries we've already generated
+            if (!registeredDlls.Add(component.ImplementationDll))
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Note} Skipping {component.ImplementationDll} — already in manifest");
                 continue;

@@ -165,7 +165,6 @@ public class WinmdServiceTests : BaseCommandTests
         string? dllLocation = null)
     {
         var pkgRoot = Path.Combine(_tempDir.FullName, packageName.ToLowerInvariant(), version);
-        var stem = packageName.Split('.').Last();
         var winmdName = $"{packageName}.winmd";
 
         // Place .winmd in lib/

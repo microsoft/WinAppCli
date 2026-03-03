@@ -105,8 +105,8 @@ if (-not $isAdmin) {
         
         # Build the arguments to pass to the elevated process
         # Use the script's directory so MSIX lookup works regardless of cwd
-        $scriptDir = Split-Path $PSCommandPath -Parent
-        $arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"Set-Location '$scriptDir'; & '$PSCommandPath' -Elevated"
+        $ScriptDir = Split-Path $PSCommandPath -Parent
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"Set-Location '$ScriptDir'; & '$PSCommandPath' -Elevated"
         
         if (-not [string]::IsNullOrEmpty($PackagePath)) {
             # Convert to absolute path before passing

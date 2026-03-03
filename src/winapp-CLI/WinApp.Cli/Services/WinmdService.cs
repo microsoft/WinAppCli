@@ -244,32 +244,6 @@ internal sealed class WinmdService(ILogger<WinmdService> logger) : IWinmdService
         }
     }
 
-    private static string? GetFullTypeName(MetadataReader reader, EntityHandle handle)
-    {
-        if (handle.IsNil)
-        {
-            return null;
-        }
-
-        switch (handle.Kind)
-        {
-            case HandleKind.TypeReference:
-                var typeRef = reader.GetTypeReference((TypeReferenceHandle)handle);
-                var ns = reader.GetString(typeRef.Namespace);
-                var name = reader.GetString(typeRef.Name);
-                return string.IsNullOrEmpty(ns) ? name : $"{ns}.{name}";
-
-            case HandleKind.TypeDefinition:
-                var typeDef = reader.GetTypeDefinition((TypeDefinitionHandle)handle);
-                var defNs = reader.GetString(typeDef.Namespace);
-                var defName = reader.GetString(typeDef.Name);
-                return string.IsNullOrEmpty(defNs) ? defName : $"{defNs}.{defName}";
-
-            default:
-                return null;
-        }
-    }
-
     /// <summary>
     /// Resolves the simple name of the attribute type from a CustomAttribute's constructor handle.
     /// </summary>
