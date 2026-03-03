@@ -138,7 +138,6 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
-| `--no-skills` | Don't generate AI agent skill files (for Copilot, Claude, etc.) | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
 | `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
 
@@ -167,14 +166,3 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-
-### `winapp agents generate`
-
-Generate SKILL.md files that help AI coding agents (GitHub Copilot, Claude Code, etc.) understand your winapp project. Skills are placed in the detected skills directory (.github/skills/, .agents/skills/, or .claude/skills/). Use --skills-dir to override.
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--directory` | Project root directory (default: current directory) | (none) |
-| `--skills-dir` | Skills directory override (default: auto-detect from .github/skills, .agents/skills, or .claude/skills) | (none) |
