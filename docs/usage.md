@@ -146,7 +146,7 @@ winapp pack <input-folder> [options]
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>.msix`)
+- `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
@@ -170,7 +170,7 @@ winapp pack <input-folder> [options]
 
 **WinRT component discovery:**
 
-When packaging, `winapp pack` automatically scans NuGet packages in the `.winapp/packages` cache for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
+When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
 - **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
 - **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
