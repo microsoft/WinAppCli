@@ -79,7 +79,7 @@ runs:
     - name: Parse coverage results
       shell: pwsh
       run: |
-        $coverageFile = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/coverage.cobertura.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $coverageFile = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/*.cobertura.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $coverageFile) {
           Write-Warning "No coverage.cobertura.xml found, skipping coverage metrics"
           @{ lineCoverage = $null; branchCoverage = $null } | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/coverage-summary.json"

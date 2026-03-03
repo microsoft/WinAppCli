@@ -85,7 +85,7 @@ try
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --collect "XPlat Code Coverage"
+        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --collect "Code Coverage;Format=cobertura"
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
@@ -103,7 +103,7 @@ try
         }
 
         # Copy coverage XML files to artifacts
-        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "coverage.cobertura.xml" -Recurse -File
+        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.cobertura.xml" -Recurse -File
         if ($CoverageFiles) {
             foreach ($coverageFile in $CoverageFiles) {
                 Copy-Item $coverageFile.FullName "$ArtifactsPath\TestResults\" -Force

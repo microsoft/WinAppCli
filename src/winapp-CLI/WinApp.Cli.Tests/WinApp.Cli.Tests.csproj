@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console.Testing" />
-    <PackageReference Include="coverlet.collector">
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
