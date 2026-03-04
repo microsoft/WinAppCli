@@ -175,8 +175,6 @@ When packaging, `winapp pack` automatically scans NuGet packages defined in the 
 - **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
 - **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
 
-Infrastructure packages (e.g., `Microsoft.Windows.SDK.CPP`, `Microsoft.Windows.SDK.BuildTools`) are automatically excluded.
-
 **Placeholder resolution during packaging:**
 
 If the manifest contains `$targetnametoken$` in the `Executable` attribute:

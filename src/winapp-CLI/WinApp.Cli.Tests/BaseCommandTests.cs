@@ -127,4 +127,60 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
     {
         return _serviceProvider.GetRequiredService<T>();
     }
+
+    /// <summary>
+    /// Ensures a single NuGet package is available in the test NuGet cache by copying it
+    /// from the real global NuGet cache if available, falling back to downloading from NuGet.org.
+    /// <para>
+    /// This avoids expensive HTTP downloads that can timeout (100 s default) when many tests
+    /// run in parallel (12-way method-level parallelism) and all try to download large packages
+    /// like <c>Microsoft.WindowsAppSDK.Runtime</c> simultaneously.
+    /// </para>
+    /// </summary>
+    protected async Task EnsurePackageInTestCacheAsync(string packageId, string version, CancellationToken cancellationToken)
+    {
+        var nugetService = GetRequiredService<INugetService>();
+        var testPackagesDir = nugetService.GetNuGetGlobalPackagesDir();
+        var targetDir = new DirectoryInfo(Path.Combine(testPackagesDir.FullName, packageId.ToLowerInvariant(), version));
+
+        if (targetDir.Exists)
+        {
+            return;
+        }
+
+        // Try to copy from the real NuGet cache (fast, no network needed).
+        // For EndToEndTests, 'dotnet build' already downloads packages here.
+        // For PackageCommandTests, previous test runs will have cached them.
+        var realCachePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget", "packages", packageId.ToLowerInvariant(), version);
+        var realCacheDir = new DirectoryInfo(realCachePath);
+
+        if (realCacheDir.Exists)
+        {
+            CopyDirectoryRecursive(realCacheDir, targetDir);
+            return;
+        }
+
+        // Fallback: download from NuGet.org
+        var packageInstallService = GetRequiredService<IPackageInstallationService>();
+        await packageInstallService.EnsurePackageAsync(
+            _testCacheDirectory, packageId, TestTaskContext,
+            version: version, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Recursively copies a directory and all its contents to a new location.
+    /// </summary>
+    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo target)
+    {
+        target.Create();
+        foreach (var file in source.EnumerateFiles("*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(source.FullName, file.FullName);
+            var destPath = Path.Combine(target.FullName, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            file.CopyTo(destPath, overwrite: true);
+        }
+    }
 }

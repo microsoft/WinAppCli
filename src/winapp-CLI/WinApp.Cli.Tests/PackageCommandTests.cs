@@ -773,7 +773,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWindowsAppSdkDependency_AddsPackageDependencyOnNewLine()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWindowsAppSdkDependency_AddsPackageDependencyOnNewLine(string winAppSdkVersion)
     {
         // Arrange - Create package structure with a manifest that has Dependencies but no WinAppSDK dependency
         var packageDir = _tempDirectory.CreateSubdirectory("WinAppSdkDependencyTest");
@@ -787,9 +789,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with Windows App SDK package to trigger dependency injection
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1";
+    version: {winAppSdkVersion}";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
 
         // Restore
@@ -800,6 +802,10 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        // Ensure the runtime MSIX package is in the test cache — SetupWorkspaceAsync's
+        // recursive NuGet resolution can silently fail under parallel test network contention
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act - Create package (this should trigger the Windows App SDK dependency injection)
         var result = await _msixService.CreateMsixPackageAsync(
@@ -855,7 +861,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_InternalManifestWithPri_ComputesResourcesWithoutCopyingAssets()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_InternalManifestWithPri_ComputesResourcesWithoutCopyingAssets(string winAppSdkVersion)
     {
         // Arrange - Manifest is INSIDE the input folder, skipPri is false.
         // This exercises the path where expandedFiles are computed for PRI generation
@@ -864,9 +872,9 @@ public class PackageCommandTests : BaseCommandTests
         CreateTestPackageStructure(packageDir);
 
         // Create winapp.yaml with Windows App SDK package for PRI generation
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1";
+    version: {winAppSdkVersion}";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
 
         // Restore
@@ -877,6 +885,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act - skipPri: false with manifest inside input folder
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1123,7 +1133,9 @@ public class PackageCommandTests : BaseCommandTests
     #region Third-Party WinRT Component Integration Tests
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWin2DPackage_AddsInProcessServerEntries()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DPackage_AddsInProcessServerEntries(string winAppSdkVersion)
     {
         // Arrange - Create package structure
         var packageDir = _tempDirectory.CreateSubdirectory("Win2DInProcessServerTest");
@@ -1136,9 +1148,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with Windows App SDK (for build tools / workspace setup) + Win2D
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1
+    version: {winAppSdkVersion}
   - name: Microsoft.Graphics.Win2D
     version: 1.3.0";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
@@ -1151,6 +1163,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act - Create package (non-self-contained, should add InProcessServer entries to AppxManifest)
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1192,7 +1206,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWin2DAndExistingExtensions_AppendsInProcessServer()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DAndExistingExtensions_AppendsInProcessServer(string winAppSdkVersion)
     {
         // Arrange - Create manifest with existing Extensions block
         var manifestWithExtensions = @"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -1244,9 +1260,9 @@ public class PackageCommandTests : BaseCommandTests
         await nugetService.InstallPackageAsync("Microsoft.Graphics.Win2D", "1.3.0", TestTaskContext, TestContext.CancellationToken);
 
         // Create winapp.yaml with WinApp SDK + Win2D
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1
+    version: {winAppSdkVersion}
   - name: Microsoft.Graphics.Win2D
     version: 1.3.0";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
@@ -1259,6 +1275,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1292,7 +1310,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWebView2Package_AddsInProcessServerEntries()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWebView2Package_AddsInProcessServerEntries(string winAppSdkVersion)
     {
         // Arrange - WebView2's implementation DLL is in lib/ (not runtimes/win-{arch}/native/)
         // This tests the lib/ fallback discovery path
@@ -1306,9 +1326,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with Windows App SDK + WebView2
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1
+    version: {winAppSdkVersion}
   - name: Microsoft.Web.WebView2
     version: 1.0.3179.45";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
@@ -1321,6 +1341,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1360,7 +1382,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWin2DAndWebView2_AddsBothInProcessServers()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DAndWebView2_AddsBothInProcessServers(string winAppSdkVersion)
     {
         // Arrange - Test both Win2D (native DLL in runtimes/) and WebView2 (managed DLL in lib/) together
         var packageDir = _tempDirectory.CreateSubdirectory("BothComponentsTest");
@@ -1373,9 +1397,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with Windows App SDK + Win2D + WebView2
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1
+    version: {winAppSdkVersion}
   - name: Microsoft.Graphics.Win2D
     version: 1.3.0
   - name: Microsoft.Web.WebView2
@@ -1390,6 +1414,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1422,7 +1448,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithNoWinRTComponents_DoesNotAddInProcessServer()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithNoWinRTComponents_DoesNotAddInProcessServer(string winAppSdkVersion)
     {
         // Arrange - Create package with a non-WinRT package (no .winmd files)
         var packageDir = _tempDirectory.CreateSubdirectory("NoWinRTComponentsTest");
@@ -1435,9 +1463,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with a non-WinRT package (no .winmd files)
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1";
+    version: {winAppSdkVersion}";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
 
         // Restore workspace
@@ -1448,6 +1476,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1553,4 +1583,38 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    /// <summary>
+    /// Installs the Windows App SDK and its critical transitive dependencies
+    /// (runtime MSIX package, build tools) into the test NuGet cache.
+    /// <para>
+    /// <c>SetupWorkspaceAsync</c> installs packages via NuGet recursive resolution, which
+    /// can silently fail under network contention when tests run in parallel
+    /// (<c>ResolveDependenciesAsync</c> has a catch-all swallowing all exceptions).
+    /// This method queries the NuGet API for the dependency tree and installs each
+    /// WinAppSDK-related dependency individually, ensuring the runtime MSIX directory
+    /// is always available for <c>FindWindowsAppSdkMsixDirectory</c>.
+    /// </para>
+    /// </summary>
+    private async Task EnsureWinAppSdkRuntimeInTestCacheAsync(string winAppSdkVersion)
+    {
+        var nugetService = GetRequiredService<INugetService>();
+
+        var deps = await nugetService.GetPackageDependenciesAsync(
+            BuildToolsService.WINAPP_SDK_PACKAGE, winAppSdkVersion, TestContext.CancellationToken);
+
+        // Install the main package plus any runtime/build tools dependencies.
+        // Uses EnsurePackageInTestCacheAsync which copies from the real NuGet cache
+        // when available, avoiding HTTP downloads that timeout under parallel execution.
+        deps.TryAdd(BuildToolsService.WINAPP_SDK_PACKAGE, winAppSdkVersion);
+
+        foreach (var (depId, depVersion) in deps)
+        {
+            if (depId.StartsWith("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(depId, BuildToolsService.BUILD_TOOLS_PACKAGE, StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsurePackageInTestCacheAsync(depId, depVersion, TestContext.CancellationToken);
+            }
+        }
+    }
 }
