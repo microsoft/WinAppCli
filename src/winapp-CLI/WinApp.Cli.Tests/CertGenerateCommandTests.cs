@@ -10,7 +10,6 @@ namespace WinApp.Cli.Tests;
 /// Tests for the CertGenerateCommand: option parsing, path validation, --export-cer, and --json output.
 /// </summary>
 [TestClass]
-[DoNotParallelize] // Invocation tests redirect Console.Out
 public class CertGenerateCommandTests : BaseCommandTests
 {
     [TestMethod]
@@ -210,20 +209,10 @@ public class CertGenerateCommandTests : BaseCommandTests
             "--json"
         };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(0, exitCode, "cert generate --json should succeed");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert generate --json should succeed");
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 
@@ -252,20 +241,10 @@ public class CertGenerateCommandTests : BaseCommandTests
             "--json"
         };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(0, exitCode, "cert generate --json --export-cer should succeed");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert generate --json --export-cer should succeed");
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 
@@ -288,20 +267,10 @@ public class CertGenerateCommandTests : BaseCommandTests
             "--json"
         };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(0, exitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode);
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 
@@ -329,20 +298,10 @@ public class CertGenerateCommandTests : BaseCommandTests
             // default --if-exists is Error
         };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(1, exitCode, "cert generate --json should fail when file exists");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(1, exitCode, "cert generate --json should fail when file exists");
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 

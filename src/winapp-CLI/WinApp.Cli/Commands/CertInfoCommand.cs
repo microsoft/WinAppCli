@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Security.Cryptography.X509Certificates;
@@ -38,7 +39,7 @@ internal class CertInfoCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler : AsynchronousCommandLineAction
+    public class Handler(IAnsiConsole ansiConsole) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -51,7 +52,7 @@ internal class CertInfoCommand : Command, IShortDescription
             {
                 if (json)
                 {
-                    return Task.FromResult(JsonErrorOutput.Write($"Certificate file not found: {certPath}"));
+                    return Task.FromResult(JsonErrorOutput.Write(ansiConsole, $"Certificate file not found: {certPath}"));
                 }
                 Console.Error.WriteLine($"{UiSymbols.Error} Certificate file not found: {certPath}");
                 return Task.FromResult(1);
@@ -74,17 +75,17 @@ internal class CertInfoCommand : Command, IShortDescription
                         NotAfter = cert.NotAfter.ToString("yyyy-MM-dd HH:mm:ss"),
                         HasPrivateKey = cert.HasPrivateKey,
                     };
-                    Console.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertInfoJsonOutput));
+                    ansiConsole.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertInfoJsonOutput));
                 }
                 else
                 {
-                    Console.WriteLine($"Subject:         {cert.Subject}");
-                    Console.WriteLine($"Issuer:          {cert.Issuer}");
-                    Console.WriteLine($"Thumbprint:      {cert.Thumbprint}");
-                    Console.WriteLine($"Serial Number:   {cert.SerialNumber}");
-                    Console.WriteLine($"Not Before:      {cert.NotBefore:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine($"Not After:       {cert.NotAfter:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine($"Has Private Key: {cert.HasPrivateKey}");
+                    ansiConsole.WriteLine($"Subject:         {cert.Subject}");
+                    ansiConsole.WriteLine($"Issuer:          {cert.Issuer}");
+                    ansiConsole.WriteLine($"Thumbprint:      {cert.Thumbprint}");
+                    ansiConsole.WriteLine($"Serial Number:   {cert.SerialNumber}");
+                    ansiConsole.WriteLine($"Not Before:      {cert.NotBefore:yyyy-MM-dd HH:mm:ss}");
+                    ansiConsole.WriteLine($"Not After:       {cert.NotAfter:yyyy-MM-dd HH:mm:ss}");
+                    ansiConsole.WriteLine($"Has Private Key: {cert.HasPrivateKey}");
                 }
 
                 return Task.FromResult(0);
@@ -93,7 +94,7 @@ internal class CertInfoCommand : Command, IShortDescription
             {
                 if (json)
                 {
-                    return Task.FromResult(JsonErrorOutput.Write($"Failed to read certificate: {ex.Message}"));
+                    return Task.FromResult(JsonErrorOutput.Write(ansiConsole, $"Failed to read certificate: {ex.Message}"));
                 }
                 Console.Error.WriteLine($"{UiSymbols.Error} Failed to read certificate: {ex.Message}");
                 return Task.FromResult(1);

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text.Json;
@@ -54,8 +55,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         };
         InstallOption = new Option<bool>("--install")
         {
-            Description = "Install the certificate to the local machine store after generation",
-            DefaultValueFactory = (argumentResult) => false,
+            Description = "Install the certificate to the local machine store after generation"
         };
         IfExistsOption = new Option<IfExists>("--if-exists")
         {
@@ -64,8 +64,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         };
         ExportCerOption = new Option<bool>("--export-cer")
         {
-            Description = "Export a .cer file (public key only) alongside the .pfx",
-            DefaultValueFactory = (argumentResult) => false,
+            Description = "Export a .cer file (public key only) alongside the .pfx"
         };
     }
 
@@ -83,7 +82,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler(ICertificateService certificateService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, ILogger<CertGenerateCommand> logger) : AsynchronousCommandLineAction
+    public class Handler(ICertificateService certificateService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, IAnsiConsole ansiConsole, ILogger<CertGenerateCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -104,7 +103,7 @@ internal class CertGenerateCommand : Command, IShortDescription
                 {
                     if (json)
                     {
-                        return JsonErrorOutput.Write($"Certificate file already exists: {output}");
+                        return JsonErrorOutput.Write(ansiConsole, $"Certificate file already exists: {output}");
                     }
                     logger.LogError("{UISymbol} Certificate file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, output, System.Environment.NewLine);
                     return 1;
@@ -130,7 +129,7 @@ internal class CertGenerateCommand : Command, IShortDescription
                 }
                 catch (Exception ex)
                 {
-                    return JsonErrorOutput.Write(ex.Message);
+                    return JsonErrorOutput.Write(ansiConsole, ex.Message);
                 }
 
                 var jsonOutput = new CertGenerateJsonOutput
@@ -141,7 +140,7 @@ internal class CertGenerateCommand : Command, IShortDescription
                     SubjectName = result.SubjectName,
                     PublicCertificatePath = result.PublicCertificatePath?.FullName,
                 };
-                Console.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertGenerateJsonOutput));
+                ansiConsole.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertGenerateJsonOutput));
                 return 0;
             }
 

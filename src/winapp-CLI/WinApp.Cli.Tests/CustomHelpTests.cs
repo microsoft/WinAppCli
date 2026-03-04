@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.CommandLine;
 using System.CommandLine.Help;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;

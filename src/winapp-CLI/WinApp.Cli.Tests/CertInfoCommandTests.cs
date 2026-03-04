@@ -11,7 +11,6 @@ namespace WinApp.Cli.Tests;
 /// Tests for the CertInfoCommand, covering parse validation, text output, JSON output, and error handling.
 /// </summary>
 [TestClass]
-[DoNotParallelize] // Tests redirect Console.Out
 public class CertInfoCommandTests : BaseCommandTests
 {
     private FileInfo _testCertificatePath = null!;
@@ -89,20 +88,10 @@ public class CertInfoCommandTests : BaseCommandTests
         var command = GetRequiredService<CertInfoCommand>();
         var args = new[] { _testCertificatePath.FullName, "--password", "testpassword" };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(0, exitCode, "cert info should succeed with correct password");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert info should succeed with correct password");
 
-        var output = consoleCapture.ToString();
+        var output = TestAnsiConsole.Output;
         StringAssert.Contains(output, "Subject:");
         StringAssert.Contains(output, "CertInfoTestPublisher");
         StringAssert.Contains(output, "Thumbprint:");
@@ -120,20 +109,10 @@ public class CertInfoCommandTests : BaseCommandTests
         var command = GetRequiredService<CertInfoCommand>();
         var args = new[] { _testCertificatePath.FullName, "--password", "testpassword", "--json" };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(0, exitCode, "cert info --json should succeed");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert info --json should succeed");
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 
@@ -170,20 +149,10 @@ public class CertInfoCommandTests : BaseCommandTests
         var command = GetRequiredService<CertInfoCommand>();
         var args = new[] { _testCertificatePath.FullName, "--password", "wrongpassword", "--json" };
 
-        var consoleCapture = new StringWriter();
-        var originalOut = Console.Out;
-        Console.SetOut(consoleCapture);
-        try
-        {
-            var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
-            Assert.AreEqual(1, exitCode, "cert info --json with wrong password should fail");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(1, exitCode, "cert info --json with wrong password should fail");
 
-        var output = consoleCapture.ToString().Trim();
+        var output = TestAnsiConsole.Output.Trim();
         var jsonDoc = JsonDocument.Parse(output);
         var root = jsonDoc.RootElement;
 

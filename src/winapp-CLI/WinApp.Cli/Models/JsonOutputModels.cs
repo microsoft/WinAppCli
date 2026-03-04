@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
 using System.Text.Json.Serialization;
 
 namespace WinApp.Cli.Models;
@@ -33,10 +34,10 @@ internal class JsonErrorOutput
     /// Writes a JSON error object to stdout and returns the given exit code.
     /// Use this from command handlers when --json is active and an error occurs.
     /// </summary>
-    public static int Write(string message, int exitCode = 1)
+    public static int Write(IAnsiConsole console, string message, int exitCode = 1)
     {
         var output = new JsonErrorOutput { Error = message };
-        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(output, WinAppJsonContext.Default.JsonErrorOutput));
+        console.Profile.Out.Writer.WriteLine(System.Text.Json.JsonSerializer.Serialize(output, WinAppJsonContext.Default.JsonErrorOutput));
         return exitCode;
     }
 }

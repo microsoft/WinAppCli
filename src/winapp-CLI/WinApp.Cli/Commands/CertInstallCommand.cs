@@ -30,8 +30,7 @@ internal class CertInstallCommand : Command, IShortDescription
         };
         ForceOption = new Option<bool>("--force")
         {
-            Description = "Force installation even if the certificate already exists",
-            DefaultValueFactory = (argumentResult) => false,
+            Description = "Force installation even if the certificate already exists"
         };
     }
 
