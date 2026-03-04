@@ -1,4 +1,4 @@
-﻿<Project Sdk="MSTest.Sdk/4.0.2">
+﻿<Project Sdk="MSTest.Sdk/4.1.0">
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -22,10 +22,6 @@
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console.Testing" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
