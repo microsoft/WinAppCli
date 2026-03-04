@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
-using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 

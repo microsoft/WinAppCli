@@ -12,7 +12,7 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
-public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogging = true)
+public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLevel = LogLevel.Debug)
 {
     private protected DirectoryInfo _tempDirectory = null!;
     private protected DirectoryInfo _testWinappDirectory = null!;
@@ -58,7 +58,7 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
                 b.ClearProviders();
                 b.AddTextWriterLogger(ConsoleStdOut, ConsoleStdErr);
                 // Use Debug level for verbose logging, Information level for non-verbose
-                b.SetMinimumLevel(verboseLogging ? LogLevel.Debug : LogLevel.Information);
+                b.SetMinimumLevel(logLevel);
             });
 
         _serviceProvider = services.BuildServiceProvider();
