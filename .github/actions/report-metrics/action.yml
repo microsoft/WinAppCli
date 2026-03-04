@@ -31,6 +31,7 @@ runs:
         Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "metrics-baseline/tests.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/coverage-summary.json" "metrics-baseline/coverage.json" -ErrorAction SilentlyContinue
 
     - name: Cache metrics baseline
       if: github.ref == 'refs/heads/main'
@@ -59,6 +60,9 @@ runs:
           let startup = { medianMs: 0 };
           try { startup = JSON.parse(fs.readFileSync(`${artifactsPath}/startup-time.json`, 'utf8')); } catch {}
 
+          let coverage = { lineCoverage: null, branchCoverage: null };
+          try { coverage = JSON.parse(fs.readFileSync(`${artifactsPath}/coverage-summary.json`, 'utf8')); } catch {}
+
           // --- Load baselines ---
           let sizeBaseline = {};
           let testsBaseline = null;
@@ -70,6 +74,9 @@ runs:
           } catch {}
           try { testsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/tests.json', 'utf8')); } catch {}
           try { startupBaseline = JSON.parse(fs.readFileSync('metrics-baseline/startup.json', 'utf8')); } catch {}
+
+          let coverageBaseline = null;
+          try { coverageBaseline = JSON.parse(fs.readFileSync('metrics-baseline/coverage.json', 'utf8')); } catch {}
 
           // --- Artifact download links ---
           const artifactLinks = {};
@@ -98,6 +105,10 @@ runs:
           }
 
           // --- Helpers ---
+          const COVERAGE_GOOD_THRESHOLD = 80;   // >= 80% line coverage: green
+          const COVERAGE_WARN_THRESHOLD = 60;   // >= 60% line coverage: yellow; below: red
+          const COVERAGE_MIN_DELTA = 0.1;       // ignore coverage changes smaller than 0.1%
+
           function formatBytes(bytes) {
             const mb = bytes / (1024 * 1024);
             if (mb >= 1) return `${mb.toFixed(2)} MB`;
@@ -200,6 +211,27 @@ runs:
             }
           }
           body += '\n';
+
+          // --- Test coverage ---
+          if (coverage.lineCoverage !== null) {
+            body += '\n### Test Coverage\n\n';
+            const coverageIcon = coverage.lineCoverage >= COVERAGE_GOOD_THRESHOLD ? ':white_check_mark:' : coverage.lineCoverage >= COVERAGE_WARN_THRESHOLD ? ':warning:' : ':x:';
+            body += `${coverageIcon} **${coverage.lineCoverage}%** line coverage`;
+            if (coverage.branchCoverage !== null) {
+              body += `, **${coverage.branchCoverage}%** branch coverage`;
+            }
+            if (coverageBaseline && coverageBaseline.lineCoverage !== null) {
+              const lineDelta = coverage.lineCoverage - coverageBaseline.lineCoverage;
+              if (Math.abs(lineDelta) >= COVERAGE_MIN_DELTA) {
+                const sign = lineDelta > 0 ? '+' : '';
+                const icon = lineDelta < 0 ? ':warning:' : ':white_check_mark:';
+                body += ` · ${icon} ${sign}${lineDelta.toFixed(1)}% vs. baseline`;
+              } else {
+                body += ' · :white_check_mark: no change vs. baseline';
+              }
+            }
+            body += '\n';
+          }
 
           // --- Startup time ---
           if (startup.medianMs > 0) {

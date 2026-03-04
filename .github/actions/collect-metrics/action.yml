@@ -76,6 +76,33 @@ runs:
         $durationSec = [math]::Round($durationMs / 1000, 1)
         Write-Host "Tests: $totalTests total, $passed passed, $failed failed, $skipped skipped in ${durationSec}s"
 
+    - name: Parse coverage results
+      shell: pwsh
+      run: |
+        $coverageFile = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/*.cobertura.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $coverageFile) {
+          Write-Warning "No coverage.cobertura.xml found, skipping coverage metrics"
+          @{ lineCoverage = $null; branchCoverage = $null } | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/coverage-summary.json"
+          exit 0
+        }
+
+        [xml]$xml = Get-Content $coverageFile.FullName
+        $coverage = $xml.coverage
+
+        # Cobertura stores rates as 0.0-1.0 floats; convert to percentage
+        $lineRate = if ($coverage.'line-rate') { [double]$coverage.'line-rate' } else { 0 }
+        $branchRate = if ($coverage.'branch-rate') { [double]$coverage.'branch-rate' } else { 0 }
+        $linePct = [math]::Round($lineRate * 100, 1)
+        $branchPct = [math]::Round($branchRate * 100, 1)
+
+        $coverageSummary = @{
+          lineCoverage = $linePct
+          branchCoverage = $branchPct
+        }
+
+        $coverageSummary | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/coverage-summary.json"
+        Write-Host "Coverage: ${linePct}% lines, ${branchPct}% branches"
+
     - name: Measure CLI startup time
       shell: pwsh
       run: |
