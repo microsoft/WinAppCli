@@ -83,7 +83,7 @@ internal static class Program
 
         // Skip first-run notice for machine-readable output modes
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode)
+        if (!isCliSchemaMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
