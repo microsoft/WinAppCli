@@ -26,6 +26,7 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
 
     public TestContext TestContext { get; set; } = null!;
     private protected TaskContext TestTaskContext { private set; get; } = null!;
+    private protected GroupableTask TestTask { private set; get; } = null!;
     private protected Lock RenderLock { private set; get; } = null!;
     private protected TestConsole TestAnsiConsole { private set; get; } = null!;
 
@@ -62,10 +63,10 @@ public abstract class BaseCommandTests(bool configPaths = true, bool verboseLogg
 
         _serviceProvider = services.BuildServiceProvider();
 
-        GroupableTask dummyTask = new GroupableTask("Dummy Task", null);
+        TestTask = new GroupableTask("Dummy Task", null);
 
         RenderLock = new Lock();
-        TestTaskContext = new TaskContext(dummyTask, null, TestAnsiConsole, GetRequiredService<ILogger<TaskContext>>(), RenderLock);
+        TestTaskContext = new TaskContext(TestTask, null, TestAnsiConsole, GetRequiredService<ILogger<TaskContext>>(), RenderLock);
 
         // Set up services with test cache directory
         if (configPaths)
