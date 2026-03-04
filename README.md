@@ -210,7 +210,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 
 ## 🤖 Using with AI Coding Agents
 
-AI coding agents (GitHub Copilot, Claude Code, etc) auto-discover skill files in your project.
+AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
 
 **GitHub Copilot CLI Plugin** (global — works across all projects)
 ```bash

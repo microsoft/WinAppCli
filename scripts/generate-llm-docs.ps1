@@ -88,7 +88,7 @@ $SkillsDir = $SkillsPath
 # Skill → CLI command mapping for auto-generated options/arguments tables
 # Each skill maps to one or more CLI commands whose options/arguments should be included
 $SkillCommandMap = @{
-    "setup"        = @("init", "restore", "update", "agents generate")
+    "setup"        = @("init", "restore", "update")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "sign")
@@ -289,21 +289,24 @@ version: $CliVersion
     Write-Host "[SKILLS]   $skillName - generated" -ForegroundColor Gray
 }
 
-# Update plugin.json version to match CLI version
-$PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
-if (Test-Path $PluginJsonPath) {
-    $pluginJson = Get-Content $PluginJsonPath -Raw | ConvertFrom-Json
-    $pluginJson.version = $CliVersion
-    $pluginJsonContent = $pluginJson | ConvertTo-Json -Depth 10
-    # Normalize line endings
-    $pluginJsonContent = $pluginJsonContent -replace "`r`n", "`n"
-    $pluginJsonContent = $pluginJsonContent.TrimEnd() + "`n"
-    [System.IO.File]::WriteAllText($PluginJsonPath, $pluginJsonContent, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "[SKILLS] Updated plugin.json version to $CliVersion" -ForegroundColor Gray
+# Update plugin.json version to match CLI version (only when outputting to the default skills path)
+$DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+if ($SkillsDir -eq $DefaultSkillsPath) {
+    $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
+    if (Test-Path $PluginJsonPath) {
+        $pluginJson = Get-Content $PluginJsonPath -Raw | ConvertFrom-Json
+        $pluginJson.version = $CliVersion
+        $pluginJsonContent = $pluginJson | ConvertTo-Json -Depth 10
+        # Normalize line endings
+        $pluginJsonContent = $pluginJsonContent -replace "`r`n", "`n"
+        $pluginJsonContent = $pluginJsonContent.TrimEnd() + "`n"
+        [System.IO.File]::WriteAllText($PluginJsonPath, $pluginJsonContent, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "[SKILLS] Updated plugin.json version to $CliVersion" -ForegroundColor Gray
+    }
 }
 
 Write-Host "[SKILLS] Generated $($SkillNames.Count) skills in:" -ForegroundColor Green
-Write-Host "  .github/plugin/skills/winapp-cli/ (also embedded in CLI binary via csproj link)" -ForegroundColor Gray
+Write-Host "  .github/plugin/skills/winapp-cli/" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "[DOCS] All documentation and skills generated successfully!" -ForegroundColor Green
