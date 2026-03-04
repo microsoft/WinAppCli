@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.1.11
+ * Source schema version: 0.2.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -150,6 +150,39 @@ export async function createDebugIdentity(options: CreateDebugIdentityOptions = 
   if (options.keepIdentity) args.push('--keep-identity');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noInstall) args.push('--no-install');
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// create-external-catalog
+// ---------------------------------------------------------------------------
+
+export interface CreateExternalCatalogOptions extends CommonOptions {
+  /** List of input folders with executable files to process (separated by semicolons) */
+  inputFolder: string;
+  /** Include flat hashes when generating the catalog */
+  computeFlatHashes?: boolean;
+  /** Behavior when output file already exists */
+  ifExists?: IfExists;
+  /** Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. */
+  output?: string;
+  /** Include files from subdirectories */
+  recursive?: boolean;
+  /** Include page hashes when generating the catalog */
+  usePageHashes?: boolean;
+}
+
+/**
+ * Generates a CodeIntegrityExternal.cat catalog file with hashes of executable files from specified directories. Used with the TrustedLaunch flag in MSIX sparse package manifests (AllowExternalContent) to allow execution of external files not included in the package.
+ */
+export async function createExternalCatalog(options: CreateExternalCatalogOptions): Promise<WinappResult> {
+  const args: string[] = ['create-external-catalog'];
+  args.push(options.inputFolder);
+  if (options.computeFlatHashes) args.push('--compute-flat-hashes');
+  if (options.ifExists) args.push('--if-exists', options.ifExists);
+  if (options.output) args.push('--output', options.output);
+  if (options.recursive) args.push('--recursive');
+  if (options.usePageHashes) args.push('--use-page-hashes');
   return run(args, options);
 }
 

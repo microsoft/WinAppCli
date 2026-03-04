@@ -68,7 +68,7 @@ function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
 | `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
@@ -116,6 +116,29 @@ function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<Wina
 | `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
 | `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `createExternalCatalog()`
+
+Generates a CodeIntegrityExternal.cat catalog file with hashes of executable files from specified directories. Used with the TrustedLaunch flag in MSIX sparse package manifests (AllowExternalContent) to allow execution of external files not included in the package.
+
+```typescript
+function createExternalCatalog(options: CreateExternalCatalogOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `inputFolder` | `string` | Yes | List of input folders with executable files to process (separated by semicolons) |
+| `computeFlatHashes` | `boolean \| undefined` | No | Include flat hashes when generating the catalog |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file already exists |
+| `output` | `string \| undefined` | No | Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. |
+| `recursive` | `boolean \| undefined` | No | Include files from subdirectories |
+| `usePageHashes` | `boolean \| undefined` | No | Include page hashes when generating the catalog |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -178,11 +201,11 @@ function manifestGenerate(options?: ManifestGenerateOptions): Promise<WinappResu
 | `directory` | `string \| undefined` | No | Directory to generate manifest in |
 | `description` | `string \| undefined` | No | Human-readable app description shown during installation and in Windows Settings |
 | `executable` | `string \| undefined` | No | Path to the application's executable. Default: <package-name>.exe |
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `logoPath` | `string \| undefined` | No | Path to logo image file |
 | `packageName` | `string \| undefined` | No | Package name (default: folder name) |
 | `publisherName` | `string \| undefined` | No | Publisher CN (default: CN=<current user>) |
-| `template` | `ManifestTemplate \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
+| `template` | `ManifestTemplates \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
 | `version` | `string \| undefined` | No | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -611,12 +634,12 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | `needsTerminalRestart` | `boolean` | Yes |  |
 | `files` | `string[]` | Yes |  |
 
-### `IfExistsPolicy`
+### `IfExists`
 
-IfExistsPolicy values.
+IfExists values.
 
 ```typescript
-type IfExistsPolicy = "error" | "skip" | "overwrite"
+type IfExists = "error" | "overwrite" | "skip"
 ```
 
 ### `SdkInstallMode`
@@ -627,19 +650,19 @@ SdkInstallMode values.
 type SdkInstallMode = "stable" | "preview" | "experimental" | "none"
 ```
 
-### `ManifestTemplate`
+### `ManifestTemplates`
 
-ManifestTemplate values.
+ManifestTemplates values.
 
 ```typescript
-type ManifestTemplate = "packaged" | "sparse"
+type ManifestTemplates = "packaged" | "sparse"
 ```
 
 ### `CertGenerateOptions`
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
 | `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
@@ -669,6 +692,20 @@ type ManifestTemplate = "packaged" | "sparse"
 | `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml |
 | `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `CreateExternalCatalogOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `inputFolder` | `string` | Yes | List of input folders with executable files to process (separated by semicolons) |
+| `computeFlatHashes` | `boolean \| undefined` | No | Include flat hashes when generating the catalog |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file already exists |
+| `output` | `string \| undefined` | No | Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. |
+| `recursive` | `boolean \| undefined` | No | Include files from subdirectories |
+| `usePageHashes` | `boolean \| undefined` | No | Include page hashes when generating the catalog |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -704,11 +741,11 @@ type ManifestTemplate = "packaged" | "sparse"
 | `directory` | `string \| undefined` | No | Directory to generate manifest in |
 | `description` | `string \| undefined` | No | Human-readable app description shown during installation and in Windows Settings |
 | `executable` | `string \| undefined` | No | Path to the application's executable. Default: <package-name>.exe |
-| `ifExists` | `IfExistsPolicy \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
+| `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `logoPath` | `string \| undefined` | No | Path to logo image file |
 | `packageName` | `string \| undefined` | No | Package name (default: folder name) |
 | `publisherName` | `string \| undefined` | No | Publisher CN (default: CN=<current user>) |
-| `template` | `ManifestTemplate \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
+| `template` | `ManifestTemplates \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
 | `version` | `string \| undefined` | No | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

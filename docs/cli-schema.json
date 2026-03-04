@@ -382,6 +382,7 @@
         "--if-exists": {
           "description": "Behavior when output file already exists",
           "hidden": false,
+          "helpName": "error|overwrite|skip",
           "valueType": "WinApp.Cli.Models.IfExists",
           "hasDefaultValue": true,
           "defaultValue": "Error",
