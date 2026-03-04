@@ -33,6 +33,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
             .AddSingleton<IPowerShellService, PowerShellService>()
             .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
+            .AddSingleton<IWinmdService, WinmdService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()

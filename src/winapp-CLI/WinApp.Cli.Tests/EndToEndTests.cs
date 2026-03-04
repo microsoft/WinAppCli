@@ -182,6 +182,243 @@ public class EndToEndTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("stable", DisplayName = "WinAppSDK Stable")]
+    [DataRow("experimental", DisplayName = "WinAppSDK Experimental")]
+    public async Task E2E_DotNetApp_PackageShouldIncludeRuntimeDependency(string sdkMode)
+    {
+        // Verifies that 'winapp init' sets up the project correctly (TFM, PackageReferences,
+        // manifest) and that the package command discovers Windows App SDK from the .csproj
+        // (via `dotnet list package --format json`) and injects the correct
+        // <PackageDependency> into the MSIX manifest.
+
+        // Step 1: Create WinForms app in _tempDirectory (FindCsproj searches here)
+        var projectName = "TestApp";
+        var createResult = await RunDotnetCommandAsync(_tempDirectory, $"new winforms -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create WinForms app: {createResult.Output}");
+
+        // Step 2: Run 'winapp init' to set up TFM, PackageReferences, manifest, and build tools
+        var initCommand = GetRequiredService<InitCommand>();
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand,
+        [
+            _tempDirectory.FullName,
+            "--use-defaults",
+            "--setup-sdks", sdkMode
+        ]);
+        Assert.AreEqual(0, initExitCode, "winapp init should succeed");
+
+        // Read the WinAppSDK version that init installed (for verification later)
+        var csprojPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.csproj");
+        var csprojContent = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
+        var winAppSdkVersion = ExtractPackageVersion(csprojContent, "Microsoft.WindowsAppSDK");
+        Assert.IsNotNull(winAppSdkVersion, "csproj should contain WindowsAppSDK version after init");
+
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+
+        // Step 3: Build
+        var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
+        Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
+
+        var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
+        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
+        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+
+        // Step 4: Install WinAppSDK packages to test cache (build tools + runtime)
+        await EnsureWinAppSdkPackagesInTestCacheAsync();
+
+        // Step 5: Package (no winapp.yaml — uses csproj for WinAppSDK detection)
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
+        var packageParseResult = packageCommand.Parse(
+        [
+            targetFrameworkFolder.FullName,
+            "--output", packageOutputPath,
+            "--manifest", manifestPath,
+            "--skip-pri"
+        ]);
+        var packageExitCode = await packageParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
+        Assert.AreEqual(0, packageExitCode, "Package command should succeed");
+
+        // Step 6: Verify manifest in MSIX has the runtime dependency
+        Assert.IsTrue(File.Exists(packageOutputPath), "MSIX should be created");
+
+        var extractDir = Path.Combine(_tempDirectory.FullName, "extracted");
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(packageOutputPath, extractDir);
+
+        var finalManifest = await File.ReadAllTextAsync(
+            Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
+
+        var versionParts = winAppSdkVersion.Split('.');
+        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+
+        Assert.Contains("<PackageDependency", finalManifest,
+            "Manifest should contain a PackageDependency element");
+        Assert.Contains(expectedRuntimeName, finalManifest,
+            $"PackageDependency should reference {expectedRuntimeName}");
+    }
+
+    [TestMethod]
+    [DataRow("stable", DisplayName = "WinAppSDK Stable")]
+    [DataRow("experimental", DisplayName = "WinAppSDK Experimental")]
+    public async Task E2E_DotNetApp_WithWin2D_PackageShouldIncludeActivatableClasses(string sdkMode)
+    {
+        // Verifies that Win2D activatable classes (InProcessServer entries) are discovered
+        // from the NuGet package .winmd files and injected into the MSIX manifest.
+        // Uses 'winapp init' to set up TFM, PackageReferences, and manifest, then
+        // adds Win2D as an additional package.
+
+        var projectName = "TestAppWin2D";
+        var createResult = await RunDotnetCommandAsync(_tempDirectory, $"new winforms -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create WinForms app: {createResult.Output}");
+
+        // Run 'winapp init' to set up TFM, PackageReferences, and manifest
+        var initCommand = GetRequiredService<InitCommand>();
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand,
+        [
+            _tempDirectory.FullName,
+            "--use-defaults",
+            "--setup-sdks", sdkMode
+        ]);
+        Assert.AreEqual(0, initExitCode, "winapp init should succeed");
+
+        // Add Win2D (init only adds WinAppSDK + BuildTools)
+        var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
+        Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
+
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+
+        var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
+        Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
+
+        var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
+        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
+        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+
+        // Install WinAppSDK packages to test cache (build tools + runtime)
+        await EnsureWinAppSdkPackagesInTestCacheAsync();
+
+        // Package
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
+        var packageParseResult = packageCommand.Parse(
+        [
+            targetFrameworkFolder.FullName,
+            "--output", packageOutputPath,
+            "--manifest", manifestPath,
+            "--skip-pri"
+        ]);
+        var packageExitCode = await packageParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
+        Assert.AreEqual(0, packageExitCode, "Package command should succeed");
+
+        // Verify manifest has Win2D InProcessServer entries
+        Assert.IsTrue(File.Exists(packageOutputPath), "MSIX should be created");
+
+        var extractDir = Path.Combine(_tempDirectory.FullName, "extracted");
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(packageOutputPath, extractDir);
+
+        var finalManifest = await File.ReadAllTextAsync(
+            Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
+
+        Assert.Contains("windows.activatableClass.inProcessServer", finalManifest,
+            "Manifest should contain inProcessServer extension category");
+        Assert.Contains("<InProcessServer>", finalManifest,
+            "Manifest should contain InProcessServer element");
+        Assert.Contains("Microsoft.Graphics.Canvas.dll", finalManifest,
+            "Manifest should reference Microsoft.Graphics.Canvas.dll");
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasDevice", finalManifest,
+            "Manifest should register CanvasDevice activatable class");
+    }
+
+    [TestMethod]
+    [DataRow("stable", DisplayName = "WinAppSDK Stable")]
+    [DataRow("experimental", DisplayName = "WinAppSDK Experimental")]
+    public async Task E2E_DotNetApp_SelfContained_ShouldBundleRuntimeAndEmbedActivatableClassesInExe(string sdkMode)
+    {
+        // Verifies that --self-contained:
+        // 1. Does NOT add <PackageDependency> or <InProcessServer> to the MSIX AppxManifest
+        // 2. DOES embed Win2D activatable classes into the exe's SxS (side-by-side) manifest
+
+        var projectName = "TestAppSelfContained";
+        var createResult = await RunDotnetCommandAsync(_tempDirectory, $"new winforms -n {projectName} -o .");
+        Assert.AreEqual(0, createResult.ExitCode, $"Failed to create WinForms app: {createResult.Output}");
+
+        // Run 'winapp init' to set up TFM, PackageReferences, and manifest
+        var initCommand = GetRequiredService<InitCommand>();
+        var initExitCode = await ParseAndInvokeWithCaptureAsync(initCommand,
+        [
+            _tempDirectory.FullName,
+            "--use-defaults",
+            "--setup-sdks", sdkMode
+        ]);
+        Assert.AreEqual(0, initExitCode, "winapp init should succeed");
+
+        // Add Win2D (init only adds WinAppSDK + BuildTools)
+        var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
+        Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
+
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+
+        var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
+        Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
+
+        var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
+        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
+        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+
+        // Install WinAppSDK packages to test cache (build tools + runtime)
+        await EnsureWinAppSdkPackagesInTestCacheAsync();
+
+        // Package with --self-contained
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
+        var packageParseResult = packageCommand.Parse(
+        [
+            targetFrameworkFolder.FullName,
+            "--output", packageOutputPath,
+            "--manifest", manifestPath,
+            "--skip-pri",
+            "--self-contained"
+        ]);
+        var packageExitCode = await packageParseResult.InvokeAsync(cancellationToken: TestContext.CancellationToken);
+        Assert.AreEqual(0, packageExitCode, "Package command should succeed");
+
+        // Extract the MSIX
+        Assert.IsTrue(File.Exists(packageOutputPath), "MSIX should be created");
+
+        var extractDir = Path.Combine(_tempDirectory.FullName, "extracted");
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(packageOutputPath, extractDir);
+
+        // Verify AppxManifest does NOT have PackageDependency or InProcessServer
+        var finalManifest = await File.ReadAllTextAsync(
+            Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
+
+        Assert.DoesNotContain("<PackageDependency", finalManifest,
+            "Self-contained package should NOT have PackageDependency (runtime is bundled)");
+        Assert.DoesNotContain("inProcessServer", finalManifest,
+            "Self-contained package should NOT have InProcessServer in AppxManifest (goes in SxS manifest)");
+
+        // Verify Win2D activatable classes ARE embedded in the exe's SxS manifest.
+        // The packaging step uses mt.exe to merge a WinRT activation manifest into the
+        // executable's Win32 resource section. We verify by reading the exe bytes and
+        // searching for known XML fragments from the embedded manifest.
+        var exeInMsix = Path.Combine(extractDir, $"{projectName}.exe");
+        Assert.IsTrue(File.Exists(exeInMsix), "Exe should be in MSIX");
+
+        var exeBytes = await File.ReadAllBytesAsync(exeInMsix);
+        var exeText = Encoding.ASCII.GetString(exeBytes);
+
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasDevice", exeText,
+            "Exe SxS manifest should contain Win2D CanvasDevice activatable class");
+        Assert.Contains("winrt.v1", exeText,
+            "Exe SxS manifest should contain WinRT manifest namespace");
+    }
+
+    [TestMethod]
     public async Task E2E_DotNetProject_InitWithSetupSdksNone_SkipsPackageReferences_ShouldSucceed()
     {
         // This test verifies that --setup-sdks none skips adding package references
@@ -645,5 +882,62 @@ public class EndToEndTests : BaseCommandTests
 
         var escaped = args.Select(Escape);
         return $"{Escape(cliPath)} {string.Join(" ", escaped)}";
+    }
+
+    /// <summary>
+    /// Extracts a NuGet package version from a .csproj file's PackageReference elements.
+    /// Returns null if the package is not found.
+    /// </summary>
+    private static string? ExtractPackageVersion(string csprojContent, string packageName)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            csprojContent,
+            $@"<PackageReference\s+Include=""{System.Text.RegularExpressions.Regex.Escape(packageName)}""\s+Version=""([^""]+)""",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Installs the Windows App SDK (with dependencies including runtime and build tools)
+    /// into the test NuGet cache at the exact versions resolved by the project's .csproj.
+    /// <para>
+    /// This is necessary because the test infrastructure overrides the NuGet cache directory
+    /// to an isolated temp location, while <c>dotnet restore</c> installs packages to the
+    /// real global NuGet cache. The CLI's <c>BuildToolsService</c> and
+    /// <c>WorkspaceSetupService</c> look for packages (makeappx.exe, MSIX runtime files)
+    /// in the test cache and fail if they're not present.
+    /// </para>
+    /// </summary>
+    private async Task EnsureWinAppSdkPackagesInTestCacheAsync()
+    {
+        var dotNetService = GetRequiredService<IDotNetService>();
+        var csprojFiles = dotNetService.FindCsproj(_tempDirectory);
+        if (csprojFiles.Count == 0)
+        {
+            return;
+        }
+
+        var packageList = await dotNetService.GetPackageListAsync(csprojFiles[0], TestContext.CancellationToken);
+        var frameworks = packageList?.Projects?
+            .SelectMany(p => p.Frameworks ?? [])
+            .ToList();
+
+        if (frameworks == null || frameworks.Count == 0)
+        {
+            return;
+        }
+
+        // Copy packages from the real NuGet cache (populated by 'dotnet build' above)
+        // into the test cache. This avoids expensive HTTP downloads that timeout when
+        // 12+ tests run in parallel and all try to download large packages simultaneously.
+        var allPackages = frameworks
+            .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []))
+            .DistinctBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var pkg in allPackages)
+        {
+            await EnsurePackageInTestCacheAsync(pkg.Id, pkg.ResolvedVersion, TestContext.CancellationToken);
+        }
     }
 }
