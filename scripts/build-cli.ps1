@@ -51,6 +51,7 @@ try
     $CliSolutionDir = "src\winapp-CLI"
     $CliSolutionPath = "$CliSolutionDir\winapp.sln"
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
+    $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -85,7 +86,7 @@ try
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --collect "Code Coverage;Format=cobertura"
+        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
