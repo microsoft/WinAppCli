@@ -36,7 +36,7 @@ MSBuild Build Target
 _WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
     │
     ▼
-_WinAppInterceptRun (overrides RunCommand with CLI path)
+_WinAppPrepareRunArguments (overrides RunCommand with CLI path)
     │
     ▼
 Run Target (invokes: winapp run --manifest ...)
@@ -84,7 +84,7 @@ samples/
 |--------|-------------|
 | `_WinAppValidateRunSupport` | Validates prerequisites (CLI exists, manifest exists) |
 | `_WinAppBuildRunArgs` | Builds CLI command arguments (shared by run targets) |
-| `_WinAppInterceptRun` | Overrides RunCommand to use CLI |
+| `_WinAppPrepareRunArguments` | Overrides RunCommand to use CLI |
 | `RunPackagedApp` | Direct target to run packaged app |
 | `WinAppRunSupportInfo` | Diagnostic target showing all properties |
 

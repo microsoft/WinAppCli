@@ -300,34 +300,42 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
 
 ```bash
-winapp run [options]
+winapp run <input-folder> [options]
 ```
+
+**Arguments:**
+
+- `input-folder` - Directory containing the app to run (required)
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect in build output or current directory)
-- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside manifest's directory)
+- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from input folder or current directory)
+- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
+- `--no-launch` - Only create the debug identity and register the package without launching the application
 
 **What it does:**
 
 - Locates or generates the AppxManifest.xml
 - Creates and registers a debug identity using a loose layout package
 - Computes the Application User Model ID (AUMID)
-- Launches the application using the registered identity
+- Launches the application using the registered identity (unless `--no-launch` is specified)
 - Prints the process ID (PID) for debugger attachment
 
 **Examples:**
 
 ```bash
-# Register debug identity, and launch app (auto-detect manifest)
-winapp run
+# Register debug identity and launch app from build output
+winapp run ./bin/Debug
 
 # Launch with custom manifest and arguments
-winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Specify output directory for loose layout package
-winapp run --output-appx-directory ./AppXDebug
+winapp run ./bin/Release --output-appx-directory ./AppXDebug
+
+# Register identity without launching
+winapp run ./bin/Debug --no-launch
 ```
 
 ---
