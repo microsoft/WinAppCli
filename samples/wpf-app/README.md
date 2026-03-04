@@ -8,7 +8,8 @@ For a complete step-by-step guide, see the [.NET Getting Started Guide](../../do
 
 - WPF desktop application with modern UI
 - Using Windows Runtime APIs to retrieve package identity
-- NuGet package references (`Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`) added directly to `.csproj` by `winapp init`
+- Using **Win2D** (`Microsoft.Graphics.Win2D`) — a third-party WinRT component that requires activatable class registration
+- NuGet package references (`Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, `Microsoft.Graphics.Win2D`) added directly to `.csproj`
 - Configuring MSBuild to automatically apply debug identity after building in Debug configuration
 - Using Windows App SDK via NuGet for modern Windows APIs
 - MSIX packaging with app manifest and assets
@@ -42,7 +43,12 @@ The WPF window will display:
 ```
 Package Family Name: wpf-app.debug_12345abcde
 Windows App Runtime Version: 1.8-stable (1.8.0)
+Win2D: <GPU device description>
 ```
+
+The Win2D line confirms that `CanvasDevice` was activated successfully, which requires the InProcessServer entries for `Microsoft.Graphics.Canvas.dll` to be registered.
+
+> **Note:** Win2D requires a platform-specific build (not AnyCPU). Use `-r win-x64` or `-r win-arm64` when building or packaging.
 
 ### Package as MSIX
 

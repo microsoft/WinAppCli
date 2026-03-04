@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
@@ -25,7 +26,7 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         IRenderable rendered;
 
         (int ReturnCode, T CompletedMessage)? result = null;
-        if (Environment.UserInteractive && !Console.IsOutputRedirected)
+        if (Environment.UserInteractive && !Console.IsOutputRedirected && logger.IsEnabled(LogLevel.Information))
         {
             rendered = task.Render();
             // Run the Live display until task completes
@@ -59,30 +60,45 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
             catch (OperationCanceledException)
             {
             }
+            catch (Exception ex) when (!logger.IsEnabled(LogLevel.Error))
+            {
+                return JsonErrorOutput.Write(ansiConsole, ex.Message);
+            }
         }
 
-        // Final render to show completed state
-        lock (renderLock)
+        if (logger.IsEnabled(LogLevel.Information))
         {
-            rendered = task.Render();
-        }
+            // Final render to show completed state
+            lock (renderLock)
+            {
+                rendered = task.Render(true);
+            }
 
-        ansiConsole.Write(rendered);
+            ansiConsole.Write(rendered);
+        }
 
         // Get the result
         try
         {
-            result = await taskExecution;
+            result ??= await taskExecution;
         }
         catch (OperationCanceledException)
         {
             return 1;
+        }
+        catch (Exception ex) when (!logger.IsEnabled(LogLevel.Error))
+        {
+            return JsonErrorOutput.Write(ansiConsole, ex.Message);
         }
 
         if (result != null)
         {
             if (result.Value.ReturnCode != 0)
             {
+                if (!logger.IsEnabled(LogLevel.Error))
+                {
+                    return JsonErrorOutput.Write(ansiConsole, result.Value.CompletedMessage?.ToString() ?? "Unknown error");
+                }
                 logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
                 if (!logger.IsEnabled(LogLevel.Debug))
                 {

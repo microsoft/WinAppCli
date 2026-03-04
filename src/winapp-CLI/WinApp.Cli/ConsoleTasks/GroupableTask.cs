@@ -85,14 +85,14 @@ internal class GroupableTask<T> : GroupableTask
         return CompletedMessage;
     }
 
-    public IRenderable Render()
+    public IRenderable Render(bool lastRender = false)
     {
         var sb = new StringBuilder();
 
         int maxDepth = _logger.IsEnabled(LogLevel.Debug) ? int.MaxValue : 1;
         RenderTask(this, sb, 0, string.Empty, maxDepth);
         var allTasksString = sb.ToString().TrimEnd([.. Environment.NewLine]);
-        if (!allTasksString.Contains(Environment.NewLine))
+        if (!lastRender && !allTasksString.Contains(Environment.NewLine))
         {
             allTasksString = $"{allTasksString}{Environment.NewLine}";
         }

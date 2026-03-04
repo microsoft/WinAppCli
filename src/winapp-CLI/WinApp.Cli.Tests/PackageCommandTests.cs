@@ -253,11 +253,11 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    [DataRow(null, @"TestPackage.msix", DisplayName = "Null output path defaults to current directory with package name")]
-    [DataRow("", @"TestPackage.msix", DisplayName = "Empty output path defaults to current directory with package name")]
+    [DataRow(null, @"TestPackage_1.0.0.0.msix", DisplayName = "Null output path defaults to current directory with package name")]
+    [DataRow("", @"TestPackage_1.0.0.0.msix", DisplayName = "Empty output path defaults to current directory with package name")]
     [DataRow("CustomPackage.msix", @"CustomPackage.msix", DisplayName = "Full filename with .msix extension uses as-is")]
-    [DataRow("output", @"output\TestPackage.msix", DisplayName = "Directory path without .msix extension combines with package name")]
-    [DataRow(@"C:\temp\output", @"C:\temp\output\TestPackage.msix", DisplayName = "Absolute directory path combines with package name")]
+    [DataRow("output", @"output\TestPackage_1.0.0.0.msix", DisplayName = "Directory path without .msix extension combines with package name")]
+    [DataRow(@"C:\temp\output", @"C:\temp\output\TestPackage_1.0.0.0.msix", DisplayName = "Absolute directory path combines with package name")]
     [DataRow(@"C:\temp\AbsolutePackage.msix", @"C:\temp\AbsolutePackage.msix", DisplayName = "Absolute .msix file path uses as-is")]
     public async Task CreateMsixPackageAsync_OutputPathHandling_WorksCorrectly(string? outputPath, string expectedRelativePath)
     {
@@ -773,7 +773,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_WithWindowsAppSdkDependency_AddsPackageDependencyOnNewLine()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWindowsAppSdkDependency_AddsPackageDependencyOnNewLine(string winAppSdkVersion)
     {
         // Arrange - Create package structure with a manifest that has Dependencies but no WinAppSDK dependency
         var packageDir = _tempDirectory.CreateSubdirectory("WinAppSdkDependencyTest");
@@ -787,9 +789,9 @@ public class PackageCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
 
         // Create winapp.yaml with Windows App SDK package to trigger dependency injection
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1";
+    version: {winAppSdkVersion}";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
 
         // Restore
@@ -800,6 +802,10 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        // Ensure the runtime MSIX package is in the test cache — SetupWorkspaceAsync's
+        // recursive NuGet resolution can silently fail under parallel test network contention
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act - Create package (this should trigger the Windows App SDK dependency injection)
         var result = await _msixService.CreateMsixPackageAsync(
@@ -855,7 +861,9 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_InternalManifestWithPri_ComputesResourcesWithoutCopyingAssets()
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_InternalManifestWithPri_ComputesResourcesWithoutCopyingAssets(string winAppSdkVersion)
     {
         // Arrange - Manifest is INSIDE the input folder, skipPri is false.
         // This exercises the path where expandedFiles are computed for PRI generation
@@ -864,9 +872,9 @@ public class PackageCommandTests : BaseCommandTests
         CreateTestPackageStructure(packageDir);
 
         // Create winapp.yaml with Windows App SDK package for PRI generation
-        var configContent = @"packages:
+        var configContent = $@"packages:
   - name: Microsoft.WindowsAppSDK
-    version: 2.0.250930001-experimental1";
+    version: {winAppSdkVersion}";
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
 
         // Restore
@@ -877,6 +885,8 @@ public class PackageCommandTests : BaseCommandTests
             RequireExistingConfig = true,
             ForceLatestBuildTools = false
         }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
 
         // Act - skipPri: false with manifest inside input folder
         var result = await _msixService.CreateMsixPackageAsync(
@@ -1120,6 +1130,382 @@ public class PackageCommandTests : BaseCommandTests
 
     #endregion
 
+    #region Third-Party WinRT Component Integration Tests
+
+    [TestMethod]
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DPackage_AddsInProcessServerEntries(string winAppSdkVersion)
+    {
+        // Arrange - Create package structure
+        var packageDir = _tempDirectory.CreateSubdirectory("Win2DInProcessServerTest");
+
+        File.WriteAllText(Path.Combine(packageDir.FullName, "AppxManifest.xml"), StandardTestManifestContent);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllText(Path.Combine(assetsDir, "Logo.png"), "fake png content");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
+
+        // Create winapp.yaml with Windows App SDK (for build tools / workspace setup) + Win2D
+        var configContent = $@"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: {winAppSdkVersion}
+  - name: Microsoft.Graphics.Win2D
+    version: 1.3.0";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore workspace (downloads NuGet packages and build tools)
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
+
+        // Act - Create package (non-self-contained, should add InProcessServer entries to AppxManifest)
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "Win2DInProcessServerTest",
+            skipPri: true,
+            autoSign: false,
+            selfContained: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - the MSIX should be created
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted_win2d");
+
+        // Verify InProcessServer extension block was added for Win2D
+        Assert.Contains("windows.activatableClass.inProcessServer", manifestContent,
+            "Manifest should contain inProcessServer extension category");
+        Assert.Contains("<InProcessServer>", manifestContent,
+            "Manifest should contain InProcessServer element");
+        Assert.Contains("Microsoft.Graphics.Canvas.dll", manifestContent,
+            "Manifest should reference Microsoft.Graphics.Canvas.dll");
+
+        // Verify well-known Win2D activatable classes are registered
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasDevice", manifestContent,
+            "Manifest should register CanvasDevice activatable class");
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasBitmap", manifestContent,
+            "Manifest should register CanvasBitmap activatable class");
+        Assert.Contains("Microsoft.Graphics.Canvas.UI.Xaml.CanvasControl", manifestContent,
+            "Manifest should register CanvasControl activatable class");
+
+        // Verify threading model is set
+        Assert.Contains(@"ThreadingModel=""both""", manifestContent,
+            "Activatable classes should use 'both' threading model");
+    }
+
+    [TestMethod]
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DAndExistingExtensions_AppendsInProcessServer(string winAppSdkVersion)
+    {
+        // Arrange - Create manifest with existing Extensions block
+        var manifestWithExtensions = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap rescap"">
+  <Identity Name=""TestPackage""
+            Publisher=""CN=TestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>Test Package</DisplayName>
+    <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+    <Description>Test package for integration testing</Description>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""TestApp.exe"" EntryPoint=""TestApp.App"">
+      <uap:VisualElements DisplayName=""Test App"" Description=""Test application""
+                          BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+    </Application>
+  </Applications>
+  <Extensions>
+    <Extension Category=""windows.activatableClass.inProcessServer"">
+      <InProcessServer>
+        <Path>SomeOtherComponent.dll</Path>
+        <ActivatableClass ActivatableClassId=""SomeOther.Component.Class1"" ThreadingModel=""both""/>
+      </InProcessServer>
+    </Extension>
+  </Extensions>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+</Package>";
+
+        var packageDir = _tempDirectory.CreateSubdirectory("Win2DAppendExtensionsTest");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "AppxManifest.xml"), manifestWithExtensions);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllText(Path.Combine(assetsDir, "Logo.png"), "fake png content");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
+
+        // Install Win2D to NuGet cache
+        var nugetService = GetRequiredService<INugetService>();
+        await nugetService.InstallPackageAsync("Microsoft.Graphics.Win2D", "1.3.0", TestTaskContext, TestContext.CancellationToken);
+
+        // Create winapp.yaml with WinApp SDK + Win2D
+        var configContent = $@"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: {winAppSdkVersion}
+  - name: Microsoft.Graphics.Win2D
+    version: 1.3.0";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore workspace
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "Win2DAppendExtensionsTest",
+            skipPri: true,
+            autoSign: false,
+            selfContained: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.MsixPath.Exists);
+
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted_win2d_append");
+
+        // Verify existing extension is preserved
+        Assert.Contains("SomeOtherComponent.dll", manifestContent,
+            "Existing InProcessServer entries should be preserved");
+        Assert.Contains("SomeOther.Component.Class1", manifestContent,
+            "Existing activatable class registrations should be preserved");
+
+        // Verify Win2D entries were appended
+        Assert.Contains("Microsoft.Graphics.Canvas.dll", manifestContent,
+            "Win2D InProcessServer entries should be added alongside existing extensions");
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasDevice", manifestContent,
+            "Win2D CanvasDevice should be registered");
+    }
+
+    [TestMethod]
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWebView2Package_AddsInProcessServerEntries(string winAppSdkVersion)
+    {
+        // Arrange - WebView2's implementation DLL is in lib/ (not runtimes/win-{arch}/native/)
+        // This tests the lib/ fallback discovery path
+        var packageDir = _tempDirectory.CreateSubdirectory("WebView2InProcessServerTest");
+
+        File.WriteAllText(Path.Combine(packageDir.FullName, "AppxManifest.xml"), StandardTestManifestContent);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllText(Path.Combine(assetsDir, "Logo.png"), "fake png content");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
+
+        // Create winapp.yaml with Windows App SDK + WebView2
+        var configContent = $@"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: {winAppSdkVersion}
+  - name: Microsoft.Web.WebView2
+    version: 1.0.3179.45";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore workspace
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "WebView2InProcessServerTest",
+            skipPri: true,
+            autoSign: false,
+            selfContained: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted_webview2");
+
+        // Verify InProcessServer extension block was added for WebView2
+        Assert.Contains("windows.activatableClass.inProcessServer", manifestContent,
+            "Manifest should contain inProcessServer extension category");
+        Assert.Contains("<InProcessServer>", manifestContent,
+            "Manifest should contain InProcessServer element");
+        Assert.Contains("Microsoft.Web.WebView2.Core.dll", manifestContent,
+            "Manifest should reference Microsoft.Web.WebView2.Core.dll");
+
+        // Verify well-known WebView2 activatable classes are registered
+        Assert.Contains("Microsoft.Web.WebView2.Core.CoreWebView2", manifestContent,
+            "Manifest should register CoreWebView2 activatable class");
+        Assert.Contains("Microsoft.Web.WebView2.Core.CoreWebView2Environment", manifestContent,
+            "Manifest should register CoreWebView2Environment activatable class");
+
+        // Verify threading model is set
+        Assert.Contains(@"ThreadingModel=""both""", manifestContent,
+            "Activatable classes should use 'both' threading model");
+    }
+
+    [TestMethod]
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithWin2DAndWebView2_AddsBothInProcessServers(string winAppSdkVersion)
+    {
+        // Arrange - Test both Win2D (native DLL in runtimes/) and WebView2 (managed DLL in lib/) together
+        var packageDir = _tempDirectory.CreateSubdirectory("BothComponentsTest");
+
+        File.WriteAllText(Path.Combine(packageDir.FullName, "AppxManifest.xml"), StandardTestManifestContent);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllText(Path.Combine(assetsDir, "Logo.png"), "fake png content");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
+
+        // Create winapp.yaml with Windows App SDK + Win2D + WebView2
+        var configContent = $@"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: {winAppSdkVersion}
+  - name: Microsoft.Graphics.Win2D
+    version: 1.3.0
+  - name: Microsoft.Web.WebView2
+    version: 1.0.3179.45";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore workspace
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "BothComponentsTest",
+            skipPri: true,
+            autoSign: false,
+            selfContained: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted_both_components");
+
+        // Verify both Win2D and WebView2 InProcessServer entries are present
+        Assert.Contains("Microsoft.Graphics.Canvas.dll", manifestContent,
+            "Manifest should contain Win2D DLL reference");
+        Assert.Contains("Microsoft.Graphics.Canvas.CanvasDevice", manifestContent,
+            "Manifest should contain Win2D CanvasDevice registration");
+
+        Assert.Contains("Microsoft.Web.WebView2.Core.dll", manifestContent,
+            "Manifest should contain WebView2 DLL reference");
+        Assert.Contains("Microsoft.Web.WebView2.Core.CoreWebView2", manifestContent,
+            "Manifest should contain WebView2 CoreWebView2 registration");
+    }
+
+    [TestMethod]
+    [DataRow("2.0.250930001-experimental1")]
+    [DataRow("1.8.251106002")]
+    public async Task CreateMsixPackageAsync_WithNoWinRTComponents_DoesNotAddInProcessServer(string winAppSdkVersion)
+    {
+        // Arrange - Create package with a non-WinRT package (no .winmd files)
+        var packageDir = _tempDirectory.CreateSubdirectory("NoWinRTComponentsTest");
+
+        File.WriteAllText(Path.Combine(packageDir.FullName, "AppxManifest.xml"), StandardTestManifestContent);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllText(Path.Combine(assetsDir, "Logo.png"), "fake png content");
+        File.WriteAllText(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content");
+
+        // Create winapp.yaml with a non-WinRT package (no .winmd files)
+        var configContent = $@"packages:
+  - name: Microsoft.WindowsAppSDK
+    version: {winAppSdkVersion}";
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, configContent, TestContext.CancellationToken);
+
+        // Restore workspace
+        await _workspaceSetupService.SetupWorkspaceAsync(new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            ForceLatestBuildTools = false
+        }, CancellationToken.None);
+
+        await EnsureWinAppSdkRuntimeInTestCacheAsync(winAppSdkVersion);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "NoWinRTComponentsTest",
+            skipPri: true,
+            autoSign: false,
+            selfContained: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.MsixPath.Exists);
+
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "extracted_no_winrt");
+
+        // Verify no InProcessServer entries were added
+        Assert.DoesNotContain("inProcessServer", manifestContent,
+            "Manifest should not contain inProcessServer entries when there are no WinRT components");
+        Assert.DoesNotContain("<InProcessServer>", manifestContent,
+            "No InProcessServer elements should be present");
+    }
+
+    #endregion
+
     #region PFX Certificate Warning Tests
 
     [TestMethod]
@@ -1197,4 +1583,38 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    /// <summary>
+    /// Installs the Windows App SDK and its critical transitive dependencies
+    /// (runtime MSIX package, build tools) into the test NuGet cache.
+    /// <para>
+    /// <c>SetupWorkspaceAsync</c> installs packages via NuGet recursive resolution, which
+    /// can silently fail under network contention when tests run in parallel
+    /// (<c>ResolveDependenciesAsync</c> has a catch-all swallowing all exceptions).
+    /// This method queries the NuGet API for the dependency tree and installs each
+    /// WinAppSDK-related dependency individually, ensuring the runtime MSIX directory
+    /// is always available for <c>FindWindowsAppSdkMsixDirectory</c>.
+    /// </para>
+    /// </summary>
+    private async Task EnsureWinAppSdkRuntimeInTestCacheAsync(string winAppSdkVersion)
+    {
+        var nugetService = GetRequiredService<INugetService>();
+
+        var deps = await nugetService.GetPackageDependenciesAsync(
+            BuildToolsService.WINAPP_SDK_PACKAGE, winAppSdkVersion, TestContext.CancellationToken);
+
+        // Install the main package plus any runtime/build tools dependencies.
+        // Uses EnsurePackageInTestCacheAsync which copies from the real NuGet cache
+        // when available, avoiding HTTP downloads that timeout under parallel execution.
+        deps.TryAdd(BuildToolsService.WINAPP_SDK_PACKAGE, winAppSdkVersion);
+
+        foreach (var (depId, depVersion) in deps)
+        {
+            if (depId.StartsWith("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(depId, BuildToolsService.BUILD_TOOLS_PACKAGE, StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsurePackageInTestCacheAsync(depId, depVersion, TestContext.CancellationToken);
+            }
+        }
+    }
 }
