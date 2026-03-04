@@ -10,6 +10,7 @@
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock FontSize="24" Text="Hello, Windows App SDK from WPF!"></TextBlock>
             <TextBlock x:Name="StatusTextBlock" Margin="0,20,0,20" FontSize="24"></TextBlock>
+            <TextBlock x:Name="Win2DStatusTextBlock" FontSize="18" Foreground="DarkCyan"></TextBlock>
         </StackPanel>
     </Grid>
 </Window>
