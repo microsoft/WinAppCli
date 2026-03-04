@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using WinApp.Cli.Commands;
 
 namespace WinApp.Cli.Tests;
@@ -194,8 +195,33 @@ public class CertGenerateCommandTests : BaseCommandTests
         Assert.IsFalse(File.Exists(cerPath), "CER file should NOT be created without --export-cer");
     }
 
-    // ── Invocation tests: --json output ─────────────────────────────────
+    // ── --json parse tests ──────────────────────────────────────────────
+    // JSON invocation tests are in CertGenerateCommandJsonTests below
+    // (requires LogLevel.None to match production --json behavior).
 
+    // ── --json rejection on commands that don't support it ──────────────
+
+    [TestMethod]
+    public void JsonOption_RejectedOnSignCommand()
+    {
+        // SignCommand does not opt in to --json; passing it should produce a parse error
+        var command = GetRequiredService<SignCommand>();
+        var args = new[] { "file.exe", "cert.pfx", "--json" };
+
+        var parseResult = command.Parse(args);
+
+        Assert.IsNotEmpty(parseResult.Errors,
+            "--json should be rejected on commands that do not opt in (e.g., sign)");
+    }
+}
+
+/// <summary>
+/// JSON invocation tests for CertGenerateCommand. Uses LogLevel.None to match
+/// production --json behavior (no log output, only structured JSON on stdout).
+/// </summary>
+[TestClass]
+public class CertGenerateCommandJsonTests() : BaseCommandTests(logLevel: LogLevel.None)
+{
     [TestMethod]
     public async Task JsonOutput_IsValidAndContainsExpectedFields()
     {
@@ -279,8 +305,6 @@ public class CertGenerateCommandTests : BaseCommandTests
             "JSON should NOT contain 'publicCertificatePath' when --export-cer is not used");
     }
 
-    // ── --json error output ──────────────────────────────────────────────
-
     [TestMethod]
     public async Task JsonError_FileAlreadyExistsOutputsJsonError()
     {
@@ -307,20 +331,5 @@ public class CertGenerateCommandTests : BaseCommandTests
 
         Assert.IsTrue(root.TryGetProperty("error", out var errorProp), "JSON error output should contain 'error' property");
         StringAssert.Contains(errorProp.GetString(), "already exists");
-    }
-
-    // ── --json rejection on commands that don't support it ──────────────
-
-    [TestMethod]
-    public void JsonOption_RejectedOnSignCommand()
-    {
-        // SignCommand does not opt in to --json; passing it should produce a parse error
-        var command = GetRequiredService<SignCommand>();
-        var args = new[] { "file.exe", "cert.pfx", "--json" };
-
-        var parseResult = command.Parse(args);
-
-        Assert.IsNotEmpty(parseResult.Errors,
-            "--json should be rejected on commands that do not opt in (e.g., sign)");
     }
 }

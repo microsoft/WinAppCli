@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
@@ -39,7 +40,7 @@ internal class CertInfoCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler(IAnsiConsole ansiConsole) : AsynchronousCommandLineAction
+    public class Handler(IAnsiConsole ansiConsole, ILogger<CertInfoCommand> logger) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -54,7 +55,7 @@ internal class CertInfoCommand : Command, IShortDescription
                 {
                     return Task.FromResult(JsonErrorOutput.Write(ansiConsole, $"Certificate file not found: {certPath}"));
                 }
-                Console.Error.WriteLine($"{UiSymbols.Error} Certificate file not found: {certPath}");
+                logger.LogError("Certificate file not found: {CertPath}", certPath);
                 return Task.FromResult(1);
             }
 
@@ -96,7 +97,7 @@ internal class CertInfoCommand : Command, IShortDescription
                 {
                     return Task.FromResult(JsonErrorOutput.Write(ansiConsole, $"Failed to read certificate: {ex.Message}"));
                 }
-                Console.Error.WriteLine($"{UiSymbols.Error} Failed to read certificate: {ex.Message}");
+                logger.LogError("Failed to read certificate: {Message}", ex.Message);
                 return Task.FromResult(1);
             }
         }

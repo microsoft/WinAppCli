@@ -119,36 +119,28 @@ internal class CertGenerateCommand : Command, IShortDescription
                 }
             }
 
-            if (json)
-            {
-                CertificateService.CertificateResult result;
-                try
-                {
-                    // In JSON mode, use quiet execution to suppress all status/Spectre output
-                    result = await statusService.ExecuteQuietlyAsync(GenerateCertAsync, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    return JsonErrorOutput.Write(ansiConsole, ex.Message);
-                }
+            CertificateService.CertificateResult? certResult = null;
 
-                var jsonOutput = new CertGenerateJsonOutput
-                {
-                    CertificatePath = result.CertificatePath.FullName,
-                    Password = result.Password,
-                    Publisher = result.Publisher,
-                    SubjectName = result.SubjectName,
-                    PublicCertificatePath = result.PublicCertificatePath?.FullName,
-                };
-                ansiConsole.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertGenerateJsonOutput));
-                return 0;
-            }
-
-            return await statusService.ExecuteWithStatusAsync("Generating development certificate...", async (taskContext, ct) =>
+            var returnCode = await statusService.ExecuteWithStatusAsync("Generating development certificate...", async (taskContext, ct) =>
             {
-                await GenerateCertAsync(taskContext, ct);
+                certResult = await GenerateCertAsync(taskContext, ct);
                 return (0, "Development certificate generated successfully.");
             }, cancellationToken);
+
+            if (returnCode == 0 && json && certResult != null)
+            {
+                var jsonOutput = new CertGenerateJsonOutput
+                {
+                    CertificatePath = certResult.CertificatePath.FullName,
+                    Password = certResult.Password,
+                    Publisher = certResult.Publisher,
+                    SubjectName = certResult.SubjectName,
+                    PublicCertificatePath = certResult.PublicCertificatePath?.FullName,
+                };
+                ansiConsole.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertGenerateJsonOutput));
+            }
+
+            return returnCode;
 
             Task<CertificateService.CertificateResult> GenerateCertAsync(TaskContext taskContext, CancellationToken ct) =>
                 certificateService.GenerateDevCertificateWithInferenceAsync(
