@@ -58,6 +58,19 @@
           "description": "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.",
           "hidden": false,
           "options": {
+            "--export-cer": {
+              "description": "Export a .cer file (public key only) alongside the .pfx",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--if-exists": {
               "description": "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
               "hidden": false,
@@ -73,6 +86,19 @@
             },
             "--install": {
               "description": "Install the certificate to the local machine store after generation",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -157,6 +183,83 @@
               "defaultValue": 365,
               "arity": {
                 "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "info": {
+          "description": "Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.",
+          "hidden": false,
+          "arguments": {
+            "cert-path": {
+              "description": "Path to the certificate file (PFX)",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.IO.FileInfo",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--password": {
+              "description": "Password for the PFX file",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": true,
+              "defaultValue": "password",
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,

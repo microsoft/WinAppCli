@@ -63,7 +63,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: artifacts/TestResults/*.trx
+        path: artifacts/TestResults/
         if-no-files-found: error
     
     - name: Upload CLI binaries

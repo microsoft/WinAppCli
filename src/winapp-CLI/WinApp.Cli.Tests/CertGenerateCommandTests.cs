@@ -1,0 +1,335 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using WinApp.Cli.Commands;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>
+/// Tests for the CertGenerateCommand: option parsing, path validation, --export-cer, and --json output.
+/// </summary>
+[TestClass]
+public class CertGenerateCommandTests : BaseCommandTests
+{
+    [TestMethod]
+    public void OutputOption_AcceptsPlainFileName()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--output", "devcert.pfx", "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors,
+            $"Plain file name should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void OutputOption_AcceptsRelativePath()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--output", "certs/devcert.pfx", "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors,
+            $"Relative path should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void OutputOption_AcceptsAbsolutePath()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var absolutePath = Path.Combine(_tempDirectory.FullName, "devcert.pfx");
+        var args = new[] { "--output", absolutePath, "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors,
+            $"Absolute path should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void OutputOption_AcceptsDotRelativePath()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--output", @".\certs\devcert.pfx", "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors,
+            $"Dot-relative path should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void OutputOption_AcceptsParentRelativePath()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--output", @"..\certs\devcert.pfx", "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors,
+            $"Parent-relative path should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void OutputOption_RejectsIllegalCharacters()
+    {
+        // Arrange
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--output", "dev|cert.pfx", "--publisher", "TestPublisher" };
+
+        // Act
+        var parseResult = command.Parse(args);
+
+        // Assert
+        Assert.IsNotEmpty(parseResult.Errors,
+            "Path with illegal characters (|) should be rejected");
+    }
+
+    // ── Parse-level tests: --export-cer and --json ──────────────────────
+
+    [TestMethod]
+    public void Parse_AcceptsExportCerOption()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--publisher", "CN=Test", "--export-cer" };
+
+        var parseResult = command.Parse(args);
+
+        Assert.IsEmpty(parseResult.Errors,
+            $"--export-cer should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    [TestMethod]
+    public void Parse_AcceptsJsonOption()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var args = new[] { "--publisher", "CN=Test", "--json" };
+
+        var parseResult = command.Parse(args);
+
+        Assert.IsEmpty(parseResult.Errors,
+            $"--json should be accepted. Errors: {string.Join("; ", parseResult.Errors)}");
+    }
+
+    // ── Invocation tests: --export-cer ──────────────────────────────────
+
+    [TestMethod]
+    public async Task ExportCer_GeneratesBothPfxAndCerFiles()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "export-test.pfx");
+        var cerPath = Path.ChangeExtension(pfxPath, ".cer");
+        var args = new[]
+        {
+            "--publisher", "CN=ExportCerTest",
+            "--output", pfxPath,
+            "--password", "testpw",
+            "--export-cer"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+
+        Assert.AreEqual(0, exitCode, "cert generate --export-cer should succeed");
+        Assert.IsTrue(File.Exists(pfxPath), "PFX file should be created");
+        Assert.IsTrue(File.Exists(cerPath), "CER file should be created alongside PFX");
+    }
+
+    [TestMethod]
+    public async Task ExportCer_CerFileContainsPublicKeyOnly()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "cer-public-test.pfx");
+        var cerPath = Path.ChangeExtension(pfxPath, ".cer");
+        var args = new[]
+        {
+            "--publisher", "CN=CerPublicKeyTest",
+            "--output", pfxPath,
+            "--password", "testpw",
+            "--export-cer"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode);
+
+        // Load the .cer file and verify it has no private key
+        using var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificateFromFile(cerPath);
+        Assert.IsFalse(cert.HasPrivateKey, "CER file should contain only the public key");
+    }
+
+    [TestMethod]
+    public async Task WithoutExportCer_OnlyPfxIsGenerated()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "no-cer-test.pfx");
+        var cerPath = Path.ChangeExtension(pfxPath, ".cer");
+        var args = new[]
+        {
+            "--publisher", "CN=NoCerTest",
+            "--output", pfxPath,
+            "--password", "testpw"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+
+        Assert.AreEqual(0, exitCode, "cert generate should succeed");
+        Assert.IsTrue(File.Exists(pfxPath), "PFX file should be created");
+        Assert.IsFalse(File.Exists(cerPath), "CER file should NOT be created without --export-cer");
+    }
+
+    // ── --json parse tests ──────────────────────────────────────────────
+    // JSON invocation tests are in CertGenerateCommandJsonTests below
+    // (requires LogLevel.None to match production --json behavior).
+
+    // ── --json rejection on commands that don't support it ──────────────
+
+    [TestMethod]
+    public void JsonOption_RejectedOnSignCommand()
+    {
+        // SignCommand does not opt in to --json; passing it should produce a parse error
+        var command = GetRequiredService<SignCommand>();
+        var args = new[] { "file.exe", "cert.pfx", "--json" };
+
+        var parseResult = command.Parse(args);
+
+        Assert.IsNotEmpty(parseResult.Errors,
+            "--json should be rejected on commands that do not opt in (e.g., sign)");
+    }
+}
+
+/// <summary>
+/// JSON invocation tests for CertGenerateCommand. Uses LogLevel.None to match
+/// production --json behavior (no log output, only structured JSON on stdout).
+/// </summary>
+[TestClass]
+public class CertGenerateCommandJsonTests() : BaseCommandTests(logLevel: LogLevel.None)
+{
+    [TestMethod]
+    public async Task JsonOutput_IsValidAndContainsExpectedFields()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "json-test.pfx");
+        var args = new[]
+        {
+            "--publisher", "CN=JsonOutputTest",
+            "--output", pfxPath,
+            "--password", "jsonpw",
+            "--json"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert generate --json should succeed");
+
+        var output = TestAnsiConsole.Output.Trim();
+        var jsonDoc = JsonDocument.Parse(output);
+        var root = jsonDoc.RootElement;
+
+        Assert.IsTrue(root.TryGetProperty("certificatePath", out var certPathProp), "JSON should contain 'certificatePath'");
+        StringAssert.EndsWith(certPathProp.GetString()!, ".pfx");
+        Assert.IsTrue(File.Exists(certPathProp.GetString()!), "certificatePath should point to an existing file");
+
+        Assert.IsTrue(root.TryGetProperty("password", out var passwordProp), "JSON should contain 'password'");
+        Assert.AreEqual("jsonpw", passwordProp.GetString());
+
+        Assert.IsTrue(root.TryGetProperty("publisher", out _), "JSON should contain 'publisher'");
+        Assert.IsTrue(root.TryGetProperty("subjectName", out _), "JSON should contain 'subjectName'");
+    }
+
+    [TestMethod]
+    public async Task JsonOutput_WithExportCer_IncludesPublicCertificatePath()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "json-cer-test.pfx");
+        var args = new[]
+        {
+            "--publisher", "CN=JsonCerTest",
+            "--output", pfxPath,
+            "--password", "testpw",
+            "--export-cer",
+            "--json"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode, "cert generate --json --export-cer should succeed");
+
+        var output = TestAnsiConsole.Output.Trim();
+        var jsonDoc = JsonDocument.Parse(output);
+        var root = jsonDoc.RootElement;
+
+        Assert.IsTrue(root.TryGetProperty("publicCertificatePath", out var cerPathProp),
+            "JSON should contain 'publicCertificatePath' when --export-cer is used");
+        StringAssert.EndsWith(cerPathProp.GetString()!, ".cer");
+        Assert.IsTrue(File.Exists(cerPathProp.GetString()!), "publicCertificatePath should point to an existing .cer file");
+    }
+
+    [TestMethod]
+    public async Task JsonOutput_WithoutExportCer_OmitsPublicCertificatePath()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "json-no-cer-test.pfx");
+        var args = new[]
+        {
+            "--publisher", "CN=JsonNoCerTest",
+            "--output", pfxPath,
+            "--password", "testpw",
+            "--json"
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(0, exitCode);
+
+        var output = TestAnsiConsole.Output.Trim();
+        var jsonDoc = JsonDocument.Parse(output);
+        var root = jsonDoc.RootElement;
+
+        // publicCertificatePath should be omitted (WhenWritingNull) when --export-cer is not used
+        Assert.IsFalse(root.TryGetProperty("publicCertificatePath", out _),
+            "JSON should NOT contain 'publicCertificatePath' when --export-cer is not used");
+    }
+
+    [TestMethod]
+    public async Task JsonError_FileAlreadyExistsOutputsJsonError()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "existing.pfx");
+        // Create the file first so it already exists
+        await File.WriteAllTextAsync(pfxPath, "placeholder");
+
+        var args = new[]
+        {
+            "--publisher", "CN=AlreadyExistsTest",
+            "--output", pfxPath,
+            "--password", "testpw",
+            "--json"
+            // default --if-exists is Error
+        };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, args);
+        Assert.AreEqual(1, exitCode, "cert generate --json should fail when file exists");
+
+        var output = TestAnsiConsole.Output.Trim();
+        var jsonDoc = JsonDocument.Parse(output);
+        var root = jsonDoc.RootElement;
+
+        Assert.IsTrue(root.TryGetProperty("error", out var errorProp), "JSON error output should contain 'error' property");
+        StringAssert.Contains(errorProp.GetString(), "already exists");
+    }
+}

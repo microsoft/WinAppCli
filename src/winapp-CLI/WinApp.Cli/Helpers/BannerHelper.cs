@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Reflection;
-
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
@@ -70,7 +68,7 @@ internal static class BannerHelper
     public static void DisplayBanner()
     {
         var useColor = UseEmoji; // Same check - modern terminals support both
-        var version = GetVersionString();
+        var version = VersionHelper.GetVersionString();
 
         if (useColor)
         {
@@ -108,24 +106,4 @@ internal static class BannerHelper
         Console.WriteLine($" Windows App Development CLI - Version {version}");
     }
 
-    /// <summary>
-    /// Gets the version string from the assembly.
-    /// </summary>
-    private static string GetVersionString()
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-
-        // Try to get informational version first (includes git info if available)
-        var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrEmpty(infoVersion))
-        {
-            // Remove git hash suffix if present (e.g., "0.1.8+abc123" -> "0.1.8")
-            var plusIndex = infoVersion.IndexOf('+');
-            return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
-        }
-
-        // Fall back to assembly version
-        var version = assembly.GetName().Version;
-        return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.0.0";
-    }
 }

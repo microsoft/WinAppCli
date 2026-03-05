@@ -104,9 +104,9 @@ if (-not $isAdmin) {
         Write-Host ""
         
         # Build the arguments to pass to the elevated process
-        # Preserve current directory and package path
-        $currentDir = Get-Location
-        $arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"Set-Location '$currentDir'; & '$PSCommandPath' -Elevated"
+        # Use the script's directory so MSIX lookup works regardless of cwd
+        $ScriptDir = Split-Path $PSCommandPath -Parent
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"Set-Location '$ScriptDir'; & '$PSCommandPath' -Elevated"
         
         if (-not [string]::IsNullOrEmpty($PackagePath)) {
             # Convert to absolute path before passing
@@ -142,9 +142,13 @@ if (-not $isAdmin) {
 Write-Host "[INFO] Running with administrator privileges" -ForegroundColor Green
 Write-Host ""
 
+# Determine the directory where this script lives (for finding .msix files)
+$ScriptDir = Split-Path $PSCommandPath -Parent
+
 # Find the package if not specified
 if ([string]::IsNullOrEmpty($PackagePath)) {
-    Write-Host "[SEARCH] Looking for MSIX package in current directory..." -ForegroundColor Blue
+    Write-Host "[SEARCH] Looking for MSIX package in script directory..." -ForegroundColor Blue
+    Write-Host "[INFO] Script directory: $ScriptDir" -ForegroundColor Gray
     
     # Detect current processor architecture
     $CurrentArch = $env:PROCESSOR_ARCHITECTURE
@@ -156,16 +160,16 @@ if ([string]::IsNullOrEmpty($PackagePath)) {
     
     Write-Host "[INFO] Detected architecture: $CurrentArch, looking for: $ArchPattern" -ForegroundColor Gray
     
-    $packages = Get-ChildItem -Filter $ArchPattern | Select-Object -First 1
+    $packages = Get-ChildItem -Path $ScriptDir -Filter $ArchPattern | Select-Object -First 1
     
     if ($null -eq $packages) {
         Write-Host ""
         Write-Warning "No matching .msix file found for architecture: $CurrentArch"
         Write-Host "Looking for any .msix file..." -ForegroundColor Yellow
-        $packages = Get-ChildItem -Filter "*.msix" | Select-Object -First 1
+        $packages = Get-ChildItem -Path $ScriptDir -Filter "*.msix" | Select-Object -First 1
         
         if ($null -eq $packages) {
-            Write-Error "No .msix files found in current directory."
+            Write-Error "No .msix files found in script directory: $ScriptDir"
             Write-Host "Please specify the package path with -PackagePath parameter." -ForegroundColor Yellow
             exit 1
         }

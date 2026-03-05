@@ -23,7 +23,8 @@ internal partial class CertificateService(
         string Password,
         string Publisher,
         string SubjectName,
-        bool UpdatedGitignore
+        bool UpdatedGitignore,
+        FileInfo? PublicCertificatePath = null
     );
 
     public async Task<CertificateResult> GenerateDevCertificateAsync(
@@ -32,6 +33,7 @@ internal partial class CertificateService(
         TaskContext taskContext,
         string password = "password",
         int validDays = 365,
+        bool exportCer = false,
         CancellationToken cancellationToken = default)
     {
         // Ensure output directory exists
@@ -84,6 +86,17 @@ internal partial class CertificateService(
 
             taskContext.AddDebugMessage($"Certificate generated: {outputPath}");
 
+            // Export public certificate (.cer) if requested
+            FileInfo? publicCertPath = null;
+            if (exportCer)
+            {
+                var cerPath = Path.ChangeExtension(outputPath.FullName, ".cer");
+                var cerBytes = cert.Export(X509ContentType.Cert);
+                await File.WriteAllBytesAsync(cerPath, cerBytes, cancellationToken);
+                publicCertPath = new FileInfo(cerPath);
+                taskContext.AddDebugMessage($"Public certificate exported: {cerPath}");
+            }
+
             outputPath.Refresh();
 
             return new CertificateResult(
@@ -91,7 +104,8 @@ internal partial class CertificateService(
                 Password: password,
                 Publisher: cleanPublisher,
                 SubjectName: subjectName,
-                UpdatedGitignore: false
+                UpdatedGitignore: false,
+                PublicCertificatePath: publicCertPath
             );
         }
         catch (Exception error)
@@ -270,6 +284,7 @@ internal partial class CertificateService(
     /// <param name="validDays">Certificate validity period</param>
     /// <param name="updateGitignore">Whether to update .gitignore</param>
     /// <param name="install">Whether to install the certificate after generation</param>
+    /// <param name="exportCer">Whether to export a .cer file (public key only) alongside the .pfx</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Certificate generation result, or null if skipped</returns>
     public async Task<CertificateResult> GenerateDevCertificateWithInferenceAsync(
@@ -281,6 +296,7 @@ internal partial class CertificateService(
         int validDays = 365,
         bool updateGitignore = true,
         bool install = false,
+        bool exportCer = false,
         CancellationToken cancellationToken = default)
     {
         try
@@ -310,10 +326,16 @@ internal partial class CertificateService(
                 taskContext,
                 password,
                 validDays,
+                exportCer,
                 cancellationToken);
 
             // Success message
             taskContext.AddStatusMessage($"{UiSymbols.Check} Development certificate generated → {result.CertificatePath}");
+
+            if (result.PublicCertificatePath is not null)
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Check} Public certificate exported → {result.PublicCertificatePath}");
+            }
 
             // Add certificate to .gitignore
             if (updateGitignore)

@@ -31,21 +31,37 @@ internal static class Program
         var minimumLogLevel = LogLevel.Information;
         bool quiet = false;
         bool verbose = false;
+        bool json = false;
 
         if (args.Contains(WinAppRootCommand.VerboseOption.Name) || args.Any(WinAppRootCommand.VerboseOption.Aliases.Contains))
         {
             minimumLogLevel = LogLevel.Debug;
             verbose = true;
         }
-        else if (args.Contains(WinAppRootCommand.QuietOption.Name) || args.Any(WinAppRootCommand.QuietOption.Aliases.Contains))
+        if (args.Contains(WinAppRootCommand.QuietOption.Name) || args.Any(WinAppRootCommand.QuietOption.Aliases.Contains))
         {
             minimumLogLevel = LogLevel.Warning;
             quiet = true;
+        }
+        if (args.Contains(WinAppRootCommand.JsonOption.Name) || args.Any(WinAppRootCommand.JsonOption.Aliases.Contains))
+        {
+            minimumLogLevel = LogLevel.None;
+            json = true;
         }
 
         if (quiet && verbose)
         {
             Console.Error.WriteLine($"Cannot specify both --quiet and --verbose options together.");
+            return 1;
+        }
+        else if (quiet && json)
+        {
+            Console.Error.WriteLine($"Cannot specify both --quiet and --json options together.");
+            return 1;
+        }
+        else if (verbose && json)
+        {
+            Console.Error.WriteLine($"Cannot specify both --verbose and --json options together.");
             return 1;
         }
 
@@ -67,7 +83,7 @@ internal static class Program
 
         // Skip first-run notice for machine-readable output modes
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode)
+        if (!isCliSchemaMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();

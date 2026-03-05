@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Validate that LLM documentation is up-to-date with CLI schema
+    Validate that CLI schema and agent skills are up-to-date
 .DESCRIPTION
-    This script checks if the generated LLM documentation (docs/cli-schema.json and 
-    docs/llm-context.md) matches what the CLI would generate. Use this locally before
+    This script checks if the generated CLI schema (docs/cli-schema.json) and agent skills
+    match what the CLI would generate. Use this locally before
     committing changes, or in CI to catch drift.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
@@ -28,7 +28,6 @@ if (-not $CliPath) {
 }
 
 $SchemaPath = Join-Path $ProjectRoot "docs\cli-schema.json"
-$ContextPath = Join-Path $ProjectRoot "docs\llm-context.md"
 
 # Verify CLI exists
 if (-not (Test-Path $CliPath)) {
@@ -37,18 +36,12 @@ if (-not (Test-Path $CliPath)) {
     exit 1
 }
 
-Write-Host "[VALIDATE] Checking LLM documentation..." -ForegroundColor Blue
+Write-Host "[VALIDATE] Checking CLI schema and agent skills..." -ForegroundColor Blue
 Write-Host "CLI path: $CliPath" -ForegroundColor Gray
 
 # Check if doc files exist
 if (-not (Test-Path $SchemaPath)) {
     Write-Host "::error::docs/cli-schema.json not found. Run 'scripts/build-cli.ps1' to build CLI and generate docs." -ForegroundColor Red
-    if ($FailOnDrift) { exit 1 }
-    exit 0
-}
-
-if (-not (Test-Path $ContextPath)) {
-    Write-Host "::error::docs/llm-context.md not found. Run 'scripts/build-cli.ps1' to build CLI and generate docs." -ForegroundColor Red
     if ($FailOnDrift) { exit 1 }
     exit 0
 }
@@ -142,8 +135,8 @@ if ($SchemaDrift) {
     Write-Host "[VALIDATE] docs/cli-schema.json is up-to-date" -ForegroundColor Green
 }
 
-# For llm-context.md, regenerate to a temp location and compare
-Write-Host "[VALIDATE] Checking llm-context.md..." -ForegroundColor Blue
+# Validate agent skills by regenerating to a temp location and comparing
+Write-Host "[VALIDATE] Checking agent skills..." -ForegroundColor Blue
 $TempDocsPath = Join-Path ([System.IO.Path]::GetTempPath()) "winapp-llm-docs-validate"
 if (Test-Path $TempDocsPath) {
     Remove-Item $TempDocsPath -Recurse -Force
@@ -151,73 +144,47 @@ if (Test-Path $TempDocsPath) {
 New-Item -ItemType Directory -Path $TempDocsPath -Force | Out-Null
 
 try {
-    # Generate to temp location
+    # Generate to temp location (docs + skills)
     $GenerateScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
-    & $GenerateScript -CliPath $CliPath -DocsPath $TempDocsPath | Out-Null
+    $TempSkills = Join-Path $TempDocsPath "skills\winapp-cli"
+    & $GenerateScript -CliPath $CliPath -DocsPath $TempDocsPath -SkillsPath $TempSkills | Out-Null
     
-    # Compare llm-context.md with line ending normalization
-    $FreshContext = Get-Content (Join-Path $TempDocsPath "llm-context.md") -Raw
-    $CommittedContext = Get-Content $ContextPath -Raw
+    $SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks")
+    $SkillsDrift = $false
     
-    $FreshContextNormalized = $FreshContext -replace "`r`n", "`n"
-    $CommittedContextNormalized = $CommittedContext -replace "`r`n", "`n"
-    
-    if ($FreshContextNormalized -ne $CommittedContextNormalized) {
-        Write-Host "::error::docs/llm-context.md is out of sync with CLI schema!" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Run 'scripts/build-cli.ps1' locally to rebuild CLI and regenerate docs, then commit the changes." -ForegroundColor Yellow
-        Write-Host ""
+    foreach ($skillName in $SkillNames) {
+        $FreshSkill = Join-Path $TempDocsPath "skills\winapp-cli\$skillName\SKILL.md"
+        $CommittedSkill = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli\$skillName\SKILL.md"
         
-        # Show diff details for debugging
-        Write-Host "[DEBUG] Showing differences:" -ForegroundColor Cyan
-        Write-Host "  Fresh file length: $($FreshContextNormalized.Length) chars" -ForegroundColor Gray
-        Write-Host "  Committed file length: $($CommittedContextNormalized.Length) chars" -ForegroundColor Gray
+        if (-not (Test-Path $CommittedSkill)) {
+            Write-Host "::error::skill '$skillName' not found at $CommittedSkill" -ForegroundColor Red
+            $SkillsDrift = $true
+            continue
+        }
         
-        # Split into lines for comparison
-        $FreshLines = $FreshContextNormalized -split "`n"
-        $CommittedLines = $CommittedContextNormalized -split "`n"
-        Write-Host "  Fresh file lines: $($FreshLines.Count)" -ForegroundColor Gray
-        Write-Host "  Committed file lines: $($CommittedLines.Count)" -ForegroundColor Gray
-        
-        # Find first differing line
-        $MaxLines = [Math]::Max($FreshLines.Count, $CommittedLines.Count)
-        $DiffCount = 0
-        $MaxDiffsToShow = 10
-        for ($i = 0; $i -lt $MaxLines -and $DiffCount -lt $MaxDiffsToShow; $i++) {
-            $FreshLine = if ($i -lt $FreshLines.Count) { $FreshLines[$i] } else { "<EOF>" }
-            $CommittedLine = if ($i -lt $CommittedLines.Count) { $CommittedLines[$i] } else { "<EOF>" }
+        if (Test-Path $FreshSkill) {
+            $freshContent = (Get-Content $FreshSkill -Raw) -replace "`r`n", "`n"
+            $committedContent = (Get-Content $CommittedSkill -Raw) -replace "`r`n", "`n"
             
-            if ($FreshLine -ne $CommittedLine) {
-                $DiffCount++
-                Write-Host ""
-                Write-Host "  [Line $($i + 1)] Difference #$DiffCount" -ForegroundColor Yellow
-                Write-Host "    Expected (fresh): $($FreshLine.Substring(0, [Math]::Min(120, $FreshLine.Length)))$(if ($FreshLine.Length -gt 120) { '...' })" -ForegroundColor Green
-                Write-Host "    Actual (committed): $($CommittedLine.Substring(0, [Math]::Min(120, $CommittedLine.Length)))$(if ($CommittedLine.Length -gt 120) { '...' })" -ForegroundColor Red
+            if ($freshContent -ne $committedContent) {
+                Write-Host "::error::skill '$skillName' is out of sync!" -ForegroundColor Red
+                $SkillsDrift = $true
             }
+        } else {
+            Write-Host "::error::freshly generated skill '$skillName' not found at $FreshSkill (generation or template issue?)" -ForegroundColor Red
+            $SkillsDrift = $true
         }
-        
-        if ($DiffCount -eq 0) {
-            Write-Host "  [DEBUG] No line-by-line differences found, but content differs (possible whitespace/encoding issue)" -ForegroundColor Yellow
-            # Check for BOM or other encoding differences
-            $FreshBytes = [System.Text.Encoding]::UTF8.GetBytes($FreshContextNormalized.Substring(0, [Math]::Min(100, $FreshContextNormalized.Length)))
-            $CommittedBytes = [System.Text.Encoding]::UTF8.GetBytes($CommittedContextNormalized.Substring(0, [Math]::Min(100, $CommittedContextNormalized.Length)))
-            Write-Host "  Fresh first bytes: $($FreshBytes[0..9] -join ', ')" -ForegroundColor Gray
-            Write-Host "  Committed first bytes: $($CommittedBytes[0..9] -join ', ')" -ForegroundColor Gray
-        } elseif ($DiffCount -ge $MaxDiffsToShow) {
-            $TotalDiffs = ($FreshLines | ForEach-Object -Begin { $idx = 0 } -Process { 
-                if ($idx -lt $CommittedLines.Count -and $_ -ne $CommittedLines[$idx]) { 1 }
-                $idx++
-            } | Measure-Object -Sum).Sum
-            Write-Host ""
-            Write-Host "  ... and more differences (showing first $MaxDiffsToShow of ~$TotalDiffs)" -ForegroundColor Yellow
-        }
+    }
+    
+    if ($SkillsDrift) {
         Write-Host ""
-        
+        Write-Host "Run 'scripts/build-cli.ps1' locally to rebuild CLI and regenerate all docs/skills, then commit." -ForegroundColor Yellow
+        Write-Host ""
         if ($FailOnDrift) {
             exit 1
         }
     } else {
-        Write-Host "[VALIDATE] docs/llm-context.md is up-to-date" -ForegroundColor Green
+        Write-Host "[VALIDATE] Agent skills are up-to-date" -ForegroundColor Green
     }
 }
 finally {
@@ -226,7 +193,7 @@ finally {
     }
 }
 
-Write-Host "[VALIDATE] LLM documentation is up-to-date!" -ForegroundColor Green
+Write-Host "[VALIDATE] CLI schema and agent skills are up-to-date!" -ForegroundColor Green
 
 # Warn about potential stale artifacts
 Write-Host ""

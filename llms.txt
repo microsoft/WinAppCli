@@ -4,9 +4,26 @@
 
 winapp helps developers add Windows-specific features (MSIX packaging, push notifications, native APIs) to apps built with any framework—Electron, Tauri, .NET, C++, Rust, or others. It handles the complexity of Windows app identity, code signing, and SDK integration.
 
+## AI Coding Agents
+
+- **Copilot CLI Plugin:** `copilot plugin install microsoft/WinAppCli`
+
+### Copilot Plugin Structure
+
+The plugin is at `.github/plugin/` and includes:
+
+- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/.github/plugin/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
+- **Skills** (auto-generated, in `.github/plugin/skills/winapp-cli/`):
+  - `setup/SKILL.md` — project init, restore, update
+  - `package/SKILL.md` — MSIX packaging
+  - `identity/SKILL.md` — debug identity and sparse packages
+  - `signing/SKILL.md` — certificates and code signing
+  - `manifest/SKILL.md` — appxmanifest.xml generation
+  - `troubleshoot/SKILL.md` — error diagnosis and SDK tools
+  - `frameworks/SKILL.md` — Electron, .NET, C++, Rust, Flutter, Tauri guidance
+
 ## Docs
 
-- [LLM Context](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/llm-context.md): Complete command reference, workflows, and prerequisites for AI assistants
 - [CLI Schema](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json): Machine-readable JSON schema of all commands, options, and types
 - [Usage Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md): Full documentation for humans
 
@@ -22,5 +39,4 @@ winapp helps developers add Windows-specific features (MSIX packaging, push noti
 
 ## Optional
 
-- [Copilot Instructions](https://github.com/microsoft/WinAppCli/blob/main/.github/copilot-instructions.md): For AI assistants working on the winapp repo itself
-- [Using with LLMs](https://github.com/microsoft/WinAppCli/blob/main/docs/using-with-llms.md): Prompt templates and integration patterns
+- [AGENTS.md](https://github.com/microsoft/WinAppCli/blob/main/AGENTS.md): For AI assistants working on the winapp repo itself
