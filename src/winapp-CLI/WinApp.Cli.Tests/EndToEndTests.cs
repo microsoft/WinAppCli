@@ -710,7 +710,7 @@ public class EndToEndTests : BaseCommandTests
                 var repoRoot = FindRepositoryRoot();
                 if (repoRoot == null)
                 {
-                    Assert.Inconclusive("Could not find repository root containing src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj.");
+                    Assert.Inconclusive("Could not find repository root containing version.json.");
                 }
 
                 var cliProjectPath = Path.Combine(repoRoot!.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
@@ -800,13 +800,13 @@ public class EndToEndTests : BaseCommandTests
         var repoRoot = FindRepositoryRoot();
         if (repoRoot == null)
         {
-            Assert.Inconclusive("Could not find repository root containing src/winapp-npm/dist/cli.js.");
+            Assert.Inconclusive("Could not find repository root containing version.json.");
         }
 
         var cliPath = Path.Combine(repoRoot!.FullName, "src", "winapp-npm", "dist", "cli.js");
         if (!File.Exists(cliPath))
         {
-            Assert.Inconclusive($"Node CLI entry point not found at: {cliPath}");
+            Assert.Inconclusive($"Node CLI entry point not found at: {cliPath}. Run 'npm run build' in src/winapp-npm.");
         }
 
         var processStartInfo = new System.Diagnostics.ProcessStartInfo
@@ -861,7 +861,7 @@ public class EndToEndTests : BaseCommandTests
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current != null)
         {
-            var markerPath = Path.Combine(current.FullName, "src", "winapp-npm", "dist", "cli.js");
+            var markerPath = Path.Combine(current.FullName, "version.json");
             if (File.Exists(markerPath))
             {
                 return current;
