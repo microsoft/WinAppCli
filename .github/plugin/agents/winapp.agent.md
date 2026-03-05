@@ -188,7 +188,8 @@ Does the project already have an appxmanifest.xml?
 
 ### .NET (WPF, WinForms, Console)
 - **Setup:** `winapp init --use-defaults`
-- **Package:** `dotnet build`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
+- **Run with identity:** Add `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, then just `dotnet run` — it auto-registers identity and launches. Without the NuGet package, use `dotnet build` then `winapp run ./bin/Debug`.
+- **Package:** `dotnet build -c Release`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
 - No native addons needed — .NET has direct Windows API access via `Microsoft.Windows.SDK.NET.Ref`
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md
 
@@ -281,3 +282,4 @@ When the user encounters an error, check these common causes:
 - **Sparse package** — A lightweight package registration that gives a desktop app package identity without full MSIX deployment. The exe stays in its original location; Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. Used by `create-debug-identity`. Best for scenarios where the exe is separate from the app code (e.g., Electron).
 - **Loose layout package** — A folder-based package registered with Windows via `Add-AppxPackage`, simulating a full MSIX install without creating an `.msix` file. Used by `winapp run`. The preferred approach for most frameworks during development.
 - **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained via full MSIX packaging, loose layout registration (`winapp run`), or sparse package registration (`create-debug-identity`).
+-identity`).

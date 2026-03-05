@@ -137,9 +137,26 @@ Then run the executable directly (do not use `dotnet run` as it might rebuild/ov
 .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
 ```
 
-### Automating Debug Identity (Optional)
+### Automating with `dotnet run` (Recommended)
 
-To streamline your development workflow, you can configure MSBuild to automatically apply debug identity after building in Debug configuration. Add this target to your `.csproj` file at the end, just before the closing `</Project>` tag:
+Instead of manually running `winapp run` after each build, you can add the **WinApp NuGet package** to your project. This hooks into `dotnet run` so it automatically creates the loose layout package, registers identity, and launches your app:
+
+```powershell
+dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease
+```
+
+Now simply run:
+```powershell
+dotnet run
+```
+
+This calls `winapp run` under the hood during `dotnet run`, so your app launches with full package identity automatically. No separate build + run steps needed.
+
+> **Tip:** To disable this behavior temporarily, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
+
+### Alternative: Manual MSBuild target
+
+If you prefer not to use the NuGet package, you can add a custom MSBuild target that runs `create-debug-identity` after Debug builds. Add this to your `.csproj` file at the end, just before the closing `</Project>` tag:
 
 ```xml
   <!-- Automatically apply debug identity after Debug builds -->
@@ -150,7 +167,7 @@ To streamline your development workflow, you can configure MSBuild to automatica
   </Target>
 ```
 
-With this configuration, simply running `dotnet build` or `dotnet run` will automatically apply the debug identity, and you can immediately run the executable with identity without the manual step.
+With this configuration, `dotnet build` applies the debug identity and you can run the executable directly. Note that `dotnet run` may rebuild and overwrite the identity, so run the exe manually after building.
 
 ## 6. Using Windows App SDK
 
@@ -192,7 +209,7 @@ class Program
 
 ### Build and Run
 
-Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-register with identity so `winapp` adds the runtime dependency. If you updated the csproj to auto set debug identity, simply run `dotnet run`. Otherwise:
+Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-register with identity so `winapp` adds the runtime dependency. If you added the WinApp NuGet package (recommended), simply run `dotnet run`. Otherwise:
 
 ```powershell
 dotnet build -c Debug
