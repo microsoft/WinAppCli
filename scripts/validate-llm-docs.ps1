@@ -159,20 +159,19 @@ try {
     $TempSkills = Join-Path $TempDocsPath "skills\winapp-cli"
     & $GenerateScript -CliPath $CliPath -DocsPath $TempDocsPath -SkillsPath $TempSkills | Out-Null
     
-    # Fix up the version in the freshly generated schema so skill templates pick up the
-    # correct base version (same reason as the JSON comparison above).
+    # Fix up the version in the freshly generated skill files.
+    # The CLI binary may not have the real version (plain dotnet publish defaults to 1.0.0).
+    # Only replace the version in the YAML frontmatter — not in example commands/templates
+    # which may legitimately contain the same string (e.g. "MyApp_1.0.0_x64").
     $TempSchemaPath = Join-Path $TempDocsPath "cli-schema.json"
     if (Test-Path $TempSchemaPath) {
         $tempSchemaObj = (Get-Content $TempSchemaPath -Raw) | ConvertFrom-Json -Depth 100
         $freshCliVersion = $tempSchemaObj.version
         if ($freshCliVersion -and $freshCliVersion -ne $BaseVersion) {
-            # Replace the CLI-reported version with the base version in all generated skill files
             Get-ChildItem -Path $TempSkills -Filter "*.md" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
                 $content = Get-Content $_.FullName -Raw
-                if ($content -match [regex]::Escape($freshCliVersion)) {
-                    $content = $content -replace [regex]::Escape($freshCliVersion), $BaseVersion
-                    [System.IO.File]::WriteAllText($_.FullName, $content)
-                }
+                $content = $content -replace "(?m)^(version:\s*)$([regex]::Escape($freshCliVersion))$", "`${1}$BaseVersion"
+                [System.IO.File]::WriteAllText($_.FullName, $content)
             }
         }
     }
