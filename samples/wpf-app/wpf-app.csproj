@@ -16,10 +16,13 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
   </ItemGroup>
 
-  <!-- Automatically package as MSIX after Release builds -->
-  <Target Name="PackageMsix" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <!-- Package and sign directly from build output -->
-    <Exec Command="winapp pack &quot;$(TargetDir.TrimEnd('\'))&quot; --cert &quot;$(ProjectDir)devcert.pfx&quot;" 
+  <!-- Automatically package as MSIX after dotnet publish -->
+  <Target Name="PackageMsix" AfterTargets="Publish">
+    <PropertyGroup>
+      <_WinAppPackArgs>pack &quot;$(PublishDir.TrimEnd('\'))&quot;</_WinAppPackArgs>
+      <_WinAppPackArgs Condition="Exists('$(ProjectDir)devcert.pfx')">$(_WinAppPackArgs) --cert &quot;$(ProjectDir)devcert.pfx&quot;</_WinAppPackArgs>
+    </PropertyGroup>
+    <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppPackArgs)" 
           WorkingDirectory="$(ProjectDir)" 
           IgnoreExitCode="false" />
   </Target>
