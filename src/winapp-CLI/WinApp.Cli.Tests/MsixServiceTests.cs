@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Text;
+using Microsoft.Extensions.Logging;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -673,6 +675,356 @@ public class MsixServiceTests
 
     #endregion
 
+    #region FindManifestInDirectory Tests
+
+    [TestMethod]
+    public void FindManifestInDirectory_FindsAppxManifestXml()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "appxmanifest.xml"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("appxmanifest.xml", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_FindsPackageAppxManifest()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("package.appxmanifest", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_PrefersAppxManifestXml_WhenBothExist()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "appxmanifest.xml"), "<Package/>");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("appxmanifest.xml", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_ReturnsNull_WhenNoManifest()
+    {
+        // Arrange — empty directory
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    #endregion
+
+    #region DetectDefaultScale Tests
+
+    [TestMethod]
+    public void DetectDefaultScale_ReturnsDefaultOf200_WhenNoScaleQualifiers()
+    {
+        // Arrange
+        var candidates = new[] { "Assets\\Logo.png", "Assets\\Icon.ico" };
+
+        // Act
+        var result = MsixService.DetectDefaultScale(candidates);
+
+        // Assert
+        Assert.AreEqual(200, result);
+    }
+
+    [TestMethod]
+    public void DetectDefaultScale_Returns200_WhenAllFilesAreScale200()
+    {
+        // Arrange
+        var candidates = new[]
+        {
+            "Assets\\Logo.scale-200.png",
+            "Assets\\Square44x44Logo.scale-200.png",
+            "Assets\\Wide310x150Logo.scale-200.png"
+        };
+
+        // Act
+        var result = MsixService.DetectDefaultScale(candidates);
+
+        // Assert
+        Assert.AreEqual(200, result);
+    }
+
+    [TestMethod]
+    public void DetectDefaultScale_ReturnsMostFrequent_WhenMixedScales()
+    {
+        // Arrange — 3 files at scale-100, 1 at scale-200
+        var candidates = new[]
+        {
+            "Assets\\Logo.scale-100.png",
+            "Assets\\Icon.scale-100.png",
+            "Assets\\Splash.scale-100.png",
+            "Assets\\Logo.scale-200.png"
+        };
+
+        // Act
+        var result = MsixService.DetectDefaultScale(candidates);
+
+        // Assert
+        Assert.AreEqual(100, result);
+    }
+
+    [TestMethod]
+    public void DetectDefaultScale_PrefersSmallestOnTie()
+    {
+        // Arrange — equal count of scale-100 and scale-200
+        var candidates = new[]
+        {
+            "Assets\\Logo.scale-100.png",
+            "Assets\\Logo.scale-200.png"
+        };
+
+        // Act
+        var result = MsixService.DetectDefaultScale(candidates);
+
+        // Assert — on tie, prefers the smallest
+        Assert.AreEqual(100, result);
+    }
+
+    [TestMethod]
+    public void DetectDefaultScale_HandlesCompoundQualifiers()
+    {
+        // Arrange — scale-200 is combined with other qualifiers
+        var candidates = new[]
+        {
+            "Assets\\Logo.scale-200.png",
+            "Assets\\Square44x44Logo.targetsize-24_altform-unplated.png"
+        };
+
+        // Act
+        var result = MsixService.DetectDefaultScale(candidates);
+
+        // Assert
+        Assert.AreEqual(200, result);
+    }
+
+    [TestMethod]
+    public void DetectDefaultScale_HandlesEmptyInput()
+    {
+        // Act
+        var result = MsixService.DetectDefaultScale([]);
+
+        // Assert
+        Assert.AreEqual(200, result);
+    }
+
+    #endregion
+
+    #region DetectPeArchitecture Tests
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForNonExistentFile()
+    {
+        // Act
+        var result = MsixService.DetectPeArchitecture(Path.Combine(_tempDir.FullName, "nonexistent.exe"));
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForNonPeFile()
+    {
+        // Arrange — create a file that's not a PE
+        var path = Path.Combine(_tempDir.FullName, "notape.exe");
+        File.WriteAllText(path, "This is not a PE file");
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForTruncatedFile()
+    {
+        // Arrange — create a very small file
+        var path = Path.Combine(_tempDir.FullName, "tiny.exe");
+        File.WriteAllBytes(path, [0x4D, 0x5A]); // Just MZ header, nothing else
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    #endregion
+
+    #region RemoveBootstrapperFromStaging Tests
+
+    [TestMethod]
+    public void RemoveBootstrapperFromStaging_RemovesBothDlls()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll"), "fake dll");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll"), "fake dll");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "App.exe"), "fake exe");
+
+        // Act
+        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
+
+        // Assert
+        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll")));
+        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll")));
+        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "App.exe")));
+    }
+
+    [TestMethod]
+    public void RemoveBootstrapperFromStaging_NoOpWhenNoDlls()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "App.exe"), "fake exe");
+
+        // Act — should not throw
+        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
+
+        // Assert
+        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "App.exe")));
+    }
+
+    [TestMethod]
+    public void RemoveBootstrapperFromStaging_RemovesOnlyBootstrapperDll()
+    {
+        // Arrange — only native bootstrapper, no .Net wrapper
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll"), "fake dll");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "SomeOther.dll"), "keep this");
+
+        // Act
+        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
+
+        // Assert
+        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll")));
+        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "SomeOther.dll")));
+    }
+
+    #endregion
+
+    #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsTrueForXGenerateManifest()
+    {
+        var manifest = @"<Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsFalseForConcreteLanguage()
+    {
+        var manifest = @"<Resources>
+    <Resource Language=""en-US""/>
+  </Resources>";
+
+        Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsFalseForNoResources()
+    {
+        var manifest = @"<Package><Identity Name=""Test""/></Package>";
+
+        Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_ReplacesSingleLanguage()
+    {
+        var manifest = @"  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_ReplacesMultipleLanguages()
+    {
+        var manifest = @"  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US", "fr-FR", "de-DE"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.Contains(@"<Resource Language=""fr-FR""/>", result);
+        Assert.Contains(@"<Resource Language=""de-DE""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_PreservesRestOfManifest()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package>
+  <Identity Name=""TestApp"" Version=""1.0.0.0""/>
+  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>
+  <Applications/>
+</Package>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Identity Name=""TestApp""", result);
+        Assert.Contains("<Applications/>", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_HandlesVariousWhitespace()
+    {
+        // x-generate with different whitespace patterns
+        var manifest = "<Resources>\n<Resource Language=\"x-generate\" />\n</Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_HandlesSingleQuotes()
+    {
+        var manifest = @"<Resources>
+    <Resource Language='x-generate'/>
+  </Resources>";
+
+        Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    #endregion
+
     #region Helpers
 
     private static int CountOccurrences(string text, string pattern)
@@ -685,6 +1037,23 @@ public class MsixServiceTests
             index += pattern.Length;
         }
         return count;
+    }
+
+    /// <summary>
+    /// Lightweight TaskContext stand-in for testing static methods that require one for logging only.
+    /// </summary>
+    private static class TestTaskContext
+    {
+        public static TaskContext Instance { get; } = CreateMinimal();
+
+        private static TaskContext CreateMinimal()
+        {
+            var console = new Spectre.Console.Testing.TestConsole();
+            var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b => { });
+            var logger = loggerFactory.CreateLogger<TaskContext>();
+            var task = new ConsoleTasks.GroupableTask("Test", null);
+            return new TaskContext(task, null, console, logger, new Lock());
+        }
     }
 
     #endregion

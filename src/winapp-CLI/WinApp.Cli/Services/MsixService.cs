@@ -84,6 +84,14 @@ internal partial class MsixService(
     [GeneratedRegex(@"<Identity[^>]*ProcessorArchitecture\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageIdentityArchitectureValueRegex();
 
+    // Matches the entire <Resources>...</Resources> block containing x-generate
+    [GeneratedRegex(@"<Resources>\s*<Resource\s+Language\s*=\s*[""']x-generate[""']\s*/>\s*</Resources>", RegexOptions.IgnoreCase | RegexOptions.Singleline, "en-US")]
+    private static partial Regex ResourceLanguageXGenerateBlockRegex();
+
+    // Extracts language tag from PRI dump qualifier strings like 'Language-en-US'
+    [GeneratedRegex(@"qualifiers=""[^""]*Language-([a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex PriDumpLanguageQualifierRegex();
+
     // build:Metadata regexes
     [GeneratedRegex(@"(<Package\b[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex BuildMetadataPackageOpenTagRegex();
@@ -884,16 +892,116 @@ internal partial class MsixService(
     }
 
     /// <summary>
+    /// Resolves <c>&lt;Resource Language="x-generate"/&gt;</c> in the manifest by replacing it
+    /// with concrete language tags. Languages are extracted from the existing <c>resources.pri</c>
+    /// in the input folder; falls back to <c>en-US</c> when no PRI or no language qualifiers are found.
+    /// </summary>
+    private async Task<string> ResolveResourceLanguageXGenerateAsync(
+        string manifestContent,
+        DirectoryInfo inputFolder,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        if (!ContainsXGenerateLanguage(manifestContent))
+        {
+            return manifestContent;
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Detected <Resource Language=\"x-generate\"/> — resolving to concrete language(s)");
+
+        var languages = new List<string>();
+
+        // Try to extract languages from existing resources.pri
+        var priFile = new FileInfo(Path.Combine(inputFolder.FullName, "resources.pri"));
+        if (priFile.Exists)
+        {
+            languages = await ExtractLanguagesFromPriAsync(priFile, taskContext, cancellationToken);
+        }
+
+        if (languages.Count == 0)
+        {
+            languages.Add("en-US");
+            taskContext.AddDebugMessage($"{UiSymbols.Note} No language qualifiers found in PRI — defaulting to en-US");
+        }
+        else
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Resolved resource languages from PRI: {string.Join(", ", languages)}");
+        }
+
+        return ReplaceXGenerateLanguage(manifestContent, languages);
+    }
+
+    /// <summary>
+    /// Returns true if the manifest contains a <c>&lt;Resource Language="x-generate"/&gt;</c> element.
+    /// </summary>
+    internal static bool ContainsXGenerateLanguage(string manifestContent)
+    {
+        return ResourceLanguageXGenerateBlockRegex().IsMatch(manifestContent);
+    }
+
+    /// <summary>
+    /// Replaces the <c>&lt;Resources&gt;&lt;Resource Language="x-generate"/&gt;&lt;/Resources&gt;</c>
+    /// block with concrete <c>&lt;Resource Language="..."/&gt;</c> entries for each specified language.
+    /// </summary>
+    internal static string ReplaceXGenerateLanguage(string manifestContent, IList<string> languages)
+    {
+        var indent = "    ";
+        var resourceEntries = string.Join(Environment.NewLine, languages.Select(lang => $"{indent}{indent}<Resource Language=\"{lang}\"/>"));
+        var replacement = $"{indent}<Resources>{Environment.NewLine}{resourceEntries}{Environment.NewLine}{indent}</Resources>";
+
+        return ResourceLanguageXGenerateBlockRegex().Replace(manifestContent, replacement);
+    }
+
+    /// <summary>
+    /// Extracts language qualifiers from a PRI file using <c>makepri dump</c>.
+    /// Returns a distinct, sorted list of BCP-47 language tags found in the PRI resource map.
+    /// </summary>
+    private async Task<List<string>> ExtractLanguagesFromPriAsync(
+        FileInfo priFile,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dumpOutputFile = Path.Combine(Path.GetTempPath(), $"winapp-pri-dump-{Guid.NewGuid():N}.xml");
+            var arguments = $@"dump /if ""{priFile.FullName}"" /of ""{dumpOutputFile}"" /o";
+
+            await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
+
+            if (!File.Exists(dumpOutputFile))
+            {
+                return [];
+            }
+
+            try
+            {
+                var dumpContent = await File.ReadAllTextAsync(dumpOutputFile, cancellationToken);
+
+                // Extract language qualifiers from Candidate elements:
+                // <Candidate qualifiers="Language-en-US" ...> or multi-qualifier like "Language-en-US, Scale-200"
+                var languages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Match match in PriDumpLanguageQualifierRegex().Matches(dumpContent))
+                {
+                    languages.Add(match.Groups[1].Value);
+                }
+
+                return languages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            finally
+            {
+                File.Delete(dumpOutputFile);
+            }
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to extract languages from PRI: {ex.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Creates an MSIX package from a prepared package directory
     /// </summary>
-    /// <param name="inputFolder">Path to the folder containing the package contents</param>
-    /// <param name="outputPath">Path to the file or folder for the output MSIX</param>
-    /// <param name="packageName">Name for the output MSIX file (default: derived from manifest)</param>
-    /// <param name="skipPri">Skip PRI generation</param>
-    /// <param name="autoSign">Automatically sign the package</param>
-    /// <param name="certificatePath">Path to signing certificate (required if autoSign is true)</param>
-    /// <param name="certificatePassword">Certificate password</param>
-    /// <param name="generateDevCert">Generate a new development certificate if none provided</param>
     /// <param name="installDevCert">Install certificate to machine</param>
     /// <param name="publisher">Publisher name for certificate generation (default: extracted from manifest)</param>
     /// <param name="manifestPath">Path to the manifest file (optional)</param>
@@ -975,6 +1083,9 @@ internal partial class MsixService(
 
         // Resolve $placeholder$ tokens in the manifest
         manifestContent = ResolveManifestPlaceholders(manifestContent, executable, inputFolder, taskContext);
+
+        // Resolve <Resource Language="x-generate"/> with concrete language(s) from PRI
+        manifestContent = await ResolveResourceLanguageXGenerateAsync(manifestContent, inputFolder, taskContext, cancellationToken);
 
         // Update manifest content to ensure it's either referencing Windows App SDK or is self-contained
         // Fetch dotnet package list once for all downstream operations
@@ -1777,7 +1888,7 @@ internal partial class MsixService(
     /// These are not needed in full MSIX packages and cause initialization failures
     /// when the app was built without WindowsPackageType=MSIX.
     /// </summary>
-    private static void RemoveBootstrapperFromStaging(DirectoryInfo stagingDir, TaskContext taskContext)
+    internal static void RemoveBootstrapperFromStaging(DirectoryInfo stagingDir, TaskContext taskContext)
     {
         string[] bootstrapperFiles =
         [
@@ -1822,7 +1933,7 @@ internal partial class MsixService(
     /// <summary>
     /// Checks a single directory for a manifest file (appxmanifest.xml or package.appxmanifest).
     /// </summary>
-    private static FileInfo? FindManifestInDirectory(DirectoryInfo directory)
+    internal static FileInfo? FindManifestInDirectory(DirectoryInfo directory)
     {
         var appxManifest = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
         if (appxManifest.Exists)
@@ -1843,7 +1954,7 @@ internal partial class MsixService(
     /// Detects the processor architecture from a PE executable's file header.
     /// Returns the MSIX ProcessorArchitecture string (x86, x64, arm, arm64) or null if detection fails.
     /// </summary>
-    private static string? DetectPeArchitecture(string filePath)
+    internal static string? DetectPeArchitecture(string filePath)
     {
         try
         {
