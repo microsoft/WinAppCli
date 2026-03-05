@@ -6,9 +6,11 @@ version: 0.2.1
 ## When to use
 
 Use this skill when:
-- **Debugging Windows APIs** that require package identity (push notifications, background tasks, share target, startup tasks, etc.)
-- **Testing identity-dependent features** without creating and installing a full MSIX package
-- **Registering a sparse package** with Windows for development
+- **The exe is separate from your app code** — e.g., Electron apps where `electron.exe` is in `node_modules`, not your build output
+- **Testing sparse package behavior** specifically — `AllowExternalContent`, `TrustedLaunch`, etc.
+- **Registering identity without copying files** — `create-debug-identity` leaves the exe in place
+
+> **Prefer `winapp run` for most frameworks.** If your exe is inside your build output folder (.NET, C++, Rust, Flutter, Tauri), use `winapp run <build-output>` instead — it registers a full loose layout package and launches the app, simulating an MSIX install. Use `create-debug-identity` only when `winapp run` doesn't fit your scenario.
 
 ## Prerequisites
 
@@ -26,7 +28,7 @@ Windows package identity enables your app to use restricted APIs and OS integrat
 - **Windows AI APIs** (Phi Silica, OCR, etc.)
 - **File type associations** registered properly in Settings
 
-A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows, giving your exe identity without packaging it into an MSIX.
+A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows — the exe stays in its original location and Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. This is different from `winapp run`, which copies files into a loose layout package.
 
 ## Usage
 

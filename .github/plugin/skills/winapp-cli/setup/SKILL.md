@@ -26,7 +26,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `create-debug-identity`, `cert generate --manifest`).
+**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 
@@ -81,12 +81,27 @@ winapp update --setup-sdks preview
 
 This updates `winapp.yaml` with the latest versions and reinstalls packages.
 
+### Run and debug with identity
+
+```powershell
+# Register debug identity and launch app from build output
+winapp run ./bin/Debug
+
+# Launch with custom manifest and pass arguments to the app
+winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+
+# Register identity without launching (useful for attaching a debugger manually)
+winapp run ./bin/Debug --no-launch
+```
+
+Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
+
 ## Recommended workflow
 
 1. **Initialize** — `winapp init --use-defaults` in your existing project
 2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
-4. **Debug with identity** — `winapp create-debug-identity ./bin/myapp.exe` to test Windows APIs
+4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
 5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
 
 ## Tips

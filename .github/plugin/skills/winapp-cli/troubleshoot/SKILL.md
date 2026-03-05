@@ -40,7 +40,10 @@ Does the project have an appxmanifest.xml?
    ├─ Need a dev certificate?
    │  └─ winapp cert generate (then winapp cert install for trust)
    ├─ Need package identity for debugging?
-   │  └─ winapp create-debug-identity <exe>
+   │  ├─ Exe is in your build output folder? (most frameworks)
+   │  │  └─ winapp run <build-output-dir>
+   │  └─ Exe is separate from app code? (Electron, sparse testing)
+   │     └─ winapp create-debug-identity <exe>
    ├─ Ready to create MSIX installer?
    │  └─ winapp package <build-output> --cert ./devcert.pfx
    ├─ Need to sign an existing file?
@@ -74,6 +77,7 @@ Does the project have an appxmanifest.xml?
 | `cert generate` | Nothing (or `appxmanifest.xml` for publisher) | `devcert.pfx` |
 | `cert install` | Certificate file + admin | Machine certificate store |
 | `create-debug-identity` | `appxmanifest.xml` + exe + trusted cert | Registers sparse package with Windows |
+| `run` | Build output folder + `appxmanifest.xml` | Registers loose layout package, launches app |
 | `package` | Build output + `appxmanifest.xml` | `.msix` file |
 | `sign` | File + certificate | Signed file (in-place) |
 | `create-external-catalog` | Directory with executables | `CodeIntegrityExternal.cat` |
