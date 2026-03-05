@@ -169,8 +169,8 @@ npx winapp --help
 **App Identity & Debugging:**
 
 - [`package`](./docs/usage.md#package) - Create MSIX packages from directories
-- [`run`](./docs/usage.md#run) - Create debug identity and launch app for debugging
-- [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add temporary app identity for debugging
+- [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
+- [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
 **Certificates & Signing:**

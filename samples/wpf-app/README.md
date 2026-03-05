@@ -10,7 +10,7 @@ For a complete step-by-step guide, see the [.NET Getting Started Guide](../../do
 - Using Windows Runtime APIs to retrieve package identity
 - Using **Win2D** (`Microsoft.Graphics.Win2D`) — a third-party WinRT component that requires activatable class registration
 - NuGet package references (`Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, `Microsoft.Graphics.Win2D`) added directly to `.csproj`
-- Configuring MSBuild to automatically apply debug identity after building in Debug configuration
+- Using `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package for automatic `dotnet run` support with package identity
 - Using Windows App SDK via NuGet for modern Windows APIs
 - MSIX packaging with app manifest and assets
 
@@ -33,7 +33,7 @@ This will validate the `TargetFramework`, add required NuGet packages to the `.c
 
 ### Run 
 
-The `.csproj` is configured to automatically apply debug identity when building in Debug configuration:
+The `.csproj` includes the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, which hooks into `dotnet run` to automatically register a loose layout package with identity and launch the app:
 
 ```powershell
 dotnet run

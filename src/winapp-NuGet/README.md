@@ -4,13 +4,13 @@ Enables `dotnet run` for packaged Windows applications.
 
 ## Overview
 
-This package provides MSBuild targets that seamlessly integrate with the .NET CLI, enabling developers to build, register debug identity, and launch packaged Windows applications with a simple `dotnet run` command.
+This package provides MSBuild targets that seamlessly integrate with the .NET CLI, enabling developers to build and launch packaged Windows applications with a simple `dotnet run` command. Under the hood, it invokes `winapp run` to create a loose layout package, register it with Windows, and launch the app — simulating a full MSIX install for debugging.
 
 ## Features
 
 - **Automatic Detection**: Detects when your project is a packaged WinUI/WinAppSDK application
-- **Seamless Integration**: Hooks into the standard `dotnet run` pipeline
-- **Debug Identity**: Automatically registers debug identity for development
+- **Seamless Integration**: Hooks into the standard `dotnet run` pipeline, invoking `winapp run` automatically
+- **Loose Layout Package**: Registers your build output as a loose layout package with Windows (like a real MSIX install)
 - **Zero Configuration**: Works out of the box with standard WinUI project templates
 
 ## Usage
@@ -34,7 +34,7 @@ When you run `dotnet run`, this package:
 1. Builds your project normally
 2. Detects if the project uses Windows App SDK with packaging
 3. Prepares a loose-layout package in the output directory
-4. Registers debug identity with the Windows shell
+4. Registers the package with Windows via `winapp run` (like a real MSIX install)
 5. Launches the application using the Windows Application Activation Manager
 
 ## Requirements

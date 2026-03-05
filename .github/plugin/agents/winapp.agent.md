@@ -37,7 +37,10 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp package <build-output-dir>
    │     (add --cert ./devcert.pfx to sign in one step)
    ├─ Need package identity for debugging Windows APIs?
-   │  └─ winapp create-debug-identity <exe-path>
+   │  ├─ Is the exe in the same folder as your build output? (most frameworks)
+   │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
+   │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
+   │     └─ winapp create-debug-identity <exe-path>  (registers sparse package)
    ├─ Need to sign an existing MSIX or exe?
    │  └─ winapp sign <file> <cert>
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
@@ -54,7 +57,7 @@ Does the project already have an appxmanifest.xml?
 
 4. **`cert install` requires administrator elevation.** Always warn the user that `winapp cert install` must be run in an elevated (administrator) terminal. Without this, the certificate won't be trusted and MSIX installation will fail.
 
-5. **Re-run `create-debug-identity` after manifest or asset changes.** The sparse package registration uses the manifest and assets at the time it was created. Any changes require re-running the command.
+5. **Re-run `winapp run` or `create-debug-identity` after manifest or asset changes.** Both commands use the manifest and assets at registration time. Any changes require re-running the command. Use `winapp run` for most frameworks; use `create-debug-identity` only when the exe lives outside your build output folder (e.g., Electron) or when testing sparse package scenarios specifically.
 
 6. **Use `--use-defaults` for non-interactive/CI scenarios.** When running `winapp init` in scripts or CI pipelines, pass `--use-defaults` (alias: `--no-prompt`) to skip interactive prompts and use sensible defaults.
 
@@ -100,13 +103,23 @@ Does the project already have an appxmanifest.xml?
 **Requires:** Built app output directory + `appxmanifest.xml`
 
 ### `winapp create-debug-identity [entrypoint]`
-**Purpose:** Register a sparse package with Windows so your app gets package identity during development without creating a full MSIX.
-**When to use:** When you need Windows APIs that require package identity (push notifications, background tasks, share target, startup tasks) during development/debugging.
+**Purpose:** Register a *sparse package* with Windows so an existing exe gets package identity without creating a full MSIX. The exe stays in its original location — Windows uses `Add-AppxPackage -ExternalLocation` to associate identity with it.
+**When to use:** When the exe is **separate from your app code** (e.g., `electron.exe` in `node_modules`), or when you specifically need to test sparse package behavior. For most frameworks where the exe is in your build output folder, prefer `winapp run` instead.
 **Key options:**
 - `--manifest <path>` — path to `appxmanifest.xml`
 - `--keep-identity` — don't append `.debug` to package name
 - `--no-install` — create but don't register the package
 **Requires:** `appxmanifest.xml` + path to your built `.exe`
+
+### `winapp run <input-folder>`
+**Purpose:** Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the app — simulating a full MSIX install for debugging.
+**When to use:** The **preferred command** for iterative development and debugging with package identity. Use this whenever your exe lives inside the build output folder (most .NET, C++, Rust, Flutter, Tauri projects).
+**Key options:**
+- `--manifest <path>` — path to `appxmanifest.xml` (default: auto-detect)
+- `--args <string>` — command-line arguments to pass to the app
+- `--no-launch` — register the package without launching
+- `--output-appx-directory <path>` — custom output directory for loose layout
+**Requires:** Built app output directory + `appxmanifest.xml`
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.
@@ -175,7 +188,8 @@ Does the project already have an appxmanifest.xml?
 
 ### .NET (WPF, WinForms, Console)
 - **Setup:** `winapp init --use-defaults`
-- **Package:** `dotnet build`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
+- **Run with identity:** `winapp init` auto-adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, so just `dotnet run` registers a loose layout package and launches with identity. Without the NuGet package, use `dotnet build` then `winapp run ./bin/Debug`.
+- **Package:** `dotnet build -c Release`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
 - No native addons needed — .NET has direct Windows API access via `Microsoft.Windows.SDK.NET.Ref`
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md
 
@@ -215,12 +229,20 @@ winapp package ./dist --cert ./devcert.pfx # Package and sign
 winapp cert install ./devcert.pfx          # Trust cert (admin required, one-time)
 ```
 
-### Add package identity for debugging
+### Run and debug with package identity
 ```bash
 winapp init .                              # If not already set up
 # ... build your app ...
-winapp create-debug-identity ./myapp.exe   # Register sparse package
-# Your app now has identity for push notifications, share target, etc.
+winapp run ./bin/Debug                     # Register loose layout package + launch
+# Your app runs as if MSIX-installed, with full package identity
+```
+
+### Add sparse package identity (Electron or separate exe)
+```bash
+winapp init .                              # If not already set up
+# ... build your app ...
+winapp create-debug-identity ./myapp.exe   # Register sparse package for exe
+# Launch your exe normally — it now has package identity
 ```
 
 ### Clone and build existing project
@@ -257,5 +279,6 @@ When the user encounters an error, check these common causes:
 - **`Assets/`** — Icon and tile images referenced by the manifest. Generated by `init` or `manifest generate`.
 - **`.winapp/`** — Local directory with downloaded SDK packages, generated headers, and libs. Gitignored.
 - **`devcert.pfx`** — Self-signed development certificate for local testing. Never use in production.
-- **Sparse package** — A package registration that gives a desktop app package identity without full MSIX deployment. Used by `create-debug-identity`.
-- **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained either via full MSIX packaging or sparse package registration.
+- **Sparse package** — A lightweight package registration that gives a desktop app package identity without full MSIX deployment. The exe stays in its original location; Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. Used by `create-debug-identity`. Best for scenarios where the exe is separate from the app code (e.g., Electron).
+- **Loose layout package** — A folder-based package registered with Windows via `Add-AppxPackage`, simulating a full MSIX install without creating an `.msix` file. Used by `winapp run`. The preferred approach for most frameworks during development.
+- **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained via full MSIX packaging, loose layout registration (`winapp run`), or sparse package registration (`create-debug-identity`).

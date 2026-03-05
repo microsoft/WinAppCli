@@ -45,12 +45,18 @@ Additional Electron guides:
 - Projects with NuGet references to `Microsoft.Windows.SDK.BuildTools` or `Microsoft.WindowsAppSDK` **don't need `winapp.yaml`** — winapp auto-detects SDK versions from the `.csproj`
 - The key prerequisite is `appxmanifest.xml`, not `winapp.yaml`
 - No native addon step needed — unlike Electron, .NET can call Windows APIs directly
+- `winapp init` automatically adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, enabling `dotnet run` with automatic identity registration
 
 Quick start:
 ```powershell
 winapp init --use-defaults
+dotnet run
+```
+
+If not using the NuGet package, build and run manually:
+```powershell
 dotnet build
-winapp create-debug-identity ./bin/Debug/net10.0-windows/myapp.exe
+winapp run ./bin/Debug
 ```
 
 ### C++ (CMake, MSBuild)
