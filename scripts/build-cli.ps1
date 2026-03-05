@@ -83,6 +83,28 @@ try
         exit 1
     }
 
+    # Step 1b: Build Node CLI so E2E tests that invoke node cli.js can run
+    if (-not $SkipNpm) {
+        Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
+        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
+        try {
+            npm ci --ignore-scripts
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm ci failed, Node E2E tests will be skipped"
+            } else {
+                npm run generate-commands
+                npm run compile
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Node CLI compile failed, Node E2E tests will be skipped"
+                } else {
+                    Write-Host "[BUILD] Node CLI built successfully" -ForegroundColor Green
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
