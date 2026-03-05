@@ -79,6 +79,11 @@ internal partial class MsixService(
     [GeneratedRegex(@"<Path>([^<]+)</Path>", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxManifestPathElementRegex();
 
+    [GeneratedRegex(@"<Identity[^>]*ProcessorArchitecture\s*=", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityArchitectureCheckRegex();
+    [GeneratedRegex(@"<Identity[^>]*ProcessorArchitecture\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityArchitectureValueRegex();
+
     // build:Metadata regexes
     [GeneratedRegex(@"(<Package\b[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex BuildMetadataPackageOpenTagRegex();
@@ -569,8 +574,10 @@ internal partial class MsixService(
         }
 
         var configPath = new FileInfo(Path.Combine(packageDir.FullName, "priconfig.xml"));
-        var arguments = $@"createconfig /cf ""{configPath}"" /dq {language} /pv {platformVersion} /o";
+        var defaultScale = DetectDefaultScale(priResourceCandidates);
+        var arguments = $@"createconfig /cf ""{configPath}"" /dq lang-{language}_scale-{defaultScale} /pv {platformVersion} /o";
 
+        taskContext.AddDebugMessage($"Auto-detected default scale qualifier: scale-{defaultScale}");
         taskContext.AddDebugMessage("Creating PRI configuration file...");
 
         try
@@ -930,8 +937,8 @@ internal partial class MsixService(
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
-        // 2. Check for appxmanifest.xml in input folder
-        // 3. Check for appxmanifest.xml in current directory
+        // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
+        // 3. Check for appxmanifest.xml or package.appxmanifest in current directory
         FileInfo resolvedManifestPath;
         if (manifestPath != null)
         {
@@ -940,24 +947,17 @@ internal partial class MsixService(
         }
         else
         {
-            var inputFolderManifest = new FileInfo(Path.Combine(inputFolder.FullName, "appxmanifest.xml"));
-            if (inputFolderManifest.Exists)
+            var resolvedFromSearch = FindManifestInDirectory(new DirectoryInfo(inputFolder.FullName))
+                ?? FindManifestInDirectory(new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()));
+
+            if (resolvedFromSearch != null)
             {
-                resolvedManifestPath = inputFolderManifest;
-                taskContext.AddDebugMessage($"{UiSymbols.Note} Using manifest from input folder: {inputFolderManifest}");
+                resolvedManifestPath = resolvedFromSearch;
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Using manifest: {resolvedManifestPath}");
             }
             else
             {
-                var currentDirManifest = new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "appxmanifest.xml"));
-                if (currentDirManifest.Exists)
-                {
-                    resolvedManifestPath = currentDirManifest;
-                    taskContext.AddDebugMessage($"{UiSymbols.Note} Using manifest from current directory: {currentDirManifest}");
-                }
-                else
-                {
-                    throw new FileNotFoundException($"Manifest file not found. Searched in: input folder ({inputFolderManifest}), current directory ({currentDirManifest})");
-                }
+                throw new FileNotFoundException($"Manifest file not found. Searched for appxmanifest.xml and package.appxmanifest in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
             }
         }
 
@@ -1009,12 +1009,55 @@ internal partial class MsixService(
 
         var executableMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
 
+        // If manifest Identity lacks ProcessorArchitecture, detect it from the executable PE header.
+        // If it already has one, warn when it doesn't match the actual executable.
+        string? packageArch = null;
+        if (executableMatch.Success)
+        {
+            var exePath = Path.Combine(inputFolder.FullName, executableMatch.Groups[1].Value);
+            var detectedArch = DetectPeArchitecture(exePath);
+
+            var existingArchMatch = AppxPackageIdentityArchitectureValueRegex().Match(manifestContent);
+            if (!existingArchMatch.Success)
+            {
+                if (detectedArch != null)
+                {
+                    manifestContent = IdentityElementRegex().Replace(manifestContent, m =>
+                    {
+                        var tag = m.Value;
+                        // Handle both self-closing (<Identity ... />) and open (<Identity ... >) tags
+                        var insertPos = tag.EndsWith("/>") ? tag.Length - 2 : tag.Length - 1;
+                        return tag.Insert(insertPos, $@" ProcessorArchitecture=""{detectedArch}""");
+                    });
+                    taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-detected ProcessorArchitecture: {detectedArch}");
+                    packageArch = detectedArch;
+                }
+            }
+            else
+            {
+                packageArch = existingArchMatch.Groups[1].Value;
+                if (detectedArch != null)
+                {
+                    var manifestArch = existingArchMatch.Groups[1].Value;
+                    if (!string.Equals(manifestArch, detectedArch, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(manifestArch, "neutral", StringComparison.OrdinalIgnoreCase))
+                    {
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest ProcessorArchitecture is '{manifestArch}' but the executable is {detectedArch}. This will likely cause runtime failures.");
+                    }
+                }
+            }
+        }
+
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
 
-        var defaultMsixFileName = !string.IsNullOrWhiteSpace(extractedVersion)
-            ? $"{finalPackageName}_{extractedVersion}.msix"
-            : $"{finalPackageName}.msix";
+        var defaultMsixFileName = (packageArch, extractedVersion) switch
+        {
+            (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
+            (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
+            (not null, _) => $"{finalPackageName}_{packageArch}.msix",
+            _ => $"{finalPackageName}.msix"
+        };
 
         FileInfo outputMsixPath;
         DirectoryInfo outputFolder;
@@ -1068,28 +1111,35 @@ internal partial class MsixService(
             var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
                 .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
-            List<(FileInfo SourceFile, string RelativePath)>? expandedFiles = null;
-            if (manifestIsOutsideInputFolder || !skipPri)
-            {
-                // Pre-compute the expanded list of manifest-referenced files here.
-                expandedFiles = GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
-            }
-
             // If manifest is outside input folder, copy its referenced assets into the staging directory
             if (manifestIsOutsideInputFolder)
             {
-                CopyAllAssets(expandedFiles!, stagingDir, taskContext);
+                var externalAssets = GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
+                CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
+
+            // Remove Windows App SDK bootstrapper DLLs from the staging directory.
+            // In a full MSIX package the app resolves the WinAppSDK runtime through
+            // its <PackageDependency> declarations, so the bootstrapper is unnecessary.
+            // Worse, if the app was built without WindowsPackageType=MSIX the auto-
+            // initializer calls Bootstrap.Initialize() without OnPackageIdentity_NOOP,
+            // which returns ERROR_NOT_SUPPORTED (0x80070032) and crashes the app.
+            RemoveBootstrapperFromStaging(stagingDir, taskContext);
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
 
-            // Generate PRI files if not skipped
-            if (!skipPri)
+            // Generate PRI files if not skipped and no existing PRI from the build output
+            var existingPri = new FileInfo(Path.Combine(stagingDir.FullName, "resources.pri"));
+            if (!skipPri && !existingPri.Exists)
             {
                 taskContext.AddDebugMessage("Generating PRI configuration and files...");
 
-                var priResourceCandidates = expandedFiles!.Select(file => file.RelativePath);
+                // Expand manifest-referenced files from the staging manifest so that
+                // assets from both the input folder and external manifest are discovered.
+                var stagingManifest = new FileInfo(Path.Combine(stagingDir.FullName, "appxmanifest.xml"));
+                var priExpandedFiles = GetExpandedManifestReferencedFiles(stagingManifest, taskContext);
+                var priResourceCandidates = priExpandedFiles.Select(file => file.RelativePath);
                 await CreatePriConfigAsync(
                     stagingDir,
                     taskContext,
@@ -1108,6 +1158,10 @@ internal partial class MsixService(
                         return Task.FromResult(0);
                     }, cancellationToken);
                 }
+            }
+            else if (!skipPri && existingPri.Exists)
+            {
+                taskContext.AddDebugMessage("Skipping PRI generation — existing resources.pri found in input folder");
             }
 
             // Handle self-contained deployment if requested
@@ -1719,6 +1773,30 @@ internal partial class MsixService(
     }
 
     /// <summary>
+    /// Removes Windows App SDK bootstrapper DLLs from the staging directory.
+    /// These are not needed in full MSIX packages and cause initialization failures
+    /// when the app was built without WindowsPackageType=MSIX.
+    /// </summary>
+    private static void RemoveBootstrapperFromStaging(DirectoryInfo stagingDir, TaskContext taskContext)
+    {
+        string[] bootstrapperFiles =
+        [
+            "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+            "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll"
+        ];
+
+        foreach (var fileName in bootstrapperFiles)
+        {
+            var file = new FileInfo(Path.Combine(stagingDir.FullName, fileName));
+            if (file.Exists)
+            {
+                file.Delete();
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Removed {fileName} (not needed in MSIX package)");
+            }
+        }
+    }
+
+    /// <summary>
     /// Searches for appxmanifest.xml in the project by looking for .winapp directory in parent directories
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
@@ -1729,10 +1807,10 @@ internal partial class MsixService(
 
         while (directory != null)
         {
-            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-            if (manifestPath.Exists)
+            var found = FindManifestInDirectory(directory);
+            if (found != null)
             {
-                return manifestPath;
+                return found;
             }
 
             directory = directory.Parent;
@@ -1742,8 +1820,80 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Generates a sparse package structure for debug purposes
+    /// Checks a single directory for a manifest file (appxmanifest.xml or package.appxmanifest).
     /// </summary>
+    private static FileInfo? FindManifestInDirectory(DirectoryInfo directory)
+    {
+        var appxManifest = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
+        if (appxManifest.Exists)
+        {
+            return appxManifest;
+        }
+
+        var packageManifest = new FileInfo(Path.Combine(directory.FullName, "package.appxmanifest"));
+        if (packageManifest.Exists)
+        {
+            return packageManifest;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Detects the processor architecture from a PE executable's file header.
+    /// Returns the MSIX ProcessorArchitecture string (x86, x64, arm, arm64) or null if detection fails.
+    /// </summary>
+    private static string? DetectPeArchitecture(string filePath)
+    {
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(stream);
+
+            if (stream.Length < 64)
+            {
+                return null;
+            }
+
+            // Read DOS header e_magic
+            var magic = reader.ReadUInt16();
+            if (magic != 0x5A4D) // MZ
+            {
+                return null;
+            }
+
+            // Read e_lfanew at offset 0x3C
+            stream.Position = 0x3C;
+            var peOffset = reader.ReadInt32();
+            if (peOffset <= 0 || peOffset > stream.Length - 6)
+            {
+                return null;
+            }
+
+            // Read PE signature
+            stream.Position = peOffset;
+            var peSignature = reader.ReadUInt32();
+            if (peSignature != 0x00004550) // PE\0\0
+            {
+                return null;
+            }
+
+            // Read Machine field from IMAGE_FILE_HEADER
+            var machine = reader.ReadUInt16();
+            return machine switch
+            {
+                0x014C => "x86",    // IMAGE_FILE_MACHINE_I386
+                0x8664 => "x64",    // IMAGE_FILE_MACHINE_AMD64
+                0xAA64 => "arm64",  // IMAGE_FILE_MACHINE_ARM64
+                0x01C4 => "arm",    // IMAGE_FILE_MACHINE_ARMNT
+                _ => null
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
     /// <param name="originalManifestPath">Path to the original appxmanifest.xml</param>
     /// <param name="entryPointPath">Path to the entryPoint/executable that the manifest should reference</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -2291,6 +2441,57 @@ $1");
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
+    }
+
+    /// <summary>
+    /// Scans resource candidate file paths for scale-* MRT qualifiers and returns the
+    /// most commonly used scale value. Falls back to 200 (the Visual Studio / modern
+    /// WinUI default) when no scale qualifiers are found.
+    /// </summary>
+    internal static int DetectDefaultScale(IEnumerable<string> resourceCandidates)
+    {
+        // Count occurrences of each scale value found in filenames
+        var scaleCounts = new Dictionary<int, int>();
+        var scaleRegex = ScaleQualifierRegex();
+
+        foreach (var path in resourceCandidates)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            if (string.IsNullOrEmpty(fileName))
+            {
+                continue;
+            }
+
+            // Split by '.' to find qualifier segments (e.g. "Logo.scale-200" -> ["Logo", "scale-200"])
+            var segments = fileName.Split('.');
+            foreach (var segment in segments)
+            {
+                // A segment may be a compound qualifier with '_' (e.g. "scale-200_theme-dark")
+                var tokens = segment.Split('_');
+                foreach (var token in tokens)
+                {
+                    var match = scaleRegex.Match(token);
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out var scaleValue))
+                    {
+                        scaleCounts[scaleValue] = scaleCounts.GetValueOrDefault(scaleValue) + 1;
+                    }
+                }
+            }
+        }
+
+        if (scaleCounts.Count == 0)
+        {
+            // No scale qualifiers found — default to 200 (matches Visual Studio behavior
+            // for modern WinUI / packaged app templates).
+            return 200;
+        }
+
+        // Pick the most frequent scale; on ties prefer the smallest value.
+        return scaleCounts
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key)
+            .First()
+            .Key;
     }
 
     // ltr / rtl
