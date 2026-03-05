@@ -1229,14 +1229,6 @@ internal partial class MsixService(
                 CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
 
-            // Remove Windows App SDK bootstrapper DLLs from the staging directory.
-            // In a full MSIX package the app resolves the WinAppSDK runtime through
-            // its <PackageDependency> declarations, so the bootstrapper is unnecessary.
-            // Worse, if the app was built without WindowsPackageType=MSIX the auto-
-            // initializer calls Bootstrap.Initialize() without OnPackageIdentity_NOOP,
-            // which returns ERROR_NOT_SUPPORTED (0x80070032) and crashes the app.
-            RemoveBootstrapperFromStaging(stagingDir, taskContext);
-
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
 
@@ -1880,30 +1872,6 @@ internal partial class MsixService(
         {
             var destSubDir = new DirectoryInfo(Path.Combine(destination.FullName, subDir.Name));
             CopyDirectoryRecursive(subDir, destSubDir);
-        }
-    }
-
-    /// <summary>
-    /// Removes Windows App SDK bootstrapper DLLs from the staging directory.
-    /// These are not needed in full MSIX packages and cause initialization failures
-    /// when the app was built without WindowsPackageType=MSIX.
-    /// </summary>
-    internal static void RemoveBootstrapperFromStaging(DirectoryInfo stagingDir, TaskContext taskContext)
-    {
-        string[] bootstrapperFiles =
-        [
-            "Microsoft.WindowsAppRuntime.Bootstrap.dll",
-            "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll"
-        ];
-
-        foreach (var fileName in bootstrapperFiles)
-        {
-            var file = new FileInfo(Path.Combine(stagingDir.FullName, fileName));
-            if (file.Exists)
-            {
-                file.Delete();
-                taskContext.AddDebugMessage($"{UiSymbols.Note} Removed {fileName} (not needed in MSIX package)");
-            }
         }
     }
 

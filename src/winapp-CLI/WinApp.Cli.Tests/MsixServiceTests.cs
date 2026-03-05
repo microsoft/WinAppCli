@@ -874,55 +874,6 @@ public class MsixServiceTests
 
     #endregion
 
-    #region RemoveBootstrapperFromStaging Tests
-
-    [TestMethod]
-    public void RemoveBootstrapperFromStaging_RemovesBothDlls()
-    {
-        // Arrange
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll"), "fake dll");
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll"), "fake dll");
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "App.exe"), "fake exe");
-
-        // Act
-        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
-
-        // Assert
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll")));
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll")));
-        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "App.exe")));
-    }
-
-    [TestMethod]
-    public void RemoveBootstrapperFromStaging_NoOpWhenNoDlls()
-    {
-        // Arrange
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "App.exe"), "fake exe");
-
-        // Act — should not throw
-        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
-
-        // Assert
-        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "App.exe")));
-    }
-
-    [TestMethod]
-    public void RemoveBootstrapperFromStaging_RemovesOnlyBootstrapperDll()
-    {
-        // Arrange — only native bootstrapper, no .Net wrapper
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll"), "fake dll");
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "SomeOther.dll"), "keep this");
-
-        // Act
-        MsixService.RemoveBootstrapperFromStaging(_tempDir, TestTaskContext.Instance);
-
-        // Assert
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDir.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll")));
-        Assert.IsTrue(File.Exists(Path.Combine(_tempDir.FullName, "SomeOther.dll")));
-    }
-
-    #endregion
-
     #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
 
     [TestMethod]
