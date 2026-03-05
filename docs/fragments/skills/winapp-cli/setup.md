@@ -21,7 +21,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `create-debug-identity`, `cert generate --manifest`).
+**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 

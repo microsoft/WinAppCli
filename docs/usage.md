@@ -202,7 +202,9 @@ winapp pack ./dist --executable MyApp.exe
 
 ### create-debug-identity
 
-Create app identity for debugging without full MSIX packaging using [external location/sparse packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps).
+Create app identity for debugging using [sparse packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps). The exe stays in its original location — Windows associates identity with it via `Add-AppxPackage -ExternalLocation`.
+
+> **When to use this vs `winapp run`:** Use `create-debug-identity` when the exe is **separate from your app code** (e.g., Electron apps where `electron.exe` is in `node_modules`), or when specifically testing sparse package behavior. For most frameworks where the exe is in your build output folder, use [`winapp run`](#run) instead — it registers a full loose layout package and launches the app.
 
 ```bash
 winapp create-debug-identity [entrypoint] [options]
@@ -305,7 +307,9 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 
 ### run
 
-Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
+Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
+
+> **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install.
 
 ```bash
 winapp run <input-folder> [options]

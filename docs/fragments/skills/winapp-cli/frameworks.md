@@ -50,7 +50,7 @@ Quick start:
 ```powershell
 winapp init --use-defaults
 dotnet build
-winapp create-debug-identity ./bin/Debug/net10.0-windows/myapp.exe
+winapp run ./bin/Debug
 ```
 
 ### C++ (CMake, MSBuild)
