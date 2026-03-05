@@ -586,7 +586,7 @@ public class SignCommandTests : BaseCommandTests
             outputPath: wrongCertPath,
             TestTaskContext,
             password: "testpassword",
-            validDays: 30, TestContext.CancellationToken);
+            validDays: 30, cancellationToken: TestContext.CancellationToken);
 
         // Arrange the sign command
         var command = GetRequiredService<SignCommand>();

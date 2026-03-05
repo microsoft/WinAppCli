@@ -22,6 +22,11 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Description = "Suppress progress messages"
     };
 
+    internal static Option<bool> JsonOption = new Option<bool>("--json")
+    {
+        Description = "Format output as JSON"
+    };
+
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")
     {
         Description = "Output the complete CLI command structure as JSON for tooling, scripting, and LLM integration. Includes all commands, options, arguments, and their descriptions.",

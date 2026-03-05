@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using Microsoft.Graphics.Canvas;
 using Windows.ApplicationModel;
 
 namespace wpf_app;
@@ -21,12 +22,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-         try
+        try
         {
             var package = Package.Current;
             var familyName = package.Id.FamilyName;
             StatusTextBlock.Text = $"Package Family Name: {familyName}";
-            
+
             // Get Windows App Runtime version using the API
             var runtimeVersion = Microsoft.Windows.ApplicationModel.WindowsAppRuntime.RuntimeInfo.AsString;
             StatusTextBlock.Text += $"\nWindows App Runtime Version: {runtimeVersion}";
@@ -35,6 +36,17 @@ public partial class MainWindow : Window
         {
             // Thrown when app doesn't have package identity
             StatusTextBlock.Text = "Not packaged";
+        }
+
+        // Verify Win2D WinRT activation works (requires activatable class registration)
+        try
+        {
+            using var device = new CanvasDevice();
+            Win2DStatusTextBlock.Text = $"Win2D: CanvasDevice activated ✓ (MaxBufferSize={device.MaximumBitmapSizeInPixels}px)";
+        }
+        catch (Exception ex)
+        {
+            Win2DStatusTextBlock.Text = $"Win2D: {ex.Message}";
         }
     }
 }

@@ -2,8 +2,11 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Text.Json;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
@@ -21,6 +24,7 @@ internal class CertGenerateCommand : Command, IShortDescription
     public static Option<int> ValidDaysOption { get; }
     public static Option<bool> InstallOption { get; }
     public static Option<IfExists> IfExistsOption { get; }
+    public static Option<bool> ExportCerOption { get; }
 
     static CertGenerateCommand()
     {
@@ -38,7 +42,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         {
             Description = "Output path for the generated PFX file"
         };
-        OutputOption.AcceptLegalFileNamesOnly();
+        OutputOption.AcceptLegalFilePathsOnly();
         PasswordOption = new Option<string>("--password")
         {
             Description = "Password for the generated PFX file",
@@ -51,13 +55,16 @@ internal class CertGenerateCommand : Command, IShortDescription
         };
         InstallOption = new Option<bool>("--install")
         {
-            Description = "Install the certificate to the local machine store after generation",
-            DefaultValueFactory = (argumentResult) => false,
+            Description = "Install the certificate to the local machine store after generation"
         };
         IfExistsOption = new Option<IfExists>("--if-exists")
         {
             Description = "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
             DefaultValueFactory = (argumentResult) => IfExists.Error,
+        };
+        ExportCerOption = new Option<bool>("--export-cer")
+        {
+            Description = "Export a .cer file (public key only) alongside the .pfx"
         };
     }
 
@@ -71,9 +78,11 @@ internal class CertGenerateCommand : Command, IShortDescription
         Options.Add(ValidDaysOption);
         Options.Add(InstallOption);
         Options.Add(IfExistsOption);
+        Options.Add(ExportCerOption);
+        Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler(ICertificateService certificateService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, ILogger<CertGenerateCommand> logger) : AsynchronousCommandLineAction
+    public class Handler(ICertificateService certificateService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, IAnsiConsole ansiConsole, ILogger<CertGenerateCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -84,12 +93,18 @@ internal class CertGenerateCommand : Command, IShortDescription
             var validDays = parseResult.GetRequiredValue(ValidDaysOption);
             var install = parseResult.GetRequiredValue(InstallOption);
             var ifExists = parseResult.GetRequiredValue(IfExistsOption);
+            var exportCer = parseResult.GetRequiredValue(ExportCerOption);
+            var json = parseResult.GetRequiredValue(WinAppRootCommand.JsonOption);
 
             // Check if certificate file already exists
             if (output.Exists)
             {
                 if (ifExists == IfExists.Error)
                 {
+                    if (json)
+                    {
+                        return JsonErrorOutput.Write(ansiConsole, $"Certificate file already exists: {output}");
+                    }
                     logger.LogError("{UISymbol} Certificate file already exists: {Output}{NewLine}Please specify a different output path or remove the existing file.", UiSymbols.Error, output, System.Environment.NewLine);
                     return 1;
                 }
@@ -104,10 +119,31 @@ internal class CertGenerateCommand : Command, IShortDescription
                 }
             }
 
-            return await statusService.ExecuteWithStatusAsync("Generating development certificate...", async (taskContext, cancellationToken) =>
+            CertificateService.CertificateResult? certResult = null;
+
+            var returnCode = await statusService.ExecuteWithStatusAsync("Generating development certificate...", async (taskContext, ct) =>
             {
-                // Use the consolidated certificate generation method with all console output and error handling
-                await certificateService.GenerateDevCertificateWithInferenceAsync(
+                certResult = await GenerateCertAsync(taskContext, ct);
+                return (0, "Development certificate generated successfully.");
+            }, cancellationToken);
+
+            if (returnCode == 0 && json && certResult != null)
+            {
+                var jsonOutput = new CertGenerateJsonOutput
+                {
+                    CertificatePath = certResult.CertificatePath.FullName,
+                    Password = certResult.Password,
+                    Publisher = certResult.Publisher,
+                    SubjectName = certResult.SubjectName,
+                    PublicCertificatePath = certResult.PublicCertificatePath?.FullName,
+                };
+                ansiConsole.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(jsonOutput, WinAppJsonContext.Default.CertGenerateJsonOutput));
+            }
+
+            return returnCode;
+
+            Task<CertificateService.CertificateResult> GenerateCertAsync(TaskContext taskContext, CancellationToken ct) =>
+                certificateService.GenerateDevCertificateWithInferenceAsync(
                     outputPath: output,
                     taskContext: taskContext,
                     explicitPublisher: publisher,
@@ -116,9 +152,8 @@ internal class CertGenerateCommand : Command, IShortDescription
                     validDays: validDays,
                     updateGitignore: true,
                     install: install,
-                    cancellationToken: cancellationToken);
-                return (0, "Development certificate generated successfully.");
-            }, cancellationToken);
+                    exportCer: exportCer,
+                    cancellationToken: ct);
         }
     }
 }

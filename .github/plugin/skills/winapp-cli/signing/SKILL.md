@@ -111,8 +111,10 @@ Create a self-signed certificate for local testing only. Publisher must match Ap
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
+| `--export-cer` | Export a .cer file (public key only) alongside the .pfx | (none) |
 | `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
 | `--install` | Install the certificate to the local machine store after generation | (none) |
+| `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to appxmanifest.xml file to extract publisher information from | (none) |
 | `--output` | Output path for the generated PFX file | (none) |
 | `--password` | Password for the generated PFX file | `password` |

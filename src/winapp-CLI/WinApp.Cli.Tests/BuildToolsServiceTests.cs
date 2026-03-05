@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 using WinApp.Cli.Tools;
@@ -365,7 +366,7 @@ public class BuildToolsServiceTests : BaseCommandTests
 /// </summary>
 [TestClass]
 [DoNotParallelize]
-public class BuildToolsServicePrintErrorsTests() : BaseCommandTests(configPaths: true, verboseLogging: false)
+public class BuildToolsServicePrintErrorsTests() : BaseCommandTests(configPaths: true, logLevel: LogLevel.Information)
 {
     [TestMethod]
     public async Task RunBuildToolAsync_WithPrintErrorsTrue_WritesErrorOutput()
