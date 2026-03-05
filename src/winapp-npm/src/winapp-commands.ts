@@ -71,10 +71,14 @@ async function run(args: string[], opts: CommonOptions): Promise<WinappResult> {
 // ---------------------------------------------------------------------------
 
 export interface CertGenerateOptions extends CommonOptions {
+  /** Export a .cer file (public key only) alongside the .pfx */
+  exportCer?: boolean;
   /** Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) */
   ifExists?: IfExists;
   /** Install the certificate to the local machine store after generation */
   install?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
   /** Path to appxmanifest.xml file to extract publisher information from */
   manifest?: string;
   /** Output path for the generated PFX file */
@@ -92,13 +96,39 @@ export interface CertGenerateOptions extends CommonOptions {
  */
 export async function certGenerate(options: CertGenerateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['cert', 'generate'];
+  if (options.exportCer) args.push('--export-cer');
   if (options.ifExists) args.push('--if-exists', options.ifExists);
   if (options.install) args.push('--install');
+  if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.output) args.push('--output', options.output);
   if (options.password) args.push('--password', options.password);
   if (options.publisher) args.push('--publisher', options.publisher);
   if (options.validDays !== undefined) args.push('--valid-days', options.validDays.toString());
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// cert info
+// ---------------------------------------------------------------------------
+
+export interface CertInfoOptions extends CommonOptions {
+  /** Path to the certificate file (PFX) */
+  certPath: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Password for the PFX file */
+  password?: string;
+}
+
+/**
+ * Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
+ */
+export async function certInfo(options: CertInfoOptions): Promise<WinappResult> {
+  const args: string[] = ['cert', 'info'];
+  args.push(options.certPath);
+  if (options.json) args.push('--json');
+  if (options.password) args.push('--password', options.password);
   return run(args, options);
 }
 

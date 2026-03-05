@@ -68,13 +68,35 @@ function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `exportCer` | `boolean \| undefined` | No | Export a .cer file (public key only) alongside the .pfx |
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
 | `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
 | `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `certInfo()`
+
+Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
+
+```typescript
+function certInfo(options: CertInfoOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `certPath` | `string` | Yes | Path to the certificate file (PFX) |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `password` | `string \| undefined` | No | Password for the PFX file |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -662,13 +684,26 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `exportCer` | `boolean \| undefined` | No | Export a .cer file (public key only) alongside the .pfx |
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
 | `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
 | `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `CertInfoOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `certPath` | `string` | Yes | Path to the certificate file (PFX) |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `password` | `string \| undefined` | No | Password for the PFX file |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
