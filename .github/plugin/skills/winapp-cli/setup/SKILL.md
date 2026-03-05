@@ -153,3 +153,23 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
+
+### `winapp run`
+
+Creates packaged layout, registers the Application, and launches the packaged application.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<input-folder>` | Yes | Input folder containing the app to run |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--args` | Command-line arguments to pass to the application | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
+| `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
+| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |

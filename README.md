@@ -169,6 +169,7 @@ npx winapp --help
 **App Identity & Debugging:**
 
 - [`package`](./docs/usage.md#package) - Create MSIX packages from directories
+- [`run`](./docs/usage.md#run) - Create debug identity and launch app for debugging
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add temporary app identity for debugging
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
