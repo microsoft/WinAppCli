@@ -1267,7 +1267,7 @@
           "recursive": false
         },
         "--json": {
-          "description": "Output in JSON format",
+          "description": "Format output as JSON",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
