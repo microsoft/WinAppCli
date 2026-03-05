@@ -36,6 +36,7 @@ winapp store app list
 - [ ] [docs/usage.md](../docs/usage.md) updated (if CLI commands changed)
 - [ ] [Language-specific guides](../docs/guides) updated (if applicable)
 - [ ] [Sample projects updated](../samples) to reflect changes (if applicable)
+- [ ] Agent skill templates updated in `docs/fragments/skills/` (if CLI commands/workflows changed)
 
 ## Screenshots / Demo
 

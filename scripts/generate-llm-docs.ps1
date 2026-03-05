@@ -1,14 +1,16 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Generate LLM-friendly documentation from CLI schema
+    Generate CLI schema and agent skills from CLI binary
 .DESCRIPTION
-    This script generates docs/cli-schema.json and docs/llm-context.md from the CLI's
-    --cli-schema output. Run after building the CLI to keep documentation in sync.
+    This script generates docs/cli-schema.json and SKILL.md files
+    from the CLI's --cli-schema output. Run after building the CLI to keep documentation in sync.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
 .PARAMETER DocsPath
     Path to the docs folder (default: docs)
+.PARAMETER SkillsPath
+    Path to the skills output folder (default: .github/plugin/skills/winapp-cli)
 .EXAMPLE
     .\scripts\generate-llm-docs.ps1
 .EXAMPLE
@@ -18,6 +20,7 @@
 param(
     [string]$CliPath = "",
     [string]$DocsPath = "",
+    [string]$SkillsPath = "",
     [switch]$CalledFromBuildScript = $false
 )
 
@@ -34,8 +37,11 @@ if (-not $DocsPath) {
     $DocsPath = Join-Path $ProjectRoot "docs"
 }
 
+if (-not $SkillsPath) {
+    $SkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+}
+
 $SchemaOutputPath = Join-Path $DocsPath "cli-schema.json"
-$LlmContextPath = Join-Path $DocsPath "llm-context.md"
 
 # Verify CLI exists
 if (-not (Test-Path $CliPath)) {
@@ -44,7 +50,7 @@ if (-not (Test-Path $CliPath)) {
     exit 1
 }
 
-Write-Host "[DOCS] Generating LLM documentation..." -ForegroundColor Blue
+Write-Host "[DOCS] Generating CLI schema and agent skills..." -ForegroundColor Blue
 Write-Host "CLI path: $CliPath" -ForegroundColor Gray
 Write-Host "Docs path: $DocsPath" -ForegroundColor Gray
 
@@ -67,134 +73,243 @@ Write-Host "[DOCS] Saved: $SchemaOutputPath" -ForegroundColor Green
 # Parse schema for markdown generation
 $Schema = $SchemaJson | ConvertFrom-Json
 
-# Step 2: Generate llm-context.md
-Write-Host "[DOCS] Generating llm-context.md..." -ForegroundColor Blue
+# ==============================================================================
+# Step 2: Generate SKILL.md files for agent context
+# ==============================================================================
+Write-Host ""
+Write-Host "[SKILLS] Generating agent skill files..." -ForegroundColor Blue
 
-$LlmContext = @"
----
-name: winapp-cli
-description: $($Schema.description)
-version: $($Schema.version)
-schema_version: $($Schema.schemaVersion)
----
+$CliVersion = $Schema.version
+$SkillTemplatesDir = Join-Path (Split-Path $PSScriptRoot) "docs\fragments\skills\winapp-cli"
 
-# winapp CLI Context for LLMs
+# Output directory for generated skills (use parameter or default)
+$SkillsDir = $SkillsPath
 
-> Auto-generated from CLI v$($Schema.version) (schema version $($Schema.schemaVersion))
-> 
-> This file provides structured context about the winapp CLI for AI assistants and LLMs.
-> For the raw JSON schema, see [cli-schema.json](cli-schema.json).
+# Skill → CLI command mapping for auto-generated options/arguments tables
+# Each skill maps to one or more CLI commands whose options/arguments should be included
+$SkillCommandMap = @{
+    "setup"        = @("init", "restore", "update")
+    "package"      = @("package", "create-external-catalog")
+    "identity"     = @("create-debug-identity")
+    "signing"      = @("cert generate", "cert install", "sign")
+    "manifest"     = @("manifest generate", "manifest update-assets")
+    "troubleshoot" = @("get-winapp-path", "tool", "store")
+    "frameworks"   = @()       # No auto-generated command sections — links to guides
+}
 
-## Overview
+# Validate that all CLI commands are covered by at least one skill
+$allMappedCommands = $SkillCommandMap.Values | ForEach-Object { $_ } | Where-Object { $_ }
+$allSchemaCommands = @()
+foreach ($cmd in $Schema.subcommands.PSObject.Properties) {
+    if ($cmd.Value.subcommands) {
+        foreach ($sub in $cmd.Value.subcommands.PSObject.Properties) {
+            $allSchemaCommands += "$($cmd.Name) $($sub.Name)"
+        }
+    } else {
+        $allSchemaCommands += $cmd.Name
+    }
+}
+$unmappedCommands = $allSchemaCommands | Where-Object { $_ -notin $allMappedCommands }
+if ($unmappedCommands) {
+    Write-Warning "The following CLI commands are not mapped to any skill in `$SkillCommandMap:"
+    foreach ($cmd in $unmappedCommands) {
+        Write-Warning "  - $cmd"
+    }
+    Write-Warning "Add them to `$SkillCommandMap in generate-llm-docs.ps1 so their options appear in SKILL.md files."
+}
 
-$($Schema.description)
-
-**Installation:**
-- WinGet: ``winget install Microsoft.WinAppCli --source winget``
-- npm: ``npm install -g @microsoft/winappcli`` (for electron projects)
-
-## Command Reference
-
-"@
-
-# Function to format a command and its subcommands
-function Format-Command {
-    param(
-        [string]$Name,
-        [PSObject]$Command,
-        [int]$Depth = 0
-    )
+# Function to resolve a command path like "cert generate" from the schema
+function Get-SchemaCommand {
+    param([string]$CommandPath, [PSObject]$RootSchema)
     
-    $indent = "  " * $Depth
-    $headingLevel = [Math]::Min($Depth + 3, 6)
-    $heading = "#" * $headingLevel
+    $parts = $CommandPath -split ' '
+    $current = $RootSchema
+    foreach ($part in $parts) {
+        if ($current.subcommands -and $current.subcommands.PSObject.Properties[$part]) {
+            $current = $current.subcommands.$part
+        } else {
+            return $null
+        }
+    }
+    return $current
+}
+
+# Function to format a command's arguments as a markdown table
+function Format-ArgumentsTable {
+    param([PSObject]$Command)
+    
+    if (-not $Command.arguments) { return "" }
     
     $output = @()
-    $output += ""
-    $output += "$heading ``winapp $Name``"
-    $output += ""
-    $output += "$($Command.description)"
+    $output += "| Argument | Required | Description |"
+    $output += "|----------|----------|-------------|"
     
-    # Aliases
-    if ($Command.aliases -and $Command.aliases.Count -gt 0) {
-        $aliasStr = ($Command.aliases | ForEach-Object { "``$_``" }) -join ", "
-        $output += ""
-        $output += "**Aliases:** $aliasStr"
+    $sortedArgs = $Command.arguments.PSObject.Properties | Sort-Object { $_.Value.order }
+    foreach ($arg in $sortedArgs) {
+        $required = if ($arg.Value.arity.minimum -gt 0) { "Yes" } else { "No" }
+        $output += "| ``<$($arg.Name)>`` | $required | $($arg.Value.description) |"
     }
     
-    # Arguments
-    if ($Command.arguments) {
-        $output += ""
-        $output += "**Arguments:**"
-        $sortedArgs = $Command.arguments.PSObject.Properties | Sort-Object { $_.Value.order }
-        foreach ($arg in $sortedArgs) {
-            $argName = $arg.Name
-            $argDetails = $arg.Value
-            $required = if ($argDetails.arity.minimum -gt 0) { " *(required)*" } else { "" }
-            $default = if ($argDetails.hasDefaultValue -and $null -ne $argDetails.defaultValue) { " (default: ``$($argDetails.defaultValue)``)" } else { "" }
-            $output += "- ``<$argName>``$required - $($argDetails.description)$default"
+    return ($output -join "`n")
+}
+
+# Function to format a command's options as a markdown table
+function Format-OptionsTable {
+    param([PSObject]$Command)
+    
+    if (-not $Command.options) { return "" }
+    
+    $visibleOptions = $Command.options.PSObject.Properties | Where-Object { 
+        -not $_.Value.hidden -and $_.Name -notin @('--verbose', '--quiet', '-v', '-q')
+    }
+    
+    if (-not $visibleOptions) { return "" }
+    
+    $output = @()
+    $output += "| Option | Description | Default |"
+    $output += "|--------|-------------|---------|"
+    
+    foreach ($opt in $visibleOptions) {
+        $default = if ($opt.Value.hasDefaultValue -and $null -ne $opt.Value.defaultValue -and $opt.Value.defaultValue -ne "" -and $opt.Value.defaultValue -ne "False") {
+            "``$($opt.Value.defaultValue)``"
+        } else {
+            "(none)"
         }
+        $output += "| ``$($opt.Name)`` | $($opt.Value.description) | $default |"
     }
     
-    # Options (exclude hidden)
-    if ($Command.options) {
-        $visibleOptions = $Command.options.PSObject.Properties | Where-Object { -not $_.Value.hidden }
-        if ($visibleOptions) {
+    return ($output -join "`n")
+}
+
+# Function to generate auto-generated command sections for a skill
+function Format-CommandSections {
+    param([string[]]$CommandPaths, [PSObject]$RootSchema)
+    
+    if (-not $CommandPaths -or $CommandPaths.Count -eq 0) { return "" }
+    
+    $output = @()
+    
+    foreach ($cmdPath in $CommandPaths) {
+        $cmd = Get-SchemaCommand -CommandPath $cmdPath -RootSchema $RootSchema
+        if (-not $cmd) {
+            Write-Warning "Command '$cmdPath' not found in schema"
+            continue
+        }
+        
+        $output += ""
+        $output += "### ``winapp $cmdPath``"
+        $output += ""
+        $output += $cmd.description
+        
+        # Aliases
+        if ($cmd.aliases -and $cmd.aliases.Count -gt 0) {
+            $aliasStr = ($cmd.aliases | ForEach-Object { "``$_``" }) -join ", "
             $output += ""
-            $output += "**Options:**"
-            foreach ($opt in $visibleOptions) {
-                $optName = $opt.Name
-                $optDetails = $opt.Value
-                $aliases = if ($optDetails.aliases -and $optDetails.aliases.Count -gt 0) {
-                    $filteredAliases = $optDetails.aliases | Where-Object { $_ -ne $optName -and $_ -ne "--$optName" }
-                    if ($filteredAliases) { " / ``$($filteredAliases -join '``, ``')``" } else { "" }
-                } else { "" }
-                $default = if ($optDetails.hasDefaultValue -and $null -ne $optDetails.defaultValue -and $optDetails.defaultValue -ne "") { 
-                    " (default: ``$($optDetails.defaultValue)``)" 
-                } else { "" }
-                $output += "- ``$optName``$aliases - $($optDetails.description)$default"
-            }
+            $output += "**Aliases:** $aliasStr"
+        }
+        
+        # Arguments table
+        $argsTable = Format-ArgumentsTable -Command $cmd
+        if ($argsTable) {
+            $output += ""
+            $output += "#### Arguments"
+            $output += "<!-- auto-generated from cli-schema.json -->"
+            $output += $argsTable
+        }
+        
+        # Options table
+        $optsTable = Format-OptionsTable -Command $cmd
+        if ($optsTable) {
+            $output += ""
+            $output += "#### Options"
+            $output += "<!-- auto-generated from cli-schema.json -->"
+            $output += $optsTable
         }
     }
     
-    # Subcommands
-    if ($Command.subcommands) {
-        foreach ($sub in $Command.subcommands.PSObject.Properties) {
-            if (-not $sub.Value.hidden) {
-                $subOutput = Format-Command -Name "$Name $($sub.Name)" -Command $sub.Value -Depth ($Depth + 1)
-                $output += $subOutput
-            }
-        }
+    return ($output -join "`n")
+}
+
+# Generate each skill
+$SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks")
+$SkillDescriptions = @{
+    "setup"        = "Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning."
+    "package"      = "Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, or distributing a desktop app."
+    "identity"     = "Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app."
+    "signing"      = "Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues."
+    "manifest"     = "Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets. Use when creating a Windows app manifest, adding Windows capabilities, or updating app icons and assets."
+    "troubleshoot" = "Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation."
+    "frameworks"   = "Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app."
+}
+
+foreach ($skillName in $SkillNames) {
+    $templatePath = Join-Path $SkillTemplatesDir "$skillName.md"
+    
+    if (-not (Test-Path $templatePath)) {
+        Write-Warning "Skill template not found: $templatePath"
+        continue
     }
     
-    return $output
+    $templateContent = Get-Content $templatePath -Raw
+    $commandPaths = $SkillCommandMap[$skillName]
+    $description = $SkillDescriptions[$skillName]
+    
+    # Build the SKILL.md content
+    $skillContent = @"
+---
+name: winapp-$skillName
+description: $description
+version: $CliVersion
+---
+
+"@
+    
+    # Add template content (hand-written workflows, examples, troubleshooting)
+    $skillContent += $templateContent
+    
+    # Add auto-generated command sections
+    $commandSections = Format-CommandSections -CommandPaths $commandPaths -RootSchema $Schema
+    if ($commandSections) {
+        $skillContent += "`n`n## Command Reference`n"
+        $skillContent += $commandSections
+    }
+    
+    # Normalize line endings and ensure trailing newline
+    $skillContent = $skillContent -replace "`r`n", "`n"
+    $skillContent = $skillContent.TrimEnd() + "`n"
+    
+    # Write to output directory
+    $skillDir = Join-Path $SkillsDir $skillName
+    if (-not (Test-Path $skillDir)) {
+        New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+    }
+    $skillPath = Join-Path $skillDir "SKILL.md"
+    [System.IO.File]::WriteAllText($skillPath, $skillContent, [System.Text.UTF8Encoding]::new($false))
+    
+    Write-Host "[SKILLS]   $skillName - generated" -ForegroundColor Gray
 }
 
-# Generate command documentation
-foreach ($cmd in $Schema.subcommands.PSObject.Properties | Sort-Object Name) {
-    if (-not $cmd.Value.hidden) {
-        $cmdOutput = Format-Command -Name $cmd.Name -Command $cmd.Value
-        $LlmContext += ($cmdOutput -join "`n")
+# Update plugin.json version to match CLI version (only when outputting to the default skills path)
+$DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+if ($SkillsDir -eq $DefaultSkillsPath) {
+    $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
+    if (Test-Path $PluginJsonPath) {
+        $pluginJson = Get-Content $PluginJsonPath -Raw | ConvertFrom-Json
+        $pluginJson.version = $CliVersion
+        $pluginJsonContent = $pluginJson | ConvertTo-Json -Depth 10
+        # Normalize line endings
+        $pluginJsonContent = $pluginJsonContent -replace "`r`n", "`n"
+        $pluginJsonContent = $pluginJsonContent.TrimEnd() + "`n"
+        [System.IO.File]::WriteAllText($PluginJsonPath, $pluginJsonContent, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "[SKILLS] Updated plugin.json version to $CliVersion" -ForegroundColor Gray
     }
 }
 
-# Add footer from separate markdown file (workflows, prerequisites, etc.)
-$FooterPath = Join-Path $PSScriptRoot "assets\llm-context-footer.md"
-if (Test-Path $FooterPath) {
-    $Footer = Get-Content $FooterPath -Raw
-    $LlmContext += "`n`n" + $Footer
-} else {
-    Write-Warning "Footer file not found: $FooterPath"
-}
+Write-Host "[SKILLS] Generated $($SkillNames.Count) skills in:" -ForegroundColor Green
+Write-Host "  .github/plugin/skills/winapp-cli/" -ForegroundColor Gray
 
-# Save llm-context.md with consistent LF line endings (same as cli-schema.json)
-# Normalize CRLF to LF and ensure exactly one trailing newline
-$LlmContext = $LlmContext -replace "`r`n", "`n"
-$LlmContext = $LlmContext.TrimEnd() + "`n"
-[System.IO.File]::WriteAllText($LlmContextPath, $LlmContext, [System.Text.UTF8Encoding]::new($false))
-Write-Host "[DOCS] Saved: $LlmContextPath" -ForegroundColor Green
-
-Write-Host "[DOCS] LLM documentation generated successfully!" -ForegroundColor Green
+Write-Host ""
+Write-Host "[DOCS] All documentation and skills generated successfully!" -ForegroundColor Green
 
 # Warn if running directly (not from build-cli.ps1)
 if (-not $CalledFromBuildScript -and $UsingDefaultPaths) {
