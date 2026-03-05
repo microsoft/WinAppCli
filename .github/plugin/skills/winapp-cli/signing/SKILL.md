@@ -138,6 +138,23 @@ Trust a certificate on this machine (requires admin). Run before installing MSIX
 | `--force` | Force installation even if the certificate already exists | (none) |
 | `--password` | Password for the PFX file | `password` |
 
+### `winapp cert info`
+
+Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<cert-path>` | Yes | Path to the certificate file (PFX) |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--json` | Format output as JSON | (none) |
+| `--password` | Password for the PFX file | `password` |
+
 ### `winapp sign`
 
 Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.
