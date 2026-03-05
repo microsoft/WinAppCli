@@ -37,7 +37,10 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp package <build-output-dir>
    │     (add --cert ./devcert.pfx to sign in one step)
    ├─ Need package identity for debugging Windows APIs?
-   │  └─ winapp create-debug-identity <exe-path>
+   │  ├─ Want to register identity AND launch the app?
+   │  │  └─ winapp run <build-output-dir>
+   │  └─ Only need to register identity (not launch)?
+   │     └─ winapp create-debug-identity <exe-path>
    ├─ Need to sign an existing MSIX or exe?
    │  └─ winapp sign <file> <cert>
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
@@ -107,6 +110,16 @@ Does the project already have an appxmanifest.xml?
 - `--keep-identity` — don't append `.debug` to package name
 - `--no-install` — create but don't register the package
 **Requires:** `appxmanifest.xml` + path to your built `.exe`
+
+### `winapp run <input-folder>`
+**Purpose:** Register a loose layout package (in a a new directory), and launch the app for debugging. Returns the process ID for debugger attachment.
+**When to use:** When you want to quickly test your app with package identity — combines identity registration + launch in one step. Preferred over `create-debug-identity` for iterative development.
+**Key options:**
+- `--manifest <path>` — path to `appxmanifest.xml` (default: auto-detect)
+- `--args <string>` — command-line arguments to pass to the app
+- `--no-launch` — register identity without launching
+- `--output-appx-directory <path>` — custom output directory for loose layout
+**Requires:** Built app output directory + `appxmanifest.xml`
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.
