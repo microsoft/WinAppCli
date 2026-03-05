@@ -990,22 +990,5 @@ public class MsixServiceTests
         return count;
     }
 
-    /// <summary>
-    /// Lightweight TaskContext stand-in for testing static methods that require one for logging only.
-    /// </summary>
-    private static class TestTaskContext
-    {
-        public static TaskContext Instance { get; } = CreateMinimal();
-
-        private static TaskContext CreateMinimal()
-        {
-            var console = new Spectre.Console.Testing.TestConsole();
-            var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b => { });
-            var logger = loggerFactory.CreateLogger<TaskContext>();
-            var task = new ConsoleTasks.GroupableTask("Test", null);
-            return new TaskContext(task, null, console, logger, new Lock());
-        }
-    }
-
     #endregion
 }
