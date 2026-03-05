@@ -97,7 +97,7 @@ When prompted:
 
 This command will:
 - Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
-- Add `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` NuGet package references to your `.csproj`
+- Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
 
 > **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
@@ -106,23 +106,32 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 ## 5. Debug with Identity
 
-The easiest way to test your app with package identity is `winapp run`, which registers your build output as a loose layout package and launches it — just like a real MSIX install.
+Since `winapp init` added the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package to your project, you can simply run:
 
-1.  **Build the executable**:
-    ```powershell
-    dotnet build -c Debug
-    ```
+```powershell
+dotnet run
+```
 
-2.  **Run with identity**:
-    ```powershell
-    winapp run .\bin\Debug\net10.0-windows10.0.26100.0
-    ```
+This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
 You should see output similar to:
 ```
 Package Family Name: dotnet-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
+
+### Alternative: Manual `winapp run`
+
+If you didn't use `winapp init` (or removed the NuGet package), you can build and run manually:
+
+```powershell
+dotnet build -c Debug
+winapp run .\bin\Debug\net10.0-windows10.0.26100.0
+```
+
+To add the NuGet package back: `dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease`
+
+> **Tip:** To disable the automatic `dotnet run` integration, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
 
 ### Alternative: Sparse package identity
 
@@ -136,23 +145,6 @@ Then run the executable directly (do not use `dotnet run` as it might rebuild/ov
 ```powershell
 .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
 ```
-
-### Automating with `dotnet run` (Recommended)
-
-Instead of manually running `winapp run` after each build, you can add the **WinApp NuGet package** to your project. This hooks into `dotnet run` so it automatically creates the loose layout package, registers identity, and launches your app:
-
-```powershell
-dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease
-```
-
-Now simply run:
-```powershell
-dotnet run
-```
-
-This calls `winapp run` under the hood during `dotnet run`, so your app launches with full package identity automatically. No separate build + run steps needed.
-
-> **Tip:** To disable this behavior temporarily, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
 
 ### Alternative: Manual MSBuild target
 
