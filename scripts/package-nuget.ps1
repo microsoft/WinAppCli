@@ -1,15 +1,12 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Package Windows App Development CLI as NuGet packages
+    Package Windows App Development CLI as a NuGet package
 .DESCRIPTION
-    This script creates NuGet packages for:
-    1. Microsoft.Windows.SDK.BuildTools.WinApp - MSBuild integration for 'dotnet run' with packaged apps
-    2. Microsoft.WindowsAppSDK.Templates - Project templates for 'dotnet new winui'
-    
-    These packages include the CLI binaries from artifacts/cli and output to artifacts/nuget.
+    This script creates the Microsoft.Windows.SDK.BuildTools.WinApp NuGet package - MSBuild integration for 'dotnet run' with packaged apps.
+    This package includes the CLI binaries from artifacts/cli and outputs the .nupkg file to artifacts/nuget.
 .PARAMETER Version
-    Version number for the NuGet packages (e.g., "1.0.0" or "1.0.0-prerelease.73").
+    Version number for the NuGet package (e.g., "1.0.0" or "1.0.0-prerelease.73").
     If not specified, reads from version.json and calculates based on Stable flag.
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
@@ -26,10 +23,7 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory=$false)]
-    [switch]$Stable = $false,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipTemplates = $false
+    [switch]$Stable = $false
 )
 
 # Ensure we're running from the project root

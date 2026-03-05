@@ -6,7 +6,6 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
-using WinApp.Cli.Models;
 using WinApp.Cli.Tools;
 
 namespace WinApp.Cli.Services;

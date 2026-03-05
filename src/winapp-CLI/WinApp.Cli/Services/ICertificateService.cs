@@ -17,6 +17,7 @@ internal interface ICertificateService
         int validDays = 365,
         bool updateGitignore = true,
         bool install = false,
+        bool exportCer = false,
         CancellationToken cancellationToken = default);
 
     public Task<CertificateResult> GenerateDevCertificateAsync(
@@ -25,6 +26,7 @@ internal interface ICertificateService
         TaskContext taskContext,
         string password = "password",
         int validDays = 365,
+        bool exportCer = false,
         CancellationToken cancellationToken = default);
 
     public bool InstallCertificate(FileInfo certPath, string password, bool force, TaskContext taskContext);

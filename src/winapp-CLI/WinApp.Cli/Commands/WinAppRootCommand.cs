@@ -24,7 +24,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
 
     internal static Option<bool> JsonOption = new Option<bool>("--json")
     {
-        Description = "Output in JSON format"
+        Description = "Format output as JSON"
     };
 
     internal static readonly Option<bool> CliSchemaOption = new("--cli-schema")

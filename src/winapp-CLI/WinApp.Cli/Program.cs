@@ -54,7 +54,7 @@ internal static class Program
             Console.Error.WriteLine($"Cannot specify both --quiet and --verbose options together.");
             return 1;
         }
-        else if (quiet && verbose)
+        else if (quiet && json)
         {
             Console.Error.WriteLine($"Cannot specify both --quiet and --json options together.");
             return 1;
@@ -83,7 +83,7 @@ internal static class Program
 
         // Skip first-run notice for machine-readable output modes
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode)
+        if (!isCliSchemaMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();

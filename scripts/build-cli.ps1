@@ -4,7 +4,7 @@
     Build script for Windows App Development CLI, npm package, NuGet packages, and MSIX packages
 .DESCRIPTION
     This script builds the Windows App Development CLI for both x64 and arm64 architectures,
-    creates the npm package, NuGet packages (BuildTools.Extras + Templates), creates MSIX packages 
+    creates the npm package, NuGet package (BuildTools.WinApp), creates MSIX packages 
     with distribution package, and places all artifacts in an artifacts folder. 
     Run this script from the root of the project.
 .PARAMETER SkipTests
@@ -16,11 +16,11 @@
 .PARAMETER SkipVsc
     Skip VS Code extension packaging
 .PARAMETER SkipNuGet
-    Skip NuGet packages creation (BuildTools.Extras + Templates)
+    Skip NuGet package creation (BuildTools.WinApp)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
-    Skip LLM documentation generation (useful in CI where docs are validated separately)
+    Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -62,6 +62,7 @@ try
     $CliSolutionDir = "src\winapp-CLI"
     $CliSolutionPath = "$CliSolutionDir\winapp.sln"
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
+    $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -96,14 +97,14 @@ try
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet test --solution $CliSolutionPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx
+        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
         Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
+        New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
         $TrxFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.trx" -Recurse -File
         if ($TrxFiles) {
-            New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
             foreach ($trxFile in $TrxFiles) {
                 Copy-Item $trxFile.FullName "$ArtifactsPath\TestResults\" -Force
                 Write-Host "[TEST] Copied: $($trxFile.Name)" -ForegroundColor Gray
@@ -111,6 +112,18 @@ try
             Write-Host "[TEST] Test results copied successfully ($($TrxFiles.Count) file(s))" -ForegroundColor Green
         } else {
             Write-Warning "No TRX test result files found in $CliSolutionDir"
+        }
+
+        # Copy coverage XML files to artifacts
+        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.cobertura.xml" -Recurse -File
+        if ($CoverageFiles) {
+            foreach ($coverageFile in $CoverageFiles) {
+                Copy-Item $coverageFile.FullName "$ArtifactsPath\TestResults\" -Force
+                Write-Host "[TEST] Copied coverage: $($coverageFile.Name)" -ForegroundColor Gray
+            }
+            Write-Host "[TEST] Coverage results copied successfully ($($CoverageFiles.Count) file(s))" -ForegroundColor Green
+        } else {
+            Write-Warning "No coverage XML files found in $CliSolutionDir"
         }
 
         # Now check test results and decide whether to exit
@@ -207,10 +220,10 @@ try
         exit 1
     }
 
-    # Step 6: Generate LLM documentation (optional)
+    # Step 6: Generate CLI schema and agent skills (optional)
     if (-not $SkipDocs) {
         Write-Host ""
-        Write-Host "[DOCS] Generating LLM documentation..." -ForegroundColor Blue
+        Write-Host "[DOCS] Generating CLI schema and agent skills..." -ForegroundColor Blue
         
         $GenerateLlmDocsScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
         $CliExePath = Join-Path $ProjectRoot "$ArtifactsPath\cli\win-x64\winapp.exe"
@@ -218,13 +231,13 @@ try
         & $GenerateLlmDocsScript -CliPath $CliExePath -CalledFromBuildScript
         
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "LLM documentation generation failed, but continuing..."
+            Write-Warning "CLI schema and agent skills generation failed, but continuing..."
         } else {
-            Write-Host "[DOCS] LLM documentation generated successfully!" -ForegroundColor Green
+            Write-Host "[DOCS] CLI schema and agent skills generated successfully!" -ForegroundColor Green
         }
     } else {
         Write-Host ""
-        Write-Host "[DOCS] Skipping LLM documentation generation (-SkipDocs)" -ForegroundColor Yellow
+        Write-Host "[DOCS] Skipping CLI schema and agent skills generation (-SkipDocs)" -ForegroundColor Yellow
     }
 
     # Step 7: Create npm package (optional)
@@ -284,7 +297,26 @@ try
         Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 10: Create MSIX packages (optional)
+    # Step 8: Create NuGet packages (optional)
+    if (-not $SkipNuGet) {
+        Write-Host ""
+        Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
+    
+        $PackageNuGetScript = Join-Path $PSScriptRoot "package-nuget.ps1"
+
+        & $PackageNuGetScript -Version $FullVersion -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "NuGet packages creation failed, but continuing..."
+        } else {
+            Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Step 9: Create MSIX packages (optional)
     if (-not $SkipMsix) {
         Write-Host ""
         Write-Host "[MSIX] Creating MSIX packages..." -ForegroundColor Blue

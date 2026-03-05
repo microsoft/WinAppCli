@@ -7,7 +7,7 @@ This document describes the implementation of `dotnet run` support for packaged 
 The solution enables developers to run packaged WinUI (WinAppSDK) applications using just the .NET CLI:
 
 ```bash
-dotnet new winui
+winapp init
 dotnet run
 ```
 
@@ -20,12 +20,7 @@ dotnet run
    - Provides MSBuild targets that hook into `dotnet run`
    - Automatically detects packaged WinUI apps and handles launch
 
-2. **Microsoft.WindowsAppSDK.Templates** (NuGet Package)
-   - Provides `dotnet new winui` template
-   - Pre-configured with BuildTools.Extras package reference
-   - Mirrors Visual Studio WinUI template structure
-
-3. **WinAppCLI**
+2. **WinAppCLI**
    - Handles debug identity registration
    - Launches packaged apps via Windows Application Activation Manager
 
@@ -41,7 +36,7 @@ MSBuild Build Target
 _WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
     │
     ▼
-_WinAppInterceptRun (overrides RunCommand with CLI path)
+_WinAppPrepareRunArguments (overrides RunCommand with CLI path)
     │
     ▼
 Run Target (invokes: winapp run --manifest ...)
@@ -57,7 +52,7 @@ WinAppCLI
 
 ```
 src/
-├── winapp-NuGet/                           # BuildTools.Extras NuGet package
+├── winapp-NuGet/                           # BuildTools.WinApp NuGet package
 │   ├── Microsoft.Windows.SDK.BuildTools.WinApp.csproj
 │   ├── README.md
 │   ├── build/
@@ -106,7 +101,7 @@ samples/
 |--------|-------------|
 | `_WinAppValidateRunSupport` | Validates prerequisites (CLI exists, manifest exists) |
 | `_WinAppBuildRunArgs` | Builds CLI command arguments (shared by run targets) |
-| `_WinAppInterceptRun` | Overrides RunCommand to use CLI |
+| `_WinAppPrepareRunArguments` | Overrides RunCommand to use CLI |
 | `RunPackagedApp` | Direct target to run packaged app |
 | `WinAppRunSupportInfo` | Diagnostic target showing all properties |
 
@@ -194,21 +189,14 @@ The CLI currently has NativeAOT compilation errors related to Newtonsoft.Json an
 **Resolution:**
 - Wait until https://github.com/NuGet/Home/issues/14408
 
-### 2. Template Certificate Generation
-
-The template creates projects without development certificates. Users will need to:
-- Run `winapp init` to generate certificates, OR
-- Use unpackaged mode first, OR
-- Add certificate generation to the template post-action
-
-### 3. Developer Mode Requirement
+### 2. Developer Mode Requirement
 
 Running packaged apps requires Developer Mode enabled on Windows. The solution should:
 - Detect when Developer Mode is disabled
 - Provide clear error messages
 - Consider documenting this requirement prominently
 
-### 4. First-run Experience
+### 3. First-run Experience
 
 On first `dotnet run`, the CLI needs to:
 - Download Windows SDK Build Tools (if not cached)
@@ -216,9 +204,9 @@ On first `dotnet run`, the CLI needs to:
 
 Consider pre-caching or documenting this.
 
-### 5. Platform Detection
+### 4. Platform Detection
 
-The current implementation defaults to x64. For ARM64 machines, the targets correctly detect architecture, but the template's default Platform may need adjustment.
+The current implementation defaults to x64. For ARM64 machines, the targets correctly detect architecture, but the default Platform may need adjustment.
 
 ## Testing
 
@@ -246,5 +234,4 @@ dotnet run -v:detailed
 1. **Hot Reload Support**: Integrate with `dotnet watch` for live reloading
 2. **Debug Attachment**: Return process ID for debugger attachment in IDEs
 3. **Unpackaged Mode**: Auto-detect and use unpackaged mode when appropriate
-4. **Certificate Management**: Template could include cert generation post-action
-5. **Multiple Apps**: Support projects with multiple Application entries in manifest
+4. **Multiple Apps**: Support projects with multiple Application entries in manifest

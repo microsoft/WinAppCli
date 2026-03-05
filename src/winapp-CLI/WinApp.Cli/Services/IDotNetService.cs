@@ -49,7 +49,14 @@ internal interface IDotNetService
     /// <summary>
     /// Adds or updates a NuGet PackageReference using the dotnet CLI.
     /// </summary>
-    /// <returns>The version that was added/updated</returns>
+    /// <param name="csprojPath">The project file in which to add or update the package reference.</param>
+    /// <param name="packageName">The name of the NuGet package to add or update.</param>
+    /// <param name="version">
+    /// The specific package version to install. When <see langword="null"/>, the dotnet CLI is invoked
+    /// with the <c>--prerelease</c> flag, allowing the latest prerelease version to be selected.
+    /// </param>
+    /// <param name="cancellationToken">A token that can be used to cancel the operation.</param>
+    /// <returns>The version that was added or updated.</returns>
     Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default);
 
     /// <summary>

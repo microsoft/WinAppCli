@@ -1,0 +1,691 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Text;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Tests;
+
+[TestClass]
+public class MsixServiceTests
+{
+    private DirectoryInfo _tempDir = null!;
+
+    [TestInitialize]
+    public void Setup()
+    {
+        _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"MsixTest_{Guid.NewGuid():N}"));
+        _tempDir.Create();
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        if (_tempDir.Exists)
+        {
+            _tempDir.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Creates a minimal AppxManifest.xml with Package root element containing
+    /// the specified InProcessServer and ProxyStub entries.
+    /// </summary>
+    private FileInfo CreateAppxManifest(
+        string filename,
+        (string dllName, string[] activatableClasses)[]? inProcessServers = null,
+        (string dllName, string classId, (string interfaceId, string name)[] interfaces)[]? proxyStubs = null)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version='1.0' encoding='utf-8'?>");
+        sb.AppendLine("<Package xmlns='http://schemas.microsoft.com/appx/manifest/foundation/windows10'>");
+        sb.AppendLine("  <Extensions>");
+
+        if (inProcessServers != null)
+        {
+            foreach (var (dllName, classes) in inProcessServers)
+            {
+                sb.AppendLine("    <Extension Category='windows.activatableClass.inProcessServer'>");
+                sb.AppendLine("      <InProcessServer>");
+                sb.AppendLine($"        <Path>{dllName}</Path>");
+                foreach (var cls in classes)
+                {
+                    sb.AppendLine($"        <ActivatableClass ActivatableClassId='{cls}' ThreadingModel='both'/>");
+                }
+                sb.AppendLine("      </InProcessServer>");
+                sb.AppendLine("    </Extension>");
+            }
+        }
+
+        if (proxyStubs != null)
+        {
+            foreach (var (dllName, classId, interfaces) in proxyStubs)
+            {
+                sb.AppendLine($"    <Extension Category='windows.activatableClass.proxyStub'>");
+                sb.AppendLine($"      <ProxyStub ClassId='{classId}'>");
+                sb.AppendLine($"        <Path>{dllName}</Path>");
+                foreach (var (interfaceId, name) in interfaces)
+                {
+                    sb.AppendLine($"        <Interface InterfaceId='{interfaceId}' Name='{name}'/>");
+                }
+                sb.AppendLine("      </ProxyStub>");
+                sb.AppendLine("    </Extension>");
+            }
+        }
+
+        sb.AppendLine("  </Extensions>");
+        sb.AppendLine("</Package>");
+
+        var path = Path.Combine(_tempDir.FullName, filename);
+        File.WriteAllText(path, sb.ToString());
+        return new FileInfo(path);
+    }
+
+    /// <summary>
+    /// Creates a minimal package.appxfragment with Fragment root element containing
+    /// the specified InProcessServer entries.
+    /// </summary>
+    private FileInfo CreateAppxFragment(
+        string filename,
+        (string dllName, string[] activatableClasses)[]? inProcessServers = null,
+        (string dllName, string classId, (string interfaceId, string name)[] interfaces)[]? proxyStubs = null)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version='1.0' encoding='utf-8'?>");
+        sb.AppendLine("<Fragment xmlns='http://schemas.microsoft.com/appx/manifest/foundation/windows10'>");
+        sb.AppendLine("  <Extensions>");
+
+        if (inProcessServers != null)
+        {
+            foreach (var (dllName, classes) in inProcessServers)
+            {
+                sb.AppendLine("    <Extension Category='windows.activatableClass.inProcessServer'>");
+                sb.AppendLine("      <InProcessServer>");
+                sb.AppendLine($"        <Path>{dllName}</Path>");
+                foreach (var cls in classes)
+                {
+                    sb.AppendLine($"        <ActivatableClass ActivatableClassId='{cls}' ThreadingModel='both'/>");
+                }
+                sb.AppendLine("      </InProcessServer>");
+                sb.AppendLine("    </Extension>");
+            }
+        }
+
+        if (proxyStubs != null)
+        {
+            foreach (var (dllName, classId, interfaces) in proxyStubs)
+            {
+                sb.AppendLine($"    <Extension Category='windows.activatableClass.proxyStub'>");
+                sb.AppendLine($"      <ProxyStub ClassId='{classId}'>");
+                sb.AppendLine($"        <Path>{dllName}</Path>");
+                foreach (var (interfaceId, name) in interfaces)
+                {
+                    sb.AppendLine($"        <Interface InterfaceId='{interfaceId}' Name='{name}'/>");
+                }
+                sb.AppendLine("      </ProxyStub>");
+                sb.AppendLine("    </Extension>");
+            }
+        }
+
+        sb.AppendLine("  </Extensions>");
+        sb.AppendLine("</Fragment>");
+
+        var path = Path.Combine(_tempDir.FullName, filename);
+        File.WriteAllText(path, sb.ToString());
+        return new FileInfo(path);
+    }
+
+    #region AppendAppManifestFromAppx: Package manifest tests
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_PackageManifest_GeneratesInProcessServerEntries()
+    {
+        // Arrange
+        var manifest = CreateAppxManifest("AppxManifest.xml",
+            inProcessServers:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                [
+                    "Microsoft.Windows.AppLifecycle.ActivationRegistrationManager",
+                    "Microsoft.Windows.AppLifecycle.AppInstance"
+                ]),
+                ("Microsoft.Windows.ApplicationModel.DynamicDependency.dll",
+                [
+                    "Microsoft.Windows.ApplicationModel.DynamicDependency.PackageDependency"
+                ])
+            ]);
+
+        var sb = new StringBuilder();
+        var dllFiles = new List<string> { "Microsoft.WindowsAppRuntime.dll", "SomeOther.dll" };
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: dllFiles, inAppxManifests: [manifest]);
+        var result = sb.ToString();
+
+        // Assert
+        Assert.Contains("Microsoft.WindowsAppRuntime.dll", result);
+        Assert.Contains("Microsoft.Windows.AppLifecycle.ActivationRegistrationManager", result);
+        Assert.Contains("Microsoft.Windows.AppLifecycle.AppInstance", result);
+        Assert.Contains("Microsoft.Windows.ApplicationModel.DynamicDependency.PackageDependency", result);
+        Assert.Contains("<winrtv1:activatableClass", result);
+        Assert.Contains("threadingModel='both'", result);
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_PackageManifest_GeneratesProxyStubEntries()
+    {
+        // Arrange
+        var manifest = CreateAppxManifest("AppxManifest.xml",
+            proxyStubs:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                "A5C66C11-43A1-4277-9CF3-6E7C0E101F86",
+                [
+                    ("50BBD3E4-2B46-4BC3-B1D3-F809AAE78943", "IAppActivationArguments"),
+                    ("29C78C83-23A4-4FE1-A5CB-0E9753FA72E0", "IAppActivationArguments2")
+                ])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: [manifest]);
+        var result = sb.ToString();
+
+        // Assert
+        Assert.Contains("<asmv3:comClass clsid='{A5C66C11-43A1-4277-9CF3-6E7C0E101F86}'/>", result);
+        Assert.Contains("<asmv3:comInterfaceProxyStub name='IAppActivationArguments' iid='{50BBD3E4-2B46-4BC3-B1D3-F809AAE78943}'/>", result);
+        Assert.Contains("<asmv3:comInterfaceProxyStub name='IAppActivationArguments2' iid='{29C78C83-23A4-4FE1-A5CB-0E9753FA72E0}'/>", result);
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_ExcludesBlacklistedProxyStubs()
+    {
+        // Arrange: PushNotificationsLongRunningTask and Widgets are excluded
+        var manifest = CreateAppxManifest("AppxManifest.xml",
+            proxyStubs:
+            [
+                ("PushNotificationsLongRunningTask.ProxyStub.dll",
+                "AAAA0000-0000-0000-0000-000000000001",
+                [("BBBB0000-0000-0000-0000-000000000001", "ISomePushInterface")]),
+                ("Microsoft.Windows.Widgets.dll",
+                "AAAA0000-0000-0000-0000-000000000002",
+                [("BBBB0000-0000-0000-0000-000000000002", "ISomeWidgetInterface")]),
+                ("Legit.ProxyStub.dll",
+                "CCCC0000-0000-0000-0000-000000000003",
+                [("DDDD0000-0000-0000-0000-000000000003", "ILegitInterface")])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: [manifest]);
+        var result = sb.ToString();
+
+        // Assert: excluded DLLs should not appear
+        Assert.DoesNotContain("PushNotificationsLongRunningTask", result);
+        Assert.DoesNotContain("Microsoft.Windows.Widgets.dll", result);
+
+        // Assert: legit proxy stub should appear
+        Assert.Contains("Legit.ProxyStub.dll", result);
+        Assert.Contains("ILegitInterface", result);
+    }
+
+    #endregion
+
+    #region AppendAppManifestFromAppx: Fragment manifest tests
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_FragmentManifest_GeneratesInProcessServerEntries()
+    {
+        // Arrange
+        var fragment = CreateAppxFragment("package.appxfragment",
+            inProcessServers:
+            [
+                ("Microsoft.Windows.AI.Search.Experimental.dll",
+                [
+                    "Microsoft.Windows.AI.Search.Experimental.SemanticSearchManager"
+                ])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: [fragment]);
+        var result = sb.ToString();
+
+        // Assert
+        Assert.Contains("Microsoft.Windows.AI.Search.Experimental.dll", result);
+        Assert.Contains("Microsoft.Windows.AI.Search.Experimental.SemanticSearchManager", result);
+        Assert.Contains("<winrtv1:activatableClass", result);
+    }
+
+    #endregion
+
+    #region AppendAppManifestFromAppx: Mixed manifest tests (Package + Fragment)
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_MixedManifests_ProcessesBothTypesInSingleCall()
+    {
+        // Arrange: main AppxManifest.xml (Package) + fragment (Fragment)
+        var mainManifest = CreateAppxManifest("AppxManifest.xml",
+            inProcessServers:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                [
+                    "Microsoft.Windows.AppLifecycle.AppInstance",
+                    "Microsoft.Windows.AppNotifications.AppNotificationManager"
+                ])
+            ],
+            proxyStubs:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                "A5C66C11-43A1-4277-9CF3-6E7C0E101F86",
+                [("50BBD3E4-2B46-4BC3-B1D3-F809AAE78943", "IAppActivationArguments")])
+            ]);
+
+        var fragment = CreateAppxFragment("package.appxfragment",
+            inProcessServers:
+            [
+                ("Microsoft.Windows.AI.Video.dll",
+                [
+                    "Microsoft.Windows.AI.Video.VideoSuperResolution"
+                ])
+            ]);
+
+        var sb = new StringBuilder();
+        var dllFiles = new List<string>
+        {
+            "Microsoft.WindowsAppRuntime.dll",
+            "Microsoft.Windows.AI.Video.dll"
+        };
+
+        // Act: single call with both Package and Fragment manifests
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: dllFiles, inAppxManifests: [mainManifest, fragment]);
+        var result = sb.ToString();
+
+        // Assert: entries from main Package manifest
+        Assert.Contains("Microsoft.Windows.AppLifecycle.AppInstance", result);
+        Assert.Contains("Microsoft.Windows.AppNotifications.AppNotificationManager", result);
+        Assert.Contains("<asmv3:comClass clsid='{A5C66C11-43A1-4277-9CF3-6E7C0E101F86}'/>", result);
+        Assert.Contains("IAppActivationArguments", result);
+
+        // Assert: entries from Fragment
+        Assert.Contains("Microsoft.Windows.AI.Video.dll", result);
+        Assert.Contains("Microsoft.Windows.AI.Video.VideoSuperResolution", result);
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_MixedManifests_AllEntriesWrappedInFileElements()
+    {
+        // Arrange
+        var mainManifest = CreateAppxManifest("AppxManifest.xml",
+            inProcessServers:
+            [
+                ("RuntimeDll.dll", ["Namespace.ClassA"])
+            ]);
+
+        var fragment = CreateAppxFragment("fragment.appxfragment",
+            inProcessServers:
+            [
+                ("FragmentDll.dll", ["Namespace.ClassB"])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: [mainManifest, fragment]);
+        var result = sb.ToString();
+
+        // Assert: each DLL should be wrapped in asmv3:file
+        Assert.Contains("<asmv3:file name='RuntimeDll.dll'>", result);
+        Assert.Contains("<asmv3:file name='FragmentDll.dll'>", result);
+
+        // Count file open and close tags — should match
+        var openCount = CountOccurrences(result, "<asmv3:file name=");
+        var closeCount = CountOccurrences(result, "</asmv3:file>");
+        Assert.AreEqual(openCount, closeCount, "Every <asmv3:file> should have a matching </asmv3:file>");
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_EmptyManifest_ProducesNoOutput()
+    {
+        // Arrange: manifest with no InProcessServer or ProxyStub entries
+        var manifest = CreateAppxManifest("empty.xml");
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: [manifest]);
+
+        // Assert
+        Assert.AreEqual(0, sb.Length, "Empty manifest should produce no output");
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_NoManifests_ProducesNoOutput()
+    {
+        // Arrange
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: false, inDllFiles: [], inAppxManifests: []);
+
+        // Assert
+        Assert.AreEqual(0, sb.Length, "No manifests should produce no output");
+    }
+
+    #endregion
+
+    #region AppendAppManifestFromAppx: redirectDlls tests
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_WithRedirectDlls_AddsLoadFromAttribute()
+    {
+        // Arrange
+        var manifest = CreateAppxManifest("AppxManifest.xml",
+            inProcessServers:
+            [
+                ("Some.Runtime.dll", ["Some.Runtime.SomeClass"])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: true, inDllFiles: ["Some.Runtime.dll", "Leftover.dll"], inAppxManifests: [manifest]);
+        var result = sb.ToString();
+
+        // Assert: InProcessServer DLL should have loadFrom
+        Assert.Contains("loadFrom='%MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY%Some.Runtime.dll'", result);
+
+        // Assert: leftover DLLs (not in any InProcessServer or ProxyStub) should also be listed for Package manifests
+        Assert.Contains("Leftover.dll", result);
+    }
+
+    [TestMethod]
+    public void AppendAppManifestFromAppx_WithRedirectDlls_FragmentDoesNotAddLeftoverDlls()
+    {
+        // Arrange: Fragment manifest — leftover DLLs should NOT be added
+        var fragment = CreateAppxFragment("fragment.appxfragment",
+            inProcessServers:
+            [
+                ("Fragment.dll", ["Fragment.SomeClass"])
+            ]);
+
+        var sb = new StringBuilder();
+
+        // Act
+        MsixService.AppendAppManifestFromAppx(sb, redirectDlls: true, inDllFiles: ["Fragment.dll", "ShouldNotAppear.dll"], inAppxManifests: [fragment]);
+        var result = sb.ToString();
+
+        // Assert: Fragment DLL should be present
+        Assert.Contains("Fragment.dll", result);
+
+        // Assert: leftover DLL should NOT appear (fragments don't add leftover DLLs)
+        Assert.DoesNotContain("ShouldNotAppear.dll", result);
+    }
+
+    #endregion
+
+    #region End-to-end: full manifest generation
+
+    [TestMethod]
+    public void EndToEnd_FullManifest_CombinesPackageFragmentAndProxyStubs()
+    {
+        // Arrange: simulate WinAppSDK layout with main manifest + fragment
+        var mainManifest = CreateAppxManifest("AppxManifest.xml",
+            inProcessServers:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                [
+                    "Microsoft.Windows.AppLifecycle.ActivationRegistrationManager",
+                    "Microsoft.Windows.AppLifecycle.AppInstance",
+                    "Microsoft.Windows.AppNotifications.AppNotificationManager"
+                ]),
+                ("Microsoft.Windows.ApplicationModel.DynamicDependency.dll",
+                [
+                    "Microsoft.Windows.ApplicationModel.DynamicDependency.PackageDependency"
+                ])
+            ],
+            proxyStubs:
+            [
+                ("Microsoft.WindowsAppRuntime.dll",
+                "A5C66C11-43A1-4277-9CF3-6E7C0E101F86",
+                [
+                    ("50BBD3E4-2B46-4BC3-B1D3-F809AAE78943", "IAppActivationArguments"),
+                    ("29C78C83-23A4-4FE1-A5CB-0E9753FA72E0", "IAppActivationArguments2")
+                ])
+            ]);
+
+        var fragment1 = CreateAppxFragment("fragment1.appxfragment",
+            inProcessServers:
+            [
+                ("Microsoft.Windows.AI.Search.Experimental.dll",
+                ["Microsoft.Windows.AI.Search.Experimental.SemanticSearchManager"])
+            ]);
+
+        var fragment2 = CreateAppxFragment("fragment2.appxfragment",
+            inProcessServers:
+            [
+                ("Microsoft.Windows.AI.Video.dll",
+                ["Microsoft.Windows.AI.Video.VideoSuperResolution"])
+            ]);
+
+        // Build full SxS manifest
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version='1.0' encoding='utf-8' standalone='yes'?>");
+        sb.AppendLine("<assembly manifestVersion='1.0'");
+        sb.AppendLine("    xmlns:asmv3='urn:schemas-microsoft-com:asm.v3'");
+        sb.AppendLine("    xmlns:winrtv1='urn:schemas-microsoft-com:winrt.v1'");
+        sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
+
+        var allDllFiles = new List<string>
+        {
+            "Microsoft.WindowsAppRuntime.dll",
+            "Microsoft.Windows.ApplicationModel.DynamicDependency.dll",
+            "Microsoft.Windows.AI.Search.Experimental.dll",
+            "Microsoft.Windows.AI.Video.dll"
+        };
+
+        // Single pass — all manifests together
+        MsixService.AppendAppManifestFromAppx(
+            sb,
+            redirectDlls: false,
+            inDllFiles: allDllFiles,
+            inAppxManifests: [mainManifest, fragment1, fragment2]);
+
+        sb.AppendLine("</assembly>");
+
+        var manifest = sb.ToString();
+
+        // Assert: XML header and wrapper
+        Assert.Contains("<?xml version='1.0'", manifest);
+        Assert.Contains("<assembly manifestVersion='1.0'", manifest);
+        Assert.Contains("</assembly>", manifest);
+
+        // Assert: InProcessServer entries from main package
+        Assert.Contains("Microsoft.Windows.AppLifecycle.ActivationRegistrationManager", manifest);
+        Assert.Contains("Microsoft.Windows.AppLifecycle.AppInstance", manifest);
+        Assert.Contains("Microsoft.Windows.AppNotifications.AppNotificationManager", manifest);
+        Assert.Contains("Microsoft.Windows.ApplicationModel.DynamicDependency.PackageDependency", manifest);
+
+        // Assert: ProxyStub entries from main package
+        Assert.Contains("<asmv3:comClass clsid='{A5C66C11-43A1-4277-9CF3-6E7C0E101F86}'/>", manifest);
+        Assert.Contains("IAppActivationArguments", manifest);
+        Assert.Contains("IAppActivationArguments2", manifest);
+        Assert.Contains("<asmv3:comInterfaceProxyStub", manifest);
+
+        // Assert: InProcessServer entries from fragments
+        Assert.Contains("Microsoft.Windows.AI.Search.Experimental.dll", manifest);
+        Assert.Contains("Microsoft.Windows.AI.Search.Experimental.SemanticSearchManager", manifest);
+        Assert.Contains("Microsoft.Windows.AI.Video.dll", manifest);
+        Assert.Contains("Microsoft.Windows.AI.Video.VideoSuperResolution", manifest);
+
+        // Assert: all asmv3:file elements are properly closed
+        var openCount = CountOccurrences(manifest, "<asmv3:file name=");
+        var closeCount = CountOccurrences(manifest, "</asmv3:file>");
+        Assert.AreEqual(openCount, closeCount, $"Mismatched file elements: {openCount} opens vs {closeCount} closes");
+        Assert.IsGreaterThanOrEqualTo(openCount, 5, $"Expected at least 5 file elements (2 InProcessServer DLLs + 2 fragment DLLs + 1 ProxyStub DLL), got {openCount}");
+    }
+
+    #endregion
+
+    #region AddBuildMetadata Tests
+
+    [TestMethod]
+    public void AddBuildMetadata_CreatesSection_WhenNoneExists()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=", result, "Should add build namespace");
+        Assert.Contains("build:Metadata", result, "Should create build:Metadata section");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+        Assert.Contains("Version=", result, "Should include version");
+        // build should be in IgnorableNamespaces
+        Assert.Contains("IgnorableNamespaces=\"uap build\"", result,
+            "Should add 'build' to IgnorableNamespaces");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_AddsNamespace_WhenBuildNamespaceMissing()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap rescap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=\"http://schemas.microsoft.com/developer/appx/2015/build\"", result);
+        Assert.Contains("IgnorableNamespaces=\"uap rescap build\"", result,
+            "Should append 'build' to existing IgnorableNamespaces");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_PreservesExistingBuildNamespace()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        // Should not duplicate the namespace
+        Assert.AreEqual(1, CountOccurrences(result, "xmlns:build="),
+            "Should not duplicate build namespace");
+        Assert.AreEqual(1, CountOccurrences(result, "<build:Metadata>"),
+            "Should create exactly one build:Metadata section");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_AppendsToExistingSection()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+  <build:Metadata>
+    <build:Item Name=""SomeOtherTool"" Version=""2.0.0"" />
+  </build:Metadata>
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains(@"Name=""SomeOtherTool""", result, "Should preserve existing items");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+        Assert.AreEqual(1, CountOccurrences(result, "<build:Metadata>"),
+            "Should not duplicate build:Metadata section");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_UpdatesExistingWinAppCliEntry()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+  IgnorableNamespaces=""uap build"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+  <build:Metadata>
+    <build:Item Name=""Microsoft.WinAppCli"" Version=""0.0.1"" />
+  </build:Metadata>
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        // Should have exactly one WinAppCli entry (updated, not duplicated)
+        Assert.AreEqual(1, CountOccurrences(result, @"Name=""Microsoft.WinAppCli"""),
+            "Should not duplicate WinAppCli entry");
+        // Old version should be gone
+        Assert.DoesNotContain(@"Version=""0.0.1""", result,
+            "Should replace old version");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_IsIdempotent()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  IgnorableNamespaces=""uap"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var first = MsixService.AddBuildMetadata(manifest);
+        var second = MsixService.AddBuildMetadata(first);
+
+        Assert.AreEqual(first, second, "Calling AddBuildMetadata twice should produce the same result");
+    }
+
+    [TestMethod]
+    public void AddBuildMetadata_CreatesIgnorableNamespaces_WhenAttributeMissing()
+    {
+        // Minimal manifest with no IgnorableNamespaces attribute at all
+        // (matches the test manifest in SignCommandWithMismatchedMsixPublishers)
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""TestApp"" Version=""1.0.0.0"" />
+</Package>";
+
+        var result = MsixService.AddBuildMetadata(manifest);
+
+        Assert.Contains("xmlns:build=", result, "Should add build namespace");
+        Assert.Contains("IgnorableNamespaces=\"build\"", result,
+            "Should create IgnorableNamespaces attribute with 'build' when none existed");
+        Assert.Contains("<build:Metadata>", result, "Should create build:Metadata section");
+        Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static int CountOccurrences(string text, string pattern)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf(pattern, index, StringComparison.Ordinal)) != -1)
+        {
+            count++;
+            index += pattern.Length;
+        }
+        return count;
+    }
+
+    #endregion
+}

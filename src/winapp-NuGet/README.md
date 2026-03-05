@@ -40,7 +40,7 @@ When you run `dotnet run`, this package:
 ## Requirements
 
 - Windows 10 or later
-- .NET 10 or later
+- .NET 8.0 or later
 - Windows App SDK 1.4 or later
 
 ## Troubleshooting

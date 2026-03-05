@@ -6,8 +6,7 @@
     This script installs (or upgrades) the following from the local artifacts folder:
       1. winapp MSIX package (architecture-matched) + its signing certificate
       2. winapp VS Code extension (.vsix)
-      3. dotnet new templates (Microsoft.WindowsAppSDK.Templates nupkg)
-      4. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.WinApp
+      3. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.WinApp
 
     Re-running with newer files will upgrade everything in place.
 .PARAMETER Elevated
@@ -228,33 +227,7 @@ if (-not $vsix) {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 3. dotnet new templates
-# ═══════════════════════════════════════════════════════════════════════════════
-Write-Step "Installing dotnet templates"
-
-$templatePkg = Get-ChildItem -Path $NugetDir -Filter "Microsoft.WindowsAppSDK.Templates.*.nupkg" -ErrorAction SilentlyContinue |
-               Select-Object -First 1
-if (-not $templatePkg) {
-    Write-Skip "No template nupkg found in $NugetDir -- skipping"
-} else {
-    Write-Detail "Package : $($templatePkg.Name)"
-
-    $dotnetCli = Get-Command dotnet -ErrorAction SilentlyContinue
-    if (-not $dotnetCli) {
-        Write-Skip "'dotnet' not found on PATH -- install the .NET SDK first"
-    } else {
-        try {
-            # dotnet new install handles both fresh installs and upgrades
-            & dotnet new install $templatePkg.FullName --force 2>&1 | Out-String | Out-Null
-            Write-Ok "dotnet templates installed / upgraded"
-        } catch {
-            Write-Err "dotnet template install failed: $_"
-        }
-    }
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 4. Local NuGet feed for BuildTools.MSIX.Extras
+# 3. Local NuGet feed for BuildTools.MSIX.Extras
 # ═══════════════════════════════════════════════════════════════════════════════
 Write-Step "Setting up local NuGet feed for BuildTools.MSIX.Extras"
 
@@ -310,7 +283,6 @@ Write-Host "=======================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  winapp CLI  : winapp --version" -ForegroundColor Gray
 Write-Host "  VS Code ext : Extensions sidebar -> search 'winapp'" -ForegroundColor Gray
-Write-Host "  Templates   : dotnet new list winapp" -ForegroundColor Gray
 Write-Host "  NuGet feed  : dotnet nuget list source" -ForegroundColor Gray
 Write-Host ""
 

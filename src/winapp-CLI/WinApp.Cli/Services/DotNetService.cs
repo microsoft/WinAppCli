@@ -345,6 +345,9 @@ internal partial class DotNetService : IDotNetService
                 $"Failed to add package {packageName} {version} (exit code {exitCode}): {message}");
         }
 
+        // NOTE: This regex is tightly coupled to the current "dotnet add package" CLI output format.
+        // If the dotnet team changes that message, this match may fail and we will fall back to
+        // returning the requested version (if provided) or "latest" below.
         var pattern = $@"PackageReference for package '{Regex.Escape(packageName)}' version '([\d\.\-a-zA-Z]+)' (?:added to|updated in) file";
         var match = Regex.Match(output, pattern);
         if (match.Success && match.Groups.Count > 1)

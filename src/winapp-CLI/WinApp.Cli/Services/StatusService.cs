@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
@@ -59,6 +60,10 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
             catch (OperationCanceledException)
             {
             }
+            catch (Exception ex) when (!logger.IsEnabled(LogLevel.Error))
+            {
+                return JsonErrorOutput.Write(ansiConsole, ex.Message);
+            }
         }
 
         if (logger.IsEnabled(LogLevel.Information))
@@ -75,17 +80,25 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         // Get the result
         try
         {
-            result = await taskExecution;
+            result ??= await taskExecution;
         }
         catch (OperationCanceledException)
         {
             return 1;
+        }
+        catch (Exception ex) when (!logger.IsEnabled(LogLevel.Error))
+        {
+            return JsonErrorOutput.Write(ansiConsole, ex.Message);
         }
 
         if (result != null)
         {
             if (result.Value.ReturnCode != 0)
             {
+                if (!logger.IsEnabled(LogLevel.Error))
+                {
+                    return JsonErrorOutput.Write(ansiConsole, result.Value.CompletedMessage?.ToString() ?? "Unknown error");
+                }
                 logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
                 if (!logger.IsEnabled(LogLevel.Debug))
                 {

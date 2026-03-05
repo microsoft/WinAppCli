@@ -146,7 +146,7 @@ winapp pack <input-folder> [options]
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>.msix`)
+- `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
@@ -164,8 +164,16 @@ winapp pack <input-folder> [options]
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
+- Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+**WinRT component discovery:**
+
+When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
+
+- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
+- **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
 
 **Placeholder resolution during packaging:**
 
@@ -300,34 +308,42 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 Create debug identity and launch the packaged application for debugging. Returns the process ID for debugger attachment. This command creates a loose layout package, registers a debug identity, and launches the app.
 
 ```bash
-winapp run [options]
+winapp run <input-folder> [options]
 ```
+
+**Arguments:**
+
+- `input-folder` - Directory containing the app to run (required)
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect in build output or current directory)
-- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside manifest's directory)
+- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from input folder or current directory)
+- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
+- `--no-launch` - Only create the debug identity and register the package without launching the application
 
 **What it does:**
 
 - Locates or generates the AppxManifest.xml
 - Creates and registers a debug identity using a loose layout package
 - Computes the Application User Model ID (AUMID)
-- Launches the application using the registered identity
+- Launches the application using the registered identity (unless `--no-launch` is specified)
 - Prints the process ID (PID) for debugger attachment
 
 **Examples:**
 
 ```bash
-# Register debug identity, and launch app (auto-detect manifest)
-winapp run
+# Register debug identity and launch app from build output
+winapp run ./bin/Debug
 
 # Launch with custom manifest and arguments
-winapp run --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Specify output directory for loose layout package
-winapp run --output-appx-directory ./AppXDebug
+winapp run ./bin/Release --output-appx-directory ./AppXDebug
+
+# Register identity without launching
+winapp run ./bin/Debug --no-launch
 ```
 
 ---
@@ -384,7 +400,7 @@ winapp manifest update-assets mylogo.png --verbose
 
 ### cert
 
-Generate and install development certificates.
+Generate, inspect, and install development certificates.
 
 #### cert generate
 
@@ -398,11 +414,30 @@ winapp cert generate [options]
 
 - `--manifest <appxmanifest.xml>` - Extract publisher information from appxmanifest.xml 
 - `--publisher <name>` - Publisher name for certificate
-- `--output <path>` - Output certificate file path
+- `--output <path>` - Output certificate file path (supports absolute and relative paths)
 - `--password <password>` - Certificate password (default: "password")
 - `--valid-days <valid-days>` - Number of days the certificate is valid (default: 365)
 - `--install` - Install the certificate to the local machine store after generation
 - `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
+- `--export-cer` - Export a `.cer` file (public key only) alongside the `.pfx`. Useful for distributing the public certificate separately for trust installation.
+- `--json` - Format output as JSON for programmatic consumption. Errors are also returned as JSON (`{"error": "..."}`).
+
+#### cert info
+
+Display certificate details from a PFX file. Useful for verifying a certificate matches your manifest before signing.
+
+```bash
+winapp cert info <cert-path> [options]
+```
+
+**Arguments:**
+
+- `cert-path` - Path to the certificate file (PFX)
+
+**Options:**
+
+- `--password <password>` - Password for the PFX file (default: "password")
+- `--json` - Format output as JSON
 
 #### cert install
 
@@ -421,6 +456,18 @@ winapp cert install <cert-path> [options]
 ```bash
 # Generate certificate for specific publisher
 winapp cert generate --publisher "CN=My Company" --output ./mycert.pfx
+
+# Generate certificate and export public key .cer file
+winapp cert generate --publisher "CN=My Company" --export-cer
+
+# Generate certificate with JSON output (for scripting)
+winapp cert generate --publisher "CN=My Company" --json
+
+# View certificate details
+winapp cert info ./mycert.pfx
+
+# View certificate details as JSON
+winapp cert info ./mycert.pfx --json
 
 # Install certificate to machine
 winapp cert install ./mycert.pfx

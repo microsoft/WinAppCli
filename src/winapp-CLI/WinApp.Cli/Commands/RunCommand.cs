@@ -40,7 +40,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
-            Description = "Output directory for the loose layout package. If not specified, A directory named AppX inside the appxmanifest.xml's directory will be used."
+            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used."
         };
 
         ArgsOption = new Option<string>("--args")
@@ -186,11 +186,27 @@ internal partial class RunCommand : Command, IShortDescription
                 PrintJson(aumid, processId, errorMessage: null);
             }
 
-            // Wait for the launched process to exit before returning
-            using var process = Process.GetProcessById((int)processId);
-            await process.WaitForExitAsync(cancellationToken);
+            // Wait for the launched process to exit before returning.
+            // The process may have already exited by the time we get here (common for
+            // fast-starting apps), in which case GetProcessById throws ArgumentException.
+            // PIDs above int.MaxValue cannot be tracked via Process.GetProcessById.
+            if (processId > int.MaxValue)
+            {
+                return 0;
+            }
 
-            return process.ExitCode;
+            try
+            {
+                using var process = Process.GetProcessById(unchecked((int)processId));
+                await process.WaitForExitAsync(cancellationToken);
+                
+                return process.ExitCode;
+            }
+            catch (ArgumentException)
+            {
+                // Process already exited before we could attach — treat as success.
+                return 0;
+            }
         }
 
         void PrintJson(string? aumid, uint? processId, string? errorMessage)
