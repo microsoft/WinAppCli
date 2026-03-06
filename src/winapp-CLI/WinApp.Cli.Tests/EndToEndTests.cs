@@ -709,16 +709,10 @@ public class EndToEndTests : BaseCommandTests
                 await File.WriteAllTextAsync(invalidManifestPath, invalidManifestContent, TestContext.CancellationToken);
 
                 var repoRoot = FindRepositoryRoot();
-                if (repoRoot == null)
-                {
-                    Assert.Inconclusive("Could not find repository root containing version.json.");
-                }
+                Assert.IsNotNull(repoRoot, "Could not find repository root containing version.json.");
 
-                var cliProjectPath = Path.Combine(repoRoot!.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
-                if (!File.Exists(cliProjectPath))
-                {
-                    Assert.Inconclusive($"Native CLI project not found at: {cliProjectPath}");
-                }
+                var cliProjectPath = Path.Combine(repoRoot.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
+                Assert.IsTrue(File.Exists(cliProjectPath), $"Native CLI project not found at: {cliProjectPath}");
 
                 // Act
                 var result = await RunDotnetCommandAsync(
@@ -798,7 +792,6 @@ public class EndToEndTests : BaseCommandTests
                 errorBuilder.AppendLine(e.Data);
             }
         };
-
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -817,16 +810,10 @@ public class EndToEndTests : BaseCommandTests
         CancellationToken cancellationToken)
     {
         var repoRoot = FindRepositoryRoot();
-        if (repoRoot == null)
-        {
-            Assert.Inconclusive("Could not find repository root containing version.json.");
-        }
+        Assert.IsNotNull(repoRoot, "Could not find repository root containing version.json.");
 
-        var cliPath = Path.Combine(repoRoot!.FullName, "src", "winapp-npm", "dist", "cli.js");
-        if (!File.Exists(cliPath))
-        {
-            Assert.Inconclusive($"Node CLI entry point not found at: {cliPath}. Run 'npm run build' in src/winapp-npm.");
-        }
+        var cliPath = Path.Combine(repoRoot.FullName, "src", "winapp-npm", "dist", "cli.js");
+        Assert.IsTrue(File.Exists(cliPath), $"Node CLI entry point not found at: {cliPath}. Run 'npm run build' in src/winapp-npm.");
 
         var processStartInfo = new System.Diagnostics.ProcessStartInfo
         {
@@ -865,7 +852,7 @@ public class EndToEndTests : BaseCommandTests
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            Assert.Inconclusive("Node.js executable was not found on PATH for this test run.");
+            Assert.Fail("Node.js executable was not found on PATH for this test run.");
         }
 
         process.BeginOutputReadLine();
