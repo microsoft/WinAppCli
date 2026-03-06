@@ -111,7 +111,7 @@
               "recursive": false
             },
             "--manifest": {
-              "description": "Path to appxmanifest.xml file to extract publisher information from",
+              "description": "Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -778,7 +778,7 @@
               "recursive": false
             },
             "--manifest": {
-              "description": "Path to AppxManifest.xml file (default: search current directory)",
+              "description": "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -1007,7 +1007,7 @@
           },
           "options": {
             "--manifest": {
-              "description": "Path to AppxManifest.xml file (default: search current directory)",
+              "description": "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,

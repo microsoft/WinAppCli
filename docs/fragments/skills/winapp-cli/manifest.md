@@ -74,7 +74,7 @@ Execution aliases let users launch the app by typing its name in a terminal (e.g
 winapp manifest add-alias
 
 # Specify the alias name explicitly
-winapp manifest add-alias --name myapp.exe
+winapp manifest add-alias --name myapp
 
 # Target a specific manifest file
 winapp manifest add-alias --manifest ./path/to/appxmanifest.xml

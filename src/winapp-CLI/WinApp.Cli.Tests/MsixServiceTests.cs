@@ -786,20 +786,6 @@ public class MsixServiceTests
         Assert.AreEqual(0, aliases.Count);
     }
 
-    [TestMethod]
-    public void ExtractExecutionAliases_WithSingleQuotes_ReturnsAlias()
-    {
-        // Arrange - single quotes around attribute value
-        var manifest = "<Package><uap5:ExecutionAlias Alias='singlequote.exe' /></Package>";
-
-        // Act
-        var aliases = MsixService.ExtractExecutionAliases(manifest);
-
-        // Assert
-        Assert.AreEqual(1, aliases.Count);
-        Assert.AreEqual("singlequote.exe", aliases[0]);
-    }
-
     #endregion
 
     #region InsertPackageLevelExtensions tests

@@ -79,7 +79,7 @@ Execution aliases let users launch the app by typing its name in a terminal (e.g
 winapp manifest add-alias
 
 # Specify the alias name explicitly
-winapp manifest add-alias --name myapp.exe
+winapp manifest add-alias --name myapp
 
 # Target a specific manifest file
 winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
@@ -181,7 +181,7 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--manifest` | Path to AppxManifest.xml file (default: search current directory) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
 
 ### `winapp manifest add-alias`
 
@@ -192,5 +192,5 @@ Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This all
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
-| `--manifest` | Path to AppxManifest.xml file (default: search current directory) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
 | `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |

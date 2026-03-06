@@ -26,7 +26,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to AppxManifest.xml file (default: search current directory)"
+            Description = "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)"
         };
         ManifestOption.AcceptExistingOnly();
     }
