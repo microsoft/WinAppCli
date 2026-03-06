@@ -697,7 +697,8 @@ public class EndToEndTests : BaseCommandTests
                                         Description="Test App"
                                         BackgroundColor="transparent"
                                         Square150x150Logo="Assets/Square150x150Logo.png"
-                                        Square44x44Logo="Assets/Square44x44Logo.png" />
+                                        Square44x44Logo="Assets/Square44x44Logo.png">
+                                    </uap:VisualElements>
                                 </Application>
                             </Applications>
                             <Capabilities>
@@ -730,6 +731,24 @@ public class EndToEndTests : BaseCommandTests
                     Assert.IsTrue(
                         combinedOutput.Contains("Failed to add package identity:", StringComparison.OrdinalIgnoreCase),
                         $"Expected add-package-identity failure message to be surfaced. Output: {combinedOutput}");
+
+                    // Ensure this fails for the intended reason (invalid identity name), not due to
+                    // a malformed VisualElements rewrite (e.g. missing AppListEntry on non-self-closing tags).
+                    var looksLikeIdentityNameValidationError =
+                        combinedOutput.Contains("Name", StringComparison.OrdinalIgnoreCase)
+                        && (combinedOutput.Contains("violates pattern constraint", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("failed to parse", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("invalid", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("not valid", StringComparison.OrdinalIgnoreCase));
+
+                    Assert.IsTrue(
+                        looksLikeIdentityNameValidationError,
+                        $"Expected invalid Identity Name validation to be the failure reason. Output: {combinedOutput}");
+
+                    Assert.IsFalse(
+                        combinedOutput.Contains("AppListEntry", StringComparison.OrdinalIgnoreCase),
+                        $"Did not expect failure to be caused by missing AppListEntry (VisualElements rewrite regression). Output: {combinedOutput}");
+
                     Assert.IsFalse(
                         combinedOutput.Contains("Get-AppPackageLog", StringComparison.OrdinalIgnoreCase)
                             || combinedOutput.Contains("At line:", StringComparison.OrdinalIgnoreCase)

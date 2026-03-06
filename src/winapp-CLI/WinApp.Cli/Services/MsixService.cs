@@ -62,7 +62,7 @@ internal partial class MsixService(
     private static partial Regex AppxApplicationOpenTagRegex();
     [GeneratedRegex(@"\s*EntryPoint\s*=\s*[""'][^""']*[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageEntryPointRegex();
-    [GeneratedRegex(@"(<uap:VisualElements[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    [GeneratedRegex(@"(<uap:VisualElements\b[^>]*?)(\s*/?>)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageVisualElementsOpenTagRegex();
     [GeneratedRegex(@"(\s*<rescap:Capability Name=""runFullTrust"" />)", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AppxPackageRunFullTrustCapabilityRegex();

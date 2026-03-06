@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using System.Text;
+using System.Reflection;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -673,6 +675,114 @@ public class MsixServiceTests
 
     #endregion
 
+        #region Sparse Manifest VisualElements Tests
+
+        [TestMethod]
+        public async Task UpdateAppxManifestContentAsync_AddsAppListEntry_WhenVisualElementsTagEndsWithAngleBracket()
+        {
+                // Arrange
+                var service = CreateMsixServiceForManifestRewriteTests();
+                var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.dll" EntryPoint="Windows.FullTrustApplication">
+            <uap:VisualElements DisplayName="Test App" Square150x150Logo="Assets\\Logo.png">
+            </uap:VisualElements>
+        </Application>
+    </Applications>
+</Package>
+""";
+
+                // Act
+                var result = await InvokeUpdateAppxManifestContentAsync(service, manifest);
+
+                // Assert
+                StringAssert.Contains(result, "<uap:VisualElements DisplayName=\"Test App\" Square150x150Logo=\"Assets\\\\Logo.png\" AppListEntry=\"none\">");
+        }
+
+        [TestMethod]
+        public async Task UpdateAppxManifestContentAsync_AddsAppListEntry_WhenVisualElementsTagSelfCloses()
+        {
+                // Arrange
+                var service = CreateMsixServiceForManifestRewriteTests();
+                var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.dll" EntryPoint="Windows.FullTrustApplication">
+            <uap:VisualElements DisplayName="Test App" Square150x150Logo="Assets\\Logo.png" />
+        </Application>
+    </Applications>
+</Package>
+""";
+
+                // Act
+                var result = await InvokeUpdateAppxManifestContentAsync(service, manifest);
+
+                // Assert
+                StringAssert.Contains(result, "<uap:VisualElements DisplayName=\"Test App\" Square150x150Logo=\"Assets\\\\Logo.png\" AppListEntry=\"none\" />");
+        }
+
+        private MsixService CreateMsixServiceForManifestRewriteTests()
+        {
+                return new MsixService(
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        null!,
+                        NullLogger<MsixService>.Instance,
+                        new CurrentDirectoryProvider(_tempDir.FullName));
+        }
+
+        private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
+        {
+                var updateMethod = typeof(MsixService).GetMethod("UpdateAppxManifestContentAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");
+
+                // selfContained=true and executable=.dll avoid dependency mutation paths, keeping this test focused
+                var resultTask = updateMethod.Invoke(service,
+                [
+                        manifest,
+                        null,
+                        "TestApp.dll",
+                        true,
+                        true,
+                        null,
+                        null!,
+                        CancellationToken.None
+                ]) as Task<string>;
+
+                Assert.IsNotNull(resultTask, "Reflection call did not return Task<string>");
+                return await resultTask;
+        }
+
+    #endregion
+
     #region InsertPackageLevelExtensions tests
 
     [TestMethod]
@@ -761,7 +871,7 @@ public class MsixServiceTests
             "New <Extensions> block should be before </Package>");
     }
 
-    #endregion
+        #endregion
 
     #region Helpers
 
