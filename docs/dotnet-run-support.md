@@ -77,6 +77,8 @@ samples/
 | `WinAppLooseLayoutPath` | `$(OutputPath)AppX\` | Output directory for loose-layout package |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
+| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID. Keeps console I/O in the current terminal. Requires `uap5:ExecutionAlias` in the manifest. Cannot be combined with `WinAppRunNoLaunch`. |
+| `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
 
 ### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
 
@@ -135,6 +137,20 @@ Pass launch arguments:
 ```xml
 <PropertyGroup>
   <WinAppLaunchArgs>--debug --verbose</WinAppLaunchArgs>
+</PropertyGroup>
+```
+
+Launch via execution alias (for console apps):
+```xml
+<PropertyGroup>
+  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+</PropertyGroup>
+```
+
+Register identity without launching:
+```xml
+<PropertyGroup>
+  <WinAppRunNoLaunch>true</WinAppRunNoLaunch>
 </PropertyGroup>
 ```
 

@@ -34,7 +34,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to appxmanifest.xml file to extract publisher information from"
+            Description = "Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from"
         };
         ManifestOption.AcceptExistingOnly();
         ManifestOption.AcceptLegalFilePathsOnly();

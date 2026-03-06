@@ -114,6 +114,8 @@ dotnet run
 
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
+> **Console apps:** By default, AUMID activation opens a new window. For console applications that need stdin/stdout in the current terminal, add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to your `.csproj` and ensure your manifest has a `uap5:ExecutionAlias`. You can add one with `winapp manifest add-alias`.
+
 You should see output similar to:
 ```
 Package Family Name: dotnet-app_12345abcde

@@ -325,6 +325,7 @@ winapp run <input-folder> [options]
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
+- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`.
 
 **What it does:**
 
@@ -348,11 +349,46 @@ winapp run ./bin/Release --output-appx-directory ./AppXDebug
 
 # Register identity without launching
 winapp run ./bin/Debug --no-launch
+
+# Launch via execution alias (console apps run in current terminal)
+winapp run ./bin/Debug --with-alias
 ```
 
 ---
 
-#### manifest update-assets
+#### manifest add-alias
+
+Add an execution alias (`uap5:AppExecutionAlias`) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name.
+
+```bash
+winapp manifest add-alias [options]
+```
+
+**Options:**
+
+- `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
+- `--manifest <path>` - Path to AppxManifest.xml (default: search current directory)
+- `--app-id <id>` - Application Id to add the alias to (default: first Application element)
+
+**What it does:**
+
+- Reads the manifest and infers the alias from the `Executable` attribute (preserving placeholders like `$targetnametoken$.exe`)
+- Adds the `uap5` namespace declaration if not already present
+- Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
+- If the alias already exists, reports it and exits successfully
+
+**Examples:**
+
+```bash
+# Add alias inferred from Executable attribute (e.g. $targetnametoken$.exe)
+winapp manifest add-alias
+
+# Add alias with explicit name
+winapp manifest add-alias --name myapp.exe
+
+# Add alias to specific manifest
+winapp manifest add-alias --manifest ./dist/appxmanifest.xml
+```
 
 Generate all required MSIX image assets from a single source image.
 

@@ -6,6 +6,7 @@ using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.Helpers;
@@ -22,6 +23,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
+    public static Option<bool> WithAliasOption { get; }
 
     static RunCommand()
     {
@@ -52,6 +54,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Only create the debug identity and register the package without launching the application"
         };
+
+        WithAliasOption = new Option<bool>("--with-alias")
+        {
+            Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use \"winapp manifest add-alias\" to add an execution alias to the manifest."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -61,6 +68,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
+        Options.Add(WithAliasOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -69,7 +77,8 @@ internal partial class RunCommand : Command, IShortDescription
         IAppLauncherService appLauncherService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
-        IStatusService statusService) : AsynchronousCommandLineAction
+        IStatusService statusService,
+        ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -78,7 +87,15 @@ internal partial class RunCommand : Command, IShortDescription
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
+            var withAlias = parseResult.GetValue(WithAliasOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Validate mutually exclusive options
+            if (withAlias && noLaunch)
+            {
+                logger.LogError("{UISymbol} --with-alias and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
 
             uint processId = 0;
             string? packageFamilyName = null;
@@ -86,6 +103,7 @@ internal partial class RunCommand : Command, IShortDescription
             string? applicationId = null;
             string? aumid = null;
             string? errorMessage = null;
+            DirectoryInfo? resolvedOutputDir = null;
             var statusMessage = noLaunch ? "Registering packaged application..." : "Launching packaged application...";
             var success = await statusService.ExecuteWithStatusAsync(statusMessage, async (taskContext, cancellationToken) =>
             {
@@ -123,6 +141,7 @@ internal partial class RunCommand : Command, IShortDescription
                     }
 
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    resolvedOutputDir = outputAppXDirectory;
 
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
@@ -147,6 +166,13 @@ internal partial class RunCommand : Command, IShortDescription
 
                     if (noLaunch)
                     {
+                        return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
+                    }
+
+                    if (withAlias)
+                    {
+                        // --with-alias: skip AUMID launch, will launch via execution alias after status completes
+                        taskContext.AddDebugMessage($"{UiSymbols.Rocket} Will launch via execution alias...");
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
@@ -179,6 +205,12 @@ internal partial class RunCommand : Command, IShortDescription
                     PrintJson(aumid, processId: null, errorMessage: null);
                 }
                 return success;
+            }
+
+            // --with-alias: launch via execution alias with inherited stdio
+            if (withAlias)
+            {
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, cancellationToken);
             }
 
             if (isJson)
@@ -231,6 +263,75 @@ internal partial class RunCommand : Command, IShortDescription
             }
             manifestPath = Path.Combine(directory, "Package.appxmanifest");
             return new FileInfo(manifestPath);
+        }
+
+        /// <summary>
+        /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
+        /// The alias process inherits stdin/stdout/stderr so console apps run inline.
+        /// </summary>
+        private async Task<int> LaunchViaExecutionAliasAsync(
+            DirectoryInfo outputAppXDirectory,
+            string? appArgs,
+            string? aumid,
+            bool isJson,
+            CancellationToken cancellationToken)
+        {
+            // Read the processed manifest from the AppX output directory (placeholders already resolved)
+            var processedManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
+            if (!processedManifest.Exists)
+            {
+                logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName);
+                return 1;
+            }
+
+            var content = await File.ReadAllTextAsync(processedManifest.FullName, Encoding.UTF8, cancellationToken);
+            var aliases = MsixService.ExtractExecutionAliases(content);
+
+            if (aliases.Count == 0)
+            {
+                logger.LogError("{UISymbol} No execution alias found in the manifest. Add one with 'winapp manifest add-alias' or use AUMID launch (without --with-alias).", UiSymbols.Error);
+                return 1;
+            }
+
+            var alias = aliases[0]; // Use the first alias
+
+            if (isJson)
+            {
+                PrintJson(aumid, processId: null, errorMessage: null);
+            }
+
+            // Launch the execution alias process with inherited stdio
+            var psi = new ProcessStartInfo
+            {
+                FileName = alias,
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+            };
+
+            if (!string.IsNullOrEmpty(appArgs))
+            {
+                psi.Arguments = appArgs;
+            }
+
+            try
+            {
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}'.", UiSymbols.Error, alias);
+                    return 1;
+                }
+
+                await process.WaitForExitAsync(cancellationToken);
+                return process.ExitCode;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}': {Error}", UiSymbols.Error, alias, ex.Message);
+                return 1;
+            }
         }
     }
 }
