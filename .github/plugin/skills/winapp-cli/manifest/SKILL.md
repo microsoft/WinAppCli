@@ -1,6 +1,6 @@
 ---
 name: winapp-manifest
-description: Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets. Use when creating a Windows app manifest, adding Windows capabilities, or updating app icons and assets.
+description: Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, updating app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions.
 version: 0.2.1
 ---
 ## When to use
@@ -70,6 +70,25 @@ winapp manifest update-assets ./my-logo.png --manifest ./path/to/appxmanifest.xm
 
 The source image should be at least 400x400 pixels (PNG recommended). The command reads the manifest to determine which asset sizes are needed and generates them all.
 
+### Add an execution alias
+
+Execution aliases let users launch the app by typing its name in a terminal (e.g. `myapp`).
+
+```powershell
+# Add alias inferred from the Executable attribute in the manifest
+winapp manifest add-alias
+
+# Specify the alias name explicitly
+winapp manifest add-alias --name myapp
+
+# Target a specific manifest file
+winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
+```
+
+This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
+
+> **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
+
 ## Manifest structure overview
 
 A typical `appxmanifest.xml` looks like:
@@ -114,6 +133,12 @@ Key fields to edit:
 - You can manually edit `appxmanifest.xml` after generation — it's a standard XML file
 - Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
 - For logos, transparent PNGs work best. Use a square image for best results across all sizes.
+- **`$targetnametoken$` placeholder:** When `winapp manifest generate` creates `appxmanifest.xml`, it sets `Application.Executable` to `$targetnametoken$.exe` by default. This is a valid placeholder that gets automatically resolved by `winapp package --executable <name>` at packaging time — you rarely need to override it during manifest generation. If `--executable` is provided to `winapp manifest generate`, winapp reads `FileVersionInfo` from the actual exe to auto-fill package name, description, publisher, and extract an icon, so the exe must already exist on disk.
+
+## Related skills
+
+- After generating a manifest, see `winapp-signing` for certificate setup and `winapp-package` to create the MSIX installer
+- Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
 
 ## Troubleshooting
 | Error | Cause | Solution |
@@ -162,4 +187,16 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--manifest` | Path to AppxManifest.xml file (default: search current directory) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+
+### `winapp manifest add-alias`
+
+Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+| `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |

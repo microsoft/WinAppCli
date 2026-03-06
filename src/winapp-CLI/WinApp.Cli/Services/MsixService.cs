@@ -294,6 +294,26 @@ internal partial class MsixService(
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
 
+    /// <summary>
+    /// Extracts execution alias names from an AppX manifest content.
+    /// Looks for uap5:ExecutionAlias or desktop:ExecutionAlias elements.
+    /// </summary>
+    /// <param name="manifestContent">The content of the appxmanifest.xml file</param>
+    /// <returns>List of alias names (e.g. "myapp.exe")</returns>
+    public static List<string> ExtractExecutionAliases(string manifestContent)
+    {
+        var aliases = new List<string>();
+        var matches = ExecutionAliasRegex().Matches(manifestContent);
+        foreach (Match match in matches)
+        {
+            aliases.Add(match.Groups[1].Value);
+        }
+        return aliases;
+    }
+
+    [GeneratedRegex(@"<(?:uap5|desktop):ExecutionAlias\s+Alias\s*=\s*[""']([^""']*)[""']\s*/>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex ExecutionAliasRegex();
+
     public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs
@@ -1606,23 +1626,39 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
             return manifestContent;
         }
 
-        // Insert the extensions into the manifest
-        // Try to find an existing <Extensions> block to append into
+        return InsertPackageLevelExtensions(manifestContent, extensionsSb.ToString());
+    }
+
+    /// <summary>
+    /// Inserts Package-level extension entries (e.g. InProcessServer) into a manifest string.
+    /// Correctly distinguishes Package-level &lt;Extensions&gt; from Application-level ones.
+    /// </summary>
+    internal static string InsertPackageLevelExtensions(string manifestContent, string extensionEntries)
+    {
+        // IMPORTANT: These are Package-level extensions (e.g. windows.activatableClass.inProcessServer),
+        // NOT Application-level extensions. We must find a Package-level <Extensions> block
+        // (after </Applications>), not an Application-level one (inside <Application>).
         var extensionsCloseTag = "</Extensions>";
-        var extensionsCloseIndex = manifestContent.LastIndexOf(extensionsCloseTag, StringComparison.OrdinalIgnoreCase);
+        var applicationsCloseTag = "</Applications>";
+        var applicationsCloseIndex = manifestContent.IndexOf(applicationsCloseTag, StringComparison.OrdinalIgnoreCase);
+
+        // Look for </Extensions> AFTER </Applications> — that's the Package-level one
+        var extensionsCloseIndex = applicationsCloseIndex >= 0
+            ? manifestContent.IndexOf(extensionsCloseTag, applicationsCloseIndex, StringComparison.OrdinalIgnoreCase)
+            : -1;
 
         if (extensionsCloseIndex >= 0)
         {
-            // Insert before </Extensions>
-            return manifestContent.Insert(extensionsCloseIndex, extensionsSb.ToString());
+            // Insert before the Package-level </Extensions>
+            return manifestContent.Insert(extensionsCloseIndex, extensionEntries);
         }
 
-        // No <Extensions> block exists — create one before </Package>
+        // No Package-level <Extensions> block exists — create one before </Package>
         var packageCloseTag = "</Package>";
         var packageCloseIndex = manifestContent.LastIndexOf(packageCloseTag, StringComparison.OrdinalIgnoreCase);
         if (packageCloseIndex >= 0)
         {
-            var extensionsBlock = $"  <Extensions>\n{extensionsSb}  </Extensions>\n";
+            var extensionsBlock = $"  <Extensions>\n{extensionEntries}  </Extensions>\n";
             return manifestContent.Insert(packageCloseIndex, extensionsBlock);
         }
 

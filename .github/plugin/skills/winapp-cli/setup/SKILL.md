@@ -111,6 +111,12 @@ Use `winapp run` during iterative development — it creates a loose layout pack
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
+## Related skills
+- After setup, see `winapp-manifest` to customize your `appxmanifest.xml`
+- Ready to package? See `winapp-package` to create an MSIX installer
+- Need a certificate? See `winapp-signing` for certificate generation
+- Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
+
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
@@ -188,3 +194,4 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
 | `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
+| `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |
