@@ -582,10 +582,8 @@ internal partial class MsixService(
         }
 
         var configPath = new FileInfo(Path.Combine(packageDir.FullName, "priconfig.xml"));
-        var defaultScale = DetectDefaultScale(priResourceCandidates);
-        var arguments = $@"createconfig /cf ""{configPath}"" /dq lang-{language}_scale-{defaultScale} /pv {platformVersion} /o";
+        var arguments = $@"createconfig /cf ""{configPath}"" /dq lang-{language}_scale-200 /pv {platformVersion} /o";
 
-        taskContext.AddDebugMessage($"Auto-detected default scale qualifier: scale-{defaultScale}");
         taskContext.AddDebugMessage("Creating PRI configuration file...");
 
         try
@@ -2520,57 +2518,6 @@ $1");
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
-    }
-
-    /// <summary>
-    /// Scans resource candidate file paths for scale-* MRT qualifiers and returns the
-    /// most commonly used scale value. Falls back to 200 (the Visual Studio / modern
-    /// WinUI default) when no scale qualifiers are found.
-    /// </summary>
-    internal static int DetectDefaultScale(IEnumerable<string> resourceCandidates)
-    {
-        // Count occurrences of each scale value found in filenames
-        var scaleCounts = new Dictionary<int, int>();
-        var scaleRegex = ScaleQualifierRegex();
-
-        foreach (var path in resourceCandidates)
-        {
-            var fileName = Path.GetFileNameWithoutExtension(path);
-            if (string.IsNullOrEmpty(fileName))
-            {
-                continue;
-            }
-
-            // Split by '.' to find qualifier segments (e.g. "Logo.scale-200" -> ["Logo", "scale-200"])
-            var segments = fileName.Split('.');
-            foreach (var segment in segments)
-            {
-                // A segment may be a compound qualifier with '_' (e.g. "scale-200_theme-dark")
-                var tokens = segment.Split('_');
-                foreach (var token in tokens)
-                {
-                    var match = scaleRegex.Match(token);
-                    if (match.Success && int.TryParse(match.Groups[1].Value, out var scaleValue))
-                    {
-                        scaleCounts[scaleValue] = scaleCounts.GetValueOrDefault(scaleValue) + 1;
-                    }
-                }
-            }
-        }
-
-        if (scaleCounts.Count == 0)
-        {
-            // No scale qualifiers found — default to 200 (matches Visual Studio behavior
-            // for modern WinUI / packaged app templates).
-            return 200;
-        }
-
-        // Pick the most frequent scale; on ties prefer the smallest value.
-        return scaleCounts
-            .OrderByDescending(kv => kv.Value)
-            .ThenBy(kv => kv.Key)
-            .First()
-            .Key;
     }
 
     // ltr / rtl
