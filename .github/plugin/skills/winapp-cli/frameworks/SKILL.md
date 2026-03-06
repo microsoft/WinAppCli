@@ -79,3 +79,11 @@ C++ projects use winapp primarily for SDK projections (CppWinRT headers) and pac
 - Tauri has its own bundler for `.msi` installers
 - Use winapp specifically for **MSIX distribution** and package identity features
 - winapp adds capabilities beyond what Tauri's built-in bundler provides (identity, sparse packages, Windows API access)
+
+## Related skills
+- **Setup**: `winapp-setup` — initial project setup with `winapp init`
+- **Manifest**: `winapp-manifest` — creating and customizing `appxmanifest.xml`
+- **Signing**: `winapp-signing` — certificate generation and management
+- **Packaging**: `winapp-package` — creating MSIX installers from build output
+- **Identity**: `winapp-identity` — enabling package identity for Windows APIs during development
+- Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart

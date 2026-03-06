@@ -109,6 +109,12 @@ Key fields to edit:
 - You can manually edit `appxmanifest.xml` after generation — it's a standard XML file
 - Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
 - For logos, transparent PNGs work best. Use a square image for best results across all sizes.
+- **`$targetnametoken$` placeholder:** When `winapp manifest generate` creates `appxmanifest.xml`, it sets `Application.Executable` to `$targetnametoken$.exe` by default. This is a valid placeholder that gets automatically resolved by `winapp package --executable <name>` at packaging time — you rarely need to override it during manifest generation. If `--executable` is provided to `winapp manifest generate`, winapp reads `FileVersionInfo` from the actual exe to auto-fill package name, description, publisher, and extract an icon, so the exe must already exist on disk.
+
+## Related skills
+
+- After generating a manifest, see `winapp-signing` for certificate setup and `winapp-package` to create the MSIX installer
+- Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
 
 ## Troubleshooting
 | Error | Cause | Solution |

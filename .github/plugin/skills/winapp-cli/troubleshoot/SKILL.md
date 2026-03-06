@@ -96,6 +96,14 @@ Does the project have an appxmanifest.xml?
 - Framework-specific guides: https://github.com/microsoft/WinAppCli/tree/main/docs/guides
 - File an issue: https://github.com/microsoft/WinAppCli/issues
 
+## Related skills
+- **Setup & init**: `winapp-setup` — adding Windows support to a project
+- **Manifest**: `winapp-manifest` — creating and editing `appxmanifest.xml`
+- **Signing**: `winapp-signing` — certificate generation and management
+- **Packaging**: `winapp-package` — creating MSIX installers
+- **Identity**: `winapp-identity` — enabling package identity for Windows APIs
+- **Frameworks**: `winapp-frameworks` — framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
+
 
 ## Command Reference
 
