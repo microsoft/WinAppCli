@@ -1,12 +1,13 @@
 ---
 name: winapp-package
-description: Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, or distributing a desktop app.
+description: Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline.
 version: 0.2.1
 ---
 ## When to use
 
 Use this skill when:
 - **Creating an MSIX installer** from a built app for distribution or testing
+- **Packaging any Windows app** — GUI apps, console apps, CLI tools, services, or background processes
 - **Signing a package** with a development or production certificate
 - **Bundling the Windows App SDK runtime** for self-contained deployment
 
@@ -111,6 +112,25 @@ winapp create-external-catalog "./bin/Release" --recursive --output ./catalog/Co
 
 This hashes executables in the specified directories so Windows trusts them when running with sparse package identity.
 
+## CI/CD
+
+### GitHub Actions
+
+Use the `microsoft/setup-winapp` action to install winapp on GitHub-hosted runners:
+
+```yaml
+- uses: microsoft/setup-winapp@v1
+
+- name: Package
+  run: winapp package ./dist --cert ${{ secrets.CERT_PATH }} --cert-password ${{ secrets.CERT_PASSWORD }} --quiet
+```
+
+**Tips for CI/CD pipelines:**
+- Use `--quiet` (or `-q`) to suppress progress output
+- Use `--if-exists skip` with `winapp cert generate` to avoid regenerating existing certificates
+- Store your PFX certificate as a repository secret and decode it in CI
+- Use `--use-defaults` (or `--no-prompt`) with `winapp init` to avoid interactive prompts
+
 ## Tips
 
 - The `package` command aliases to `pack` — both work identically
@@ -119,6 +139,11 @@ This hashes executables in the specified directories so Windows trusts them when
 - For framework-specific packaging paths (Electron, .NET, Rust, etc.), see the `winapp-frameworks` skill
 - The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `appxmanifest.xml`
 - For production distribution, use a certificate from a trusted CA and add `--timestamp` when signing with `winapp sign`
+
+## Related skills
+- Need a manifest first? See `winapp-manifest` to generate `appxmanifest.xml`
+- Need a certificate? See `winapp-signing` for certificate generation and management
+- Having issues? See `winapp-troubleshoot` for a command selection flowchart and error solutions
 
 ## Troubleshooting
 | Error | Cause | Solution |
