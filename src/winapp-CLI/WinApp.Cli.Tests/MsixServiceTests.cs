@@ -774,6 +774,65 @@ public class MsixServiceTests
         Assert.IsNull(result);
     }
 
+    [TestMethod]
+    [DataRow((ushort)0x014C, "x86", DisplayName = "x86 (IMAGE_FILE_MACHINE_I386)")]
+    [DataRow((ushort)0x8664, "x64", DisplayName = "x64 (IMAGE_FILE_MACHINE_AMD64)")]
+    [DataRow((ushort)0xAA64, "arm64", DisplayName = "arm64 (IMAGE_FILE_MACHINE_ARM64)")]
+    [DataRow((ushort)0x01C4, "arm", DisplayName = "arm (IMAGE_FILE_MACHINE_ARMNT)")]
+    public void DetectPeArchitecture_ReturnsExpected_ForValidPeHeader(ushort machineType, string expected)
+    {
+        // Arrange — build a minimal valid PE with the given Machine value.
+        // DOS header: MZ magic at offset 0, e_lfanew at offset 0x3C pointing to PE header at 0x80.
+        // PE header: PE\0\0 signature followed by the Machine field.
+        var pe = new byte[0x80 + 6]; // DOS header (128 bytes) + PE sig (4) + Machine (2)
+        pe[0] = 0x4D; // 'M'
+        pe[1] = 0x5A; // 'Z'
+        // e_lfanew at offset 0x3C = 0x80 (little-endian)
+        pe[0x3C] = 0x80;
+        // PE signature at offset 0x80
+        pe[0x80] = 0x50; // 'P'
+        pe[0x81] = 0x45; // 'E'
+        pe[0x82] = 0x00;
+        pe[0x83] = 0x00;
+        // Machine field at offset 0x84 (little-endian)
+        pe[0x84] = (byte)(machineType & 0xFF);
+        pe[0x85] = (byte)(machineType >> 8);
+
+        var path = Path.Combine(_tempDir.FullName, $"test_{machineType:X4}.exe");
+        File.WriteAllBytes(path, pe);
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.AreEqual(expected, result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForUnknownMachineType()
+    {
+        // Arrange — valid PE structure but with an unrecognized Machine value (0xFFFF)
+        var pe = new byte[0x80 + 6];
+        pe[0] = 0x4D;
+        pe[1] = 0x5A;
+        pe[0x3C] = 0x80;
+        pe[0x80] = 0x50;
+        pe[0x81] = 0x45;
+        pe[0x82] = 0x00;
+        pe[0x83] = 0x00;
+        pe[0x84] = 0xFF;
+        pe[0x85] = 0xFF;
+
+        var path = Path.Combine(_tempDir.FullName, "unknown_machine.exe");
+        File.WriteAllBytes(path, pe);
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
     #endregion
 
     #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
