@@ -81,6 +81,12 @@ After running, launch your exe normally — Windows will recognize it as having 
 - If you have both a debug identity and an installed MSIX, they may conflict — use `--keep-identity` carefully
 - For Electron apps, use `npx winapp node add-electron-debug-identity` instead (handles Electron-specific paths)
 
+## Related skills
+- Need a manifest? See `winapp-manifest` to generate `appxmanifest.xml`
+- Need a certificate? See `winapp-signing` — a trusted cert is required for identity registration
+- Ready for full MSIX distribution? See `winapp-package` to create an installer
+- Having issues? See `winapp-troubleshoot` for common error solutions
+
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
