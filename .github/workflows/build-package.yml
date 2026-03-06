@@ -12,6 +12,26 @@ permissions:
   pull-requests: write  # Required for binary size report comments
 
 jobs:
+  # Fast docs validation - runs in parallel with the main build to fail PRs early on doc drift
+  # Only builds the CLI binary (no tests, npm, or MSIX) so it completes much faster
+  validate-docs:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Build and publish CLI (x64 only)
+      run: dotnet publish src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-x64 --self-contained -o artifacts/cli/win-x64
+
+    - name: Validate CLI schema and agent skills
+      run: .\scripts\validate-llm-docs.ps1 -FailOnDrift
+
   build-and-package:
     runs-on: windows-latest
     steps:
@@ -51,11 +71,10 @@ jobs:
         echo "base_version=$baseVersion" >> $env:GITHUB_OUTPUT
         echo "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
     
-    # Validate LLM documentation is up-to-date (runs after build so CLI binary exists, but docs weren't regenerated)
-    - name: Validate LLM documentation
-      run: |
-        $FailOnDrift = ("${{ github.event_name }}" -eq "pull_request" -and "${{ github.base_ref }}" -eq "main")
-        .\scripts\validate-llm-docs.ps1 -FailOnDrift:$FailOnDrift
+    # Validate CLI schema and agent skills on push to main (warning only, not blocking)
+    - name: Validate CLI schema and agent skills
+      if: github.event_name != 'pull_request'
+      run: .\scripts\validate-llm-docs.ps1 -FailOnDrift:$false
     
     # Upload all build artifacts
     - name: Upload test results

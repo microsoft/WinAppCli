@@ -1,8 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Generated LLM documentation - always use LF to avoid script regeneration issues
+# Generated LLM documentation - always use LF to match what generate-llm-docs.ps1 writes
 docs/cli-schema.json text eol=lf
+.github/plugin/plugin.json text eol=lf
+.github/plugin/skills/** text eol=lf
 
 # Shell scripts should use LF
 *.sh text eol=lf

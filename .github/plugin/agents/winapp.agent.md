@@ -1,6 +1,6 @@
 ---
 name: winapp
-description: Expert in Windows app development, packaging, and distribution. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, or distributing apps through the Microsoft Store. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
+description: Expert in Windows app development, packaging, and distribution. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, distributing apps through the Microsoft Store, adding execution aliases or file type associations, or adding MSIX packaging to build scripts or CI/CD pipelines. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
 infer: true
 ---
 

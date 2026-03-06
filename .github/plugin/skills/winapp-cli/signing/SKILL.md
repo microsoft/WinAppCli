@@ -91,6 +91,11 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 - Use `--timestamp` when signing production builds so the signature survives certificate expiration
 - You can also use the shorthand: `winapp package ./dist --generate-cert --install-cert` to do everything in one command
 
+## Related skills
+- Need to create a manifest first? See `winapp-manifest` to generate `appxmanifest.xml` with correct publisher info
+- Ready to package? See `winapp-package` to create and sign an MSIX in one step
+- Having issues? See `winapp-troubleshoot` for common error solutions
+
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|

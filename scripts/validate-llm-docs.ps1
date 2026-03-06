@@ -39,6 +39,11 @@ if (-not (Test-Path $CliPath)) {
 Write-Host "[VALIDATE] Checking CLI schema and agent skills..." -ForegroundColor Blue
 Write-Host "CLI path: $CliPath" -ForegroundColor Gray
 
+# Read base version from version.json — used to fix up the version in freshly generated
+# output so the comparison still catches stale committed versions even when the CLI binary
+# was built without a real version (e.g. plain dotnet publish defaults to 1.0.0).
+$BaseVersion = (Get-Content (Join-Path $ProjectRoot "version.json") | ConvertFrom-Json).version
+
 # Check if doc files exist
 if (-not (Test-Path $SchemaPath)) {
     Write-Host "::error::docs/cli-schema.json not found. Run 'scripts/build-cli.ps1' to build CLI and generate docs." -ForegroundColor Red
@@ -68,6 +73,11 @@ $SchemaDrift = $false
 try {
     $FreshObj = $FreshSchemaNormalized | ConvertFrom-Json -Depth 100
     $CommittedObj = $CommittedSchemaNormalized | ConvertFrom-Json -Depth 100
+    
+    # The CLI binary may not have the real version (plain dotnet publish defaults to 1.0.0).
+    # Replace the fresh version with the base version from version.json so the comparison
+    # still validates that committed docs carry the correct version.
+    $FreshObj.version = $BaseVersion
     
     # Re-serialize both with consistent formatting for comparison
     $FreshReserialized = $FreshObj | ConvertTo-Json -Depth 100 -Compress
@@ -148,6 +158,23 @@ try {
     $GenerateScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
     $TempSkills = Join-Path $TempDocsPath "skills\winapp-cli"
     & $GenerateScript -CliPath $CliPath -DocsPath $TempDocsPath -SkillsPath $TempSkills | Out-Null
+    
+    # Fix up the version in the freshly generated skill files.
+    # The CLI binary may not have the real version (plain dotnet publish defaults to 1.0.0).
+    # Only replace the version in the YAML frontmatter — not in example commands/templates
+    # which may legitimately contain the same string (e.g. "MyApp_1.0.0_x64").
+    $TempSchemaPath = Join-Path $TempDocsPath "cli-schema.json"
+    if (Test-Path $TempSchemaPath) {
+        $tempSchemaObj = (Get-Content $TempSchemaPath -Raw) | ConvertFrom-Json -Depth 100
+        $freshCliVersion = $tempSchemaObj.version
+        if ($freshCliVersion -and $freshCliVersion -ne $BaseVersion) {
+            Get-ChildItem -Path $TempSkills -Filter "*.md" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                $content = Get-Content $_.FullName -Raw
+                $content = $content -replace "(?m)^(version:\s*)$([regex]::Escape($freshCliVersion))$", "`${1}$BaseVersion"
+                [System.IO.File]::WriteAllText($_.FullName, $content)
+            }
+        }
+    }
     
     $SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks")
     $SkillsDrift = $false

@@ -81,9 +81,11 @@ Look at the `docs\cli-schema.json` for the full schema to know what the cli can 
 
 ## Auto-generation pipeline
 
-The following files are auto-generated from `cli-schema.json` via `scripts/generate-llm-docs.ps1`. Do not run this script directly and run via the `build-cli.ps1` script. Do not edit these files directly:
+The following files are auto-generated from `cli-schema.json` via `scripts/generate-llm-docs.ps1`. Do not run this script directly and run via the `build-cli.ps1` script. **Do not edit these files directly — your changes will be overwritten:**
 
 - `docs/cli-schema.json` — machine-readable schema
 - `.github/plugin/skills/winapp-cli/*/SKILL.md` — Copilot CLI plugin skills
 
-The hand-written workflow content lives in `docs/fragments/skills/winapp-cli/`. Running `scripts/build-cli.ps1` triggers regeneration automatically.
+**To edit skill content**, modify the hand-written templates in `docs/fragments/skills/winapp-cli/`. Each template file (e.g., `package.md`, `manifest.md`) contains the workflow docs, examples, and troubleshooting content. The auto-generation script appends command reference tables from the CLI schema. Running `scripts/build-cli.ps1` triggers regeneration automatically.
+
+Skill descriptions (used for Copilot skill matching) are defined in the `$SkillDescriptions` hashtable in `scripts/generate-llm-docs.ps1`.

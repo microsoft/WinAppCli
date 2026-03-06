@@ -162,6 +162,13 @@ try
         exit 1
     }
 
+    npm run generate-commands
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Command code generation failed"
+        Pop-Location
+        exit 1
+    }
+
     npm run compile
     if ($LASTEXITCODE -ne 0) {
         Write-Error "TypeScript compilation failed"
