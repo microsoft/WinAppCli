@@ -111,6 +111,8 @@
       <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 

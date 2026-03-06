@@ -673,6 +673,135 @@ public class MsixServiceTests
 
     #endregion
 
+    #region ExtractExecutionAliases tests
+
+    [TestMethod]
+    public void ExtractExecutionAliases_WithUap5Alias_ReturnsAlias()
+    {
+        // Arrange
+        var manifest = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5">
+              <Applications>
+                <Application Id="App">
+                  <Extensions>
+                    <uap5:Extension Category="windows.appExecutionAlias">
+                      <uap5:AppExecutionAlias>
+                        <uap5:ExecutionAlias Alias="myapp.exe" />
+                      </uap5:AppExecutionAlias>
+                    </uap5:Extension>
+                  </Extensions>
+                </Application>
+              </Applications>
+            </Package>
+            """;
+
+        // Act
+        var aliases = MsixService.ExtractExecutionAliases(manifest);
+
+        // Assert
+        Assert.AreEqual(1, aliases.Count);
+        Assert.AreEqual("myapp.exe", aliases[0]);
+    }
+
+    [TestMethod]
+    public void ExtractExecutionAliases_WithDesktopAlias_ReturnsAlias()
+    {
+        // Arrange
+        var manifest = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
+              <Applications>
+                <Application Id="App">
+                  <Extensions>
+                    <desktop:Extension Category="windows.appExecutionAlias">
+                      <desktop:ExecutionAlias Alias="desktopapp.exe" />
+                    </desktop:Extension>
+                  </Extensions>
+                </Application>
+              </Applications>
+            </Package>
+            """;
+
+        // Act
+        var aliases = MsixService.ExtractExecutionAliases(manifest);
+
+        // Assert
+        Assert.AreEqual(1, aliases.Count);
+        Assert.AreEqual("desktopapp.exe", aliases[0]);
+    }
+
+    [TestMethod]
+    public void ExtractExecutionAliases_WithMultipleAliases_ReturnsAll()
+    {
+        // Arrange
+        var manifest = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5">
+              <Applications>
+                <Application Id="App">
+                  <Extensions>
+                    <uap5:Extension Category="windows.appExecutionAlias">
+                      <uap5:AppExecutionAlias>
+                        <uap5:ExecutionAlias Alias="app1.exe" />
+                        <uap5:ExecutionAlias Alias="app2.exe" />
+                      </uap5:AppExecutionAlias>
+                    </uap5:Extension>
+                  </Extensions>
+                </Application>
+              </Applications>
+            </Package>
+            """;
+
+        // Act
+        var aliases = MsixService.ExtractExecutionAliases(manifest);
+
+        // Assert
+        Assert.AreEqual(2, aliases.Count);
+        Assert.AreEqual("app1.exe", aliases[0]);
+        Assert.AreEqual("app2.exe", aliases[1]);
+    }
+
+    [TestMethod]
+    public void ExtractExecutionAliases_NoAliases_ReturnsEmptyList()
+    {
+        // Arrange
+        var manifest = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Applications>
+                <Application Id="App" Executable="app.exe">
+                </Application>
+              </Applications>
+            </Package>
+            """;
+
+        // Act
+        var aliases = MsixService.ExtractExecutionAliases(manifest);
+
+        // Assert
+        Assert.AreEqual(0, aliases.Count);
+    }
+
+    [TestMethod]
+    public void ExtractExecutionAliases_WithSingleQuotes_ReturnsAlias()
+    {
+        // Arrange - single quotes around attribute value
+        var manifest = "<Package><uap5:ExecutionAlias Alias='singlequote.exe' /></Package>";
+
+        // Act
+        var aliases = MsixService.ExtractExecutionAliases(manifest);
+
+        // Assert
+        Assert.AreEqual(1, aliases.Count);
+        Assert.AreEqual("singlequote.exe", aliases[0]);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static int CountOccurrences(string text, string pattern)

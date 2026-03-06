@@ -10,7 +10,7 @@
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
+  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10 uap5">
 
   <Identity
     Name="dotnet-app"

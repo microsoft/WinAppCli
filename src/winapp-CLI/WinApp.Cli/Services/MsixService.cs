@@ -293,6 +293,26 @@ internal partial class MsixService(
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
 
+    /// <summary>
+    /// Extracts execution alias names from an AppX manifest content.
+    /// Looks for uap5:ExecutionAlias or desktop:ExecutionAlias elements.
+    /// </summary>
+    /// <param name="manifestContent">The content of the appxmanifest.xml file</param>
+    /// <returns>List of alias names (e.g. "myapp.exe")</returns>
+    public static List<string> ExtractExecutionAliases(string manifestContent)
+    {
+        var aliases = new List<string>();
+        var matches = ExecutionAliasRegex().Matches(manifestContent);
+        foreach (Match match in matches)
+        {
+            aliases.Add(match.Groups[1].Value);
+        }
+        return aliases;
+    }
+
+    [GeneratedRegex(@"<(?:uap5|desktop):ExecutionAlias\s+Alias\s*=\s*[""']([^""']*)[""']\s*/>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex ExecutionAliasRegex();
+
     public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs

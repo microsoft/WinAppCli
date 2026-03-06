@@ -6,6 +6,8 @@
     <RootNamespace>dotnet_app</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Launch via execution alias so console I/O stays in the current terminal -->
+    <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,11 +16,15 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
   </ItemGroup>
 
-     <!-- Automatically package as MSIX after Release builds -->
-  <Target Name="PackageMsix" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <!-- Package and sign directly from build output -->
-    <Exec Command="winapp pack &quot;$(TargetDir.TrimEnd('\'))&quot; --manifest &quot;$(ProjectDir)appxmanifest.xml&quot; --cert &quot;$(ProjectDir)devcert.pfx&quot;" 
-          WorkingDirectory="$(ProjectDir)" 
+  <!-- Automatically package as MSIX after Publish -->
+  <Target Name="PackageMsix" AfterTargets="Publish">
+    <!-- Use cert only if devcert.pfx exists -->
+    <PropertyGroup>
+      <_CertArg Condition="Exists('$(ProjectDir)devcert.pfx')"> --cert "$(ProjectDir)devcert.pfx"</_CertArg>
+      <_CertArg Condition="!Exists('$(ProjectDir)devcert.pfx')"></_CertArg>
+    </PropertyGroup>
+    <Exec Command="&quot;$(WinAppCliPath)&quot; pack &quot;$(PublishDir.TrimEnd('\'))&quot; --manifest &quot;$(ProjectDir)appxmanifest.xml&quot;$(_CertArg)"
+          WorkingDirectory="$(ProjectDir)"
           IgnoreExitCode="false" />
   </Target>
 

@@ -343,4 +343,70 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    #region --with-alias option tests
+
+    [TestMethod]
+    public void ParseOptions_WithAlias_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--with-alias"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.WithAliasOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_WithAliasNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.WithAliasOption));
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAliasAndNoLaunch_ReturnsError()
+    {
+        // Arrange - --with-alias and --no-launch are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--with-alias", "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --with-alias and --no-launch are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_RegistersIdentityButDoesNotLaunchByAumid()
+    {
+        // Arrange - manifest in input folder, --with-alias means no AUMID launch.
+        // The LaunchViaExecutionAliasAsync will fail because there's no processed manifest
+        // in the AppX output directory, but we can verify that it does NOT use AUMID launch.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--with-alias"]);
+
+        // Assert - identity should be created but AUMID launch should NOT be used
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should NOT be launched via AUMID when --with-alias is specified");
+    }
+
+    #endregion
 }

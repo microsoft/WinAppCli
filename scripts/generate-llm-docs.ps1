@@ -92,7 +92,7 @@ $SkillCommandMap = @{
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "cert info", "sign")
-    "manifest"     = @("manifest generate", "manifest update-assets")
+    "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot" = @("get-winapp-path", "tool", "store")
     "frameworks"   = @()       # No auto-generated command sections — links to guides
 }
