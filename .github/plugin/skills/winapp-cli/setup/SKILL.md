@@ -96,6 +96,12 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
+## Related skills
+- After setup, see `winapp-manifest` to customize your `appxmanifest.xml`
+- Ready to package? See `winapp-package` to create an MSIX installer
+- Need a certificate? See `winapp-signing` for certificate generation
+- Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
+
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|

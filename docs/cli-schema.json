@@ -74,6 +74,7 @@
             "--if-exists": {
               "description": "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
               "hidden": false,
+              "helpName": "error|overwrite|skip",
               "valueType": "WinApp.Cli.Models.IfExists",
               "hasDefaultValue": true,
               "defaultValue": "Error",
@@ -484,6 +485,7 @@
         "--if-exists": {
           "description": "Behavior when output file already exists",
           "hidden": false,
+          "helpName": "error|overwrite|skip",
           "valueType": "WinApp.Cli.Models.IfExists",
           "hasDefaultValue": true,
           "defaultValue": "Error",
@@ -809,6 +811,7 @@
             "--if-exists": {
               "description": "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
               "hidden": false,
+              "helpName": "error|overwrite|skip",
               "valueType": "WinApp.Cli.Models.IfExists",
               "hasDefaultValue": true,
               "defaultValue": "Error",
@@ -874,6 +877,7 @@
             "--template": {
               "description": "Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs)",
               "hidden": false,
+              "helpName": "packaged|sparse",
               "valueType": "WinApp.Cli.Models.ManifestTemplates",
               "hasDefaultValue": true,
               "defaultValue": "Packaged",
