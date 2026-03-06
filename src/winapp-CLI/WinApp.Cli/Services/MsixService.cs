@@ -1443,23 +1443,39 @@ internal partial class MsixService(
             return manifestContent;
         }
 
-        // Insert the extensions into the manifest
-        // Try to find an existing <Extensions> block to append into
+        return InsertPackageLevelExtensions(manifestContent, extensionsSb.ToString());
+    }
+
+    /// <summary>
+    /// Inserts Package-level extension entries (e.g. InProcessServer) into a manifest string.
+    /// Correctly distinguishes Package-level &lt;Extensions&gt; from Application-level ones.
+    /// </summary>
+    internal static string InsertPackageLevelExtensions(string manifestContent, string extensionEntries)
+    {
+        // IMPORTANT: These are Package-level extensions (e.g. windows.activatableClass.inProcessServer),
+        // NOT Application-level extensions. We must find a Package-level <Extensions> block
+        // (after </Applications>), not an Application-level one (inside <Application>).
         var extensionsCloseTag = "</Extensions>";
-        var extensionsCloseIndex = manifestContent.LastIndexOf(extensionsCloseTag, StringComparison.OrdinalIgnoreCase);
+        var applicationsCloseTag = "</Applications>";
+        var applicationsCloseIndex = manifestContent.IndexOf(applicationsCloseTag, StringComparison.OrdinalIgnoreCase);
+
+        // Look for </Extensions> AFTER </Applications> — that's the Package-level one
+        var extensionsCloseIndex = applicationsCloseIndex >= 0
+            ? manifestContent.IndexOf(extensionsCloseTag, applicationsCloseIndex, StringComparison.OrdinalIgnoreCase)
+            : -1;
 
         if (extensionsCloseIndex >= 0)
         {
-            // Insert before </Extensions>
-            return manifestContent.Insert(extensionsCloseIndex, extensionsSb.ToString());
+            // Insert before the Package-level </Extensions>
+            return manifestContent.Insert(extensionsCloseIndex, extensionEntries);
         }
 
-        // No <Extensions> block exists — create one before </Package>
+        // No Package-level <Extensions> block exists — create one before </Package>
         var packageCloseTag = "</Package>";
         var packageCloseIndex = manifestContent.LastIndexOf(packageCloseTag, StringComparison.OrdinalIgnoreCase);
         if (packageCloseIndex >= 0)
         {
-            var extensionsBlock = $"  <Extensions>\n{extensionsSb}  </Extensions>\n";
+            var extensionsBlock = $"  <Extensions>\n{extensionEntries}  </Extensions>\n";
             return manifestContent.Insert(packageCloseIndex, extensionsBlock);
         }
 

@@ -673,6 +673,96 @@ public class MsixServiceTests
 
     #endregion
 
+    #region InsertPackageLevelExtensions tests
+
+    [TestMethod]
+    public void InsertPackageLevelExtensions_WithExistingPackageLevelExtensions_InsertsBeforeClose()
+    {
+        // Arrange — manifest has both Application-level and Package-level <Extensions>
+        var manifest = @"<Package>
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"">
+      <Extensions>
+        <uap5:Extension Category=""windows.appExecutionAlias"" />
+      </Extensions>
+    </Application>
+  </Applications>
+  <Extensions>
+    <Extension Category=""windows.activatableClass.proxyStub"" />
+  </Extensions>
+</Package>";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
+
+        // Act
+        var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
+
+        // Assert — new entry should appear inside the Package-level <Extensions>, not the Application-level one
+        Assert.IsTrue(result.Contains("inProcessServer"), "Should contain the new entry");
+        var appExtIndex = result.IndexOf("windows.appExecutionAlias", StringComparison.Ordinal);
+        var proxyStubIndex = result.IndexOf("windows.activatableClass.proxyStub", StringComparison.Ordinal);
+        var inProcessIndex = result.IndexOf("windows.activatableClass.inProcessServer", StringComparison.Ordinal);
+        Assert.IsTrue(inProcessIndex > proxyStubIndex, "InProcessServer should be in Package-level Extensions (after proxyStub)");
+        Assert.IsTrue(inProcessIndex > appExtIndex, "InProcessServer should be after Application-level Extensions");
+    }
+
+    [TestMethod]
+    public void InsertPackageLevelExtensions_WithOnlyApplicationLevelExtensions_CreatesNewPackageLevelBlock()
+    {
+        // Arrange — manifest has ONLY Application-level <Extensions> (the regression scenario)
+        var manifest = @"<Package>
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"">
+      <Extensions>
+        <uap5:Extension Category=""windows.appExecutionAlias"" />
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
+
+        // Act
+        var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
+
+        // Assert — should create a NEW Package-level <Extensions> block, NOT insert into Application-level one
+        Assert.IsTrue(result.Contains("inProcessServer"), "Should contain the new entry");
+
+        // The new entry must appear AFTER </Applications>
+        var applicationsCloseIndex = result.IndexOf("</Applications>", StringComparison.Ordinal);
+        var inProcessIndex = result.IndexOf("windows.activatableClass.inProcessServer", StringComparison.Ordinal);
+        Assert.IsTrue(inProcessIndex > applicationsCloseIndex,
+            "InProcessServer must be outside <Applications> (Package-level), not inside Application-level Extensions");
+
+        // Should have two separate <Extensions> blocks
+        Assert.AreEqual(2, CountOccurrences(result, "<Extensions>"),
+            "Should have Application-level + new Package-level <Extensions> blocks");
+    }
+
+    [TestMethod]
+    public void InsertPackageLevelExtensions_WithNoExtensions_CreatesNewPackageLevelBlock()
+    {
+        // Arrange — manifest has no <Extensions> at all
+        var manifest = @"<Package>
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"" />
+  </Applications>
+</Package>";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
+
+        // Act
+        var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
+
+        // Assert
+        Assert.IsTrue(result.Contains("inProcessServer"), "Should contain the new entry");
+        var packageCloseIndex = result.IndexOf("</Package>", StringComparison.Ordinal);
+        var extensionsIndex = result.IndexOf("<Extensions>", StringComparison.Ordinal);
+        Assert.IsTrue(extensionsIndex > result.IndexOf("</Applications>", StringComparison.Ordinal),
+            "New <Extensions> block should be after </Applications>");
+        Assert.IsTrue(extensionsIndex < packageCloseIndex,
+            "New <Extensions> block should be before </Package>");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static int CountOccurrences(string text, string pattern)
