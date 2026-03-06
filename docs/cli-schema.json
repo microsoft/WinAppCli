@@ -1340,6 +1340,19 @@
           "required": false,
           "recursive": false
         },
+        "--attach-debug": {
+          "description": "Attach as a debugger to capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Format output as JSON",
           "hidden": false,

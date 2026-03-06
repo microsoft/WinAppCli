@@ -24,6 +24,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
+    public static Option<bool> AttachDebugOption { get; }
 
     static RunCommand()
     {
@@ -59,6 +60,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use \"winapp manifest add-alias\" to add an execution alias to the manifest."
         };
+
+        AttachDebugOption = new Option<bool>("--attach-debug")
+        {
+            Description = "Attach as a debugger to capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -69,12 +75,14 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
+        Options.Add(AttachDebugOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
+        IDebugOutputService debugOutputService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         IStatusService statusService,
@@ -88,12 +96,19 @@ internal partial class RunCommand : Command, IShortDescription
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
+            var attachDebug = parseResult.GetValue(AttachDebugOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
             if (withAlias && noLaunch)
             {
                 logger.LogError("{UISymbol} --with-alias and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (attachDebug && noLaunch)
+            {
+                logger.LogError("{UISymbol} --attach-debug and --no-launch cannot be used together.", UiSymbols.Error);
                 return 1;
             }
 
@@ -210,12 +225,18 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, cancellationToken);
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, attachDebug, cancellationToken);
             }
 
             if (isJson)
             {
                 PrintJson(aumid, processId, errorMessage: null);
+            }
+
+            // --attach-debug: run the debug event loop instead of plain WaitForExit.
+            if (attachDebug)
+            {
+                return await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
             }
 
             // Wait for the launched process to exit before returning.
@@ -274,6 +295,7 @@ internal partial class RunCommand : Command, IShortDescription
             string? appArgs,
             string? aumid,
             bool isJson,
+            bool attachDebug,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
@@ -322,6 +344,11 @@ internal partial class RunCommand : Command, IShortDescription
                 {
                     logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}'.", UiSymbols.Error, alias);
                     return 1;
+                }
+
+                if (attachDebug)
+                {
+                    return await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
                 }
 
                 await process.WaitForExitAsync(cancellationToken);

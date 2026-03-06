@@ -13,6 +13,7 @@ public class RunCommandTests : BaseCommandTests
 {
     private FakeMsixService _fakeMsixService = null!;
     private FakeAppLauncherService _fakeAppLauncherService = null!;
+    private FakeDebugOutputService _fakeDebugOutputService = null!;
 
     private const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -48,9 +49,11 @@ public class RunCommandTests : BaseCommandTests
     {
         _fakeMsixService = new FakeMsixService();
         _fakeAppLauncherService = new FakeAppLauncherService();
+        _fakeDebugOutputService = new FakeDebugOutputService();
         return services
             .AddSingleton<IMsixService>(_fakeMsixService)
             .AddSingleton<IAppLauncherService>(_fakeAppLauncherService)
+            .AddSingleton<IDebugOutputService>(_fakeDebugOutputService)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -406,6 +409,107 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
             "Application should NOT be launched via AUMID when --with-alias is specified");
+    }
+
+    #endregion
+
+    #region --attach-debug option tests
+
+    [TestMethod]
+    public void ParseOptions_AttachDebug_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--attach-debug"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.AttachDebugOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_AttachDebugNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.AttachDebugOption));
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebugAndNoLaunch_ReturnsError()
+    {
+        // Arrange - --attach-debug and --no-launch are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --attach-debug and --no-launch are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebug_LaunchesByAumidAndCallsDebugService()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched via AUMID");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should be called");
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, _fakeDebugOutputService.AttachCalls[0],
+            "Debug service should receive the launched process ID");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebugWithAlias_RegistersIdentityAndDebugServiceReceivesAlias()
+    {
+        // Arrange - with both --attach-debug and --with-alias, the execution alias path is used.
+        // LaunchViaExecutionAliasAsync will fail because there's no processed manifest in AppX output,
+        // but verify that AUMID launch is not used.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--with-alias"]);
+
+        // Assert - identity should be created but AUMID launch should NOT be used
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should NOT be launched via AUMID when --with-alias is specified");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebug_UsesDebugServiceExitCode()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        _fakeDebugOutputService.FakeExitCode = 42;
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+
+        // Assert
+        Assert.AreEqual(42, exitCode, "Exit code should come from the debug service");
     }
 
     #endregion

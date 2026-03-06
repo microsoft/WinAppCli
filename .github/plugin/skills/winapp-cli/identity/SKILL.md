@@ -6,16 +6,16 @@ version: 0.2.1
 ## When to use
 
 Use this skill when:
-- **The exe is separate from your app code** — e.g., Electron apps where `electron.exe` is in `node_modules`, not your build output
-- **Testing sparse package behavior** specifically — `AllowExternalContent`, `TrustedLaunch`, etc.
-- **Registering identity without copying files** — `create-debug-identity` leaves the exe in place
+- **The exe is separate from your app code** â€” e.g., Electron apps where `electron.exe` is in `node_modules`, not your build output
+- **Testing sparse package behavior** specifically â€” `AllowExternalContent`, `TrustedLaunch`, etc.
+- **Registering identity without copying files** â€” `create-debug-identity` leaves the exe in place
 
-> **Prefer `winapp run` for most frameworks.** If your exe is inside your build output folder (.NET, C++, Rust, Flutter, Tauri), use `winapp run <build-output>` instead — it registers a full loose layout package and launches the app, simulating an MSIX install. Use `create-debug-identity` only when `winapp run` doesn't fit your scenario.
+> **Prefer `winapp run` for most frameworks.** If your exe is inside your build output folder (.NET, C++, Rust, Flutter, Tauri), use `winapp run <build-output>` instead â€” it registers a full loose layout package and launches the app, simulating an MSIX install. Use `create-debug-identity` only when `winapp run` doesn't fit your scenario.
 
 ## Prerequisites
 
-1. **`appxmanifest.xml`** in your project — from `winapp init` or `winapp manifest generate`
-2. **Built executable** — the `.exe` your app runs from
+1. **`appxmanifest.xml`** in your project â€” from `winapp init` or `winapp manifest generate`
+2. **Built executable** â€” the `.exe` your app runs from
 
 ## What is package identity?
 
@@ -28,7 +28,7 @@ Windows package identity enables your app to use restricted APIs and OS integrat
 - **Windows AI APIs** (Phi Silica, OCR, etc.)
 - **File type associations** registered properly in Settings
 
-A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows — the exe stays in its original location and Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. This is different from `winapp run`, which copies files into a loose layout package.
+A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows â€” the exe stays in its original location and Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. This is different from `winapp run`, which copies files into a loose layout package.
 
 ## Usage
 
@@ -59,20 +59,20 @@ winapp create-debug-identity ./myapp.exe --no-install
 
 ## What the command does
 
-1. **Reads `appxmanifest.xml`** — extracts identity, capabilities, and assets
+1. **Reads `appxmanifest.xml`** â€” extracts identity, capabilities, and assets
 2. **Creates a sparse package layout** in a temp directory
 3. **Appends `.debug`** to the package name (unless `--keep-identity`) to avoid conflicts
-4. **Registers with Windows** via `Add-AppxPackage -ExternalLocation` — makes your exe "identity-aware"
+4. **Registers with Windows** via `Add-AppxPackage -ExternalLocation` â€” makes your exe "identity-aware"
 
-After running, launch your exe normally — Windows will recognize it as having package identity.
+After running, launch your exe normally â€” Windows will recognize it as having package identity.
 
 ## Recommended workflow
 
-1. **Setup** — `winapp init --use-defaults` (creates `appxmanifest.xml`)
-2. **Generate development certificate** — `winapp cert generate`
+1. **Setup** â€” `winapp init --use-defaults` (creates `appxmanifest.xml`)
+2. **Generate development certificate** â€” `winapp cert generate`
 3. **Build** your app
-4. **Register identity** — `winapp create-debug-identity ./bin/myapp.exe`
-5. **Run** your app — identity-requiring APIs now work
+4. **Register identity** â€” `winapp create-debug-identity ./bin/myapp.exe`
+5. **Run** your app â€” identity-requiring APIs now work
 6. **Re-run step 4** whenever you change `appxmanifest.xml` or `Assets/`
 
 ## Tips
@@ -80,7 +80,7 @@ After running, launch your exe normally — Windows will recognize it as having 
 - You must re-run `create-debug-identity` after any changes to `appxmanifest.xml` or image assets
 - The debug identity persists across reboots until explicitly removed
 - To remove: `Get-AppxPackage *yourapp.debug* | Remove-AppxPackage`
-- If you have both a debug identity and an installed MSIX, they may conflict — use `--keep-identity` carefully
+- If you have both a debug identity and an installed MSIX, they may conflict â€” use `--keep-identity` carefully
 - For Electron apps, use `npx winapp node add-electron-debug-identity` instead (handles Electron-specific paths)
 
 ## Troubleshooting

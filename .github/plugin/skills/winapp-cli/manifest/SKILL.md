@@ -17,16 +17,16 @@ Use this skill when:
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the key prerequisite for most winapp commands — it's more important than `winapp.yaml`. It declares:
-- **Package identity** — name, publisher, version
-- **App entry point** — which executable to launch
-- **Capabilities** — what the app can access (internet, file system, etc.)
-- **Visual assets** — icons for Start menu, taskbar, installers
-- **Extensions** — share target, startup tasks, file associations, etc.
+**`appxmanifest.xml`** is the key prerequisite for most winapp commands â€” it's more important than `winapp.yaml`. It declares:
+- **Package identity** â€” name, publisher, version
+- **App entry point** â€” which executable to launch
+- **Capabilities** â€” what the app can access (internet, file system, etc.)
+- **Visual assets** â€” icons for Start menu, taskbar, installers
+- **Extensions** â€” share target, startup tasks, file associations, etc.
 
 **Two manifest templates:**
-- **`packaged`** (default) — for full MSIX distribution
-- **`sparse`** — for desktop apps that need package identity without full MSIX containment (uses `AllowExternalContent`)
+- **`packaged`** (default) â€” for full MSIX distribution
+- **`sparse`** â€” for desktop apps that need package identity without full MSIX containment (uses `AllowExternalContent`)
 
 **`winapp init` also generates a manifest** as part of full project setup. Use `winapp manifest generate` when you only need the manifest without SDK setup or `winapp.yaml`.
 
@@ -35,7 +35,7 @@ Use this skill when:
 ### Generate a new manifest
 
 ```powershell
-# Defaults — uses current folder name, current user as publisher
+# Defaults â€” uses current folder name, current user as publisher
 winapp manifest generate
 
 # Into a specific directory
@@ -55,8 +55,8 @@ winapp manifest generate --if-exists overwrite
 ```
 
 Output:
-- `appxmanifest.xml` — the manifest file
-- `Assets/` — default app icons in required sizes (Square44x44Logo, Square150x150Logo, Wide310x150Logo, etc.)
+- `appxmanifest.xml` â€” the manifest file
+- `Assets/` â€” default app icons in required sizes (Square44x44Logo, Square150x150Logo, Wide310x150Logo, etc.)
 
 ### Update app icons from a source image
 
@@ -121,17 +121,17 @@ A typical `appxmanifest.xml` looks like:
 ```
 
 Key fields to edit:
-- `Identity.Name` — unique package name (no spaces)
-- `Identity.Publisher` — must match your certificate exactly
-- `Application.Executable` — your app's exe filename
-- `Capabilities` — add capabilities as needed (`internetClient`, `broadFileSystemAccess`, etc.)
+- `Identity.Name` â€” unique package name (no spaces)
+- `Identity.Publisher` â€” must match your certificate exactly
+- `Application.Executable` â€” your app's exe filename
+- `Capabilities` â€” add capabilities as needed (`internetClient`, `broadFileSystemAccess`, etc.)
 
 ## Tips
 
-- Always ensure `Identity.Publisher` matches your signing certificate — use `winapp cert generate --manifest` to auto-match
+- Always ensure `Identity.Publisher` matches your signing certificate â€” use `winapp cert generate --manifest` to auto-match
 - The `sparse` template adds `uap10:AllowExternalContent="true"` for apps that need identity but run outside the MSIX container
-- You can manually edit `appxmanifest.xml` after generation — it's a standard XML file
-- Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
+- You can manually edit `appxmanifest.xml` after generation â€” it's a standard XML file
+- Image assets must match the paths referenced in the manifest â€” `update-assets` handles this automatically
 - For logos, transparent PNGs work best. Use a square image for best results across all sizes.
 
 ## Troubleshooting
@@ -139,7 +139,7 @@ Key fields to edit:
 |-------|-------|----------|
 | "Manifest already exists" | `appxmanifest.xml` present | Use `--if-exists overwrite` to replace, or edit existing file directly |
 | "Invalid source image" | Image too small or wrong format | Use PNG, at least 400x400 pixels |
-| "Publisher mismatch" during packaging | Manifest publisher ≠ cert publisher | Edit `Identity.Publisher` in manifest, or regenerate cert with `--manifest` |
+| "Publisher mismatch" during packaging | Manifest publisher â‰  cert publisher | Edit `Identity.Publisher` in manifest, or regenerate cert with `--manifest` |
 
 
 ## Command Reference

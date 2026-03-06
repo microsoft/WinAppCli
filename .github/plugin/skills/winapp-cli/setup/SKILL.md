@@ -18,29 +18,29 @@ Install the winapp CLI before running any commands:
 # Via winget (recommended for non-Node projects)
 winget install Microsoft.WinAppCli --source winget
 
-# Via npm (recommended for Electron/Node projects — includes Node.js SDK)
+# Via npm (recommended for Electron/Node projects â€” includes Node.js SDK)
 npm install --save-dev @microsoft/winappcli
 ```
 
-You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
+You need an **existing app project** â€” `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
+**`appxmanifest.xml`** is the most important file winapp creates â€” it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 
-**`.winapp/`** is the local folder where SDK packages and generated projections (e.g., CppWinRT headers) are stored. This folder is `.gitignore`d — team members recreate it via `winapp restore`.
+**`.winapp/`** is the local folder where SDK packages and generated projections (e.g., CppWinRT headers) are stored. This folder is `.gitignore`d â€” team members recreate it via `winapp restore`.
 
 ## Usage
 
 ### Initialize a new winapp project
 
 ```powershell
-# Interactive — prompts for app name, publisher, SDK channel, etc.
+# Interactive â€” prompts for app name, publisher, SDK channel, etc.
 winapp init .
 
-# Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
+# Non-interactive â€” accepts all defaults (stable SDKs, current folder name as app name)
 winapp init --use-defaults
 
 # Skip SDK installation (just manifest + config)
@@ -51,11 +51,11 @@ winapp init --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
-- `appxmanifest.xml` — package identity and capabilities
-- `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
-- `winapp.yaml` — SDK version pinning for `restore`/`update`
-- `.winapp/` — downloaded SDK packages and generated projections
-- `.gitignore` update — excludes `.winapp/` and `devcert.pfx`
+- `appxmanifest.xml` â€” package identity and capabilities
+- `Assets/` â€” default app icons (Square44x44Logo, Square150x150Logo, etc.)
+- `winapp.yaml` â€” SDK version pinning for `restore`/`update`
+- `.winapp/` â€” downloaded SDK packages and generated projections
+- `.gitignore` update â€” excludes `.winapp/` and `devcert.pfx`
 
 ### Restore after cloning
 
@@ -92,23 +92,27 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
+
+# Launch and capture OutputDebugString messages and first-chance exceptions
+# Note: prevents other debuggers (VS, VS Code) from attaching â€” use --no-launch if you need those instead
+winapp run ./bin/Debug --attach-debug
 ```
 
-Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
+Use `winapp run` during iterative development â€” it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
 
 ## Recommended workflow
 
-1. **Initialize** — `winapp init --use-defaults` in your existing project
-2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
-3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
-4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
-5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
+1. **Initialize** â€” `winapp init --use-defaults` in your existing project
+2. **Configure** â€” edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
+3. **Build** â€” build your app as usual (dotnet build, cmake, npm run build, etc.)
+4. **Run with identity** â€” `winapp run ./bin/Debug` to register identity and launch for debugging
+5. **Package** â€” `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
 
 ## Tips
 
 - Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts
 - If you only need `appxmanifest.xml` without SDK setup, use `winapp manifest generate` instead of `init`
-- `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
+- `winapp init` is idempotent for the config file â€” re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
 ## Troubleshooting
@@ -184,6 +188,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--args` | Command-line arguments to pass to the application | (none) |
+| `--attach-debug` | Attach as a debugger to capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |

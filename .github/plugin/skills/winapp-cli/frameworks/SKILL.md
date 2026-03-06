@@ -10,7 +10,7 @@ Use this skill when:
 - **Choosing the correct install method** (npm package vs. standalone CLI)
 - **Looking for framework-specific guides** for step-by-step setup, build, and packaging
 
-Each framework has a detailed guide — refer to the links below rather than trying to guess commands.
+Each framework has a detailed guide â€” refer to the links below rather than trying to guess commands.
 
 ## Framework guides
 
@@ -47,9 +47,9 @@ Additional Electron guides:
 
 ### .NET (WPF, WinForms, Console)
 .NET projects have direct access to Windows APIs. Key differences:
-- Projects with NuGet references to `Microsoft.Windows.SDK.BuildTools` or `Microsoft.WindowsAppSDK` **don't need `winapp.yaml`** — winapp auto-detects SDK versions from the `.csproj`
+- Projects with NuGet references to `Microsoft.Windows.SDK.BuildTools` or `Microsoft.WindowsAppSDK` **don't need `winapp.yaml`** â€” winapp auto-detects SDK versions from the `.csproj`
 - The key prerequisite is `appxmanifest.xml`, not `winapp.yaml`
-- No native addon step needed — unlike Electron, .NET can call Windows APIs directly
+- No native addon step needed â€” unlike Electron, .NET can call Windows APIs directly
 - `winapp init` automatically adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, enabling `dotnet run` with automatic identity registration
 
 Quick start:
