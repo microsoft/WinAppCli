@@ -19,6 +19,8 @@ namespace WinApp.Cli.Services;
 /// <c>OutputDebugString</c> messages and first-chance exceptions to the console.
 /// Only one debugger can attach to a process at a time — using this service
 /// prevents other debuggers (Visual Studio, VS Code) from attaching.
+/// The debugged process is terminated when the debug session ends (e.g., Ctrl+C)
+/// or if the winapp process exits unexpectedly.
 /// </summary>
 internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutputService> logger) : IDebugOutputService
 {
@@ -38,12 +40,15 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
 
     private int RunDebugLoop(uint processId, CancellationToken cancellationToken)
     {
-        // Ensure the target process keeps running if winapp is killed.
-        PInvoke.DebugSetProcessKillOnExit(false);
+        // If winapp crashes without cleanup, the OS terminates the debuggee.
+        PInvoke.DebugSetProcessKillOnExit(true);
 
         if (!PInvoke.DebugActiveProcess(processId))
         {
-            logger.LogError("Failed to attach debugger to process {PID}.", processId);
+            logger.LogError(
+                "Failed to attach debugger to process {PID}. The process may have exited before the debugger could attach. " +
+                "For short-lived apps, consider using --with-alias instead.",
+                processId);
             return -1;
         }
 
@@ -108,7 +113,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
     private unsafe void HandleOutputDebugString(in DEBUG_EVENT debugEvent)
     {
         var info = debugEvent.u.DebugString;
-        int length = info.nDebugStringLength;
+        int length = Math.Min((int)info.nDebugStringLength, 65534);
         if (length == 0)
         {
             return;
@@ -132,7 +137,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         var usable = buffer[..(int)bytesRead];
         string message = info.fUnicode != 0
             ? Encoding.Unicode.GetString(usable)
-            : Encoding.UTF8.GetString(usable);
+            : Encoding.Default.GetString(usable);
 
         message = message.TrimEnd('\0');
 
@@ -175,7 +180,9 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
             console.MarkupLine($"[yellow]First-chance exception:[/] {name} (0x{code:X8}) at 0x{address:X}");
         }
 
-        // Let the target's own exception handling run.
+        // Let the target's own exception handling run. For second-chance exceptions
+        // (firstChance == false), this causes the OS to terminate the process — correct
+        // behavior for a passive listener that doesn't handle exceptions itself.
         continueStatus = NTSTATUS.DBG_EXCEPTION_NOT_HANDLED;
     }
 

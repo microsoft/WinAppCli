@@ -15,9 +15,10 @@ internal interface IDebugOutputService
     /// Attaches to the specified process using the Win32 Debug API and writes
     /// captured debug output and exception information to the console until
     /// the process exits or the <paramref name="cancellationToken"/> is signaled.
+    /// When cancelled, the debugged process is terminated before returning.
     /// </summary>
     /// <param name="processId">The ID of the process to attach to.</param>
-    /// <param name="cancellationToken">Token to stop the debug loop (e.g. Ctrl+C).</param>
-    /// <returns>The exit code of the debugged process, or <c>-1</c> if detached early.</returns>
+    /// <param name="cancellationToken">Token to stop the debug loop (e.g. Ctrl+C). The debugged process is terminated when this token is signaled.</param>
+    /// <returns>The exit code of the debugged process, or <c>-1</c> if terminated early.</returns>
     Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken);
 }

@@ -113,6 +113,7 @@
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunAttachDebug)' == 'true'">$(_WinAppRunArgs) --attach-debug</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 

@@ -480,7 +480,7 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebugWithAlias_RegistersIdentityAndDebugServiceReceivesAlias()
+    public async Task RunCommand_AttachDebugWithAlias_SkipsAumidLaunch()
     {
         // Arrange - with both --attach-debug and --with-alias, the execution alias path is used.
         // LaunchViaExecutionAliasAsync will fail because there's no processed manifest in AppX output,
@@ -510,6 +510,40 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(42, exitCode, "Exit code should come from the debug service");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebugWithJson_EmitsJsonAndCallsDebugService()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--json"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should be called");
+
+        var json = ParseJsonOutput();
+        Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, json.GetProperty("ProcessId").GetUInt32());
+    }
+
+    [TestMethod]
+    public async Task RunCommand_AttachDebug_PropagatesFailureExitCode()
+    {
+        // Arrange — debug service returns -1 (e.g., DebugActiveProcess failed)
+        await CreateTestManifestAsync();
+        _fakeDebugOutputService.FakeExitCode = -1;
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+
+        // Assert
+        Assert.AreEqual(-1, exitCode, "Failure exit code from the debug service should propagate");
     }
 
     #endregion

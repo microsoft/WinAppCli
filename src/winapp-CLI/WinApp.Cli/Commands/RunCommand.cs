@@ -234,9 +234,15 @@ internal partial class RunCommand : Command, IShortDescription
             }
 
             // --attach-debug: run the debug event loop instead of plain WaitForExit.
+            // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
             if (attachDebug)
             {
-                return await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    TerminateProcess(processId);
+                }
+                return exitCode;
             }
 
             // Wait for the launched process to exit before returning.
@@ -259,6 +265,12 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 // Process already exited before we could attach — treat as success.
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                // Ctrl+C — terminate the launched process before exiting.
+                TerminateProcess(processId);
+                return -1;
             }
         }
 
@@ -284,6 +296,32 @@ internal partial class RunCommand : Command, IShortDescription
             }
             manifestPath = Path.Combine(directory, "Package.appxmanifest");
             return new FileInfo(manifestPath);
+        }
+
+        /// <summary>
+        /// Terminates a process by PID. Safe to call if the process has already exited.
+        /// </summary>
+        private void TerminateProcess(uint processId)
+        {
+            if (processId == 0 || processId > int.MaxValue)
+            {
+                return;
+            }
+
+            try
+            {
+                using var process = Process.GetProcessById(unchecked((int)processId));
+                process.Kill();
+                logger.LogDebug("Terminated process {PID}.", processId);
+            }
+            catch (ArgumentException)
+            {
+                // Process already exited.
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already exited.
+            }
         }
 
         /// <summary>
@@ -348,11 +386,25 @@ internal partial class RunCommand : Command, IShortDescription
 
                 if (attachDebug)
                 {
-                    return await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        TerminateProcess(unchecked((uint)process.Id));
+                    }
+                    return exitCode;
                 }
 
-                await process.WaitForExitAsync(cancellationToken);
-                return process.ExitCode;
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                    return process.ExitCode;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ctrl+C — terminate the launched process before exiting.
+                    TerminateProcess(unchecked((uint)process.Id));
+                    return -1;
+                }
             }
             catch (Exception ex)
             {
