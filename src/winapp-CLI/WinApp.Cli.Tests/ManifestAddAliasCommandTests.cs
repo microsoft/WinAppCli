@@ -288,6 +288,157 @@ public class ManifestAddAliasCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode, "Command should fail for non-existent app ID");
     }
 
+    [TestMethod]
+    public async Task AddAlias_MultipleApps_NoAppId_TargetsFirstApplication()
+    {
+        // Arrange - manifest with multiple Application elements, no --app-id
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="First" Executable="first.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+                <Application Id="Second" Executable="second.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act - no --app-id specified, should default to first Application
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var content = await File.ReadAllTextAsync(manifestPath);
+        Assert.Contains("Alias=\"first.exe\"", content, "Alias should be inferred from the first Application's Executable");
+
+        // The alias should be inside the first Application, not the second
+        var doc = System.Xml.Linq.XDocument.Parse(content);
+        var ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+        var firstApp = doc.Descendants(System.Xml.Linq.XName.Get("Application", ns)).First();
+        Assert.AreEqual("First", firstApp.Attribute("Id")?.Value);
+        Assert.IsNotNull(firstApp.Element(System.Xml.Linq.XName.Get("Extensions", ns)),
+            "Extensions should be added to the first Application");
+
+        var secondApp = doc.Descendants(System.Xml.Linq.XName.Get("Application", ns)).Last();
+        Assert.IsNull(secondApp.Element(System.Xml.Linq.XName.Get("Extensions", ns)),
+            "Second Application should not have Extensions");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_MultipleApps_WithAppId_OnlyModifiesTargetApp()
+    {
+        // Arrange - manifest with multiple apps, target the second one
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="App1" Executable="app1.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+                <Application Id="App2" Executable="app2.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+                <Application Id="App3" Executable="app3.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act - target App2
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--app-id", "App2"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var doc = System.Xml.Linq.XDocument.Parse(await File.ReadAllTextAsync(manifestPath));
+        var ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+        var apps = doc.Descendants(System.Xml.Linq.XName.Get("Application", ns)).ToList();
+
+        // Only App2 should have Extensions
+        Assert.IsNull(apps[0].Element(System.Xml.Linq.XName.Get("Extensions", ns)),
+            "App1 should not have Extensions");
+        Assert.IsNotNull(apps[1].Element(System.Xml.Linq.XName.Get("Extensions", ns)),
+            "App2 should have Extensions with the alias");
+        Assert.IsNull(apps[2].Element(System.Xml.Linq.XName.Get("Extensions", ns)),
+            "App3 should not have Extensions");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_MultipleApps_ExistingAliasOnOtherApp_DoesNotConflict()
+    {
+        // Arrange - App1 already has an alias, adding alias to App2 should work
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+                     IgnorableNamespaces="uap5">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="App1" Executable="app1.exe" EntryPoint="Windows.FullTrustApplication">
+                  <Extensions>
+                    <uap5:Extension Category="windows.appExecutionAlias">
+                      <uap5:AppExecutionAlias>
+                        <uap5:ExecutionAlias Alias="app1.exe" />
+                      </uap5:AppExecutionAlias>
+                    </uap5:Extension>
+                  </Extensions>
+                </Application>
+                <Application Id="App2" Executable="app2.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act - add alias to App2 (App1 already has one, but that shouldn't matter)
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--app-id", "App2"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed — alias on other app should not conflict");
+        var content = await File.ReadAllTextAsync(manifestPath);
+        Assert.Contains("Alias=\"app1.exe\"", content, "App1's existing alias should remain");
+        Assert.Contains("Alias=\"app2.exe\"", content, "App2's new alias should be added");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_MultipleApps_CustomNameOnSpecificApp()
+    {
+        // Arrange
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="MainApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+                <Application Id="HelperApp" Executable="helper.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act - custom alias name on the second app
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--app-id", "HelperApp", "--name", "my-helper"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var content = await File.ReadAllTextAsync(manifestPath);
+        Assert.Contains("Alias=\"my-helper.exe\"", content, "Custom alias should be applied to HelperApp");
+        // Ensure MainApp wasn't touched
+        Assert.IsFalse(content.Contains("Alias=\"myapp.exe\""),
+            "MainApp should not have received an alias");
+    }
+
     #endregion
 
     #region Error handling tests
