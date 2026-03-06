@@ -326,7 +326,7 @@ winapp run <input-folder> [options]
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`.
-- `--attach-debug` - Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`.
+- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`.
 
 **What it does:**
 
@@ -355,10 +355,29 @@ winapp run ./bin/Debug --no-launch
 winapp run ./bin/Debug --with-alias
 
 # Launch and capture OutputDebugString messages and first-chance exceptions
-winapp run ./bin/Debug --attach-debug
+winapp run ./bin/Debug --debug-output
 
 # Combine with execution alias to debug console apps inline
-winapp run ./bin/Debug --with-alias --attach-debug
+winapp run ./bin/Debug --with-alias --debug-output
+```
+
+**MSBuild properties (NuGet package):**
+
+When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
+| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
+| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
+| `WinAppRunNoLaunch` | `false` | Only register identity without launching |
+| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions |
+
+```xml
+<PropertyGroup>
+  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
+</PropertyGroup>
 ```
 
 ---

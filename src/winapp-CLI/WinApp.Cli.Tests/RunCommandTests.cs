@@ -413,24 +413,24 @@ public class RunCommandTests : BaseCommandTests
 
     #endregion
 
-    #region --attach-debug option tests
+    #region --debug-output option tests
 
     [TestMethod]
-    public void ParseOptions_AttachDebug_IsParsedCorrectly()
+    public void ParseOptions_DebugOutput_IsParsedCorrectly()
     {
         // Arrange
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var parseResult = command.Parse([_tempDirectory.FullName, "--attach-debug"]);
+        var parseResult = command.Parse([_tempDirectory.FullName, "--debug-output"]);
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
-        Assert.IsTrue(parseResult.GetValue(RunCommand.AttachDebugOption));
+        Assert.IsTrue(parseResult.GetValue(RunCommand.DebugOutputOption));
     }
 
     [TestMethod]
-    public void ParseOptions_AttachDebugNotSpecified_DefaultsToFalse()
+    public void ParseOptions_DebugOutputNotSpecified_DefaultsToFalse()
     {
         // Arrange
         var command = GetRequiredService<RunCommand>();
@@ -440,35 +440,35 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
-        Assert.IsFalse(parseResult.GetValue(RunCommand.AttachDebugOption));
+        Assert.IsFalse(parseResult.GetValue(RunCommand.DebugOutputOption));
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebugAndNoLaunch_ReturnsError()
+    public async Task RunCommand_DebugOutputAndNoLaunch_ReturnsError()
     {
-        // Arrange - --attach-debug and --no-launch are mutually exclusive
+        // Arrange - --debug-output and --no-launch are mutually exclusive
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--no-launch"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output", "--no-launch"]);
 
         // Assert
-        Assert.AreEqual(1, exitCode, "Command should fail when both --attach-debug and --no-launch are specified");
+        Assert.AreEqual(1, exitCode, "Command should fail when both --debug-output and --no-launch are specified");
         Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
         Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebug_LaunchesByAumidAndCallsDebugService()
+    public async Task RunCommand_DebugOutput_LaunchesByAumidAndCallsDebugService()
     {
         // Arrange
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output"]);
 
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
@@ -480,16 +480,16 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebugWithAlias_SkipsAumidLaunch()
+    public async Task RunCommand_DebugOutputWithAlias_SkipsAumidLaunch()
     {
-        // Arrange - with both --attach-debug and --with-alias, the execution alias path is used.
+        // Arrange - with both --debug-output and --with-alias, the execution alias path is used.
         // LaunchViaExecutionAliasAsync will fail because there's no processed manifest in AppX output,
         // but verify that AUMID launch is not used.
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--with-alias"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output", "--with-alias"]);
 
         // Assert - identity should be created but AUMID launch should NOT be used
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
@@ -498,7 +498,7 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebug_UsesDebugServiceExitCode()
+    public async Task RunCommand_DebugOutput_UsesDebugServiceExitCode()
     {
         // Arrange
         await CreateTestManifestAsync();
@@ -506,21 +506,21 @@ public class RunCommandTests : BaseCommandTests
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output"]);
 
         // Assert
         Assert.AreEqual(42, exitCode, "Exit code should come from the debug service");
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebugWithJson_EmitsJsonAndCallsDebugService()
+    public async Task RunCommand_DebugOutputWithJson_EmitsJsonAndCallsDebugService()
     {
         // Arrange
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output", "--json"]);
 
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
@@ -532,7 +532,7 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_AttachDebug_PropagatesFailureExitCode()
+    public async Task RunCommand_DebugOutput_PropagatesFailureExitCode()
     {
         // Arrange — debug service returns -1 (e.g., DebugActiveProcess failed)
         await CreateTestManifestAsync();
@@ -540,10 +540,46 @@ public class RunCommandTests : BaseCommandTests
         var command = GetRequiredService<RunCommand>();
 
         // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--attach-debug"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output"]);
 
         // Assert
         Assert.AreEqual(-1, exitCode, "Failure exit code from the debug service should propagate");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DebugOutputWithAliasAndNoLaunch_ReturnsError()
+    {
+        // Arrange — all three flags conflict; --with-alias + --no-launch is caught first
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--debug-output", "--with-alias", "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail with conflicting flags");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DebugOutputWithArgs_ForwardsArgsToLauncher()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--debug-output", "--args", "--my-flag value"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--my-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Arguments should be forwarded to the launcher");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should be called");
     }
 
     #endregion

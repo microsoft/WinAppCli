@@ -24,7 +24,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
-    public static Option<bool> AttachDebugOption { get; }
+    public static Option<bool> DebugOutputOption { get; }
 
     static RunCommand()
     {
@@ -61,9 +61,9 @@ internal partial class RunCommand : Command, IShortDescription
             Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use \"winapp manifest add-alias\" to add an execution alias to the manifest."
         };
 
-        AttachDebugOption = new Option<bool>("--attach-debug")
+        DebugOutputOption = new Option<bool>("--debug-output")
         {
-            Description = "Attach as a debugger to capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously."
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously."
         };
     }
 
@@ -75,7 +75,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
-        Options.Add(AttachDebugOption);
+        Options.Add(DebugOutputOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -96,7 +96,7 @@ internal partial class RunCommand : Command, IShortDescription
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
-            var attachDebug = parseResult.GetValue(AttachDebugOption);
+            var debugOutput = parseResult.GetValue(DebugOutputOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -106,9 +106,9 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (attachDebug && noLaunch)
+            if (debugOutput && noLaunch)
             {
-                logger.LogError("{UISymbol} --attach-debug and --no-launch cannot be used together.", UiSymbols.Error);
+                logger.LogError("{UISymbol} --debug-output and --no-launch cannot be used together.", UiSymbols.Error);
                 return 1;
             }
 
@@ -225,7 +225,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, attachDebug, cancellationToken);
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, debugOutput, cancellationToken);
             }
 
             if (isJson)
@@ -233,9 +233,9 @@ internal partial class RunCommand : Command, IShortDescription
                 PrintJson(aumid, processId, errorMessage: null);
             }
 
-            // --attach-debug: run the debug event loop instead of plain WaitForExit.
+            // --debug-output: run the debug event loop instead of plain WaitForExit.
             // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
-            if (attachDebug)
+            if (debugOutput)
             {
                 var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
                 if (cancellationToken.IsCancellationRequested)
@@ -333,7 +333,7 @@ internal partial class RunCommand : Command, IShortDescription
             string? appArgs,
             string? aumid,
             bool isJson,
-            bool attachDebug,
+            bool debugOutput,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
@@ -384,7 +384,7 @@ internal partial class RunCommand : Command, IShortDescription
                     return 1;
                 }
 
-                if (attachDebug)
+                if (debugOutput)
                 {
                     var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
                     if (cancellationToken.IsCancellationRequested)

@@ -119,7 +119,7 @@ Does the project already have an appxmanifest.xml?
 - `--args <string>` — command-line arguments to pass to the app
 - `--no-launch` — register the package without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
-- `--attach-debug` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching)
+- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching)
 - `--output-appx-directory <path>` — custom output directory for loose layout
 **Requires:** Built app output directory + `appxmanifest.xml`
 

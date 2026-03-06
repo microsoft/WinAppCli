@@ -50,12 +50,12 @@
     <WinAppRunNoLaunch Condition="'$(WinAppRunNoLaunch)' == ''">false</WinAppRunNoLaunch>
 
     <!--
-      When true, attach as a debugger to capture OutputDebugString messages and
+      When true, capture OutputDebugString messages and
       first-chance exceptions from the launched application. Only one debugger can
       attach at a time, so Visual Studio or VS Code cannot debug simultaneously.
       Use WinAppRunNoLaunch instead if you need to attach a different debugger.
     -->
-    <WinAppRunAttachDebug Condition="'$(WinAppRunAttachDebug)' == ''">false</WinAppRunAttachDebug>
+    <WinAppRunDebugOutput Condition="'$(WinAppRunDebugOutput)' == ''">false</WinAppRunDebugOutput>
   </PropertyGroup>
 
 </Project>

@@ -1340,8 +1340,8 @@
           "required": false,
           "recursive": false
         },
-        "--attach-debug": {
-          "description": "Attach as a debugger to capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously.",
+        "--debug-output": {
+          "description": "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,

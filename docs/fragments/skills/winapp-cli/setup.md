@@ -90,7 +90,7 @@ winapp run ./bin/Debug --no-launch
 
 # Launch and capture OutputDebugString messages and first-chance exceptions
 # Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
-winapp run ./bin/Debug --attach-debug
+winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
