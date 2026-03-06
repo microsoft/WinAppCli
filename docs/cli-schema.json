@@ -74,6 +74,7 @@
             "--if-exists": {
               "description": "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
               "hidden": false,
+              "helpName": "error|overwrite|skip",
               "valueType": "WinApp.Cli.Models.IfExists",
               "hasDefaultValue": true,
               "defaultValue": "Error",
@@ -484,6 +485,7 @@
         "--if-exists": {
           "description": "Behavior when output file already exists",
           "hidden": false,
+          "helpName": "error|overwrite|skip",
           "valueType": "WinApp.Cli.Models.IfExists",
           "hasDefaultValue": true,
           "defaultValue": "Error",
@@ -883,6 +885,7 @@
             "--if-exists": {
               "description": "Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace)",
               "hidden": false,
+              "helpName": "error|overwrite|skip",
               "valueType": "WinApp.Cli.Models.IfExists",
               "hasDefaultValue": true,
               "defaultValue": "Error",
@@ -948,6 +951,7 @@
             "--template": {
               "description": "Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs)",
               "hidden": false,
+              "helpName": "packaged|sparse",
               "valueType": "WinApp.Cli.Models.ManifestTemplates",
               "hasDefaultValue": true,
               "defaultValue": "Packaged",
@@ -1055,7 +1059,7 @@
       }
     },
     "package": {
-      "description": "Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx",
+      "description": "Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx",
       "hidden": false,
       "aliases": [
         "pack"

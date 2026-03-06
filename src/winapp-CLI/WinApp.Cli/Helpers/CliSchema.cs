@@ -197,11 +197,27 @@ internal static class CliSchema
                 CreateSubcommandsDictionary(subCommand.Subcommands)
             );
 
+    /// <summary>
+    /// If the option/argument value type is an enum (or Nullable&lt;enum&gt;),
+    /// return a pipe-separated string of its values (lowercased).
+    /// This lets downstream code generators discover valid values automatically.
+    /// </summary>
+    private static string? EnumHelpName(Type valueType)
+    {
+        var underlying = Nullable.GetUnderlyingType(valueType) ?? valueType;
+        if (!underlying.IsEnum)
+        {
+            return null;
+        }
+
+        return string.Join("|", Enum.GetNames(underlying).Select(n => n.ToLowerInvariant()));
+    }
+
     private static OptionDetails CreateOptionDetails(Option option) => new OptionDetails(
                 option.Description?.ReplaceLineEndings("\n"),
                 option.Hidden,
                 DetermineAliases(option.Aliases),
-                option.HelpName,
+                option.HelpName ?? EnumHelpName(option.ValueType),
                 option.ValueType.ToCliTypeString(),
                 option.HasDefaultValue,
                 option.HasDefaultValue ? HumanizeValue(option.GetDefaultValue()) : null,
@@ -225,7 +241,7 @@ internal static class CliSchema
                 argument.Description?.ReplaceLineEndings("\n"),
                 index,
                 argument.Hidden,
-                argument.HelpName,
+                argument.HelpName ?? EnumHelpName(argument.ValueType),
                 argument.ValueType.ToCliTypeString(),
                 argument.HasDefaultValue,
                 argument.HasDefaultValue ? HumanizeValue(argument.GetDefaultValue()) : null,

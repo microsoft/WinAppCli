@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Reflection;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -669,6 +673,386 @@ public class MsixServiceTests
             "Should create IgnorableNamespaces attribute with 'build' when none existed");
         Assert.Contains("<build:Metadata>", result, "Should create build:Metadata section");
         Assert.Contains(@"Name=""Microsoft.WinAppCli""", result, "Should add WinAppCli item");
+    }
+
+    #endregion
+
+    #region FindManifestInDirectory Tests
+
+    [TestMethod]
+    public void FindManifestInDirectory_FindsAppxManifestXml()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "appxmanifest.xml"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("appxmanifest.xml", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_FindsPackageAppxManifest()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("package.appxmanifest", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_PrefersAppxManifestXml_WhenBothExist()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "appxmanifest.xml"), "<Package/>");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("appxmanifest.xml", result.Name);
+    }
+
+    [TestMethod]
+    public void FindManifestInDirectory_ReturnsNull_WhenNoManifest()
+    {
+        // Arrange — empty directory
+
+        // Act
+        var result = MsixService.FindManifestInDirectory(_tempDir);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    #endregion
+
+    #region DetectPeArchitecture Tests
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForNonExistentFile()
+    {
+        // Act
+        var result = MsixService.DetectPeArchitecture(Path.Combine(_tempDir.FullName, "nonexistent.exe"));
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForNonPeFile()
+    {
+        // Arrange — create a file that's not a PE
+        var path = Path.Combine(_tempDir.FullName, "notape.exe");
+        File.WriteAllText(path, "This is not a PE file");
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForTruncatedFile()
+    {
+        // Arrange — create a very small file
+        var path = Path.Combine(_tempDir.FullName, "tiny.exe");
+        File.WriteAllBytes(path, [0x4D, 0x5A]); // Just MZ header, nothing else
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    [DataRow((ushort)0x014C, "x86", DisplayName = "x86 (IMAGE_FILE_MACHINE_I386)")]
+    [DataRow((ushort)0x8664, "x64", DisplayName = "x64 (IMAGE_FILE_MACHINE_AMD64)")]
+    [DataRow((ushort)0xAA64, "arm64", DisplayName = "arm64 (IMAGE_FILE_MACHINE_ARM64)")]
+    [DataRow((ushort)0x01C4, "arm", DisplayName = "arm (IMAGE_FILE_MACHINE_ARMNT)")]
+    public void DetectPeArchitecture_ReturnsExpected_ForValidPeHeader(ushort machineType, string expected)
+    {
+        var pe = BuildMinimalNativePe(machineType);
+        var path = Path.Combine(_tempDir.FullName, $"test_{machineType:X4}.exe");
+        File.WriteAllBytes(path, pe);
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.AreEqual(expected, result);
+    }
+
+    [TestMethod]
+    public void DetectPeArchitecture_ReturnsNull_ForUnknownMachineType()
+    {
+        // Arrange — valid PE structure but with an unrecognized Machine value (0xFFFF)
+        var pe = BuildMinimalNativePe(0xFFFF);
+        var path = Path.Combine(_tempDir.FullName, "unknown_machine.exe");
+        File.WriteAllBytes(path, pe);
+
+        // Act
+        var result = MsixService.DetectPeArchitecture(path);
+
+        // Assert
+        Assert.IsNull(result);
+    }
+
+    /// <summary>
+    /// Builds a minimal valid native PE file (no COR header) with the given Machine value.
+    /// Uses PE32 for 32-bit machine types and PE32+ for 64-bit machine types.
+    /// </summary>
+    private static byte[] BuildMinimalNativePe(ushort machineType)
+    {
+        bool is64Bit = machineType is 0x8664 or 0xAA64;
+        ushort optHeaderSize = is64Bit ? (ushort)0xF0 : (ushort)0xE0;
+        int coffStart = 0x84;
+        var pe = new byte[coffStart + 20 + optHeaderSize + 64];
+
+        pe[0] = 0x4D; pe[1] = 0x5A; // MZ
+        BitConverter.GetBytes(0x80).CopyTo(pe, 0x3C); // e_lfanew
+        pe[0x80] = 0x50; pe[0x81] = 0x45; // PE\0\0
+
+        // COFF header
+        BitConverter.GetBytes(machineType).CopyTo(pe, coffStart);
+        BitConverter.GetBytes(optHeaderSize).CopyTo(pe, coffStart + 16); // SizeOfOptionalHeader
+        pe[coffStart + 18] = 0x02; // Characteristics = EXECUTABLE_IMAGE
+
+        // Optional header
+        int optStart = coffStart + 20;
+        if (is64Bit)
+        {
+            pe[optStart] = 0x0B; pe[optStart + 1] = 0x02; // PE32+ magic
+            BitConverter.GetBytes(16).CopyTo(pe, optStart + 108); // NumberOfRvaAndSizes
+        }
+        else
+        {
+            pe[optStart] = 0x0B; pe[optStart + 1] = 0x01; // PE32 magic
+            BitConverter.GetBytes(16).CopyTo(pe, optStart + 92); // NumberOfRvaAndSizes
+        }
+
+        return pe;
+    }
+
+    #endregion
+
+    #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsTrueForXGenerateManifest()
+    {
+        var manifest = @"<Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsFalseForConcreteLanguage()
+    {
+        var manifest = @"<Resources>
+    <Resource Language=""en-US""/>
+  </Resources>";
+
+        Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_ReturnsFalseForNoResources()
+    {
+        var manifest = @"<Package><Identity Name=""Test""/></Package>";
+
+        Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_ReplacesSingleLanguage()
+    {
+        var manifest = @"  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_ReplacesMultipleLanguages()
+    {
+        var manifest = @"  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US", "fr-FR", "de-DE"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.Contains(@"<Resource Language=""fr-FR""/>", result);
+        Assert.Contains(@"<Resource Language=""de-DE""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_PreservesRestOfManifest()
+    {
+        var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package>
+  <Identity Name=""TestApp"" Version=""1.0.0.0""/>
+  <Resources>
+    <Resource Language=""x-generate""/>
+  </Resources>
+  <Applications/>
+</Package>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Identity Name=""TestApp""", result);
+        Assert.Contains("<Applications/>", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ReplaceXGenerateLanguage_HandlesVariousWhitespace()
+    {
+        // x-generate with different whitespace patterns
+        var manifest = "<Resources>\n<Resource Language=\"x-generate\" />\n</Resources>";
+
+        var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
+
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.DoesNotContain("x-generate", result);
+    }
+
+    [TestMethod]
+    public void ContainsXGenerateLanguage_HandlesSingleQuotes()
+    {
+        var manifest = @"<Resources>
+    <Resource Language='x-generate'/>
+  </Resources>";
+
+        Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
+    }
+
+    #endregion
+
+    #region Sparse Manifest VisualElements Tests
+
+    [TestMethod]
+    public async Task UpdateAppxManifestContentAsync_AddsAppListEntry_WhenVisualElementsTagEndsWithAngleBracket()
+    {
+        // Arrange
+        var service = CreateMsixServiceForManifestRewriteTests();
+        var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.dll" EntryPoint="Windows.FullTrustApplication">
+            <uap:VisualElements DisplayName="Test App" Square150x150Logo="Assets\\Logo.png">
+            </uap:VisualElements>
+        </Application>
+    </Applications>
+</Package>
+""";
+
+        // Act
+        var result = await InvokeUpdateAppxManifestContentAsync(service, manifest);
+
+        // Assert
+        StringAssert.Contains(result, "<uap:VisualElements DisplayName=\"Test App\" Square150x150Logo=\"Assets\\\\Logo.png\" AppListEntry=\"none\">");
+    }
+
+    [TestMethod]
+    public async Task UpdateAppxManifestContentAsync_AddsAppListEntry_WhenVisualElementsTagSelfCloses()
+    {
+        // Arrange
+        var service = CreateMsixServiceForManifestRewriteTests();
+        var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.dll" EntryPoint="Windows.FullTrustApplication">
+            <uap:VisualElements DisplayName="Test App" Square150x150Logo="Assets\\Logo.png" />
+        </Application>
+    </Applications>
+</Package>
+""";
+
+        // Act
+        var result = await InvokeUpdateAppxManifestContentAsync(service, manifest);
+
+        // Assert
+        StringAssert.Contains(result, "<uap:VisualElements DisplayName=\"Test App\" Square150x150Logo=\"Assets\\\\Logo.png\" AppListEntry=\"none\" />");
+    }
+
+    private MsixService CreateMsixServiceForManifestRewriteTests()
+    {
+        return new MsixService(
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            NullLogger<MsixService>.Instance,
+            new CurrentDirectoryProvider(_tempDir.FullName));
+    }
+
+    private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
+    {
+        var updateMethod = typeof(MsixService).GetMethod("UpdateAppxManifestContentAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");
+
+        // selfContained=true and executable=.dll avoid dependency mutation paths, keeping this test focused
+        var resultTask = updateMethod.Invoke(service,
+        [
+            manifest,
+            null,
+            "TestApp.dll",
+            true,
+            true,
+            null,
+            null!,
+            CancellationToken.None
+        ]) as Task<string>;
+
+        Assert.IsNotNull(resultTask, "Reflection call did not return Task<string>");
+        return await resultTask;
     }
 
     #endregion

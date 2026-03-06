@@ -5,3 +5,6 @@ node_modules/
 *.pdb
 addon-template/
 cs-addon-template/
+
+# Auto-generated files
+src/winapp-commands.ts
