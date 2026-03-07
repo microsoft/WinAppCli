@@ -3,9 +3,7 @@
 
 using System.Reflection;
 using System.Text;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -1028,9 +1026,9 @@ public class MsixServiceTests
             null!,
             null!,
             null!,
-            null!,
             NullLogger<MsixService>.Instance,
-            new CurrentDirectoryProvider(_tempDir.FullName));
+            new CurrentDirectoryProvider(_tempDir.FullName),
+            null!);
     }
 
     private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
