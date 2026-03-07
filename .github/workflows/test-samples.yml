@@ -17,6 +17,7 @@ on:
           - dotnet-app
           - electron
           - flutter-app
+          - packaging-cli
           - rust-app
           - tauri-app
           - wpf-app
@@ -34,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [cpp-app, dotnet-app, electron, flutter-app, rust-app, tauri-app, wpf-app]
+        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app]
     runs-on: windows-latest
     name: ${{ matrix.sample }}
 

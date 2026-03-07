@@ -353,6 +353,83 @@ function New-DevCertificate {
 }
 
 # ============================================================================
+# Temp Directory Helpers (for from-scratch guide tests)
+# ============================================================================
+
+function New-TempTestDirectory {
+    <#
+    .SYNOPSIS
+    Creates a temporary directory for from-scratch guide workflow tests.
+    Returns the absolute path to the new directory.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Prefix
+    )
+    $tempBase = Join-Path ([System.IO.Path]::GetTempPath()) "winapp-test"
+    $null = New-Item -ItemType Directory -Path $tempBase -Force
+    $tempDir = Join-Path $tempBase "$Prefix-$([System.IO.Path]::GetRandomFileName())"
+    $null = New-Item -ItemType Directory -Path $tempDir -Force
+    Write-TestSuccess "Created temp directory: $tempDir"
+    return $tempDir
+}
+
+function Remove-TempTestDirectory {
+    <#
+    .SYNOPSIS
+    Removes a temporary test directory created by New-TempTestDirectory.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+    if (Test-Path $Path) {
+        Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+        Write-TestSuccess "Cleaned up temp directory: $Path"
+    }
+}
+
+function Assert-WinappInitOutput {
+    <#
+    .SYNOPSIS
+    Validates that winapp init created the expected files in the current directory.
+    Checks for winapp.yaml, appxmanifest.xml, and .winapp/ directory.
+    #>
+    param(
+        [string]$Directory = (Get-Location),
+        [switch]$ExpectWinappYaml = $true,
+        [switch]$ExpectManifest = $true,
+        [switch]$ExpectDotWinapp
+    )
+    if ($ExpectWinappYaml) {
+        Assert-FileExists (Join-Path $Directory "winapp.yaml") "winapp.yaml config"
+    }
+    if ($ExpectManifest) {
+        Assert-FileExists (Join-Path $Directory "appxmanifest.xml") "AppxManifest"
+    }
+    if ($ExpectDotWinapp) {
+        Assert-DirectoryExists (Join-Path $Directory ".winapp") ".winapp SDK directory"
+    }
+}
+
+function Assert-CertInfo {
+    <#
+    .SYNOPSIS
+    Runs winapp cert info on a certificate and validates the output is non-empty.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$CertPath
+    )
+    $output = Invoke-Winapp "cert info `"$CertPath`"" -FailMessage "winapp cert info failed"
+    if (-not $output) {
+        Write-TestError "winapp cert info produced no output"
+        throw "winapp cert info produced no output"
+    }
+    Write-TestSuccess "winapp cert info returned certificate details"
+}
+
+# ============================================================================
 # Exports
 # ============================================================================
 
@@ -375,4 +452,8 @@ Export-ModuleMember -Function @(
     'Complete-SampleTest'
     'Assert-MsixCreated'
     'New-DevCertificate'
+    'New-TempTestDirectory'
+    'Remove-TempTestDirectory'
+    'Assert-WinappInitOutput'
+    'Assert-CertInfo'
 )
