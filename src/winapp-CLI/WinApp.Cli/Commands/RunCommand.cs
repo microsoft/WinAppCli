@@ -112,6 +112,18 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (isJson && debugOutput)
+            {
+                logger.LogError("{UISymbol} --json and --debug-output cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (isJson && withAlias)
+            {
+                logger.LogError("{UISymbol} --json and --with-alias cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
             uint processId = 0;
             string? packageFamilyName = null;
             string? publisher = null;
@@ -225,7 +237,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, debugOutput, cancellationToken);
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, cancellationToken);
             }
 
             if (isJson)
@@ -331,8 +343,6 @@ internal partial class RunCommand : Command, IShortDescription
         private async Task<int> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
             string? appArgs,
-            string? aumid,
-            bool isJson,
             bool debugOutput,
             CancellationToken cancellationToken)
         {
@@ -354,11 +364,6 @@ internal partial class RunCommand : Command, IShortDescription
             }
 
             var alias = aliases[0]; // Use the first alias
-
-            if (isJson)
-            {
-                PrintJson(aumid, processId: null, errorMessage: null);
-            }
 
             // Launch the execution alias process with inherited stdio
             var psi = new ProcessStartInfo

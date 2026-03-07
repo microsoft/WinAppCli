@@ -513,9 +513,9 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_DebugOutputWithJson_EmitsJsonAndCallsDebugService()
+    public async Task RunCommand_JsonAndDebugOutput_ReturnsError()
     {
-        // Arrange
+        // Arrange - --json and --debug-output are mutually exclusive
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
@@ -523,12 +523,26 @@ public class RunCommandTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output", "--json"]);
 
         // Assert
-        Assert.AreEqual(0, exitCode, "Command should succeed");
-        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should be called");
+        Assert.AreEqual(1, exitCode, "Command should fail when both --json and --debug-output are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+    }
 
-        var json = ParseJsonOutput();
-        Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
-        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, json.GetProperty("ProcessId").GetUInt32());
+    [TestMethod]
+    public async Task RunCommand_JsonAndWithAlias_ReturnsError()
+    {
+        // Arrange - --json and --with-alias are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--with-alias", "--json"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --json and --with-alias are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
     }
 
     [TestMethod]
