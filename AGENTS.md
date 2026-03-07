@@ -79,7 +79,7 @@ Each sample under `samples/` has a self-contained **Pester 5.x** test file (`tes
 - **`BeforeDiscovery`**: Set `$script:skip` using inline `Get-Command` checks (no module import). Pester evaluates `-Skip:$variable` during discovery, before `BeforeAll` runs.
 - **`BeforeAll`**: Import `SampleTestHelpers.psm1`, install winapp, create temp directories. Guard with `if ($script:skip) { return }`.
 - **`AfterAll`**: Clean up temp directories using `Remove-TempTestDirectory`.
-- **`It` blocks**: Use `-Skip:$script:skip` for prerequisite gating. Use Pester `Should` assertions (`Should -Be 0`, `Should -Exist`, `Should -Not -BeNullOrEmpty`).
+- **`It` blocks**: Use `-Skip:$script:skip` for prerequisite gating. Use Pester `Should` assertions (`Should -Be 0`, `Should -Exist`, `Should -Not -BeNullOrEmpty`). When all setup happens in `BeforeAll` and depends on the prerequisite, you may apply `-Skip:$script:skip` to the enclosing `Context` instead.
 - **Shared helpers**: `Invoke-WinappCommand` (throws on failure), `Test-Prerequisite` (returns bool), `New-TempTestDirectory`, `Remove-TempTestDirectory`, `Install-WinappGlobal`.
 
 ### CI integration

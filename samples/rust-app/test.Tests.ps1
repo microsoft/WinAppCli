@@ -19,7 +19,6 @@ Describe "Rust App Sample" {
         $resolvedPkg = Resolve-WinappCliPath -WinappPath $WinappPath
         Install-WinappGlobal -PackagePath $resolvedPkg
 
-        $script:sampleDir = $PSScriptRoot
         $script:tempDir = New-TempTestDirectory -Prefix "rust-guide"
     }
 
@@ -54,8 +53,7 @@ Describe "Rust App Sample" {
         It "Should run winapp init" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-Expression "winapp init --use-defaults --setup-sdks=none"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "init --use-defaults --setup-sdks=none"
             } finally { Pop-Location }
         }
 
@@ -85,8 +83,7 @@ Describe "Rust App Sample" {
         It "Should generate dev certificate" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-Expression "winapp cert generate --if-exists skip"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
             } finally { Pop-Location }
         }
 
@@ -105,8 +102,7 @@ Describe "Rust App Sample" {
         It "Should package as MSIX" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-Expression "winapp pack dist --manifest appxmanifest.xml --cert devcert.pfx"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "pack dist --manifest appxmanifest.xml --cert devcert.pfx"
             } finally { Pop-Location }
         }
 

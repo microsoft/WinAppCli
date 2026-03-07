@@ -21,7 +21,6 @@ Describe ".NET App Guide Workflow" {
 
         $script:tempDir = New-TempTestDirectory -Prefix "dotnet-guide"
         $script:projectDir = Join-Path $script:tempDir "test-dotnet-app"
-        $script:sampleDir = $PSScriptRoot
     }
 
     AfterAll {
@@ -64,8 +63,7 @@ Describe ".NET App Guide Workflow" {
             It "Should run winapp init successfully" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "winapp init --use-defaults"
-                    $LASTEXITCODE | Should -Be 0
+                    Invoke-WinappCommand -Arguments "init --use-defaults"
                 } finally { Pop-Location }
             }
 
@@ -78,8 +76,7 @@ Describe ".NET App Guide Workflow" {
             It "Should generate dev certificate" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "winapp cert generate --if-exists skip"
-                    $LASTEXITCODE | Should -Be 0
+                    Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
                 } finally { Pop-Location }
             }
 
@@ -115,8 +112,7 @@ Describe ".NET App Guide Workflow" {
             It "Should package MSIX with winapp pack" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "winapp pack `"$($script:outputDir)`" --manifest appxmanifest.xml --cert devcert.pfx"
-                    $LASTEXITCODE | Should -Be 0
+                    Invoke-WinappCommand -Arguments "pack `"$($script:outputDir)`" --manifest appxmanifest.xml --cert devcert.pfx"
                 } finally { Pop-Location }
             }
 

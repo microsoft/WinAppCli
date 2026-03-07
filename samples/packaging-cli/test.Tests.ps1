@@ -44,8 +44,7 @@ Describe "Packaging CLI Guide Workflow" {
         It "Should generate manifest from executable" -Skip:$script:skip {
             Push-Location $script:packageDir
             try {
-                Invoke-Expression "winapp manifest generate --executable mycli.exe"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "manifest generate --executable mycli.exe"
             } finally { Pop-Location }
         }
 
@@ -58,8 +57,7 @@ Describe "Packaging CLI Guide Workflow" {
         It "Should generate dev certificate" -Skip:$script:skip {
             Push-Location $script:packageDir
             try {
-                Invoke-Expression "winapp cert generate --if-exists skip"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
             } finally { Pop-Location }
         }
 
@@ -80,8 +78,7 @@ Describe "Packaging CLI Guide Workflow" {
         It "Should package as MSIX" -Skip:$script:skip {
             Push-Location $script:packageDir
             try {
-                Invoke-Expression "winapp pack . --cert devcert.pfx"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "pack . --cert devcert.pfx"
             } finally { Pop-Location }
         }
 
@@ -95,8 +92,7 @@ Describe "Packaging CLI Guide Workflow" {
         It "Should sign the MSIX" -Skip:$script:skip {
             Push-Location $script:packageDir
             try {
-                Invoke-Expression "winapp sign `"$($script:msixPath)`" devcert.pfx"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "sign `"$($script:msixPath)`" devcert.pfx"
             } finally { Pop-Location }
         }
     }

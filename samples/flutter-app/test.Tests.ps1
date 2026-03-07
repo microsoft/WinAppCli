@@ -58,7 +58,7 @@ Describe "flutter-app sample" {
             $script:projectDir = Join-Path $script:tempDir "test_flutter_app"
             Set-Location $script:projectDir
 
-            Invoke-WinappCommand "init --use-defaults --setup-sdks=stable"
+            Invoke-WinappCommand -Arguments "init --use-defaults --setup-sdks=stable"
 
             flutter build windows
             if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
@@ -66,8 +66,8 @@ Describe "flutter-app sample" {
             $script:buildOutput = Join-Path $script:projectDir "build\windows\x64\runner\Release"
             Copy-Item $script:buildOutput -Destination (Join-Path $script:projectDir "dist") -Recurse
 
-            Invoke-WinappCommand "cert generate --if-exists skip"
-            Invoke-WinappCommand "pack dist --cert devcert.pfx"
+            Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
+            Invoke-WinappCommand -Arguments "pack dist --cert devcert.pfx"
         }
 
         It "Should create winapp.yaml after init" {
@@ -102,7 +102,7 @@ Describe "flutter-app sample" {
             flutter pub get
             if ($LASTEXITCODE -ne 0) { throw "flutter pub get failed" }
 
-            Invoke-WinappCommand "restore"
+            Invoke-WinappCommand -Arguments "restore"
 
             flutter build windows
             if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }

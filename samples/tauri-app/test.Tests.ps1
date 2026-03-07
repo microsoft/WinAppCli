@@ -64,8 +64,7 @@ Describe "Tauri App Sample" {
         It "Should run winapp init" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "winapp init --use-defaults --setup-sdks=none"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "init --use-defaults --setup-sdks=none"
             } finally { Pop-Location }
         }
 
@@ -99,8 +98,7 @@ Describe "Tauri App Sample" {
         It "Should generate dev certificate" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "winapp cert generate --if-exists skip --manifest appxmanifest.xml"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "cert generate --if-exists skip --manifest appxmanifest.xml"
             } finally { Pop-Location }
         }
 
@@ -111,8 +109,7 @@ Describe "Tauri App Sample" {
         It "Should package as MSIX" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "winapp pack msix-layout --manifest appxmanifest.xml --cert devcert.pfx"
-                $LASTEXITCODE | Should -Be 0
+                Invoke-WinappCommand -Arguments "pack msix-layout --manifest appxmanifest.xml --cert devcert.pfx"
             } finally { Pop-Location }
         }
 
