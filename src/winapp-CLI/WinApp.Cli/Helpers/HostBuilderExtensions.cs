@@ -28,6 +28,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IManifestService, ManifestService>()
             .AddSingleton<IImageAssetService, ImageAssetService>()
             .AddSingleton<IMsixService, MsixService>()
+            .AddSingleton<IPriService, PriService>()
             .AddSingleton<INugetService, NugetService>()
             .AddSingleton<IPackageInstallationService, PackageInstallationService>()
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()

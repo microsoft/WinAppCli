@@ -438,6 +438,8 @@ export interface RunOptions extends CommonOptions {
   inputFolder: string;
   /** Command-line arguments to pass to the application */
   args?: string;
+  /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
+  debugOutput?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) */
@@ -457,6 +459,7 @@ export async function run(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
   if (options.args) args.push('--args', options.args);
+  if (options.debugOutput) args.push('--debug-output');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
