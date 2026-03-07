@@ -8,6 +8,8 @@
     <Nullable>enable</Nullable>
     <!-- Launch via execution alias so console I/O stays in the current terminal -->
     <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+    <!-- Uncomment to capture OutputDebugString messages and first-chance exceptions -->
+    <!-- <WinAppRunDebugOutput>true</WinAppRunDebugOutput> -->
   </PropertyGroup>
 
   <ItemGroup>

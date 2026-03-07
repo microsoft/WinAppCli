@@ -92,6 +92,10 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
+
+# Launch and capture OutputDebugString messages and first-chance exceptions
+# Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
+winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
@@ -190,6 +194,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--args` | Command-line arguments to pass to the application | (none) |
+| `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
