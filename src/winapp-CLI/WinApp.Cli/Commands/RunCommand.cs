@@ -24,6 +24,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
+    public static Option<bool> DebugOutputOption { get; }
 
     static RunCommand()
     {
@@ -59,6 +60,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use \"winapp manifest add-alias\" to add an execution alias to the manifest."
         };
+
+        DebugOutputOption = new Option<bool>("--debug-output")
+        {
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -69,12 +75,14 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
+        Options.Add(DebugOutputOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
+        IDebugOutputService debugOutputService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         IStatusService statusService,
@@ -88,12 +96,31 @@ internal partial class RunCommand : Command, IShortDescription
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
+            var debugOutput = parseResult.GetValue(DebugOutputOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
             if (withAlias && noLaunch)
             {
                 logger.LogError("{UISymbol} --with-alias and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (debugOutput && noLaunch)
+            {
+                logger.LogError("{UISymbol} --debug-output and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (isJson && debugOutput)
+            {
+                logger.LogError("{UISymbol} --json and --debug-output cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (isJson && withAlias)
+            {
+                logger.LogError("{UISymbol} --json and --with-alias cannot be used together.", UiSymbols.Error);
                 return 1;
             }
 
@@ -210,12 +237,24 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, aumid, isJson, cancellationToken);
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, cancellationToken);
             }
 
             if (isJson)
             {
                 PrintJson(aumid, processId, errorMessage: null);
+            }
+
+            // --debug-output: run the debug event loop instead of plain WaitForExit.
+            // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
+            if (debugOutput)
+            {
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    TerminateProcess(processId);
+                }
+                return exitCode;
             }
 
             // Wait for the launched process to exit before returning.
@@ -238,6 +277,12 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 // Process already exited before we could attach — treat as success.
                 return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                // Ctrl+C — terminate the launched process before exiting.
+                TerminateProcess(processId);
+                return -1;
             }
         }
 
@@ -266,14 +311,39 @@ internal partial class RunCommand : Command, IShortDescription
         }
 
         /// <summary>
+        /// Terminates a process by PID. Safe to call if the process has already exited.
+        /// </summary>
+        private void TerminateProcess(uint processId)
+        {
+            if (processId == 0 || processId > int.MaxValue)
+            {
+                return;
+            }
+
+            try
+            {
+                using var process = Process.GetProcessById(unchecked((int)processId));
+                process.Kill();
+                logger.LogDebug("Terminated process {PID}.", processId);
+            }
+            catch (ArgumentException)
+            {
+                // Process already exited.
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already exited.
+            }
+        }
+
+        /// <summary>
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
         private async Task<int> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
             string? appArgs,
-            string? aumid,
-            bool isJson,
+            bool debugOutput,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
@@ -294,11 +364,6 @@ internal partial class RunCommand : Command, IShortDescription
             }
 
             var alias = aliases[0]; // Use the first alias
-
-            if (isJson)
-            {
-                PrintJson(aumid, processId: null, errorMessage: null);
-            }
 
             // Launch the execution alias process with inherited stdio
             var psi = new ProcessStartInfo
@@ -324,8 +389,27 @@ internal partial class RunCommand : Command, IShortDescription
                     return 1;
                 }
 
-                await process.WaitForExitAsync(cancellationToken);
-                return process.ExitCode;
+                if (debugOutput)
+                {
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        TerminateProcess(unchecked((uint)process.Id));
+                    }
+                    return exitCode;
+                }
+
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                    return process.ExitCode;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ctrl+C — terminate the launched process before exiting.
+                    TerminateProcess(unchecked((uint)process.Id));
+                    return -1;
+                }
             }
             catch (Exception ex)
             {

@@ -31,3 +31,15 @@ CryptCATCDFEnumMembersByCDFTagEx
 CryptCATCDFEnumAttributesWithCDFTag
 IApplicationActivationManager
 ApplicationActivationManager
+DebugActiveProcess
+WaitForDebugEventEx
+ContinueDebugEvent
+DebugActiveProcessStop
+DebugSetProcessKillOnExit
+DEBUG_EVENT
+ReadProcessMemory
+OpenProcess
+CloseHandle
+PROCESS_ACCESS_RIGHTS
+DBG_CONTINUE
+DBG_EXCEPTION_NOT_HANDLED

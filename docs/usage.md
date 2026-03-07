@@ -325,7 +325,8 @@ winapp run <input-folder> [options]
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
-- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`.
+- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
+- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 
 **What it does:**
 
@@ -352,6 +353,31 @@ winapp run ./bin/Debug --no-launch
 
 # Launch via execution alias (console apps run in current terminal)
 winapp run ./bin/Debug --with-alias
+
+# Launch and capture OutputDebugString messages and first-chance exceptions
+winapp run ./bin/Debug --debug-output
+
+# Combine with execution alias to debug console apps inline
+winapp run ./bin/Debug --with-alias --debug-output
+```
+
+**MSBuild properties (NuGet package):**
+
+When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
+| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
+| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
+| `WinAppRunNoLaunch` | `false` | Only register identity without launching |
+| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
+
+```xml
+<PropertyGroup>
+  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
+</PropertyGroup>
 ```
 
 ---
