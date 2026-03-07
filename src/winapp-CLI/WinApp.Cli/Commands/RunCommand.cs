@@ -63,7 +63,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         DebugOutputOption = new Option<bool>("--debug-output")
         {
-            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously."
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
         };
     }
 

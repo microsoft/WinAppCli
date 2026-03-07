@@ -53,7 +53,7 @@ Set these MSBuild properties in your `.csproj` to customize behavior:
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation. Useful for console apps that need terminal I/O. |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching the app |
-| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Cannot be used with other debuggers simultaneously. |
+| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 
 Example:
 

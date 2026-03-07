@@ -371,7 +371,7 @@ When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet 
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching |
-| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions |
+| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
 
 ```xml
 <PropertyGroup>
