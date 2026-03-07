@@ -47,6 +47,35 @@ When adding or changing public facing features, ensure all documentation is also
 
 If a feature is big enough and requires its own docs page, add it under docs\
 
+## Sample testing
+
+Each sample under `samples/` has a self-contained `test.ps1` that validates the sample builds and packages correctly. Tests share infrastructure via `samples/SampleTestHelpers.psm1`.
+
+### Running sample tests locally
+
+```powershell
+# Run all sample tests
+.\scripts\test-samples.ps1
+
+# Run a specific sample
+.\scripts\test-samples.ps1 -Samples dotnet-app
+
+# Run with a specific winapp package (e.g., from CI artifacts)
+.\scripts\test-samples.ps1 -WinappPath .\artifacts\npm -Verbose
+```
+
+### Writing a new sample test
+
+1. Create `test.ps1` in the sample directory
+2. Import the shared helpers: `Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force`
+3. Use `New-SampleTestContext` to initialize, `Complete-SampleTest` to finalize
+4. Follow the pattern: prerequisites → install winapp → build → package MSIX → validate
+5. Clean up generated artifacts in a `finally` block (unless `-SkipCleanup`)
+6. Add the sample name to the matrix in `.github/workflows/test-samples.yml`
+
+### CI integration
+
+Sample tests run via `.github/workflows/test-samples.yml` using a GitHub Actions matrix strategy. Each sample runs in its own parallel job after the main build completes. The workflow downloads the npm package artifact from the `Build and Package` workflow.
 
 ## Where to look first
 
