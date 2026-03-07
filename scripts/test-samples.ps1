@@ -1,9 +1,11 @@
 <#
 .SYNOPSIS
-Local orchestrator to run sample tests.
+Local orchestrator to run sample & guide tests.
 
 .DESCRIPTION
 Discovers and runs test.ps1 for each sample (or a specified subset).
+Each test validates the corresponding guide workflow from scratch and
+verifies the existing sample code still builds.
 Reports a pass/fail summary at the end.
 
 .PARAMETER Samples
@@ -27,11 +29,11 @@ Run all sample tests.
 Run only the dotnet-app and rust-app tests with verbose output.
 #>
 
+[CmdletBinding()]
 param(
     [string[]]$Samples,
     [string]$WinappPath,
-    [switch]$SkipCleanup,
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 Set-StrictMode -Version Latest
@@ -40,9 +42,9 @@ $ErrorActionPreference = 'Stop'
 $samplesRoot = Join-Path $PSScriptRoot "..\samples"
 
 # Discover samples with test.ps1
-$allTests = Get-ChildItem -Path $samplesRoot -Directory |
+$allTests = @(Get-ChildItem -Path $samplesRoot -Directory |
     Where-Object { Test-Path (Join-Path $_.FullName "test.ps1") } |
-    Select-Object -ExpandProperty Name
+    Select-Object -ExpandProperty Name)
 
 if ($Samples) {
     # Validate requested samples exist
@@ -51,7 +53,7 @@ if ($Samples) {
             Write-Warning "Sample '$s' does not have a test.ps1 — skipping"
         }
     }
-    $testList = $Samples | Where-Object { $_ -in $allTests }
+    $testList = @($Samples | Where-Object { $_ -in $allTests })
 } else {
     $testList = $allTests
 }
@@ -62,7 +64,7 @@ if (-not $testList) {
 }
 
 Write-Host "`n$('='*80)" -ForegroundColor Cyan
-Write-Host "SAMPLE TEST RUNNER — $($testList.Count) sample(s)" -ForegroundColor Cyan
+Write-Host "SAMPLE & GUIDE TEST RUNNER — $($testList.Count) test(s)" -ForegroundColor Cyan
 Write-Host "$('='*80)`n" -ForegroundColor Cyan
 
 $results = @()
@@ -77,7 +79,7 @@ foreach ($sample in $testList) {
         $params = @{}
         if ($WinappPath)  { $params['WinappPath']  = $WinappPath }
         if ($SkipCleanup) { $params['SkipCleanup'] = $true }
-        if ($Verbose)     { $params['Verbose']     = $true }
+        if ($VerbosePreference -eq 'Continue') { $params['Verbose'] = $true }
 
         & $testScript @params
         $sw.Stop()
@@ -94,8 +96,8 @@ Write-Host "`n$('='*80)" -ForegroundColor Cyan
 Write-Host "RESULTS SUMMARY" -ForegroundColor Cyan
 Write-Host "$('='*80)" -ForegroundColor Cyan
 
-$passed = ($results | Where-Object Status -eq 'PASS').Count
-$failed = ($results | Where-Object Status -eq 'FAIL').Count
+$passed = @($results | Where-Object Status -eq 'PASS').Count
+$failed = @($results | Where-Object Status -eq 'FAIL').Count
 
 foreach ($r in $results) {
     $color = if ($r.Status -eq 'PASS') { 'Green' } else { 'Red' }
@@ -107,7 +109,7 @@ foreach ($r in $results) {
     }
 }
 
-Write-Host "`n  $passed passed, $failed failed out of $($results.Count) samples`n" -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
+Write-Host "`n  $passed passed, $failed failed out of $($results.Count) test(s)`n" -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
 
 if ($failed -gt 0) {
     exit 1

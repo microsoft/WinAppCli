@@ -12,20 +12,17 @@ Path to the winapp npm package (.tgz or directory) to install.
 
 .PARAMETER SkipCleanup
 Keep generated artifacts after test completes.
-
-.PARAMETER Verbose
-Enable verbose output.
 #>
 
+[CmdletBinding()]
 param(
     [string]$WinappPath,
-    [switch]$SkipCleanup,
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
 
-$ctx = New-SampleTestContext -SampleName "flutter-app" -WinappPath $WinappPath -Verbose:$Verbose
+$ctx = New-SampleTestContext -SampleName "flutter-app" -SampleDir $PSScriptRoot -WinappPath $WinappPath -Verbose:$VerbosePreference
 $step = 0
 $tempDir = $null
 

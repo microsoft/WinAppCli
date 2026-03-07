@@ -268,32 +268,36 @@ function New-SampleTestContext {
 
     .DESCRIPTION
     Sets strict mode, resolves the sample directory, and prepares the context
-    object used by all sample tests. Does NOT create temporary directories —
-    sample tests run in-place against the sample's own source directory.
+    object used by all sample tests.
+
+    .PARAMETER SampleDir
+    The directory of the calling test.ps1 script. Pass $PSScriptRoot from the
+    test script (the module's $PSScriptRoot points to the module directory, not
+    the caller).
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [string]$SampleName,
-        [string]$WinappPath,
-        [switch]$Verbose
+        [Parameter(Mandatory)]
+        [string]$SampleDir,
+        [string]$WinappPath
     )
 
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
-    if ($Verbose) { $VerbosePreference = 'Continue' }
 
-    $sampleDir = $PSScriptRoot  # test.ps1 lives alongside sample files
-    $repoRoot = (Resolve-Path "$sampleDir\..\..").Path
+    $repoRoot = (Resolve-Path "$SampleDir\..\..").Path
 
     $ctx = @{
         SampleName = $SampleName
-        SampleDir  = $sampleDir
+        SampleDir  = $SampleDir
         RepoRoot   = $repoRoot
         WinappPath = $WinappPath
         StartTime  = Get-Date
     }
 
-    Write-TestHeader "$SampleName Sample Test"
+    Write-TestHeader "$SampleName — Sample & Guide Test"
     Write-Verbose "Sample directory: $($ctx.SampleDir)"
     Write-Verbose "Repo root: $($ctx.RepoRoot)"
 
@@ -311,7 +315,7 @@ function Complete-SampleTest {
     )
     $elapsed = (Get-Date) - $Context.StartTime
     Write-Host "`n$('='*80)" -ForegroundColor Green
-    Write-Host "$($Context.SampleName) SAMPLE TEST COMPLETED SUCCESSFULLY ($([math]::Round($elapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+    Write-Host "$($Context.SampleName) TEST COMPLETED SUCCESSFULLY ($([math]::Round($elapsed.TotalSeconds, 1))s)" -ForegroundColor Green
     Write-Host "$('='*80)`n" -ForegroundColor Green
 }
 
@@ -397,8 +401,8 @@ function Assert-WinappInitOutput {
     #>
     param(
         [string]$Directory = (Get-Location),
-        [switch]$ExpectWinappYaml = $true,
-        [switch]$ExpectManifest = $true,
+        [switch]$ExpectWinappYaml,
+        [switch]$ExpectManifest,
         [switch]$ExpectDotWinapp
     )
     if ($ExpectWinappYaml) {

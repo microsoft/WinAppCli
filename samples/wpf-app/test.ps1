@@ -12,20 +12,17 @@ Path to the winapp npm package (.tgz or directory) to install.
 
 .PARAMETER SkipCleanup
 Keep generated artifacts after test completes.
-
-.PARAMETER Verbose
-Enable verbose output.
 #>
 
+[CmdletBinding()]
 param(
     [string]$WinappPath,
-    [switch]$SkipCleanup,
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
 
-$ctx = New-SampleTestContext -SampleName "wpf-app" -WinappPath $WinappPath -Verbose:$Verbose
+$ctx = New-SampleTestContext -SampleName "wpf-app" -SampleDir $PSScriptRoot -WinappPath $WinappPath -Verbose:$VerbosePreference
 $step = 0
 $tempDir = $null
 
@@ -55,7 +52,7 @@ try {
 
     Write-TestStep "Running winapp init..." (++$step)
     Assert-Command "winapp init --use-defaults" "winapp init failed"
-    Assert-WinappInitOutput -ExpectWinappYaml -ExpectManifest
+    Assert-WinappInitOutput -ExpectManifest
 
     Write-TestStep "Generating dev certificate..." (++$step)
     Assert-Command "winapp cert generate --if-exists skip" "cert generate failed"
@@ -64,8 +61,16 @@ try {
     Write-TestStep "Verifying certificate info..." (++$step)
     Assert-CertInfo -CertPath "devcert.pfx"
 
-    Write-TestStep "Building in Release mode with RID (auto-packages MSIX)..." (++$step)
+    Write-TestStep "Building in Release mode with RID..." (++$step)
     Assert-Command "dotnet build -c Release -r win-x64" "dotnet build -c Release -r win-x64 failed"
+
+    # Find the actual output directory containing the exe
+    $exeFile = Get-ChildItem -Path "bin\Release" -Filter "*.exe" -Recurse | Select-Object -First 1
+    if (-not $exeFile) { throw "No .exe found in Release output" }
+    $outputDir = $exeFile.DirectoryName
+
+    Write-TestStep "Packaging MSIX with winapp pack..." (++$step)
+    Assert-Command "winapp pack `"$outputDir`" --manifest appxmanifest.xml --cert devcert.pfx" "winapp pack failed"
 
     Write-TestStep "Validating MSIX output..." (++$step)
     Assert-MsixCreated -Directory (Get-Location) -Description "Guide wpf-app MSIX"

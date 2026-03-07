@@ -16,20 +16,17 @@ Path to the winapp npm package (.tgz or directory) to install.
 
 .PARAMETER SkipCleanup
 Keep generated artifacts after test completes.
-
-.PARAMETER Verbose
-Enable verbose output.
 #>
 
+[CmdletBinding()]
 param(
     [string]$WinappPath,
-    [switch]$SkipCleanup,
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
 
-$ctx = New-SampleTestContext -SampleName "packaging-cli" -WinappPath $WinappPath -Verbose:$Verbose
+$ctx = New-SampleTestContext -SampleName "packaging-cli" -SampleDir $PSScriptRoot -WinappPath $WinappPath -Verbose:$VerbosePreference
 $step = 0
 $tempDir = $null
 
@@ -83,7 +80,7 @@ try {
 
     # Sign the MSIX (standalone sign command from usage.md)
     Write-TestStep "Signing MSIX (standalone sign command)..." (++$step)
-    Assert-Command "winapp sign `"$msixPath`" --cert devcert.pfx" "winapp sign failed"
+    Assert-Command "winapp sign `"$msixPath`" devcert.pfx" "winapp sign failed"
     Write-TestSuccess "MSIX signed successfully"
 
     Pop-Location  # back to tempDir

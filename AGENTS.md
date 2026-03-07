@@ -47,11 +47,11 @@ When adding or changing public facing features, ensure all documentation is also
 
 If a feature is big enough and requires its own docs page, add it under docs\
 
-## Sample testing
+## Sample & guide testing
 
-Each sample under `samples/` has a self-contained `test.ps1` that validates the sample builds and packages correctly. Tests share infrastructure via `samples/SampleTestHelpers.psm1`.
+Each sample under `samples/` has a self-contained `test.ps1` that validates the corresponding guide workflow from scratch (Phase 1) and verifies the existing sample code still builds (Phase 2). Tests share infrastructure via `samples/SampleTestHelpers.psm1`.
 
-### Running sample tests locally
+### Running sample & guide tests locally
 
 ```powershell
 # Run all sample tests
@@ -64,18 +64,18 @@ Each sample under `samples/` has a self-contained `test.ps1` that validates the 
 .\scripts\test-samples.ps1 -WinappPath .\artifacts\npm -Verbose
 ```
 
-### Writing a new sample test
+### Writing a new sample & guide test
 
 1. Create `test.ps1` in the sample directory
 2. Import the shared helpers: `Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force`
-3. Use `New-SampleTestContext` to initialize, `Complete-SampleTest` to finalize
-4. Follow the pattern: prerequisites → install winapp → build → package MSIX → validate
-5. Clean up generated artifacts in a `finally` block (unless `-SkipCleanup`)
+3. Use `New-SampleTestContext -SampleDir $PSScriptRoot` to initialize, `Complete-SampleTest` to finalize
+4. Phase 1: from-scratch guide workflow in a temp directory (scaffold, winapp init, build, cert, pack)
+5. Phase 2: quick build of existing sample code to verify freshness
 6. Add the sample name to the matrix in `.github/workflows/test-samples.yml`
 
 ### CI integration
 
-Sample tests run via `.github/workflows/test-samples.yml` using a GitHub Actions matrix strategy. Each sample runs in its own parallel job after the main build completes. The workflow downloads the npm package artifact from the `Build and Package` workflow.
+Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub Actions matrix strategy. Each sample runs in its own parallel job after the main build completes. The workflow downloads the npm package artifact from the `Build and Package` workflow.
 
 ## Where to look first
 

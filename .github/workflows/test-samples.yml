@@ -1,4 +1,4 @@
-name: Test Samples
+name: Test Samples & Guides
 
 on:
   workflow_run:
@@ -82,7 +82,7 @@ jobs:
     - name: Setup .NET
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["dotnet-app", "wpf-app", "electron"]'), matrix.sample)
+        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
@@ -90,7 +90,7 @@ jobs:
     - name: Setup Node.js
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app"]'), matrix.sample)
+        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
         node-version: '24'

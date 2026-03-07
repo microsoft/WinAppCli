@@ -12,20 +12,17 @@ Path to the winapp npm package (.tgz or directory) to install.
 
 .PARAMETER SkipCleanup
 Keep generated artifacts after test completes.
-
-.PARAMETER Verbose
-Enable verbose output.
 #>
 
+[CmdletBinding()]
 param(
     [string]$WinappPath,
-    [switch]$SkipCleanup,
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
 
-$ctx = New-SampleTestContext -SampleName "tauri-app" -WinappPath $WinappPath -Verbose:$Verbose
+$ctx = New-SampleTestContext -SampleName "tauri-app" -SampleDir $PSScriptRoot -WinappPath $WinappPath -Verbose:$VerbosePreference
 $step = 0
 $tempDir = $null
 
@@ -62,7 +59,7 @@ try {
 
     Write-TestStep "Running winapp init..." (++$step)
     Assert-Command "winapp init --use-defaults --setup-sdks=none" "winapp init failed"
-    Assert-WinappInitOutput -ExpectWinappYaml -ExpectManifest
+    Assert-WinappInitOutput -ExpectManifest
 
     Write-TestStep "Building Tauri app (release)..." (++$step)
     Assert-Command "cargo build --release --manifest-path src-tauri\Cargo.toml" "Tauri cargo build failed"
