@@ -1,0 +1,133 @@
+param(
+    [string]$WinappPath,
+    [switch]$SkipCleanup
+)
+
+BeforeDiscovery {
+    $script:skip = $null -eq (Get-Command cargo -ErrorAction SilentlyContinue) -or $null -eq (Get-Command npm -ErrorAction SilentlyContinue)
+}
+
+Describe "Rust App Sample" {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
+        $script:skip = $null -eq (Get-Command cargo -ErrorAction SilentlyContinue) -or $null -eq (Get-Command npm -ErrorAction SilentlyContinue)
+        $script:sampleDir = $PSScriptRoot
+        $script:tempDir = $null
+
+        if ($script:skip) { return }
+
+        $resolvedPkg = Resolve-WinappCliPath -WinappPath $WinappPath
+        Install-WinappGlobal -PackagePath $resolvedPkg
+
+        $script:sampleDir = $PSScriptRoot
+        $script:tempDir = New-TempTestDirectory -Prefix "rust-guide"
+    }
+
+    AfterAll {
+        if (-not $SkipCleanup) {
+            if ($script:tempDir) { Remove-TempTestDirectory -Path $script:tempDir }
+            Remove-Item -Path (Join-Path $script:sampleDir "target") -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Context "Prerequisites" {
+        It "Should have cargo available" -Skip:$script:skip {
+            Test-Prerequisite 'cargo' | Should -Be $true
+        }
+
+        It "Should have npm available" -Skip:$script:skip {
+            Test-Prerequisite 'npm' | Should -Be $true
+        }
+    }
+
+    Context "Rust Guide Workflow (from scratch)" {
+        It "Should create a new Rust project" -Skip:$script:skip {
+            Push-Location $script:tempDir
+            try {
+                Invoke-Expression "cargo new test-rust-app"
+                $LASTEXITCODE | Should -Be 0
+                $script:rustProjectDir = Join-Path $script:tempDir "test-rust-app"
+                $script:rustProjectDir | Should -Exist
+            } finally { Pop-Location }
+        }
+
+        It "Should run winapp init" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-Expression "winapp init --use-defaults --setup-sdks=none"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should have created appxmanifest.xml" -Skip:$script:skip {
+            Join-Path $script:rustProjectDir "appxmanifest.xml" | Should -Exist
+        }
+
+        It "Should build Rust app in release mode" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-Expression "cargo build --release"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should have produced release executable" -Skip:$script:skip {
+            Join-Path $script:rustProjectDir "target\release\test-rust-app.exe" | Should -Exist
+        }
+
+        It "Should prepare MSIX layout" -Skip:$script:skip {
+            $distDir = Join-Path $script:rustProjectDir "dist"
+            $null = New-Item -ItemType Directory -Path $distDir -Force
+            Copy-Item (Join-Path $script:rustProjectDir "target\release\test-rust-app.exe") -Destination $distDir
+            Join-Path $distDir "test-rust-app.exe" | Should -Exist
+        }
+
+        It "Should generate dev certificate" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-Expression "winapp cert generate --if-exists skip"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should have created devcert.pfx" -Skip:$script:skip {
+            Join-Path $script:rustProjectDir "devcert.pfx" | Should -Exist
+        }
+
+        It "Should report certificate info" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                $output = Invoke-WinappCommand -Arguments "cert info devcert.pfx"
+                $output | Should -Not -BeNullOrEmpty
+            } finally { Pop-Location }
+        }
+
+        It "Should package as MSIX" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-Expression "winapp pack dist --manifest appxmanifest.xml --cert devcert.pfx"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should have created an MSIX file" -Skip:$script:skip {
+            $msix = Get-ChildItem -Path $script:rustProjectDir -Filter "*.msix" |
+                Select-Object -First 1
+            $msix | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context "Sample Build Check" {
+        It "Should build existing sample with cargo" -Skip:$script:skip {
+            Push-Location $script:sampleDir
+            try {
+                Invoke-Expression "cargo build"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should have produced debug executable" -Skip:$script:skip {
+            Join-Path $script:sampleDir "target\debug\rust-app.exe" | Should -Exist
+        }
+    }
+}

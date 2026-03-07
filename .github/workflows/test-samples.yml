@@ -109,7 +109,13 @@ jobs:
         contains(fromJson('["rust-app", "tauri-app"]'), matrix.sample)
       uses: dtolnay/rust-toolchain@stable
 
-    # --- Run the sample's self-contained test ---
+    # --- Run the sample's self-contained Pester test ---
+
+    - name: Install Pester
+      if: steps.check.outputs.skip != 'true'
+      shell: pwsh
+      run: |
+        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
 
     - name: Run ${{ matrix.sample }} test
       if: steps.check.outputs.skip != 'true'
@@ -117,10 +123,27 @@ jobs:
       run: |
         $winappPath = "artifacts/npm"
         if (-not (Test-Path $winappPath)) {
-          # Fallback: use the local source if no artifact was downloaded
           $winappPath = "src/winapp-npm"
         }
-        .\samples\${{ matrix.sample }}\test.ps1 -WinappPath $winappPath -Verbose
+        $container = New-PesterContainer -Path "samples/${{ matrix.sample }}/test.Tests.ps1" -Data @{
+          WinappPath = $winappPath
+        }
+        $config = New-PesterConfiguration
+        $config.Run.Container = $container
+        $config.Run.Exit = $true
+        $config.Output.Verbosity = 'Detailed'
+        $config.TestResult.Enabled = $true
+        $config.TestResult.OutputPath = "test-results-${{ matrix.sample }}.xml"
+        $config.TestResult.OutputFormat = 'JUnitXml'
+        Invoke-Pester -Configuration $config
+
+    - name: Upload test results
+      if: always() && steps.check.outputs.skip != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.sample }}
+        path: test-results-${{ matrix.sample }}.xml
+        if-no-files-found: ignore
 
   # Summary job to provide a single check status for branch protection
   test-samples-result:
