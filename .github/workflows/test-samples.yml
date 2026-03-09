@@ -1,6 +1,8 @@
 name: Test Samples & Guides
 
 on:
+  pull_request:
+    branches: [ "main" ]
   workflow_run:
     workflows: ["Build and Package"]
     types: [completed]
@@ -27,11 +29,37 @@ permissions:
   actions: read    # Required for downloading cross-workflow artifacts
 
 jobs:
+  # Build npm package for pull_request events (workflow_run already has it)
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '10.0.x'
+    - uses: actions/setup-node@v5
+      with:
+        node-version: '24'
+    - name: Build npm package
+      shell: pwsh
+      run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix
+    - uses: actions/upload-artifact@v4
+      with:
+        name: npm-package
+        path: artifacts/*.tgz
+
   test-sample:
-    # Run on successful builds or manual dispatch
+    needs: [build]
+    # Run when: PR build succeeded, workflow_run build succeeded, or manual dispatch
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      always() &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (
+        github.event_name == 'pull_request' ||
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      )
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +83,16 @@ jobs:
       if: steps.check.outputs.skip != 'true'
       uses: actions/checkout@v5
 
-    # Download the npm package artifact from the triggering build
+    # Download the npm package artifact — source varies by trigger
+    - name: Download npm package (pull_request)
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        github.event_name == 'pull_request'
+      uses: actions/download-artifact@v4
+      with:
+        name: npm-package
+        path: artifacts/npm
+
     - name: Download npm package (workflow_run)
       if: >-
         steps.check.outputs.skip != 'true' &&
@@ -148,7 +185,7 @@ jobs:
   # Summary job to provide a single check status for branch protection
   test-samples-result:
     if: always()
-    needs: test-sample
+    needs: [build, test-sample]
     runs-on: ubuntu-latest
     steps:
     - name: Check results
