@@ -82,7 +82,7 @@ jobs:
     - name: Setup .NET
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli"]'), matrix.sample)
+        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron"]'), matrix.sample)
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
