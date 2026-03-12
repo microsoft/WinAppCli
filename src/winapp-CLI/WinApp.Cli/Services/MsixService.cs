@@ -30,11 +30,6 @@ internal partial class MsixService(
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
-    [GeneratedRegex(@"<Application[^>]*Executable\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex AppxPackageApplicationExecutableRegex();
-    [GeneratedRegex(@"(<Application[^>]*Executable\s*=\s*)[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex AppxPackageApplicationExecutableAssignmentRegex();
-
     /// <summary>
     /// Parses an AppX manifest file and extracts the package identity information
     /// </summary>
@@ -134,11 +129,11 @@ internal partial class MsixService(
             replacements[PlaceholderHelper.TargetNameToken] = nameWithoutExtension;
 
             // Also replace the Executable attribute value if it contains a placeholder
-            var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-            if (execMatch.Success && PlaceholderHelper.ContainsPlaceholders(execMatch.Groups[1].Value))
+            var doc = AppxManifestDocument.Parse(manifestContent);
+            if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
             {
-                manifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
-                    manifestContent, $"${{1}}\"{executable}\"");
+                doc.ApplicationExecutable = executable;
+                manifestContent = doc.ToXml();
             }
 
             taskContext.AddDebugMessage($"{UiSymbols.Note} Using specified executable: {executable}");
@@ -146,8 +141,8 @@ internal partial class MsixService(
         else
         {
             // Check if the Executable attribute in the manifest has a placeholder
-            var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-            if (execMatch.Success && PlaceholderHelper.ContainsPlaceholders(execMatch.Groups[1].Value))
+            var doc = AppxManifestDocument.Parse(manifestContent);
+            if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
             {
                 // Try to auto-infer by finding .exe files in the input folder root
                 var exeFiles = inputFolder.Exists
@@ -162,8 +157,8 @@ internal partial class MsixService(
                     var nameWithoutExtension = Path.GetFileNameWithoutExtension(inferredExe);
                     replacements[PlaceholderHelper.TargetNameToken] = nameWithoutExtension;
 
-                    manifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
-                        manifestContent, $"${{1}}\"{inferredExe}\"");
+                    doc.ApplicationExecutable = inferredExe;
+                    manifestContent = doc.ToXml();
 
                     taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-inferred executable: {inferredExe}");
                 }

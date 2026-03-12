@@ -29,27 +29,25 @@ internal partial class MsixService
         {
             var manifestContent = await File.ReadAllTextAsync(appxManifestPath.FullName, Encoding.UTF8, cancellationToken);
 
-            // Resolve placeholders in memory only to extract the executable path
+            // Parse once to extract the executable path
+            var doc = AppxManifestDocument.Parse(manifestContent);
+
             if (PlaceholderHelper.ContainsPlaceholders(manifestContent))
             {
-                // Without an explicit entrypoint, we can't resolve $targetnametoken$
-                var executableMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-                if (executableMatch.Success && PlaceholderHelper.ContainsPlaceholders(executableMatch.Groups[1].Value))
+                // Without an explicit entrypoint, we can't resolve $targetnametoken$ in the executable
+                if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
                 {
                     throw new InvalidOperationException(
                         "The manifest contains a placeholder for the executable. " +
                         "Provide the entrypoint argument to specify the executable path.");
                 }
 
-                // Resolve built-in tokens (e.g. $targetentrypoint$) in memory to extract executable
+                // Resolve built-in tokens (e.g. $targetentrypoint$) in memory — the executable
+                // attribute itself has no placeholders, so its value from the initial parse is valid.
                 manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent);
             }
 
-            var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
-            if (execMatch.Success)
-            {
-                entryPointPath = execMatch.Groups[1].Value;
-            }
+            entryPointPath = doc.ApplicationExecutable ?? entryPointPath;
         }
 
         // Validate inputs
@@ -115,45 +113,25 @@ internal partial class MsixService
 
         taskContext.AddDebugMessage($"Using AppX manifest: {appxManifestPath}");
 
-        // If there is a csproj, warn the user that they should use `dotnet run` instead of `winapp run`
-        var csprojFiles = dotNetService.FindCsproj(inputDirectory);
-        var csproj = csprojFiles.Count > 0 ? csprojFiles[0] : null;
-        if (csproj != null)
-        {
-            throw new InvalidOperationException(
-                $"A .csproj file was found in the input directory: {csproj.FullName}. " +
-                $"Please use 'dotnet run' to run your application instead of 'winapp run'.");
-        }
-
         if (!outputAppXDirectory.Exists)
         {
             outputAppXDirectory.Create();
         }
 
-        // Recursive copy all files to output directory, but exclude the outputAppXFolder itself if it's inside the input directory
+        // Incremental copy: only copy files that are new or changed (by size or timestamp).
+        // Also remove stale files from the output directory that no longer exist in input.
         if (inputDirectory != null && !string.Equals(inputDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar),
             outputAppXDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
         {
-            var outputFullPath = outputAppXDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-            foreach (var file in inputDirectory.EnumerateFiles("*", SearchOption.AllDirectories))
+            var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                // Skip files that are inside the output folder (if output is nested inside input)
-                if (file.FullName.StartsWith(outputFullPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                "appxmanifest.xml",
+                "Package.appxmanifest",
+                "resources.pri"
+            };
 
-                var relativePath = Path.GetRelativePath(inputDirectory.FullName, file.FullName);
-                var destFile = new FileInfo(Path.Combine(outputAppXDirectory.FullName, relativePath));
-
-                destFile.Directory?.Create();
-                file.CopyTo(destFile.FullName, overwrite: true);
-
-                taskContext.AddDebugMessage($"{UiSymbols.Files} Copied: {relativePath}");
-            }
-
-            taskContext.AddDebugMessage($"{UiSymbols.Check} Copied files to output directory: {outputAppXDirectory.FullName}");
+            var result = IncrementalCopyHelper.SyncDirectory(inputDirectory, outputAppXDirectory, protectedFiles);
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Sync to output directory: {result.Copied} copied, {result.Skipped} unchanged, {result.Deleted} deleted");
         }
 
         // Copy the appxmanifest to the output directory, if not already present
@@ -442,12 +420,12 @@ internal partial class MsixService
             };
 
             // Also replace the Executable attribute if it has a placeholder
-            var executableAttrMatch = AppxPackageApplicationExecutableRegex().Match(originalManifestContent);
-            if (executableAttrMatch.Success && PlaceholderHelper.ContainsPlaceholders(executableAttrMatch.Groups[1].Value))
+            var doc = AppxManifestDocument.Parse(originalManifestContent);
+            if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
             {
                 var exeName = Path.GetFileName(entryPointPath);
-                originalManifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
-                    originalManifestContent, $"${{1}}\"{exeName}\"");
+                doc.ApplicationExecutable = exeName;
+                originalManifestContent = doc.ToXml();
             }
 
             originalManifestContent = PlaceholderHelper.ReplacePlaceholders(originalManifestContent, replacements);

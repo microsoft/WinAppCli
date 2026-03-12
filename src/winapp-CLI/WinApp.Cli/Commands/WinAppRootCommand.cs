@@ -36,6 +36,13 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Action = new PrintCliSchemaAction()
     };
 
+    internal static readonly Option<string?> CallerOption = new("--caller")
+    {
+        Description = "Identifies the caller (e.g., nuget-package, npm). Used for telemetry.",
+        Recursive = true,
+        Hidden = true
+    };
+
     private class PrintCliSchemaAction : SynchronousCommandLineAction
     {
         public override bool Terminating => true;
@@ -78,6 +85,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(createExternalCatalogCommand);
 
         Options.Add(CliSchemaOption);
+        Options.Add(CallerOption);
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();

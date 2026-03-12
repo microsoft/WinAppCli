@@ -148,20 +148,8 @@ internal static partial class MrtAssetHelper
 
     internal static void CopyAllAssets(List<(FileInfo SourceFile, string RelativePath)> expandedFiles, DirectoryInfo targetDir, TaskContext taskContext)
     {
-        var filesCopied = 0;
-
-        foreach (var (sourceFile, relativePath) in expandedFiles)
-        {
-            var targetFile = new FileInfo(Path.Combine(targetDir.FullName, relativePath));
-
-            targetFile.Directory?.Create();
-            sourceFile.CopyTo(targetFile.FullName, overwrite: true);
-            filesCopied++;
-
-            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied manifest resource: {relativePath}");
-        }
-
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Copied {filesCopied} files to target directory");
+        var (copied, skipped) = IncrementalCopyHelper.CopyFiles(expandedFiles, targetDir);
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Manifest resources: {copied} copied, {skipped} unchanged");
     }
 
     // ltr / rtl
