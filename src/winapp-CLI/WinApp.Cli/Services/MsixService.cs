@@ -334,7 +334,18 @@ internal partial class MsixService(
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
-        manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
+        // Determine executable path for ProcessorArchitecture auto-detection
+        string? resolvedExePath = null;
+        {
+            var tempDoc = AppxManifestDocument.Parse(manifestContent);
+            var appExe = tempDoc.ApplicationExecutable;
+            if (appExe != null)
+            {
+                resolvedExePath = Path.Combine(inputFolder.FullName, appExe);
+            }
+        }
+
+        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
 
         // Parse the manifest to extract identity, executable, and architecture info
         var manifestDoc = AppxManifestDocument.Parse(manifestContent);
@@ -359,41 +370,6 @@ internal partial class MsixService(
         catch
         {
             finalPackageName ??= "Package";
-        }
-
-        var applicationExecutable = manifestDoc.ApplicationExecutable;
-
-        // If manifest Identity lacks ProcessorArchitecture, detect it from the executable PE header.
-        // If it already has one, warn when it doesn't match the actual executable.
-        string? packageArch = null;
-        if (applicationExecutable != null)
-        {
-            var exePath = Path.Combine(inputFolder.FullName, applicationExecutable);
-            var detectedArch = PeHelper.DetectPeArchitecture(exePath);
-
-            var existingArch = manifestDoc.IdentityProcessorArchitecture;
-            if (existingArch == null)
-            {
-                if (detectedArch != null)
-                {
-                    manifestDoc.IdentityProcessorArchitecture = detectedArch;
-                    manifestContent = manifestDoc.ToXml();
-                    taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-detected ProcessorArchitecture: {detectedArch}");
-                    packageArch = detectedArch;
-                }
-            }
-            else
-            {
-                packageArch = existingArch;
-                if (detectedArch != null)
-                {
-                    if (!string.Equals(existingArch, detectedArch, StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(existingArch, "neutral", StringComparison.OrdinalIgnoreCase))
-                    {
-                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest ProcessorArchitecture is '{existingArch}' but the executable is {detectedArch}. This will likely cause runtime failures.");
-                    }
-                }
-            }
         }
 
         // Clean the resolved package name to ensure it meets MSIX schema requirements
@@ -453,6 +429,7 @@ internal partial class MsixService(
             await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
 
             // Resolve executable path relative to the staging directory
+            var applicationExecutable = manifestDoc.ApplicationExecutable;
             FileInfo? executablePath = applicationExecutable != null ? new FileInfo(Path.Combine(stagingDir.FullName, applicationExecutable)) : null;
 
             // Pre-compute expanded manifest resources from the original manifest
@@ -704,10 +681,11 @@ internal partial class MsixService(
     /// <summary>
     /// Updates the manifest identity, application ID, and executable path for sparse packaging
     /// </summary>
-    private async Task<string> UpdateAppxManifestContentAsync(
+    private async Task<(string Content, string? DetectedArchitecture)> UpdateAppxManifestContentAsync(
         string originalAppxManifestContent,
         MsixIdentityResult? identity,
         string? entryPointPath,
+        string? exePath,
         bool sparse,
         bool selfContained,
         DotNetPackageListJson? dotNetPackageList,
@@ -806,7 +784,15 @@ internal partial class MsixService(
         // Stamp build metadata with CLI version
         modifiedContent = AddBuildMetadata(modifiedContent);
 
-        return modifiedContent;
+        // Auto-detect ProcessorArchitecture from the executable PE header if not already set.
+        // Without this, ARM64 Windows resolves framework dependencies to ARM64 DLLs even for x64 apps.
+        string? detectedArch = null;
+        if (exePath != null)
+        {
+            (modifiedContent, detectedArch) = AutoDetectProcessorArchitecture(modifiedContent, exePath, taskContext);
+        }
+
+        return (modifiedContent, detectedArch);
     }
 
     /// <summary>

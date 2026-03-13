@@ -847,6 +847,151 @@ public class MsixServiceTests
 
     #endregion
 
+    #region AutoDetectProcessorArchitecture Tests
+
+    private const string ManifestWithoutArch = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+        </Package>
+        """;
+
+    private const string ManifestWithX86Arch = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" ProcessorArchitecture="x86" />
+        </Package>
+        """;
+
+    private const string ManifestWithNeutralArch = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+        </Package>
+        """;
+
+    private static TaskContext CreateTestTaskContext()
+    {
+        var task = new GroupableTask("test", null);
+        var console = new Spectre.Console.Testing.TestConsole();
+        var logger = NullLogger<MsixService>.Instance;
+        var renderLock = new Lock();
+        return new TaskContext(task, null, console, logger, renderLock);
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_SetsArch_WhenMissingFromManifest()
+    {
+        // Arrange — x64 PE, manifest without ProcessorArchitecture
+        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
+        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
+
+        // Assert
+        Assert.AreEqual("x64", arch);
+        StringAssert.Contains(content, "ProcessorArchitecture=\"x64\"");
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_SetsArm64_WhenMissingFromManifest()
+    {
+        // Arrange — arm64 PE, manifest without ProcessorArchitecture
+        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
+        File.WriteAllBytes(exePath, BuildMinimalNativePe(0xAA64)); // arm64
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
+
+        // Assert
+        Assert.AreEqual("arm64", arch);
+        StringAssert.Contains(content, "ProcessorArchitecture=\"arm64\"");
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenMatchesExe()
+    {
+        // Arrange — x86 PE, manifest already has x86
+        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
+        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x014C)); // x86
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
+
+        // Assert — manifest unchanged, architecture returned
+        Assert.AreEqual("x86", arch);
+        Assert.AreEqual(ManifestWithX86Arch, content, "Manifest should not be modified when arch matches");
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenMismatch()
+    {
+        // Arrange — x64 PE, manifest says x86 → should warn but keep existing
+        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
+        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
+
+        // Assert — returns existing arch, does not modify manifest
+        Assert.AreEqual("x86", arch);
+        Assert.AreEqual(ManifestWithX86Arch, content, "Manifest should not be modified on mismatch");
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_SkipsWarning_WhenNeutral()
+    {
+        // Arrange — x64 PE, manifest says "neutral" → should not warn
+        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
+        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithNeutralArch, exePath, taskContext);
+
+        // Assert — returns "neutral", no modification
+        Assert.AreEqual("neutral", arch);
+        Assert.AreEqual(ManifestWithNeutralArch, content);
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenExeNotFound()
+    {
+        // Arrange — non-existent exe path, manifest has no arch
+        var exePath = Path.Combine(_tempDir.FullName, "nonexistent.exe");
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
+
+        // Assert — returns null arch (can't detect), manifest unchanged
+        Assert.IsNull(arch);
+        Assert.AreEqual(ManifestWithoutArch, content);
+    }
+
+    [TestMethod]
+    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenExeIsNotPe()
+    {
+        // Arrange — non-PE file, manifest already has arch
+        var exePath = Path.Combine(_tempDir.FullName, "notape.exe");
+        File.WriteAllText(exePath, "not a PE file");
+        var taskContext = CreateTestTaskContext();
+
+        // Act
+        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
+
+        // Assert — returns existing manifest arch when PE detection fails
+        Assert.AreEqual("x86", arch);
+        Assert.AreEqual(ManifestWithX86Arch, content);
+    }
+
+    #endregion
+
     #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
 
     [TestMethod]
@@ -1049,20 +1194,24 @@ public class MsixServiceTests
         Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");
 
         // selfContained=true and executable=.dll avoid dependency mutation paths, keeping this test focused
+        // exePath=null skips ProcessorArchitecture detection
         var resultTask = updateMethod.Invoke(service,
         [
             manifest,
             null,
             "TestApp.dll",
+            null,
             true,
             true,
             null,
             null!,
             CancellationToken.None
-        ]) as Task<string>;
+        ]) as dynamic;
 
-        Assert.IsNotNull(resultTask, "Reflection call did not return Task<string>");
-        return await resultTask;
+        Assert.IsNotNull(resultTask, "Reflection call did not return a Task");
+        var result = await resultTask;
+        // Named tuple members aren't available via reflection; use Item1 (Content)
+        return result.Item1;
     }
 
     #endregion

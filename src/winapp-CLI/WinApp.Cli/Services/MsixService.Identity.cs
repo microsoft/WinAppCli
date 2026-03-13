@@ -157,14 +157,18 @@ internal partial class MsixService
             throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
         }
 
-        // Generate sparse package structure
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
-        manifestContent = manifestContent.Replace("$targetnametoken$", Path.GetFileNameWithoutExtension(executableMatch.Name), StringComparison.OrdinalIgnoreCase);
-        manifestContent = manifestContent.Replace("$targetentrypoint$", "Windows.FullTrustApplication", StringComparison.OrdinalIgnoreCase);
+        // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
+        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [PlaceholderHelper.TargetNameToken] = Path.GetFileNameWithoutExtension(executableMatch.Name)
+        };
+        manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
+
+        // Resolve <Resource Language="x-generate"/> — falls back to "en-US" if no PRI found
         manifestContent = manifestContent.Replace("x-generate", "EN-US");
-        manifestContent = await UpdateWindowsAppSdkDependencyAsync(manifestContent, dotNetPackageList, taskContext, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -174,6 +178,13 @@ internal partial class MsixService
             File.Move(priFilePath, resourcesPriPath, overwrite: true);
             taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {Path.GetFileName(priFilePath)} to resources.pri");
         }
+
+        // Unified manifest processing: WinAppSDK dependency, third-party WinRT components,
+        // ProcessorArchitecture auto-detection, and build metadata
+        (manifestContent, _) = await UpdateAppxManifestContentAsync(
+            manifestContent, null, null, executableMatch.FullName,
+            sparse: false, selfContained: false,
+            dotNetPackageList, taskContext, cancellationToken);
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
@@ -440,9 +451,10 @@ internal partial class MsixService
         var debugIdentity = keepIdentity ? originalIdentity : CreateDebugIdentity(originalIdentity);
 
         // Step 4: Modify manifest for sparse packaging and debug identity
-        var debugManifestContent = await UpdateAppxManifestContentAsync(
+        (var debugManifestContent, _) = await UpdateAppxManifestContentAsync(
             originalManifestContent,
             debugIdentity,
+            entryPointPath,
             entryPointPath,
             sparse: true,
             selfContained: false,
@@ -477,6 +489,41 @@ internal partial class MsixService
         }
 
         return (debugManifestPath, debugIdentity);
+    }
+
+    /// <summary>
+    /// Auto-detects ProcessorArchitecture from the executable PE header and sets it in the manifest
+    /// if not already present. Mirrors the logic used by all three code paths (run, create-debug-identity, package).
+    /// Without this, ARM64 Windows resolves framework dependencies to ARM64 DLLs even for x64 apps.
+    /// </summary>
+    /// <returns>The effective architecture (detected or existing), or null if unknown.</returns>
+    internal static (string manifestContent, string? architecture) AutoDetectProcessorArchitecture(string manifestContent, string exePath, TaskContext taskContext)
+    {
+        var detectedArch = PeHelper.DetectPeArchitecture(exePath);
+        if (detectedArch == null)
+        {
+            // Can't detect — return whatever the manifest already has
+            var existingDoc = AppxManifestDocument.Parse(manifestContent);
+            return (manifestContent, existingDoc.IdentityProcessorArchitecture);
+        }
+
+        var doc = AppxManifestDocument.Parse(manifestContent);
+        var existingArch = doc.IdentityProcessorArchitecture;
+
+        if (existingArch == null)
+        {
+            doc.IdentityProcessorArchitecture = detectedArch;
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-detected ProcessorArchitecture: {detectedArch}");
+            return (doc.ToXml(), detectedArch);
+        }
+
+        if (!string.Equals(existingArch, detectedArch, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(existingArch, "neutral", StringComparison.OrdinalIgnoreCase))
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest ProcessorArchitecture is '{existingArch}' but the executable is {detectedArch}. This may cause runtime failures.");
+        }
+
+        return (manifestContent, existingArch);
     }
 
     /// <summary>
