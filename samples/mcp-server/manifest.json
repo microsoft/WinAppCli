@@ -1,0 +1,60 @@
+{
+  "manifest_version": "0.1",
+  "name": "SampleMcpServer",
+  "version": "1.0.0",
+  "description": "A sample MCP server demonstrating MCPB-to-MSIX conversion",
+  "author": { "name": "Microsoft" },
+  "server": {
+    "type": "binary",
+    "entry_point": "SampleMcpServer.exe",
+    "mcp_config": {
+      "command": "SampleMcpServer.exe",
+      "args": []
+    }
+  },
+  "tools": [
+    { "name": "get_greeting", "description": "Returns a greeting for the given name" },
+    { "name": "get_time", "description": "Returns the current UTC time" }
+  ],
+  "license": "MIT",
+  "_meta": {
+    "com.microsoft.windows": {
+      "static_responses": {
+        "initialize": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {
+            "logging": {},
+            "tools": { "listChanged": true }
+          },
+          "serverInfo": {
+            "name": "SampleMcpServer",
+            "version": "1.0.0.0"
+          }
+        },
+        "tools/list": {
+          "tools": [
+            {
+              "name": "get_greeting",
+              "description": "Returns a greeting for the given name",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "description": "The name to greet" }
+                },
+                "required": ["name"]
+              }
+            },
+            {
+              "name": "get_time",
+              "description": "Returns the current UTC time",
+              "inputSchema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

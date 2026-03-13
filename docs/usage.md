@@ -198,6 +198,43 @@ winapp pack ./dist --generate-cert --install-cert --self-contained
 winapp pack ./dist --executable MyApp.exe
 ```
 
+#### MCP Bundle (.mcpb) Conversion
+
+Convert an [MCP Bundle](https://github.com/modelcontextprotocol/mcpb) to a signed MSIX with Windows ODR registration and containment support.
+
+```bash
+winapp pack --mcpb <mcpb-file> [options]
+```
+
+**Additional Options for MCP Bundles:**
+
+* `--mcpb <path>` - Path to MCP Bundle file. When used, `input-folder` is not required.
+* `--architecture <arch>` - Target processor architecture: `x64` (default), `x86`, or `arm64` (also `--arch`)
+* `--runtime-path <path>` - Path to runtime executable for script-based servers (auto-detected if not specified)
+
+**What it does:**
+
+* Extracts the `.mcpb` ZIP archive and validates `manifest.json`
+* Checks for `_meta.com.microsoft.windows.static_responses` (required for ODR)
+* Generates `AppxManifest.xml` with `TrustedLaunch`, MCP server extension, and execution alias
+* Stages server files, icons, and MCP manifest
+* Packages and signs using existing `pack` infrastructure
+
+**Examples:**
+
+```bash
+# Convert MCP Bundle with auto-generated certificate
+winapp pack --mcpb ./my-server.mcpb --generate-cert
+
+# Convert for ARM64 with existing certificate
+winapp pack --mcpb ./my-server.mcpb --cert ./mycert.pfx --architecture arm64
+
+# Script-based server with explicit runtime path
+winapp pack --mcpb ./node-server.mcpb --generate-cert --runtime-path "C:\Program Files\nodejs\node.exe"
+```
+
+See the [Packaging an MCP Server as MSIX](guides/packaging-mcp-server.md) guide for detailed instructions.
+
 ---
 
 ### create-debug-identity

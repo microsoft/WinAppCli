@@ -49,6 +49,7 @@ Whether you're building with .NET/Win32, CMake, Electron, or Rust, this CLI give
 - **Modern Windows APIs** - [Windows App SDK](https://learn.microsoft.com/windows/apps/windows-app-sdk/) and Windows SDK with automatic setup and code generation
 - **Package Identity** - Debug and test by adding package identity without full packaging in a snap
 - **MSIX Packaging** - App packaging with signing and Store readiness
+- **MCP Server Packaging** - Convert [MCP Bundle](https://github.com/modelcontextprotocol/mcpb) (.mcpb) files to signed MSIX with Windows ODR registration
 - **Developer Tools** - Manifests, certificates, assets, and build integration
 
 Perfect for:
@@ -120,6 +121,7 @@ Checkout our getting started guides for step by step instructions of how to setu
 
 Additional guides:
 - [Packaging an EXE/CLI](/docs/guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- [Packaging an MCP Server](/docs/guides/packaging-mcp-server.md): convert MCP Bundle (.mcpb) to signed MSIX
 
 ## 📦 Installation
 

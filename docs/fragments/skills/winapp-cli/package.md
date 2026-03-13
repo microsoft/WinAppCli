@@ -107,6 +107,23 @@ winapp create-external-catalog "./bin/Release" --recursive --output ./catalog/Co
 
 This hashes executables in the specified directories so Windows trusts them when running with sparse package identity.
 
+### MCP Bundle (.mcpb) to MSIX
+
+Convert [MCP Bundle](https://github.com/modelcontextprotocol/mcpb) files directly to signed MSIX packages for Windows on-device runtime (ODR) registration:
+
+```powershell
+# Convert MCP Bundle with auto-generated certificate
+winapp pack --mcpb ./my-server.mcpb --generate-cert
+
+# Specify architecture for ARM64
+winapp pack --mcpb ./my-server.mcpb --cert ./devcert.pfx --architecture arm64
+
+# Script-based server with explicit runtime
+winapp pack --mcpb ./node-server.mcpb --generate-cert --runtime-path "C:\nodejs\node.exe"
+```
+
+The MCPB flow extracts the bundle, validates `manifest.json` (including `_meta.com.microsoft.windows.static_responses`), generates the AppxManifest with MCP server extension and TrustedLaunch, and packages using the standard MSIX pipeline.
+
 ## CI/CD
 
 ### GitHub Actions
@@ -134,6 +151,7 @@ Use the `microsoft/setup-winapp` action to install winapp on GitHub-hosted runne
 - For framework-specific packaging paths (Electron, .NET, Rust, etc.), see the `winapp-frameworks` skill
 - The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `appxmanifest.xml`
 - For production distribution, use a certificate from a trusted CA and add `--timestamp` when signing with `winapp sign`
+- Use `--mcpb <path>` to convert an MCP Bundle (.mcpb) file directly to a signed MSIX. See [Packaging an MCP Server](../../docs/guides/packaging-mcp-server.md) for details.
 
 ## Related skills
 - Need a manifest first? See `winapp-manifest` to generate `appxmanifest.xml`
