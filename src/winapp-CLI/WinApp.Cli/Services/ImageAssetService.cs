@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using SkiaSharp;
+using Svg.Skia;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -47,15 +49,7 @@ internal class ImageAssetService : IImageAssetService
         Bitmap sourceImage;
         try
         {
-            if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
-            {
-                using var icon = new Icon(sourceImagePath.FullName);
-                sourceImage = icon.ToBitmap();
-            }
-            else
-            {
-                sourceImage = new Bitmap(sourceImagePath.FullName);
-            }
+            sourceImage = LoadSourceImage(sourceImagePath);
         }
         catch (Exception ex)
         {
@@ -123,15 +117,7 @@ internal class ImageAssetService : IImageAssetService
         Bitmap sourceImage;
         try
         {
-            if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
-            {
-                using var icon = new Icon(sourceImagePath.FullName);
-                sourceImage = icon.ToBitmap();
-            }
-            else
-            {
-                sourceImage = new Bitmap(sourceImagePath.FullName);
-            }
+            sourceImage = LoadSourceImage(sourceImagePath);
         }
         catch (Exception ex)
         {
@@ -212,6 +198,81 @@ internal class ImageAssetService : IImageAssetService
                 taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {successCount} of {totalCount} image assets");
             }
         }
+    }
+
+    private static Bitmap LoadSourceImage(FileInfo sourceImagePath)
+    {
+        if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
+        {
+            using var icon = new Icon(sourceImagePath.FullName);
+            return icon.ToBitmap();
+        }
+
+        if (sourceImagePath.Extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            return LoadSvgAsBitmap(sourceImagePath);
+        }
+
+        return new Bitmap(sourceImagePath.FullName);
+    }
+
+    private static Bitmap LoadSvgAsBitmap(FileInfo sourceImagePath)
+    {
+        var svg = new SKSvg();
+        using var stream = File.OpenRead(sourceImagePath.FullName);
+        svg.Load(stream);
+
+        var picture = svg.Picture ?? throw new InvalidOperationException(
+            $"Failed to render SVG image: {sourceImagePath.FullName}. The file may be corrupted or contain unsupported SVG features.");
+        var bounds = picture.CullRect;
+
+        int width = (int)Math.Ceiling(bounds.Width);
+        int height = (int)Math.Ceiling(bounds.Height);
+
+        if (width <= 0 || height <= 0)
+        {
+            throw new InvalidOperationException(
+                $"SVG image has invalid dimensions ({width}x{height}): {sourceImagePath.FullName}. Ensure the SVG has a valid viewBox or width/height attributes.");
+        }
+
+        // Render at a reasonable minimum size for quality when scaling down to asset sizes
+        const float minRenderDimension = 1024f;
+        float scaleFactor = 1f;
+        if (width < minRenderDimension || height < minRenderDimension)
+        {
+            scaleFactor = Math.Max(minRenderDimension / width, minRenderDimension / height);
+            width = (int)Math.Ceiling(bounds.Width * scaleFactor);
+            height = (int)Math.Ceiling(bounds.Height * scaleFactor);
+        }
+
+        // Render SVG to SKBitmap, then convert to System.Drawing.Bitmap
+        using var skBitmap = new SKBitmap(width, height);
+        using (var canvas = new SKCanvas(skBitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+
+            // Translate to handle non-zero origin bounds, then scale
+            if (bounds.Left != 0 || bounds.Top != 0)
+            {
+                canvas.Translate(-bounds.Left * scaleFactor, -bounds.Top * scaleFactor);
+            }
+
+            if (scaleFactor > 1f)
+            {
+                canvas.Scale(scaleFactor);
+            }
+
+            canvas.DrawPicture(picture);
+            canvas.Flush();
+        }
+
+        using var image = SKImage.FromBitmap(skBitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+
+        // Create the Bitmap from a fresh MemoryStream that it will own.
+        // Bitmap keeps a reference to the stream, so we must NOT dispose it.
+        var ms = new MemoryStream(data.ToArray());
+        return new Bitmap(ms);
     }
 
     private static async Task GenerateAssetAsync(Bitmap sourceImage, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
