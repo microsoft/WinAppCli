@@ -7,7 +7,6 @@ This guide walks you through converting an [MCP Bundle](https://github.com/model
 MCP Bundles are easy to create and cross-platform, but on Windows they lack **package identity** — which means:
 
 - No containment (sandbox isolation) in agent sessions
-- No enterprise management via Intune/Group Policy
 - No verifiable publisher identity
 
 Converting to MSIX gives your MCP server full Windows platform integration while keeping MCPB's authoring simplicity.
@@ -92,9 +91,5 @@ winapp package --mcpb ./node-server.mcpb --generate-cert --runtime-path "C:\Prog
 ```
 
 The runtime will be auto-detected from PATH if not specified.
-
-## TrustedLaunch and Self-Signed Certificates
-
-MSIX packages with TrustedLaunch require special handling for self-signed certificates during development. For containment launch (`odr mcp run --proxy`), install via **Windows Device Portal** instead of `Add-AppxPackage`.
 
 See the [winappCli documentation](../usage.md) for more details on certificate management.
