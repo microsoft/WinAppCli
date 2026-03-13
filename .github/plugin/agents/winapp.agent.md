@@ -143,9 +143,9 @@ Does the project already have an appxmanifest.xml?
 - `--logo-path` — source image for asset generation
 - `--if-exists error|skip|overwrite`
 
-### `winapp manifest update-assets <image-path>`
-**Purpose:** Regenerate all required icon sizes from a single source image.
-**When to use:** When updating your app icon. Source image should be at least 400×400 pixels.
+### `winapp manifest update-assets <image-path> [--light-image <path>]`
+**Purpose:** Regenerate all required icon sizes, scale variants, and app.ico from a single source image (PNG, SVG, ICO, etc.).
+**When to use:** When updating your app icon. Source image should be at least 400×400 pixels. SVG recommended for best quality. Use `--light-image` for light theme variants.
 
 ### `winapp tool <toolname> [args...]` (alias: `winapp run-buildtool`)
 **Purpose:** Run Windows SDK tools directly (makeappx, signtool, makepri, etc.).

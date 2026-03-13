@@ -11,6 +11,193 @@ using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
+/// <summary>
+/// Wraps either a raster Bitmap or an SVG SKPicture so that SVG sources can be
+/// rendered directly at each target size without an intermediate rasterization step.
+/// </summary>
+internal sealed class ImageSource : IDisposable
+{
+    private readonly Bitmap? bitmap;
+    private readonly SKSvg? svg;
+    private readonly SKPicture? svgPicture;
+    private readonly SKRect svgBounds;
+
+    private ImageSource(Bitmap bitmap)
+    {
+        this.bitmap = bitmap;
+        AspectRatio = (float)bitmap.Width / bitmap.Height;
+    }
+
+    private ImageSource(SKSvg svg, SKPicture picture, SKRect bounds)
+    {
+        this.svg = svg;
+        svgPicture = picture;
+        svgBounds = bounds;
+
+        var width = Math.Max(1, (int)Math.Ceiling(bounds.Width));
+        var height = Math.Max(1, (int)Math.Ceiling(bounds.Height));
+        AspectRatio = (float)width / height;
+    }
+
+    public float AspectRatio { get; }
+
+    public bool IsSvg => svgPicture != null;
+
+    public string DimensionsLabel => bitmap != null
+        ? $"{bitmap.Width}x{bitmap.Height}"
+        : $"{(int)Math.Ceiling(svgBounds.Width)}x{(int)Math.Ceiling(svgBounds.Height)} (SVG)";
+
+    /// <summary>
+    /// Renders the source at the exact target size and returns PNG bytes.
+    /// SVG sources are rasterized via SkiaSharp at the target resolution.
+    /// Raster sources are scaled via GDI+ high-quality bicubic.
+    /// </summary>
+    public byte[] RenderToPng(int targetWidth, int targetHeight)
+    {
+        if (svgPicture != null)
+        {
+            return RenderSvgToPng(targetWidth, targetHeight);
+        }
+
+        return RenderBitmapToPng(bitmap!, targetWidth, targetHeight);
+    }
+
+    private byte[] RenderSvgToPng(int targetWidth, int targetHeight)
+    {
+        using var skBitmap = new SKBitmap(targetWidth, targetHeight);
+        using (var canvas = new SKCanvas(skBitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+
+            // Fit SVG into target maintaining aspect ratio, centered
+            var svgWidth = svgBounds.Width;
+            var svgHeight = svgBounds.Height;
+            var svgAspect = svgWidth / svgHeight;
+            var targetAspect = (float)targetWidth / targetHeight;
+
+            float scale;
+            float offsetX, offsetY;
+            if (svgAspect > targetAspect)
+            {
+                scale = targetWidth / svgWidth;
+                offsetX = 0;
+                offsetY = (targetHeight - svgHeight * scale) / 2f;
+            }
+            else
+            {
+                scale = targetHeight / svgHeight;
+                offsetX = (targetWidth - svgWidth * scale) / 2f;
+                offsetY = 0;
+            }
+
+            canvas.Translate(offsetX - svgBounds.Left * scale, offsetY - svgBounds.Top * scale);
+            canvas.Scale(scale);
+            canvas.DrawPicture(svgPicture);
+            canvas.Flush();
+        }
+
+        using var image = SKImage.FromBitmap(skBitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    private static byte[] RenderBitmapToPng(Bitmap source, int targetWidth, int targetHeight)
+    {
+        var sourceAspect = (float)source.Width / source.Height;
+        var targetAspect = (float)targetWidth / targetHeight;
+
+        int scaledWidth;
+        int scaledHeight;
+        if (sourceAspect > targetAspect)
+        {
+            scaledWidth = targetWidth;
+            scaledHeight = (int)(targetWidth / sourceAspect);
+        }
+        else
+        {
+            scaledHeight = targetHeight;
+            scaledWidth = (int)(targetHeight * sourceAspect);
+        }
+
+        using var targetBitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(targetBitmap);
+
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.SmoothingMode = SmoothingMode.HighQuality;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.CompositingMode = CompositingMode.SourceOver;
+        graphics.Clear(Color.Transparent);
+
+        var x = (targetWidth - scaledWidth) / 2f;
+        var y = (targetHeight - scaledHeight) / 2f;
+        graphics.DrawImage(source, new RectangleF(x, y, scaledWidth, scaledHeight));
+
+        using var ms = new MemoryStream();
+        targetBitmap.Save(ms, ImageFormat.Png);
+        return ms.ToArray();
+    }
+
+    public static ImageSource FromFile(FileInfo path)
+    {
+        if (path.Extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            return FromSvgFile(path);
+        }
+
+        if (path.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
+        {
+            using var icon = new Icon(path.FullName);
+            return new ImageSource(icon.ToBitmap());
+        }
+
+        return new ImageSource(new Bitmap(path.FullName));
+    }
+
+    private static ImageSource FromSvgFile(FileInfo path)
+    {
+        var svg = new SKSvg();
+        try
+        {
+            using var stream = File.OpenRead(path.FullName);
+            svg.Load(stream);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            svg.Dispose();
+            throw new InvalidOperationException(
+                $"Failed to parse SVG image: {path.FullName}. Ensure the file is valid SVG.", ex);
+        }
+
+        var picture = svg.Picture;
+        if (picture == null)
+        {
+            svg.Dispose();
+            throw new InvalidOperationException(
+                $"Failed to render SVG image: {path.FullName}. The file may be corrupted or contain unsupported SVG features.");
+        }
+
+        var bounds = picture.CullRect;
+        var width = (int)Math.Ceiling(bounds.Width);
+        var height = (int)Math.Ceiling(bounds.Height);
+
+        if (width <= 0 || height <= 0)
+        {
+            svg.Dispose();
+            throw new InvalidOperationException(
+                $"SVG image has invalid dimensions ({width}x{height}): {path.FullName}. Ensure the SVG has a valid viewBox or width/height attributes.");
+        }
+
+        return new ImageSource(svg, picture, bounds);
+    }
+
+    public void Dispose()
+    {
+        bitmap?.Dispose();
+        svg?.Dispose(); // Deterministically frees the SKPicture it owns
+    }
+}
+
 internal class ImageAssetService : IImageAssetService
 {
     private static readonly ManifestAssetReference[] DefaultAssetReferences =
@@ -76,37 +263,37 @@ internal class ImageAssetService : IImageAssetService
 
         taskContext.AddStatusMessage($"{UiSymbols.Info} Generating MSIX image assets from: {sourceImagePath.FullName}");
 
-        Bitmap sourceImage;
+        ImageSource source;
         try
         {
-            sourceImage = LoadSourceImage(sourceImagePath);
+            source = ImageSource.FromFile(sourceImagePath);
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Failed to decode image: {sourceImagePath.FullName}. Please ensure the file is a valid image format.", ex);
         }
 
-        Bitmap? lightImage = null;
+        ImageSource? lightSource = null;
         try
         {
             if (lightImagePath != null)
             {
-                lightImage = LoadSourceImage(lightImagePath);
+                lightSource = ImageSource.FromFile(lightImagePath);
             }
         }
         catch (Exception ex)
         {
-            sourceImage.Dispose();
+            source.Dispose();
             throw new InvalidOperationException($"Failed to decode image: {lightImagePath!.FullName}. Please ensure the file is a valid image format.", ex);
         }
 
-        using (sourceImage)
-        using (lightImage)
+        using (source)
+        using (lightSource)
         {
-            taskContext.AddDebugMessage($"Source image size: {sourceImage.Width}x{sourceImage.Height}");
-            if (lightImage != null)
+            taskContext.AddDebugMessage($"Source image: {source.DimensionsLabel}");
+            if (lightSource != null)
             {
-                taskContext.AddDebugMessage($"Light image size: {lightImage.Width}x{lightImage.Height}");
+                taskContext.AddDebugMessage($"Light image: {lightSource.DimensionsLabel}");
             }
 
             var successCount = 0;
@@ -132,25 +319,25 @@ internal class ImageAssetService : IImageAssetService
                     var scaledPath = Path.Combine(assetDirectory, scaledFileName);
 
                     totalCount++;
-                    if (await TryGenerateAssetAsync(sourceImage, scaledPath, scaledFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
+                    if (await TryGenerateAssetAsync(source, scaledPath, scaledFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
                     {
                         successCount++;
                     }
 
-                    if (lightImage != null)
+                    if (lightSource != null)
                     {
                         var lightScaleFileName = $"{assetFileName}.scale-{GetScalePercentage(scale)}_altform-colorful_theme-light{assetExtension}";
                         var lightScalePath = Path.Combine(assetDirectory, lightScaleFileName);
 
                         totalCount++;
-                        if (await TryGenerateAssetAsync(lightImage, lightScalePath, lightScaleFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
+                        if (await TryGenerateAssetAsync(lightSource, lightScalePath, lightScaleFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
                         {
                             successCount++;
                         }
                     }
                 }
 
-                if (IsTargetSizeAsset(assetReference, assetFileName))
+                if (IsTargetSizeAsset(assetReference))
                 {
                     foreach (var targetSize in TargetSizes)
                     {
@@ -158,7 +345,7 @@ internal class ImageAssetService : IImageAssetService
                         var platedPath = Path.Combine(assetDirectory, platedFileName);
 
                         totalCount++;
-                        if (await TryGenerateAssetAsync(sourceImage, platedPath, platedFileName, targetSize, targetSize, taskContext, cancellationToken))
+                        if (await TryGenerateAssetAsync(source, platedPath, platedFileName, targetSize, targetSize, taskContext, cancellationToken))
                         {
                             successCount++;
                         }
@@ -167,18 +354,18 @@ internal class ImageAssetService : IImageAssetService
                         var unplatedPath = Path.Combine(assetDirectory, unplatedFileName);
 
                         totalCount++;
-                        if (await TryGenerateAssetAsync(sourceImage, unplatedPath, unplatedFileName, targetSize, targetSize, taskContext, cancellationToken))
+                        if (await TryGenerateAssetAsync(source, unplatedPath, unplatedFileName, targetSize, targetSize, taskContext, cancellationToken))
                         {
                             successCount++;
                         }
 
-                        if (lightImage != null)
+                        if (lightSource != null)
                         {
                             var lightTargetFileName = $"{assetFileName}.targetsize-{targetSize}_altform-lightunplated{assetExtension}";
                             var lightTargetPath = Path.Combine(assetDirectory, lightTargetFileName);
 
                             totalCount++;
-                            if (await TryGenerateAssetAsync(lightImage, lightTargetPath, lightTargetFileName, targetSize, targetSize, taskContext, cancellationToken))
+                            if (await TryGenerateAssetAsync(lightSource, lightTargetPath, lightTargetFileName, targetSize, targetSize, taskContext, cancellationToken))
                             {
                                 successCount++;
                             }
@@ -207,17 +394,17 @@ internal class ImageAssetService : IImageAssetService
 
         taskContext.AddStatusMessage($"{UiSymbols.Info} Generating ICO file: {outputPath}");
 
-        Bitmap sourceImage;
+        ImageSource source;
         try
         {
-            sourceImage = LoadSourceImage(sourceImagePath);
+            source = ImageSource.FromFile(sourceImagePath);
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Failed to decode image: {sourceImagePath.FullName}. Please ensure the file is a valid image format.", ex);
         }
 
-        using (sourceImage)
+        using (source)
         {
             var outputDirectory = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrEmpty(outputDirectory) && !Directory.Exists(outputDirectory))
@@ -232,37 +419,7 @@ internal class ImageAssetService : IImageAssetService
                 foreach (var size in IcoSizes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-
-                    using var targetBitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
-                    using var graphics = Graphics.FromImage(targetBitmap);
-                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    graphics.SmoothingMode = SmoothingMode.HighQuality;
-                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    graphics.CompositingQuality = CompositingQuality.HighQuality;
-                    graphics.CompositingMode = CompositingMode.SourceOver;
-                    graphics.Clear(Color.Transparent);
-
-                    var sourceAspect = (float)sourceImage.Width / sourceImage.Height;
-                    int scaledWidth;
-                    int scaledHeight;
-                    if (sourceAspect > 1f)
-                    {
-                        scaledWidth = size;
-                        scaledHeight = (int)(size / sourceAspect);
-                    }
-                    else
-                    {
-                        scaledHeight = size;
-                        scaledWidth = (int)(size * sourceAspect);
-                    }
-
-                    var x = (size - scaledWidth) / 2f;
-                    var y = (size - scaledHeight) / 2f;
-                    graphics.DrawImage(sourceImage, new RectangleF(x, y, scaledWidth, scaledHeight));
-
-                    using var memoryStream = new MemoryStream();
-                    targetBitmap.Save(memoryStream, ImageFormat.Png);
-                    pngFrames.Add(memoryStream.ToArray());
+                    pngFrames.Add(source.RenderToPng(size, size));
                 }
 
                 WriteIcoFile(outputPath, IcoSizes, pngFrames);
@@ -272,87 +429,12 @@ internal class ImageAssetService : IImageAssetService
         taskContext.AddStatusMessage($"{UiSymbols.Info} Generated ICO file with {IcoSizes.Length} sizes");
     }
 
-    private static Bitmap LoadSourceImage(FileInfo sourceImagePath)
-    {
-        if (sourceImagePath.Extension.Equals(".ico", StringComparison.OrdinalIgnoreCase))
-        {
-            using var icon = new Icon(sourceImagePath.FullName);
-            return icon.ToBitmap();
-        }
-
-        if (sourceImagePath.Extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
-        {
-            return LoadSvgAsBitmap(sourceImagePath);
-        }
-
-        return new Bitmap(sourceImagePath.FullName);
-    }
-
-    private static Bitmap LoadSvgAsBitmap(FileInfo sourceImagePath)
-    {
-        var svg = new SKSvg();
-        using var stream = File.OpenRead(sourceImagePath.FullName);
-        svg.Load(stream);
-
-        var picture = svg.Picture ?? throw new InvalidOperationException(
-            $"Failed to render SVG image: {sourceImagePath.FullName}. The file may be corrupted or contain unsupported SVG features.");
-        var bounds = picture.CullRect;
-
-        int width = (int)Math.Ceiling(bounds.Width);
-        int height = (int)Math.Ceiling(bounds.Height);
-
-        if (width <= 0 || height <= 0)
-        {
-            throw new InvalidOperationException(
-                $"SVG image has invalid dimensions ({width}x{height}): {sourceImagePath.FullName}. Ensure the SVG has a valid viewBox or width/height attributes.");
-        }
-
-        // Render at a reasonable minimum size for quality when scaling down to asset sizes
-        const float minRenderDimension = 1024f;
-        float scaleFactor = 1f;
-        if (width < minRenderDimension || height < minRenderDimension)
-        {
-            scaleFactor = Math.Max(minRenderDimension / width, minRenderDimension / height);
-            width = (int)Math.Ceiling(bounds.Width * scaleFactor);
-            height = (int)Math.Ceiling(bounds.Height * scaleFactor);
-        }
-
-        // Render SVG to SKBitmap, then convert to System.Drawing.Bitmap
-        using var skBitmap = new SKBitmap(width, height);
-        using (var canvas = new SKCanvas(skBitmap))
-        {
-            canvas.Clear(SKColors.Transparent);
-
-            // Translate to handle non-zero origin bounds, then scale
-            if (bounds.Left != 0 || bounds.Top != 0)
-            {
-                canvas.Translate(-bounds.Left * scaleFactor, -bounds.Top * scaleFactor);
-            }
-
-            if (scaleFactor > 1f)
-            {
-                canvas.Scale(scaleFactor);
-            }
-
-            canvas.DrawPicture(picture);
-            canvas.Flush();
-        }
-
-        using var image = SKImage.FromBitmap(skBitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-
-        // Create the Bitmap from a fresh MemoryStream that it will own.
-        // Bitmap keeps a reference to the stream, so we must NOT dispose it.
-        var ms = new MemoryStream(data.ToArray());
-        return new Bitmap(ms);
-    }
-
     private static int GetScalePercentage(float scale)
     {
         return (int)Math.Round(scale * 100, MidpointRounding.AwayFromZero);
     }
 
-    private static bool IsTargetSizeAsset(ManifestAssetReference assetReference, string assetFileName)
+    private static bool IsTargetSizeAsset(ManifestAssetReference assetReference)
     {
         // App icon assets (44x44) get targetsize variants regardless of naming convention
         // Supports both old naming (Square44x44Logo) and new naming (AppList)
@@ -361,7 +443,7 @@ internal class ImageAssetService : IImageAssetService
     }
 
     private static async Task<bool> TryGenerateAssetAsync(
-        Bitmap sourceImage,
+        ImageSource source,
         string outputPath,
         string fileName,
         int targetWidth,
@@ -371,7 +453,7 @@ internal class ImageAssetService : IImageAssetService
     {
         try
         {
-            await GenerateAssetAsync(sourceImage, outputPath, targetWidth, targetHeight, cancellationToken);
+            await GenerateAssetAsync(source, outputPath, targetWidth, targetHeight, cancellationToken);
             taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {fileName} ({targetWidth}x{targetHeight})");
             return true;
         }
@@ -420,44 +502,12 @@ internal class ImageAssetService : IImageAssetService
         }
     }
 
-    private static async Task GenerateAssetAsync(Bitmap sourceImage, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
+    private static async Task GenerateAssetAsync(ImageSource source, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
     {
         await Task.Run(() =>
         {
-            var sourceAspect = (float)sourceImage.Width / sourceImage.Height;
-            var targetAspect = (float)targetWidth / targetHeight;
-
-            int scaledWidth;
-            int scaledHeight;
-            if (sourceAspect > targetAspect)
-            {
-                scaledWidth = targetWidth;
-                scaledHeight = (int)(targetWidth / sourceAspect);
-            }
-            else
-            {
-                scaledHeight = targetHeight;
-                scaledWidth = (int)(targetHeight * sourceAspect);
-            }
-
-            using var targetBitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
-            using var graphics = Graphics.FromImage(targetBitmap);
-
-            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            graphics.SmoothingMode = SmoothingMode.HighQuality;
-            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.CompositingQuality = CompositingQuality.HighQuality;
-            graphics.CompositingMode = CompositingMode.SourceOver;
-
-            graphics.Clear(Color.Transparent);
-
-            var x = (targetWidth - scaledWidth) / 2f;
-            var y = (targetHeight - scaledHeight) / 2f;
-            var destRect = new RectangleF(x, y, scaledWidth, scaledHeight);
-
-            graphics.DrawImage(sourceImage, destRect);
-
-            targetBitmap.Save(outputPath, ImageFormat.Png);
+            var pngData = source.RenderToPng(targetWidth, targetHeight);
+            File.WriteAllBytes(outputPath, pngData);
         }, cancellationToken);
     }
 }

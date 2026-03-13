@@ -924,7 +924,7 @@
           "hidden": false,
           "arguments": {
             "image-path": {
-              "description": "Path to source image file",
+              "description": "Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF)",
               "order": 0,
               "hidden": false,
               "valueType": "System.IO.FileInfo",
@@ -936,6 +936,18 @@
             }
           },
           "options": {
+            "--light-image": {
+              "description": "Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF)",
+              "hidden": false,
+              "valueType": "System.IO.FileInfo",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--manifest": {
               "description": "Path to AppxManifest.xml file (default: search current directory)",
               "hidden": false,

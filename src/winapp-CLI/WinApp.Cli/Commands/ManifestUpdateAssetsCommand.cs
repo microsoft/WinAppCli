@@ -21,7 +21,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
     {
         ImageArgument = new Argument<FileInfo>("image-path")
         {
-            Description = "Path to source image file"
+            Description = "Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF)"
         };
         ImageArgument.AcceptExistingOnly();
 
@@ -33,7 +33,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
 
         LightImageOption = new Option<FileInfo>("--light-image")
         {
-            Description = "Path to source image for light theme variants"
+            Description = "Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF)"
         };
         LightImageOption.AcceptExistingOnly();
     }

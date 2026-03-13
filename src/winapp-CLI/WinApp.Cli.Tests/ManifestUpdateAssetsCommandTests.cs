@@ -358,4 +358,74 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         Assert.AreEqual(expectedWidth, bitmap.Width, $"{Path.GetFileName(imagePath)} width mismatch");
         Assert.AreEqual(expectedHeight, bitmap.Height, $"{Path.GetFileName(imagePath)} height mismatch");
     }
+
+    private static void CreateNewNamingManifest(string path)
+    {
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package 
+  xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+  xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""TestPackage"" Publisher=""CN=TestPublisher"" Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>TestPackage</DisplayName>
+    <PublisherDisplayName>TestPublisher</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""test.exe"">
+      <uap:VisualElements
+        DisplayName=""TestPackage""
+        Description=""Test Application""
+        BackgroundColor=""transparent""
+        Square150x150Logo=""Assets\MedTile.png""
+        Square44x44Logo=""Assets\AppList.png"">
+        <uap:DefaultTile Wide310x150Logo=""Assets\WideTile.png"" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+</Package>";
+        File.WriteAllText(path, manifestContent);
+    }
+
+    [TestMethod]
+    public async Task ManifestUpdateAssetsCommandShouldGenerateAssetsWithNewNaming()
+    {
+        var newNamingManifest = Path.Combine(_tempDirectory.FullName, "appxmanifest-new.xml");
+        CreateNewNamingManifest(newNamingManifest);
+
+        var updateAssetsCommand = GetRequiredService<ManifestUpdateAssetsCommand>();
+        var args = new[]
+        {
+            _testImagePath,
+            "--manifest", newNamingManifest,
+        };
+
+        var parseResult = updateAssetsCommand.Parse(args);
+        var exitCode = await parseResult.InvokeAsync();
+
+        Assert.AreEqual(0, exitCode, "Update-assets command should succeed with new naming manifest");
+
+        var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+
+        // Base assets use new names
+        var expectedBaseAssets = new[] { "AppList.png", "MedTile.png", "WideTile.png", "StoreLogo.png", "app.ico" };
+        foreach (var asset in expectedBaseAssets)
+        {
+            Assert.IsTrue(File.Exists(Path.Combine(assetsDir, asset)), $"Asset {asset} should be generated");
+        }
+
+        // Scale variants use new names
+        AssertImageDimensions(Path.Combine(assetsDir, "AppList.scale-200.png"), 88, 88);
+        AssertImageDimensions(Path.Combine(assetsDir, "MedTile.scale-200.png"), 300, 300);
+        AssertImageDimensions(Path.Combine(assetsDir, "WideTile.scale-200.png"), 620, 300);
+
+        // Targetsize variants generated for AppList (44x44 app icon)
+        AssertImageDimensions(Path.Combine(assetsDir, "AppList.targetsize-48.png"), 48, 48);
+        AssertImageDimensions(Path.Combine(assetsDir, "AppList.targetsize-48_altform-unplated.png"), 48, 48);
+        AssertImageDimensions(Path.Combine(assetsDir, "AppList.targetsize-256.png"), 256, 256);
+
+        // No targetsize variants for non-app-icon assets
+        Assert.IsFalse(File.Exists(Path.Combine(assetsDir, "MedTile.targetsize-48.png")),
+            "MedTile should not have targetsize variants");
+    }
 }

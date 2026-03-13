@@ -8,7 +8,7 @@ Use this skill when:
 ## Prerequisites
 
 - winapp CLI installed
-- Optional: a source image (PNG, at least 400x400 pixels) for custom app icons
+- Optional: a source image (PNG or SVG, at least 400x400 pixels) for custom app icons
 
 ## Key concepts
 
@@ -59,11 +59,24 @@ Output:
 # Generate all required icon sizes from one source image
 winapp manifest update-assets ./my-logo.png
 
+# SVG source images produce the best quality at all sizes
+winapp manifest update-assets ./my-logo.svg
+
 # Specify manifest location (if not in current directory)
 winapp manifest update-assets ./my-logo.png --manifest ./path/to/appxmanifest.xml
+
+# Generate light theme variants from a separate image
+winapp manifest update-assets ./my-logo.png --light-image ./my-logo-light.png
+
+# Use the same image for both (generates all MRT light theme qualifiers)
+winapp manifest update-assets ./my-logo.png --light-image ./my-logo.png
 ```
 
-The source image should be at least 400x400 pixels (PNG recommended). The command reads the manifest to determine which asset sizes are needed and generates them all.
+The source image should be at least 400x400 pixels (PNG or SVG recommended). The command reads the manifest to determine which asset sizes are needed and generates:
+- **5 scale variants** per asset (100%, 125%, 150%, 200%, 400%)
+- **14 plated + 14 unplated targetsize variants** for the app icon (44x44)
+- **app.ico** — multi-resolution ICO file for shell integration
+- With `--light-image`: light theme variants using the correct MRT qualifiers per asset type
 
 ## Manifest structure overview
 
@@ -108,7 +121,7 @@ Key fields to edit:
 - The `sparse` template adds `uap10:AllowExternalContent="true"` for apps that need identity but run outside the MSIX container
 - You can manually edit `appxmanifest.xml` after generation — it's a standard XML file
 - Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
-- For logos, transparent PNGs work best. Use a square image for best results across all sizes.
+- For logos, transparent PNGs or SVGs work best. SVG source images are rendered as vectors directly at each target size, producing pixel-perfect results. Use a square image for best results across all sizes.
 - **`$targetnametoken$` placeholder:** When `winapp manifest generate` creates `appxmanifest.xml`, it sets `Application.Executable` to `$targetnametoken$.exe` by default. This is a valid placeholder that gets automatically resolved by `winapp package --executable <name>` at packaging time — you rarely need to override it during manifest generation. If `--executable` is provided to `winapp manifest generate`, winapp reads `FileVersionInfo` from the actual exe to auto-fill package name, description, publisher, and extract an icon, so the exe must already exist on disk.
 
 ## Related skills
@@ -120,5 +133,5 @@ Key fields to edit:
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "Manifest already exists" | `appxmanifest.xml` present | Use `--if-exists overwrite` to replace, or edit existing file directly |
-| "Invalid source image" | Image too small or wrong format | Use PNG, at least 400x400 pixels |
+| "Invalid source image" | Image too small or wrong format | Use PNG or SVG, at least 400x400 pixels |
 | "Publisher mismatch" during packaging | Manifest publisher ≠ cert publisher | Edit `Identity.Publisher` in manifest, or regenerate cert with `--manifest` |

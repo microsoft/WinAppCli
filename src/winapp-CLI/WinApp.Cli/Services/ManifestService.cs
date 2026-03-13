@@ -252,7 +252,11 @@ internal partial class ManifestService(
         {
             await imageAssetService.GenerateAssetsFromManifestAsync(imagePath, manifestDir, assetReferences, taskContext, lightImagePath, cancellationToken);
 
-            var relativeAssetsDirectory = Path.GetDirectoryName(assetReferences[0].RelativePath);
+            // Place app.ico alongside the app icon asset (44x44), falling back to
+            // the most common asset directory so we don't depend on parse order.
+            var appIconRef = assetReferences.FirstOrDefault(r => r.BaseWidth == 44 && r.BaseHeight == 44);
+            var relativeAssetsDirectory = Path.GetDirectoryName(
+                appIconRef?.RelativePath ?? GetMostCommonAssetDirectory(assetReferences));
             var assetsDirectoryPath = string.IsNullOrWhiteSpace(relativeAssetsDirectory)
                 ? manifestDir.FullName
                 : Path.Combine(manifestDir.FullName, relativeAssetsDirectory);
@@ -476,4 +480,18 @@ internal partial class ManifestService(
 
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
+
+    /// <summary>
+    /// Returns the relative path of the asset whose parent directory appears most often,
+    /// so the ICO file lands in the majority directory even for non-standard manifests.
+    /// </summary>
+    private static string GetMostCommonAssetDirectory(IReadOnlyList<ManifestAssetReference> assetReferences)
+    {
+        return assetReferences
+            .GroupBy(r => Path.GetDirectoryName(r.RelativePath) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .First()
+            .First()
+            .RelativePath;
+    }
 }
