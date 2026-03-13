@@ -12,7 +12,7 @@ internal class PackageCommand : Command, IShortDescription
 {
     public string ShortDescription => "Create MSIX package";
 
-    public static Argument<DirectoryInfo> InputFolderArgument { get; }
+    public static Argument<DirectoryInfo?> InputFolderArgument { get; }
     public static Option<FileInfo> OutputOption { get; }
     public static Option<string?> NameOption { get; }
     public static Option<bool> SkipPriOption { get; }
@@ -25,14 +25,18 @@ internal class PackageCommand : Command, IShortDescription
     public static Option<bool> SelfContainedOption { get; }
     public static Option<string?> ExecutableOption { get; }
 
+    // MCP Bundle options
+    public static Option<FileInfo?> McpbOption { get; }
+    public static Option<string> ArchitectureOption { get; }
+    public static Option<string?> RuntimePathOption { get; }
+
     static PackageCommand()
     {
-        InputFolderArgument = new Argument<DirectoryInfo>("input-folder")
+        InputFolderArgument = new Argument<DirectoryInfo?>("input-folder")
         {
-            Description = "Input folder with package layout",
-            Arity = ArgumentArity.ExactlyOne
+            Description = "Input folder with package layout (not required when --mcpb is used)",
+            Arity = ArgumentArity.ZeroOrOne
         };
-        InputFolderArgument.AcceptExistingOnly();
         OutputOption = new Option<FileInfo>("--output")
         {
             Description = "Output msix file name for the generated package (defaults to <name>.msix)",
@@ -82,10 +86,30 @@ internal class PackageCommand : Command, IShortDescription
             Description = "Path to the executable relative to the input folder."
         };
         ExecutableOption.Aliases.Add("--exe");
+
+        // MCP Bundle options
+        McpbOption = new Option<FileInfo?>("--mcpb")
+        {
+            Description = "Path to an MCP Bundle (.mcpb) file. Extracts, validates, and converts to MSIX with MCP server registration. When used, input-folder is not required."
+        };
+#pragma warning disable CS8620 // Nullability mismatch is intentional: McpbOption is nullable because it's optional
+        McpbOption.AcceptExistingOnly();
+#pragma warning restore CS8620
+        ArchitectureOption = new Option<string>("--architecture")
+        {
+            Description = "Target processor architecture for MCP Bundle conversion (x64, x86, arm64). Default: x64."
+        };
+        ArchitectureOption.Aliases.Add("--arch");
+        ArchitectureOption.AcceptOnlyFromAmong("x64", "x86", "arm64");
+        ArchitectureOption.DefaultValueFactory = _ => "x64";
+        RuntimePathOption = new Option<string?>("--runtime-path")
+        {
+            Description = "Path to the runtime executable (e.g., node.exe, python.exe) for script-based MCP servers. Auto-detected if not specified."
+        };
     }
 
     public PackageCommand()
-        : base("package", "Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx")
+        : base("package", "Create MSIX installer from your built app or MCP Bundle. For apps: provide input-folder with appxmanifest.xml. For MCP servers: use --mcpb <file.mcpb> to convert an MCP Bundle to a signed MSIX with Windows ODR registration. Example: winapp package ./dist --cert devcert.pfx | winapp package --mcpb server.mcpb --generate-cert")
     {
         Aliases.Add("pack");
         Arguments.Add(InputFolderArgument);
@@ -100,13 +124,16 @@ internal class PackageCommand : Command, IShortDescription
         Options.Add(ManifestOption);
         Options.Add(SelfContainedOption);
         Options.Add(ExecutableOption);
+        Options.Add(McpbOption);
+        Options.Add(ArchitectureOption);
+        Options.Add(RuntimePathOption);
     }
 
-    public class Handler(IMsixService msixService, IStatusService statusService) : AsynchronousCommandLineAction
+    public class Handler(IMsixService msixService, IMcpbService mcpbService, IStatusService statusService) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
+            var inputFolder = parseResult.GetValue(InputFolderArgument);
             var output = parseResult.GetValue(OutputOption);
             var name = parseResult.GetValue(NameOption);
             var skipPri = parseResult.GetValue(SkipPriOption);
@@ -118,6 +145,78 @@ internal class PackageCommand : Command, IShortDescription
             var manifestPath = parseResult.GetValue(ManifestOption);
             var selfContained = parseResult.GetValue(SelfContainedOption);
             var executable = parseResult.GetValue(ExecutableOption);
+
+            // MCP Bundle options
+            var mcpbPath = parseResult.GetValue(McpbOption);
+            var architecture = parseResult.GetRequiredValue(ArchitectureOption);
+            var runtimePath = parseResult.GetValue(RuntimePathOption);
+
+            // MCPB flow: convert .mcpb → staging directory → MSIX
+            if (mcpbPath != null)
+            {
+                return await statusService.ExecuteWithStatusAsync("Converting MCP Bundle to MSIX...", async (taskContext, cancellationToken) =>
+                {
+                    McpbConversionResult? mcpbResult = null;
+                    try
+                    {
+                        var publisherName = publisher ?? "CN=McpbToMsix-TestPublisher";
+
+                        mcpbResult = await mcpbService.ExtractAndPrepareAsync(
+                            mcpbPath, architecture, publisherName, runtimePath, taskContext, cancellationToken);
+
+                        taskContext.AddStatusMessage($"{UiSymbols.Check} MCPB extracted and validated: {mcpbResult.DisplayName}");
+
+                        // Use the staging directory as input for the standard MSIX packaging pipeline
+                        var autoSign = certPath != null || generateCert;
+                        var result = await msixService.CreateMsixPackageAsync(
+                            mcpbResult.StagingDirectory,
+                            output,
+                            taskContext,
+                            name ?? mcpbResult.PackageName,
+                            skipPri: true, // MCP server packages don't need PRI
+                            autoSign,
+                            certPath,
+                            certPassword,
+                            generateCert,
+                            installCert,
+                            publisherName,
+                            manifestPath: null, // manifest is already in the staging dir
+                            selfContained: false,
+                            mcpbResult.EntryPointExe,
+                            cancellationToken);
+
+                        taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.MsixPath}");
+                        if (result.Signed)
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Lock} Package has been signed");
+                        }
+
+                        return (0, "MCP Bundle conversion completed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
+                        return (1, $"{UiSymbols.Error} Failed to convert MCP Bundle: {ex.GetBaseException().Message}");
+                    }
+                    finally
+                    {
+                        // Clean up staging directory
+                        if (mcpbResult?.StagingDirectory is { Exists: true } staging)
+                        {
+                            try { staging.Delete(recursive: true); } catch { /* best effort */ }
+                        }
+                    }
+                }, cancellationToken);
+            }
+
+            // Standard flow: input-folder is required
+            if (inputFolder is null || !inputFolder.Exists)
+            {
+                return await statusService.ExecuteWithStatusAsync("Creating MSIX package...", (taskContext, _) =>
+                {
+                    return Task.FromResult<(int, string)>((1, $"{UiSymbols.Error} input-folder is required when --mcpb is not used. Provide a directory with your app layout."));
+                }, cancellationToken);
+            }
 
             return await statusService.ExecuteWithStatusAsync("Creating MSIX package...", async (taskContext, cancellationToken) =>
             {
