@@ -37,5 +37,6 @@ internal interface IManifestService
         FileInfo manifestPath,
         FileInfo imagePath,
         TaskContext taskContext,
+        FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default);
 }

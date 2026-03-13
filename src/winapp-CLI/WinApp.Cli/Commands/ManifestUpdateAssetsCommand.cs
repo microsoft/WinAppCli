@@ -15,6 +15,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
 
     public static Argument<FileInfo> ImageArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
+    public static Option<FileInfo> LightImageOption { get; }
 
     static ManifestUpdateAssetsCommand()
     {
@@ -29,12 +30,19 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
             Description = "Path to AppxManifest.xml file (default: search current directory)"
         };
         ManifestOption.AcceptExistingOnly();
+
+        LightImageOption = new Option<FileInfo>("--light-image")
+        {
+            Description = "Path to source image for light theme variants"
+        };
+        LightImageOption.AcceptExistingOnly();
     }
 
     public ManifestUpdateAssetsCommand() : base("update-assets", "Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.")
     {
         Arguments.Add(ImageArgument);
         Options.Add(ManifestOption);
+        Options.Add(LightImageOption);
     }
 
     public class Handler(IManifestService manifestService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, ILogger<ManifestUpdateAssetsCommand> logger) : AsynchronousCommandLineAction
@@ -43,6 +51,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
         {
             var imagePath = parseResult.GetValue(ImageArgument);
             var manifestPath = parseResult.GetValue(ManifestOption);
+            var lightImagePath = parseResult.GetValue(LightImageOption);
 
             // If manifest path is not provided, try to find it in the current directory
             if (manifestPath == null)
@@ -53,6 +62,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
                     logger.LogError("{UISymbol} Could not find AppxManifest.xml in current directory or parent directories", UiSymbols.Error);
                     return 1;
                 }
+
                 logger.LogDebug("Found manifest at: {ManifestPath}", manifestPath.FullName);
             }
 
@@ -66,7 +76,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
             {
                 try
                 {
-                    await manifestService.UpdateManifestAssetsAsync(manifestPath, imagePath, taskContext, cancellationToken);
+                    await manifestService.UpdateManifestAssetsAsync(manifestPath, imagePath, taskContext, lightImagePath, cancellationToken);
                     return (0, "Successfully updated assets for manifest.");
                 }
                 catch (Exception ex)

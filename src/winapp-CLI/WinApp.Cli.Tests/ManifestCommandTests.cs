@@ -160,9 +160,9 @@ public class ManifestCommandTests : BaseCommandTests
         // Verify expected MSIX asset files were generated
         var expectedAssets = new[]
         {
-            "Square44x44Logo.png",
-            "Square150x150Logo.png",
-            "Wide310x150Logo.png",
+            "AppList.png",
+            "MedTile.png",
+            "WideTile.png",
             "StoreLogo.png"
         };
 

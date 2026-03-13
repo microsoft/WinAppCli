@@ -13,84 +13,41 @@ namespace WinApp.Cli.Services;
 
 internal class ImageAssetService : IImageAssetService
 {
-    // Define the required asset specifications for MSIX packages (used for fallback/default generation)
-    private static readonly (string FileName, int Width, int Height)[] AssetSpecifications =
+    private static readonly ManifestAssetReference[] DefaultAssetReferences =
     [
-        ("Square44x44Logo.png", 44, 44),
-        ("Square44x44Logo.scale-200.png", 88, 88),
-        ("Square44x44Logo.targetsize-24_altform-unplated.png", 24, 24),
-        ("Square150x150Logo.png", 150, 150),
-        ("Square150x150Logo.scale-200.png", 300, 300),
-        ("Wide310x150Logo.png", 310, 150),
-        ("Wide310x150Logo.scale-200.png", 620, 300),
-        ("StoreLogo.png", 50, 50),
+        new("AppList.png", 44, 44),
+        new("MedTile.png", 150, 150),
+        new("WideTile.png", 310, 150),
+        new("StoreLogo.png", 50, 50),
     ];
 
-    // Scale factors to generate for each asset
     private static readonly (string Suffix, float Scale)[] ScaleVariants =
     [
-        ("", 1.0f),                 // Base (scale-100)
-        (".scale-200", 2.0f),       // scale-200
+        ("", 1.0f),
+        (".scale-125", 1.25f),
+        (".scale-150", 1.5f),
+        (".scale-200", 2.0f),
+        (".scale-400", 4.0f),
     ];
 
-    // Target size variants for square assets (for taskbar, Start menu, etc.)
-    private static readonly int[] TargetSizes = [16, 24, 32, 48, 256];
+    private static readonly int[] TargetSizes = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256];
 
-    public async Task GenerateAssetsAsync(FileInfo sourceImagePath, DirectoryInfo outputDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    private static readonly int[] IcoSizes = [16, 24, 32, 48, 256];
+
+    public Task GenerateAssetsAsync(
+        FileInfo sourceImagePath,
+        DirectoryInfo outputDirectory,
+        TaskContext taskContext,
+        FileInfo? lightImagePath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (!sourceImagePath.Exists)
-        {
-            throw new FileNotFoundException($"Source image not found: {sourceImagePath.FullName}");
-        }
-
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating MSIX image assets from: {sourceImagePath.FullName}");
-
-        // Load the source image
-        Bitmap sourceImage;
-        try
-        {
-            sourceImage = LoadSourceImage(sourceImagePath);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to decode image: {sourceImagePath.FullName}. Please ensure the file is a valid image format.", ex);
-        }
-
-        using (sourceImage)
-        {
-            taskContext.AddDebugMessage($"Source image size: {sourceImage.Width}x{sourceImage.Height}");
-
-            // Ensure output directory exists
-            if (!outputDirectory.Exists)
-            {
-                outputDirectory.Create();
-            }
-
-            // Generate each required asset
-            var successCount = 0;
-            foreach (var (fileName, width, height) in AssetSpecifications)
-            {
-                try
-                {
-                    var outputPath = Path.Combine(outputDirectory.FullName, fileName);
-                    await GenerateAssetAsync(sourceImage, outputPath, width, height, cancellationToken);
-                    successCount++;
-                    taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {fileName} ({width}x{height})");
-                }
-                catch (Exception ex)
-                {
-                    taskContext.AddDebugMessage($"  {UiSymbols.Warning} Failed to generate {fileName}: {ex.Message}");
-                }
-            }
-            if (successCount == AssetSpecifications.Length)
-            {
-                taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {AssetSpecifications.Length} image assets in: {outputDirectory.FullName}");
-            }
-            else
-            {
-                taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {successCount} of {AssetSpecifications.Length} image assets in: {outputDirectory.FullName}");
-            }
-        }
+        return GenerateAssetsFromManifestAsync(
+            sourceImagePath,
+            outputDirectory,
+            DefaultAssetReferences,
+            taskContext,
+            lightImagePath,
+            cancellationToken);
     }
 
     public async Task GenerateAssetsFromManifestAsync(
@@ -98,11 +55,17 @@ internal class ImageAssetService : IImageAssetService
         DirectoryInfo manifestDirectory,
         IReadOnlyList<ManifestAssetReference> assetReferences,
         TaskContext taskContext,
+        FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default)
     {
         if (!sourceImagePath.Exists)
         {
             throw new FileNotFoundException($"Source image not found: {sourceImagePath.FullName}");
+        }
+
+        if (lightImagePath is { Exists: false })
+        {
+            throw new FileNotFoundException($"Light theme source image not found: {lightImagePath.FullName}");
         }
 
         if (assetReferences.Count == 0)
@@ -111,9 +74,8 @@ internal class ImageAssetService : IImageAssetService
             return;
         }
 
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating MSIX image assets from manifest references: {sourceImagePath.FullName}");
+        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating MSIX image assets from: {sourceImagePath.FullName}");
 
-        // Load the source image
         Bitmap sourceImage;
         try
         {
@@ -124,66 +86,102 @@ internal class ImageAssetService : IImageAssetService
             throw new InvalidOperationException($"Failed to decode image: {sourceImagePath.FullName}. Please ensure the file is a valid image format.", ex);
         }
 
+        Bitmap? lightImage = null;
+        try
+        {
+            if (lightImagePath != null)
+            {
+                lightImage = LoadSourceImage(lightImagePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            sourceImage.Dispose();
+            throw new InvalidOperationException($"Failed to decode image: {lightImagePath!.FullName}. Please ensure the file is a valid image format.", ex);
+        }
+
         using (sourceImage)
+        using (lightImage)
         {
             taskContext.AddDebugMessage($"Source image size: {sourceImage.Width}x{sourceImage.Height}");
+            if (lightImage != null)
+            {
+                taskContext.AddDebugMessage($"Light image size: {lightImage.Width}x{lightImage.Height}");
+            }
 
             var successCount = 0;
             var totalCount = 0;
 
-            foreach (var assetRef in assetReferences)
+            foreach (var assetReference in assetReferences)
             {
-                // Get the directory and base filename
-                var assetFullPath = Path.Combine(manifestDirectory.FullName, assetRef.RelativePath);
-                var assetDirectory = Path.GetDirectoryName(assetFullPath);
-                var assetFileName = Path.GetFileNameWithoutExtension(assetRef.RelativePath);
-                var assetExtension = Path.GetExtension(assetRef.RelativePath);
+                var assetFullPath = Path.Combine(manifestDirectory.FullName, assetReference.RelativePath);
+                var assetDirectory = Path.GetDirectoryName(assetFullPath) ?? manifestDirectory.FullName;
+                var assetFileName = Path.GetFileNameWithoutExtension(assetReference.RelativePath);
+                var assetExtension = Path.GetExtension(assetReference.RelativePath);
 
-                // Ensure asset directory exists
-                if (!string.IsNullOrEmpty(assetDirectory) && !Directory.Exists(assetDirectory))
+                if (!Directory.Exists(assetDirectory))
                 {
                     Directory.CreateDirectory(assetDirectory);
                 }
 
-                // Generate scale variants
                 foreach (var (suffix, scale) in ScaleVariants)
                 {
-                    totalCount++;
-                    var scaledWidth = (int)(assetRef.BaseWidth * scale);
-                    var scaledHeight = (int)(assetRef.BaseHeight * scale);
+                    var scaledWidth = (int)(assetReference.BaseWidth * scale);
+                    var scaledHeight = (int)(assetReference.BaseHeight * scale);
                     var scaledFileName = $"{assetFileName}{suffix}{assetExtension}";
-                    var scaledPath = Path.Combine(assetDirectory ?? manifestDirectory.FullName, scaledFileName);
+                    var scaledPath = Path.Combine(assetDirectory, scaledFileName);
 
-                    try
+                    totalCount++;
+                    if (await TryGenerateAssetAsync(sourceImage, scaledPath, scaledFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
                     {
-                        await GenerateAssetAsync(sourceImage, scaledPath, scaledWidth, scaledHeight, cancellationToken);
                         successCount++;
-                        taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {scaledFileName} ({scaledWidth}x{scaledHeight})");
                     }
-                    catch (Exception ex)
+
+                    if (lightImage != null)
                     {
-                        taskContext.AddDebugMessage($"  {UiSymbols.Warning} Failed to generate {scaledFileName}: {ex.Message}");
+                        var lightScaleFileName = $"{assetFileName}.scale-{GetScalePercentage(scale)}_altform-colorful_theme-light{assetExtension}";
+                        var lightScalePath = Path.Combine(assetDirectory, lightScaleFileName);
+
+                        totalCount++;
+                        if (await TryGenerateAssetAsync(lightImage, lightScalePath, lightScaleFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
+                        {
+                            successCount++;
+                        }
                     }
                 }
 
-                // Generate targetsize variants for square assets (used for taskbar icons, etc.)
-                if (assetRef.BaseWidth == assetRef.BaseHeight && assetFileName.Contains("44x44", StringComparison.OrdinalIgnoreCase))
+                if (IsTargetSizeAsset(assetReference, assetFileName))
                 {
                     foreach (var targetSize in TargetSizes)
                     {
-                        totalCount++;
-                        var targetFileName = $"{assetFileName}.targetsize-{targetSize}_altform-unplated{assetExtension}";
-                        var targetPath = Path.Combine(assetDirectory ?? manifestDirectory.FullName, targetFileName);
+                        var platedFileName = $"{assetFileName}.targetsize-{targetSize}{assetExtension}";
+                        var platedPath = Path.Combine(assetDirectory, platedFileName);
 
-                        try
+                        totalCount++;
+                        if (await TryGenerateAssetAsync(sourceImage, platedPath, platedFileName, targetSize, targetSize, taskContext, cancellationToken))
                         {
-                            await GenerateAssetAsync(sourceImage, targetPath, targetSize, targetSize, cancellationToken);
                             successCount++;
-                            taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {targetFileName} ({targetSize}x{targetSize})");
                         }
-                        catch (Exception ex)
+
+                        var unplatedFileName = $"{assetFileName}.targetsize-{targetSize}_altform-unplated{assetExtension}";
+                        var unplatedPath = Path.Combine(assetDirectory, unplatedFileName);
+
+                        totalCount++;
+                        if (await TryGenerateAssetAsync(sourceImage, unplatedPath, unplatedFileName, targetSize, targetSize, taskContext, cancellationToken))
                         {
-                            taskContext.AddDebugMessage($"  {UiSymbols.Warning} Failed to generate {targetFileName}: {ex.Message}");
+                            successCount++;
+                        }
+
+                        if (lightImage != null)
+                        {
+                            var lightTargetFileName = $"{assetFileName}.targetsize-{targetSize}_altform-lightunplated{assetExtension}";
+                            var lightTargetPath = Path.Combine(assetDirectory, lightTargetFileName);
+
+                            totalCount++;
+                            if (await TryGenerateAssetAsync(lightImage, lightTargetPath, lightTargetFileName, targetSize, targetSize, taskContext, cancellationToken))
+                            {
+                                successCount++;
+                            }
                         }
                     }
                 }
@@ -198,6 +196,80 @@ internal class ImageAssetService : IImageAssetService
                 taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {successCount} of {totalCount} image assets");
             }
         }
+    }
+
+    public async Task GenerateIcoAsync(FileInfo sourceImagePath, string outputPath, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        if (!sourceImagePath.Exists)
+        {
+            throw new FileNotFoundException($"Source image not found: {sourceImagePath.FullName}");
+        }
+
+        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating ICO file: {outputPath}");
+
+        Bitmap sourceImage;
+        try
+        {
+            sourceImage = LoadSourceImage(sourceImagePath);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to decode image: {sourceImagePath.FullName}. Please ensure the file is a valid image format.", ex);
+        }
+
+        using (sourceImage)
+        {
+            var outputDirectory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(outputDirectory) && !Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            await Task.Run(() =>
+            {
+                var pngFrames = new List<byte[]>(IcoSizes.Length);
+
+                foreach (var size in IcoSizes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    using var targetBitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+                    using var graphics = Graphics.FromImage(targetBitmap);
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.SmoothingMode = SmoothingMode.HighQuality;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.CompositingQuality = CompositingQuality.HighQuality;
+                    graphics.CompositingMode = CompositingMode.SourceOver;
+                    graphics.Clear(Color.Transparent);
+
+                    var sourceAspect = (float)sourceImage.Width / sourceImage.Height;
+                    int scaledWidth;
+                    int scaledHeight;
+                    if (sourceAspect > 1f)
+                    {
+                        scaledWidth = size;
+                        scaledHeight = (int)(size / sourceAspect);
+                    }
+                    else
+                    {
+                        scaledHeight = size;
+                        scaledWidth = (int)(size * sourceAspect);
+                    }
+
+                    var x = (size - scaledWidth) / 2f;
+                    var y = (size - scaledHeight) / 2f;
+                    graphics.DrawImage(sourceImage, new RectangleF(x, y, scaledWidth, scaledHeight));
+
+                    using var memoryStream = new MemoryStream();
+                    targetBitmap.Save(memoryStream, ImageFormat.Png);
+                    pngFrames.Add(memoryStream.ToArray());
+                }
+
+                WriteIcoFile(outputPath, IcoSizes, pngFrames);
+            }, cancellationToken);
+        }
+
+        taskContext.AddStatusMessage($"{UiSymbols.Info} Generated ICO file with {IcoSizes.Length} sizes");
     }
 
     private static Bitmap LoadSourceImage(FileInfo sourceImagePath)
@@ -275,51 +347,116 @@ internal class ImageAssetService : IImageAssetService
         return new Bitmap(ms);
     }
 
+    private static int GetScalePercentage(float scale)
+    {
+        return (int)Math.Round(scale * 100, MidpointRounding.AwayFromZero);
+    }
+
+    private static bool IsTargetSizeAsset(ManifestAssetReference assetReference, string assetFileName)
+    {
+        // App icon assets (44x44) get targetsize variants regardless of naming convention
+        // Supports both old naming (Square44x44Logo) and new naming (AppList)
+        return assetReference.BaseWidth == 44
+            && assetReference.BaseHeight == 44;
+    }
+
+    private static async Task<bool> TryGenerateAssetAsync(
+        Bitmap sourceImage,
+        string outputPath,
+        string fileName,
+        int targetWidth,
+        int targetHeight,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await GenerateAssetAsync(sourceImage, outputPath, targetWidth, targetHeight, cancellationToken);
+            taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {fileName} ({targetWidth}x{targetHeight})");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"  {UiSymbols.Warning} Failed to generate {fileName}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static void WriteIcoFile(string outputPath, int[] sizes, List<byte[]> pngFrames)
+    {
+        if (sizes.Length != pngFrames.Count)
+        {
+            throw new InvalidOperationException("ICO size and frame counts must match.");
+        }
+
+        using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+        using var writer = new BinaryWriter(fileStream);
+
+        writer.Write((ushort)0);
+        writer.Write((ushort)1);
+        writer.Write((ushort)sizes.Length);
+
+        var dataOffset = 6 + (16 * sizes.Length);
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            var size = sizes[i];
+            var pngData = pngFrames[i];
+
+            writer.Write((byte)(size >= 256 ? 0 : size));
+            writer.Write((byte)(size >= 256 ? 0 : size));
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)32);
+            writer.Write((uint)pngData.Length);
+            writer.Write((uint)dataOffset);
+
+            dataOffset += pngData.Length;
+        }
+
+        foreach (var pngData in pngFrames)
+        {
+            writer.Write(pngData);
+        }
+    }
+
     private static async Task GenerateAssetAsync(Bitmap sourceImage, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
     {
         await Task.Run(() =>
         {
-            // Calculate scaling to fit target dimensions while maintaining aspect ratio
             var sourceAspect = (float)sourceImage.Width / sourceImage.Height;
             var targetAspect = (float)targetWidth / targetHeight;
 
-            int scaledWidth, scaledHeight;
+            int scaledWidth;
+            int scaledHeight;
             if (sourceAspect > targetAspect)
             {
-                // Source is wider - fit to width
                 scaledWidth = targetWidth;
                 scaledHeight = (int)(targetWidth / sourceAspect);
             }
             else
             {
-                // Source is taller - fit to height
                 scaledHeight = targetHeight;
                 scaledWidth = (int)(targetHeight * sourceAspect);
             }
 
-            // Create the target bitmap with the required dimensions
             using var targetBitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
             using var graphics = Graphics.FromImage(targetBitmap);
 
-            // Set high-quality rendering options
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             graphics.SmoothingMode = SmoothingMode.HighQuality;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.CompositingQuality = CompositingQuality.HighQuality;
             graphics.CompositingMode = CompositingMode.SourceOver;
 
-            // Fill with transparent background
             graphics.Clear(Color.Transparent);
 
-            // Calculate position to center the scaled image
             var x = (targetWidth - scaledWidth) / 2f;
             var y = (targetHeight - scaledHeight) / 2f;
             var destRect = new RectangleF(x, y, scaledWidth, scaledHeight);
 
-            // Draw the scaled image
             graphics.DrawImage(sourceImage, destRect);
 
-            // Save as PNG
             targetBitmap.Save(outputPath, ImageFormat.Png);
         }, cancellationToken);
     }
