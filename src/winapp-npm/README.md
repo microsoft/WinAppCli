@@ -64,7 +64,21 @@ npx winapp --help
 - [`node create-addon`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-create-addon) - Generate native C# or C++ addons
 - [`node add-electron-debug-identity`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 
-The full CLI usage can be found here: [Documentation](/docs/usage.md)
+The full CLI usage can be found here: [Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md)
+
+### Programmatic API
+
+The package also exports typed async functions for all CLI commands and utility helpers, so you can use them directly from TypeScript/JavaScript without spawning a CLI process:
+
+```typescript
+import { init, packageApp, certGenerate } from '@microsoft/winappcli';
+
+await init({ useDefaults: true });
+await certGenerate({ install: true });
+await packageApp({ inputFolder: './dist', cert: './devcert.pfx' });
+```
+
+Full programmatic API reference: [NPM API Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/npm-usage.md)
 
 ## 🔧 Feedback
 

@@ -91,6 +91,11 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 - Use `--timestamp` when signing production builds so the signature survives certificate expiration
 - You can also use the shorthand: `winapp package ./dist --generate-cert --install-cert` to do everything in one command
 
+## Related skills
+- Need to create a manifest first? See `winapp-manifest` to generate `appxmanifest.xml` with correct publisher info
+- Ready to package? See `winapp-package` to create and sign an MSIX in one step
+- Having issues? See `winapp-troubleshoot` for common error solutions
+
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
@@ -136,6 +141,23 @@ Trust a certificate on this machine (requires admin). Run before installing MSIX
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--force` | Force installation even if the certificate already exists | (none) |
+| `--password` | Password for the PFX file | `password` |
+
+### `winapp cert info`
+
+Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<cert-path>` | Yes | Path to the certificate file (PFX) |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--json` | Format output as JSON | (none) |
 | `--password` | Password for the PFX file | `password` |
 
 ### `winapp sign`

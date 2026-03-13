@@ -7,7 +7,6 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
-using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Commands;

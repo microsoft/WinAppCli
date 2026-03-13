@@ -83,6 +83,28 @@ try
         exit 1
     }
 
+    # Step 1b: Build Node CLI so E2E tests that invoke node cli.js can run
+    if (-not $SkipNpm) {
+        Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
+        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
+        try {
+            npm ci --ignore-scripts
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm ci failed, Node E2E tests will be skipped"
+            } else {
+                npm run generate-commands
+                npm run compile
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Node CLI compile failed, Node E2E tests will be skipped"
+                } else {
+                    Write-Host "[BUILD] Node CLI built successfully" -ForegroundColor Green
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
     # Step 2: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
@@ -239,9 +261,22 @@ try
         & $PackageNpmScript -Version $FullVersion -Stable:$Stable
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "npm package creation failed, but continuing..."
-        } else {
-            Write-Host "[NPM] npm package created successfully!" -ForegroundColor Green
+            Write-Error "npm package creation failed"
+            exit 1
+        }
+
+        # Generate npm API documentation from TypeScript source (after npm build so codegen is fresh)
+        Write-Host "[NPM] Generating npm API documentation..." -ForegroundColor Blue
+        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
+        try {
+            npm run generate-docs
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm API documentation generation failed, but continuing..."
+            } else {
+                Write-Host "[NPM] npm API documentation generated successfully!" -ForegroundColor Green
+            }
+        } finally {
+            Pop-Location
         }
     } else {
         Write-Host ""

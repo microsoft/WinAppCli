@@ -697,7 +697,8 @@ public class EndToEndTests : BaseCommandTests
                                         Description="Test App"
                                         BackgroundColor="transparent"
                                         Square150x150Logo="Assets/Square150x150Logo.png"
-                                        Square44x44Logo="Assets/Square44x44Logo.png" />
+                                        Square44x44Logo="Assets/Square44x44Logo.png">
+                                    </uap:VisualElements>
                                 </Application>
                             </Applications>
                             <Capabilities>
@@ -708,16 +709,10 @@ public class EndToEndTests : BaseCommandTests
                 await File.WriteAllTextAsync(invalidManifestPath, invalidManifestContent, TestContext.CancellationToken);
 
                 var repoRoot = FindRepositoryRoot();
-                if (repoRoot == null)
-                {
-                    Assert.Inconclusive("Could not find repository root containing src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj.");
-                }
+                Assert.IsNotNull(repoRoot, "Could not find repository root containing version.json.");
 
-                var cliProjectPath = Path.Combine(repoRoot!.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
-                if (!File.Exists(cliProjectPath))
-                {
-                    Assert.Inconclusive($"Native CLI project not found at: {cliProjectPath}");
-                }
+                var cliProjectPath = Path.Combine(repoRoot.FullName, "src", "winapp-CLI", "WinApp.Cli", "WinApp.Cli.csproj");
+                Assert.IsTrue(File.Exists(cliProjectPath), $"Native CLI project not found at: {cliProjectPath}");
 
                 // Act
                 var result = await RunDotnetCommandAsync(
@@ -730,6 +725,24 @@ public class EndToEndTests : BaseCommandTests
                     Assert.IsTrue(
                         combinedOutput.Contains("Failed to add package identity:", StringComparison.OrdinalIgnoreCase),
                         $"Expected add-package-identity failure message to be surfaced. Output: {combinedOutput}");
+
+                    // Ensure this fails for the intended reason (invalid identity name), not due to
+                    // a malformed VisualElements rewrite (e.g. missing AppListEntry on non-self-closing tags).
+                    var looksLikeIdentityNameValidationError =
+                        combinedOutput.Contains("Name", StringComparison.OrdinalIgnoreCase)
+                        && (combinedOutput.Contains("violates pattern constraint", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("failed to parse", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("invalid", StringComparison.OrdinalIgnoreCase)
+                            || combinedOutput.Contains("not valid", StringComparison.OrdinalIgnoreCase));
+
+                    Assert.IsTrue(
+                        looksLikeIdentityNameValidationError,
+                        $"Expected invalid Identity Name validation to be the failure reason. Output: {combinedOutput}");
+
+                    Assert.IsFalse(
+                        combinedOutput.Contains("AppListEntry", StringComparison.OrdinalIgnoreCase),
+                        $"Did not expect failure to be caused by missing AppListEntry (VisualElements rewrite regression). Output: {combinedOutput}");
+
                     Assert.IsFalse(
                         combinedOutput.Contains("Get-AppPackageLog", StringComparison.OrdinalIgnoreCase)
                             || combinedOutput.Contains("At line:", StringComparison.OrdinalIgnoreCase)
@@ -779,7 +792,6 @@ public class EndToEndTests : BaseCommandTests
                 errorBuilder.AppendLine(e.Data);
             }
         };
-
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -798,16 +810,10 @@ public class EndToEndTests : BaseCommandTests
         CancellationToken cancellationToken)
     {
         var repoRoot = FindRepositoryRoot();
-        if (repoRoot == null)
-        {
-            Assert.Inconclusive("Could not find repository root containing src/winapp-npm/dist/cli.js.");
-        }
+        Assert.IsNotNull(repoRoot, "Could not find repository root containing version.json.");
 
-        var cliPath = Path.Combine(repoRoot!.FullName, "src", "winapp-npm", "dist", "cli.js");
-        if (!File.Exists(cliPath))
-        {
-            Assert.Inconclusive($"Node CLI entry point not found at: {cliPath}");
-        }
+        var cliPath = Path.Combine(repoRoot.FullName, "src", "winapp-npm", "dist", "cli.js");
+        Assert.IsTrue(File.Exists(cliPath), $"Node CLI entry point not found at: {cliPath}. Run 'npm run build' in src/winapp-npm.");
 
         var processStartInfo = new System.Diagnostics.ProcessStartInfo
         {
@@ -846,7 +852,7 @@ public class EndToEndTests : BaseCommandTests
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            Assert.Inconclusive("Node.js executable was not found on PATH for this test run.");
+            Assert.Fail("Node.js executable was not found on PATH for this test run.");
         }
 
         process.BeginOutputReadLine();
@@ -861,7 +867,7 @@ public class EndToEndTests : BaseCommandTests
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current != null)
         {
-            var markerPath = Path.Combine(current.FullName, "src", "winapp-npm", "dist", "cli.js");
+            var markerPath = Path.Combine(current.FullName, "version.json");
             if (File.Exists(markerPath))
             {
                 return current;
