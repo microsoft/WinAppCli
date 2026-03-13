@@ -1,6 +1,6 @@
 ---
 name: winapp
-description: Expert in Windows app development, packaging, and distribution. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, distributing apps through the Microsoft Store, adding execution aliases or file type associations, or adding MSIX packaging to build scripts or CI/CD pipelines. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
+description: Expert in Windows app development, packaging, distribution, and platform integration for non-WinUI frameworks. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, distributing apps through the Microsoft Store, adding execution aliases or file type associations, or adding MSIX packaging to build scripts or CI/CD pipelines. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
 infer: true
 ---
 
@@ -186,6 +186,7 @@ Does the project already have an appxmanifest.xml?
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`
 - Use `winapp node create-addon` to create native C#/C++ addons for Windows APIs
 - Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
+- **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
 
 ### .NET (WPF, WinForms, Console)
@@ -273,6 +274,7 @@ When the user encounters an error, check these common causes:
 | "Package installation failed" | Stale registration or untrusted cert | Run `Get-AppxPackage <name> \| Remove-AppxPackage`, ensure cert is trusted |
 | "Certificate not trusted" | Dev cert not installed | Run `winapp cert install ./devcert.pfx` as admin |
 | "Build tools not found" | First run, tools not downloaded | winapp auto-downloads tools; ensure internet access |
+| Windows APIs fail at runtime | Debug identity not registered | Register debug identity after build and before launching: `winapp create-debug-identity <exe>` (or `npx winapp node add-electron-debug-identity` for Electron) — this is **mandatory** for any app using identity-requiring APIs |
 
 ## Key files and concepts
 
