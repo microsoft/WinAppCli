@@ -81,6 +81,25 @@ C++ projects use winapp primarily for SDK projections (CppWinRT headers) and pac
 - Use winapp specifically for **MSIX distribution** and package identity features
 - winapp adds capabilities beyond what Tauri's built-in bundler provides (identity, sparse packages, Windows API access)
 
+## Debugging by framework
+
+| Framework | Recommended command | Notes |
+|-----------|-------------------|-------|
+| **.NET** | `winapp run .\bin\Debug` | GUI apps launch directly; console apps need `--with-alias` |
+| **C++** | `winapp run .\build\Debug --with-alias` | Console apps need `--with-alias` + `uap5:ExecutionAlias` in manifest |
+| **Rust** | `winapp run .\target\debug --with-alias` | Console apps need `--with-alias` + `uap5:ExecutionAlias` in manifest |
+| **Flutter** | `winapp run .\build\windows\x64\runner\Debug` | GUI app — plain `winapp run` works |
+| **Tauri** | `winapp run .\dist` | Stage exe to `dist/` first (avoids copying entire `target/` tree); GUI app |
+| **Electron** | `npx winapp node add-electron-debug-identity` | Uses Electron-specific identity registration; `winapp run` is **not** recommended for Electron |
+
+**Key rules:**
+- **GUI apps** (Flutter, Tauri, WPF): use `winapp run <build-output>` — launches via AUMID activation
+- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `appxmanifest.xml`
+- **Electron**: different mechanism — uses `npx winapp node add-electron-debug-identity` because `electron.exe` is in `node_modules/`, not your build output
+- **Startup debugging (any framework)**: use `winapp create-debug-identity <exe>` so your IDE can F5-launch the exe with identity from the first instruction
+
+For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
+
 ## Related skills
 - **Setup**: `winapp-setup` — initial project setup with `winapp init`
 - **Manifest**: `winapp-manifest` — creating and customizing `appxmanifest.xml`

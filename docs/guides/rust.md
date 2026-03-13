@@ -156,6 +156,8 @@ Package Family Name: rust-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
 
+> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+
 ## 6. Package with MSIX
 
 Once you're ready to distribute your app, you can package it as an MSIX using the same manifest.

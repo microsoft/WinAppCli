@@ -67,13 +67,3 @@ target_link_libraries(cpp-app PRIVATE WindowsApp.lib OneCoreUap.lib)
 
 # Add Windows App SDK include directory
 target_include_directories(cpp-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.winapp/include)
-
-# Add a post-build command to apply debug identity in Debug builds
-add_custom_command(TARGET cpp-app POST_BUILD
-    COMMAND $<$<CONFIG:Debug>:winapp>
-            $<$<CONFIG:Debug>:create-debug-identity>
-            $<$<CONFIG:Debug>:$<TARGET_FILE:cpp-app>>
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND_EXPAND_LISTS
-    COMMENT "Applying debug identity to executable..."
-)

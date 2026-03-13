@@ -10,6 +10,7 @@
 #include <string>
 
 void RegisterWinAppSdkPlugin(flutter::FlutterEngine* engine) {
+
   auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       engine->messenger(), "com.example/winapp_sdk",
       &flutter::StandardMethodCodec::GetInstance());
@@ -33,7 +34,6 @@ void RegisterWinAppSdkPlugin(flutter::FlutterEngine* engine) {
           }
         } else if (call.method_name() == "showNotification") {
           try {
-            // Build a simple toast notification using Windows App SDK
             auto builder = winrt::Microsoft::Windows::AppNotifications::Builder::
                 AppNotificationBuilder();
             builder.AddText(L"Hello from Flutter!");
