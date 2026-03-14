@@ -161,34 +161,31 @@ internal sealed class ImageSource : IDisposable
         {
             using var stream = File.OpenRead(path.FullName);
             svg.Load(stream);
+
+            var picture = svg.Picture;
+            if (picture == null)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to render SVG image: {path.FullName}. The file may be corrupted or contain unsupported SVG features.");
+            }
+
+            var bounds = picture.CullRect;
+            var width = (int)Math.Ceiling(bounds.Width);
+            var height = (int)Math.Ceiling(bounds.Height);
+
+            if (width <= 0 || height <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"SVG image has invalid dimensions ({width}x{height}): {path.FullName}. Ensure the SVG has a valid viewBox or width/height attributes.");
+            }
+
+            return new ImageSource(svg, picture, bounds);
         }
-        catch (Exception ex) when (ex is not InvalidOperationException)
+        catch
         {
             svg.Dispose();
-            throw new InvalidOperationException(
-                $"Failed to parse SVG image: {path.FullName}. Ensure the file is valid SVG.", ex);
+            throw;
         }
-
-        var picture = svg.Picture;
-        if (picture == null)
-        {
-            svg.Dispose();
-            throw new InvalidOperationException(
-                $"Failed to render SVG image: {path.FullName}. The file may be corrupted or contain unsupported SVG features.");
-        }
-
-        var bounds = picture.CullRect;
-        var width = (int)Math.Ceiling(bounds.Width);
-        var height = (int)Math.Ceiling(bounds.Height);
-
-        if (width <= 0 || height <= 0)
-        {
-            svg.Dispose();
-            throw new InvalidOperationException(
-                $"SVG image has invalid dimensions ({width}x{height}): {path.FullName}. Ensure the SVG has a valid viewBox or width/height attributes.");
-        }
-
-        return new ImageSource(svg, picture, bounds);
     }
 
     public void Dispose()
@@ -296,10 +293,12 @@ internal class ImageAssetService : IImageAssetService
                 taskContext.AddDebugMessage($"Light image: {lightSource.DimensionsLabel}");
             }
 
-            var successCount = 0;
-            var totalCount = 0;
+            var (successCount, totalCount) = await Task.Run(() =>
+            {
+                var success = 0;
+                var total = 0;
 
-            foreach (var assetReference in assetReferences)
+                foreach (var assetReference in assetReferences)
             {
                 var assetFullPath = Path.Combine(manifestDirectory.FullName, assetReference.RelativePath);
                 var assetDirectory = Path.GetDirectoryName(assetFullPath) ?? manifestDirectory.FullName;
@@ -313,15 +312,15 @@ internal class ImageAssetService : IImageAssetService
 
                 foreach (var (suffix, scale) in ScaleVariants)
                 {
-                    var scaledWidth = (int)(assetReference.BaseWidth * scale);
-                    var scaledHeight = (int)(assetReference.BaseHeight * scale);
+                    var scaledWidth = (int)Math.Round(assetReference.BaseWidth * scale, MidpointRounding.AwayFromZero);
+                    var scaledHeight = (int)Math.Round(assetReference.BaseHeight * scale, MidpointRounding.AwayFromZero);
                     var scaledFileName = $"{assetFileName}{suffix}{assetExtension}";
                     var scaledPath = Path.Combine(assetDirectory, scaledFileName);
 
-                    totalCount++;
-                    if (await TryGenerateAssetAsync(source, scaledPath, scaledFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
+                    total++;
+                    if (TryGenerateAsset(source, scaledPath, scaledFileName, scaledWidth, scaledHeight, taskContext))
                     {
-                        successCount++;
+                        success++;
                     }
 
                     if (lightSource != null)
@@ -329,12 +328,14 @@ internal class ImageAssetService : IImageAssetService
                         var lightScaleFileName = $"{assetFileName}.scale-{GetScalePercentage(scale)}_altform-colorful_theme-light{assetExtension}";
                         var lightScalePath = Path.Combine(assetDirectory, lightScaleFileName);
 
-                        totalCount++;
-                        if (await TryGenerateAssetAsync(lightSource, lightScalePath, lightScaleFileName, scaledWidth, scaledHeight, taskContext, cancellationToken))
+                        total++;
+                        if (TryGenerateAsset(lightSource, lightScalePath, lightScaleFileName, scaledWidth, scaledHeight, taskContext))
                         {
-                            successCount++;
+                            success++;
                         }
                     }
+
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
 
                 if (IsTargetSizeAsset(assetReference))
@@ -344,19 +345,19 @@ internal class ImageAssetService : IImageAssetService
                         var platedFileName = $"{assetFileName}.targetsize-{targetSize}{assetExtension}";
                         var platedPath = Path.Combine(assetDirectory, platedFileName);
 
-                        totalCount++;
-                        if (await TryGenerateAssetAsync(source, platedPath, platedFileName, targetSize, targetSize, taskContext, cancellationToken))
+                        total++;
+                        if (TryGenerateAsset(source, platedPath, platedFileName, targetSize, targetSize, taskContext))
                         {
-                            successCount++;
+                            success++;
                         }
 
                         var unplatedFileName = $"{assetFileName}.targetsize-{targetSize}_altform-unplated{assetExtension}";
                         var unplatedPath = Path.Combine(assetDirectory, unplatedFileName);
 
-                        totalCount++;
-                        if (await TryGenerateAssetAsync(source, unplatedPath, unplatedFileName, targetSize, targetSize, taskContext, cancellationToken))
+                        total++;
+                        if (TryGenerateAsset(source, unplatedPath, unplatedFileName, targetSize, targetSize, taskContext))
                         {
-                            successCount++;
+                            success++;
                         }
 
                         if (lightSource != null)
@@ -364,15 +365,21 @@ internal class ImageAssetService : IImageAssetService
                             var lightTargetFileName = $"{assetFileName}.targetsize-{targetSize}_altform-lightunplated{assetExtension}";
                             var lightTargetPath = Path.Combine(assetDirectory, lightTargetFileName);
 
-                            totalCount++;
-                            if (await TryGenerateAssetAsync(lightSource, lightTargetPath, lightTargetFileName, targetSize, targetSize, taskContext, cancellationToken))
+                            total++;
+                            if (TryGenerateAsset(lightSource, lightTargetPath, lightTargetFileName, targetSize, targetSize, taskContext))
                             {
-                                successCount++;
+                                success++;
                             }
                         }
+
+                        cancellationToken.ThrowIfCancellationRequested();
                     }
                 }
             }
+
+                return (success, total);
+            },
+            cancellationToken);
 
             if (successCount == totalCount)
             {
@@ -442,18 +449,17 @@ internal class ImageAssetService : IImageAssetService
             && assetReference.BaseHeight == 44;
     }
 
-    private static async Task<bool> TryGenerateAssetAsync(
+    private static bool TryGenerateAsset(
         ImageSource source,
         string outputPath,
         string fileName,
         int targetWidth,
         int targetHeight,
-        TaskContext taskContext,
-        CancellationToken cancellationToken)
+        TaskContext taskContext)
     {
         try
         {
-            await GenerateAssetAsync(source, outputPath, targetWidth, targetHeight, cancellationToken);
+            GenerateAsset(source, outputPath, targetWidth, targetHeight);
             taskContext.AddDebugMessage($"  {UiSymbols.Check} Generated: {fileName} ({targetWidth}x{targetHeight})");
             return true;
         }
@@ -502,12 +508,9 @@ internal class ImageAssetService : IImageAssetService
         }
     }
 
-    private static async Task GenerateAssetAsync(ImageSource source, string outputPath, int targetWidth, int targetHeight, CancellationToken cancellationToken)
+    private static void GenerateAsset(ImageSource source, string outputPath, int targetWidth, int targetHeight)
     {
-        await Task.Run(() =>
-        {
-            var pngData = source.RenderToPng(targetWidth, targetHeight);
-            File.WriteAllBytes(outputPath, pngData);
-        }, cancellationToken);
+        var pngData = source.RenderToPng(targetWidth, targetHeight);
+        File.WriteAllBytes(outputPath, pngData);
     }
 }

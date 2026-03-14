@@ -322,7 +322,7 @@ winapp manifest update-assets <image-path> [options]
 Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
 
 For each asset referenced in the manifest:
-- **5 scale variants** — `.scale-100` (base), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
+- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
 
 For the app icon (Square44x44Logo / AppList, 44×44 base):
 - **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
