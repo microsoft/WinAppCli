@@ -424,28 +424,32 @@ winapp manifest update-assets <image-path> [options]
 
 **Arguments:**
 
-- `image-path` - Path to source image file (PNG, JPG, GIF, etc.)
+- `image-path` - Path to source image file (PNG, JPG, SVG, ICO, GIF, BMP, etc.)
 
 **Options:**
 
 - `--manifest <path>` - Path to AppxManifest.xml file (default: search current directory)
+- `--light-image <path>` - Path to a separate source image for light theme variants
 
 **Description:**
 
-Takes a single source image and automatically generates all 12 required MSIX image assets at the correct dimensions:
+Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
 
-- Square44x44Logo.png (44×44)
-- Square44x44Logo.scale-200.png (88×88)
-- Square44x44Logo.targetsize-24_altform-unplated.png (24×24)
-- Square150x150Logo.png (150×150)
-- Square150x150Logo.scale-200.png (300×300)
-- Wide310x150Logo.png (310×150)
-- Wide310x150Logo.scale-200.png (620×300)
-- SplashScreen.png (620×300)
-- SplashScreen.scale-200.png (1240×600)
-- StoreLogo.png (50×50)
-- LockScreenLogo.png (24×24)
-- LockScreenLogo.scale-200.png (48×48)
+For each asset referenced in the manifest:
+- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
+
+For the app icon (Square44x44Logo / AppList, 44×44 base):
+- **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
+- **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
+
+Additionally:
+- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration
+
+With `--light-image`:
+- **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)
+- **Light theme scale variants** — `.scale-{factor}_altform-colorful_theme-light` (tiles, store logo)
+
+**SVG support:** SVG files are fully supported as source images. They are rendered as vectors directly at each target size, producing pixel-perfect results at all resolutions.
 
 The command scales images proportionally while maintaining aspect ratio, centering them with transparent backgrounds when needed. Assets are saved to the `Assets` directory relative to the manifest location.
 
@@ -455,8 +459,17 @@ The command scales images proportionally while maintaining aspect ratio, centeri
 # Generate assets with auto-detected manifest
 winapp manifest update-assets mylogo.png
 
+# Use an SVG source for best quality at all sizes
+winapp manifest update-assets mylogo.svg
+
 # Specify manifest location explicitly
 winapp manifest update-assets mylogo.png --manifest ./dist/appxmanifest.xml
+
+# Generate light theme variants from a separate image
+winapp manifest update-assets mylogo.png --light-image mylogo-light.png
+
+# Use the same image for both (generates all MRT light theme qualifiers)
+winapp manifest update-assets mylogo.png --light-image mylogo.png
 
 # With verbose output
 winapp manifest update-assets mylogo.png --verbose

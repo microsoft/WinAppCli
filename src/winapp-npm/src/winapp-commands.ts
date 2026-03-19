@@ -341,9 +341,11 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
 // ---------------------------------------------------------------------------
 
 export interface ManifestUpdateAssetsOptions extends CommonOptions {
-  /** Path to source image file */
+  /** Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) */
   imagePath: string;
-  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
+  /** Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) */
+  lightImage?: string;
+  /** Path to AppxManifest.xml file (default: search current directory) */
   manifest?: string;
 }
 
@@ -353,6 +355,7 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
 export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<WinappResult> {
   const args: string[] = ['manifest', 'update-assets'];
   args.push(options.imagePath);
+  if (options.lightImage) args.push('--light-image', options.lightImage);
   if (options.manifest) args.push('--manifest', options.manifest);
   return execCommand(args, options);
 }
