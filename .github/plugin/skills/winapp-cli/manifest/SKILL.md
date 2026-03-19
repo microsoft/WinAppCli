@@ -200,7 +200,7 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-<<<<<<< HEAD
+| `--light-image` | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) | (none) |
 | `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
 
 ### `winapp manifest add-alias`
@@ -214,7 +214,3 @@ Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This all
 | `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
 | `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
 | `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |
-=======
-| `--light-image` | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) | (none) |
-| `--manifest` | Path to AppxManifest.xml file (default: search current directory) | (none) |
->>>>>>> main

@@ -345,7 +345,7 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
   imagePath: string;
   /** Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) */
   lightImage?: string;
-  /** Path to AppxManifest.xml file (default: search current directory) */
+  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
   manifest?: string;
 }
 

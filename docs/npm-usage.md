@@ -266,7 +266,8 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `imagePath` | `string` | Yes | Path to source image file |
+| `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
+| `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -846,7 +847,8 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `imagePath` | `string` | Yes | Path to source image file |
+| `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
+| `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
