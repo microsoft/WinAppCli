@@ -1070,6 +1070,38 @@ internal class WorkspaceSetupService(
     }
 
     /// <summary>
+    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
+    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
+    /// the real identity directly from the package to ensure correct installation checks.
+    /// </summary>
+    private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
+    {
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(msixFilePath);
+            var manifestEntry = zip.GetEntry("AppxManifest.xml");
+            if (manifestEntry == null)
+            {
+                return (null, null);
+            }
+
+            using var stream = manifestEntry.Open();
+            var doc = System.Xml.Linq.XDocument.Load(stream);
+            var identityElement = doc.Root?.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "Identity");
+
+            var name = identityElement?.Attribute("Name")?.Value;
+            var version = identityElement?.Attribute("Version")?.Value;
+            return (name, version);
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not read identity from {Path.GetFileName(msixFilePath)}: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    /// <summary>
     /// Installs Windows App SDK runtime MSIX packages for the current system architecture
     /// </summary>
     /// <param name="msixDir">Directory containing the MSIX packages</param>
@@ -1098,12 +1130,20 @@ internal class WorkspaceSetupService(
                 continue;
             }
 
-            // Parse the PackageIdentity (format: Name_Version_Architecture_PublisherId)
-            var identityParts = entry.PackageIdentity.Split('_');
-            var packageName = identityParts[0];
-            var newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
+            // Read the actual package identity from the MSIX's AppxManifest.xml.
+            // The inventory file's PackageIdentity can differ from the real installed name
+            // (e.g., DDLM: inventory says "Microsoft.WindowsAppRuntime.DDLM.2.0-experimental3"
+            // but the MSIX installs as "Microsoft.WinAppRuntime.DDLM.0.676.658.0-x6-e3").
+            var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
+            if (packageName == null)
+            {
+                // Fallback: parse from inventory identity string
+                var identityParts = entry.PackageIdentity.Split('_');
+                packageName = identityParts[0];
+                newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
+            }
 
-            packageData.Add($"@{{Path='{msixFilePath}';Identity='{entry.PackageIdentity}';Name='{packageName}';Version='{newVersionString}';FileName='{entry.FileName}'}}");
+            packageData.Add($"@{{Path='{msixFilePath}';Identity='{packageName}';Name='{packageName}';Version='{newVersionString}';FileName='{entry.FileName}'}}");
         }
 
         if (packageData.Count == 0)
@@ -1114,9 +1154,6 @@ internal class WorkspaceSetupService(
         // Create compact PowerShell script with reusable function
         var script = $@"
 function Test-PackageNeedsInstall($pkg) {{
-    $exactMatch = Get-AppxPackage | Where-Object {{ $_.PackageFullName -eq $pkg.Identity }}
-    if ($exactMatch) {{ return $false }}
-    
     $existing = Get-AppxPackage -Name $pkg.Name -ErrorAction SilentlyContinue
     if (-not $existing) {{ return $true }}
     
