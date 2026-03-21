@@ -1,0 +1,94 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using WinApp.Cli.Models;
+
+namespace WinApp.Cli.Helpers;
+
+/// <summary>
+/// Source-generated JSON serializer context for UI automation models (NativeAOT-safe).
+/// </summary>
+[JsonSerializable(typeof(UiElement))]
+[JsonSerializable(typeof(UiElement[]))]
+[JsonSerializable(typeof(UiSessionInfo))]
+[JsonSerializable(typeof(CachedElement))]
+[JsonSerializable(typeof(Dictionary<string, CachedElement>))]
+[JsonSerializable(typeof(UiStatusResult))]
+[JsonSerializable(typeof(UiInspectResult))]
+[JsonSerializable(typeof(UiSearchResult))]
+[JsonSerializable(typeof(UiPropertyResult))]
+[JsonSerializable(typeof(UiInvokeResult))]
+[JsonSerializable(typeof(UiScreenshotResult))]
+[JsonSerializable(typeof(UiWaitForResult))]
+[JsonSerializable(typeof(WindowInfo))]
+[JsonSerializable(typeof(WindowInfo[]))]
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    NewLine = "\n",
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class UiJsonContext : JsonSerializerContext;
+
+// JSON output models for --json mode
+
+internal sealed class UiStatusResult
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public string? WindowTitle { get; set; }
+    public string Mode { get; set; } = "";
+    public int RootElementCount { get; set; }
+}
+
+internal sealed class UiInspectResult
+{
+    public string Mode { get; set; } = "";
+    public UiElement[] Elements { get; set; } = [];
+}
+
+internal sealed class UiSearchResult
+{
+    public string Mode { get; set; } = "";
+    public int MatchCount { get; set; }
+    public bool HasMore { get; set; }
+    public UiElement[] Matches { get; set; } = [];
+}
+
+internal sealed class UiPropertyResult
+{
+    public string ElementId { get; set; } = "";
+    public Dictionary<string, object?> Properties { get; set; } = [];
+}
+
+internal sealed class UiInvokeResult
+{
+    public string ElementId { get; set; } = "";
+    public string Pattern { get; set; } = "";
+}
+
+internal sealed class UiScreenshotResult
+{
+    public string? ElementId { get; set; }
+    public string FilePath { get; set; } = "";
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int ProcessId { get; set; }
+    public string? WindowTitle { get; set; }
+}
+
+internal sealed class UiWaitForResult
+{
+    public bool Found { get; set; }
+    public int WaitedMs { get; set; }
+    public UiElement? Element { get; set; }
+}
+
+internal sealed class WindowInfo
+{
+    public long Hwnd { get; set; }
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public string? Title { get; set; }
+}
