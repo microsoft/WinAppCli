@@ -28,8 +28,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
     public class Handler(
         IUiAutomationService uiAutomation,
         IStatusService statusService,
-        IAnsiConsole ansiConsole,
-        ILogger<UiListWindowsCommand> logger) : AsynchronousCommandLineAction
+        IAnsiConsole ansiConsole) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {

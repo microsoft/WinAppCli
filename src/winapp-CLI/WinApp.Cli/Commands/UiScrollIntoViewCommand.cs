@@ -32,7 +32,6 @@ internal class UiScrollIntoViewCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IStatusService statusService,
-        IAnsiConsole ansiConsole,
         ILogger<UiScrollIntoViewCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
