@@ -92,12 +92,7 @@ internal sealed class UiSessionService(
     private async Task<UiSessionInfo> ResolveByHwndAsync(long hwnd, string? forceMode, CancellationToken ct)
     {
         // Get PID from HWND
-        uint pid = 0;
-        unsafe
-        {
-            Windows.Win32.PInvoke.GetWindowThreadProcessId(
-                new Windows.Win32.Foundation.HWND((nint)hwnd), &pid);
-        }
+        var pid = GetPidFromHwnd(hwnd);
         if (pid == 0)
         {
             throw new InvalidOperationException($"Window HWND {hwnd} not found or not accessible.");
@@ -191,7 +186,10 @@ internal sealed class UiSessionService(
     private static void RefreshWindowTitle(UiSessionInfo session)
     {
         // Don't overwrite title if we have a specific HWND (title from UIA is more accurate)
-        if (session.WindowHandle != 0) return;
+        if (session.WindowHandle != 0)
+        {
+            return;
+        }
 
         try
         {
@@ -316,6 +314,17 @@ internal sealed class UiSessionService(
 
         // Not found by PID or process name — return null to trigger UIA title search
         return null;
+    }
+
+    private static uint GetPidFromHwnd(long hwnd)
+    {
+        uint pid = 0;
+        unsafe
+        {
+            Windows.Win32.PInvoke.GetWindowThreadProcessId(
+                new Windows.Win32.Foundation.HWND((nint)hwnd), &pid);
+        }
+        return pid;
     }
 
     private static bool IsProcessAlive(int pid)

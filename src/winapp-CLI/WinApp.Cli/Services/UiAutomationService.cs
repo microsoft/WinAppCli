@@ -44,22 +44,32 @@ internal sealed class UiAutomationService : IUiAutomationService
         {
             hwnd = Windows.Win32.PInvoke.FindWindowEx(
                 Windows.Win32.Foundation.HWND.Null, hwnd, null, (string?)null);
-            if (hwnd.IsNull) break;
+            if (hwnd.IsNull)
+            {
+                break;
+            }
 
-            if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd)) continue;
+            if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd))
+            {
+                continue;
+            }
 
             unsafe
             {
                 uint pid = 0;
                 Windows.Win32.PInvoke.GetWindowThreadProcessId(hwnd, &pid);
 
-                char* buffer = stackalloc char[512];
-                var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
-                var title = len > 0 ? new string(buffer, 0, len) : "";
-
-                if (filter((int)pid, title))
+                // Allocate buffer outside the hot path (CA2014: no stackalloc in loop)
+                var titleChars = new char[512];
+                fixed (char* buffer = titleChars)
                 {
-                    results.Add(((nint)hwnd.Value, (int)pid, title));
+                    var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
+                    var title = len > 0 ? new string(buffer, 0, len) : "";
+
+                    if (filter((int)pid, title))
+                    {
+                        results.Add(((nint)hwnd.Value, (int)pid, title));
+                    }
                 }
             }
         }
@@ -234,14 +244,13 @@ return Task.FromResult<UiElement?>(null);
 
         if (found is null || found.get_Length() == 0)
         {
-            if (found is not null)
-return Task.FromResult<UiElement?>(null);
+            return Task.FromResult<UiElement?>(null);
         }
 
         if (found.get_Length() > 1)
         {
             var matchCount = found.get_Length();
-throw new InvalidOperationException(
+            throw new InvalidOperationException(
                 $"Selector matched {matchCount} elements. Narrow your selector or use 'search' to list them.");
         }
 
@@ -552,7 +561,13 @@ return Task.FromResult<UiElement?>(result);
     private IUIAutomationElement? ResolveComElement(UiSessionInfo session, UiElement element)
     {
         var root = GetRootElement(session);
-        if (root is null) return null;
+        if (root is null)
+
+        {
+
+            return null;
+
+        }
 
         // Try AutomationId first (most stable)
         if (element.AutomationId is not null)
@@ -561,7 +576,13 @@ return Task.FromResult<UiElement?>(result);
                 UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
                 ComVariant.Create(element.AutomationId));
             var found = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
-            if (found is not null) return found;
+            if (found is not null)
+
+            {
+
+                return found;
+
+            }
         }
 
         // Try Name + ControlType
@@ -586,7 +607,13 @@ return Task.FromResult<UiElement?>(result);
             }
 
             var found = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
-            if (found is not null) return found;
+            if (found is not null)
+
+            {
+
+                return found;
+
+            }
         }
 
         return null;
@@ -615,7 +642,13 @@ return Task.FromResult<UiElement?>(result);
         }
 
         var root = _automation.GetRootElement();
-        if (root is null) return null;
+        if (root is null)
+
+        {
+
+            return null;
+
+        }
 
         var condition = _automation.CreatePropertyCondition(
             UIA_PROPERTY_ID.UIA_ProcessIdPropertyId,
@@ -738,7 +771,16 @@ return Task.FromResult<UiElement?>(result);
         var uiElement = ToUiElement(element, path);
         results.Add(uiElement);
 
-        if (currentDepth >= maxDepth) return;
+        if (currentDepth >= maxDepth)
+
+
+        {
+
+
+            return;
+
+
+        }
 
         var walker = _automation.get_ControlViewWalker();
         var child = walker.GetFirstChildElement(element);
