@@ -68,6 +68,7 @@
     "addon-template/",
     "cs-addon-template/",
     "bin/**/*.exe",
+    "bin/**/*.dll",
     "README.md",
     "LICENSE"
   ]
