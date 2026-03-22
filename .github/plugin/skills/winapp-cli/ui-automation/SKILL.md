@@ -14,7 +14,8 @@ version: 0.2.1
 - For UIA mode (any app): No setup needed — works with any running Windows app
 
 ## Key concepts
-- **Selectors**: Target elements by ID (`e5`), name (`#Submit`), AutomationId (`$SearchBox`), or type (`Button`)
+- **Selectors**: Target elements by ID (`e5`), name (`#Submit`), AutomationId (`$SearchBox`), type (`Button`), or text content (`~partial text`)
+- **Text search (`~`)**: `~hello` finds elements whose visible text contains "hello" (case-insensitive). Also surfaces the nearest invokable ancestor (e.g., parent Button) so agents can act on it immediately
 - **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting (survives tab switches)
 - **Element IDs**: Assigned by `inspect`/`search`. Valid until the next `inspect`/`search`. Use selectors (`#Name`, `$AutomationId`) for stable references
 

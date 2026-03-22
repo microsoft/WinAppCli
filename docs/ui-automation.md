@@ -65,17 +65,40 @@ Use `-a` for discovery, `-w` for stable targeting. When `-a` matches multiple wi
 
 ## Selectors
 
-Target elements by ID, name, AutomationId, or type:
+Target elements by ID, name, AutomationId, type, or text content:
 
 | Selector | Meaning | Example |
 |---|---|---|
 | `e5` | Element ID (from last inspect/search) | `winapp ui invoke e5 -a notepad` |
-| `#Submit` | Name="Submit" | `winapp ui invoke "#Submit" -a myapp` |
+| `#Submit` | Name="Submit" (exact) | `winapp ui invoke "#Submit" -a myapp` |
 | `$SearchBox` | AutomationId="SearchBox" | `winapp ui invoke '$SearchBox' -a myapp` |
 | `Button` | Type=Button | `winapp ui search Button -a myapp` |
 | `Button#OK` | Type + Name | `winapp ui invoke "Button#OK" -a myapp` |
+| `~hello` | Text contains "hello" (case-insensitive) | `winapp ui search "~hello" -a myapp` |
 
 Element IDs are assigned by the last `inspect` or `search` command. They are valid until the next `inspect`/`search` overwrites them.
+
+### Text content search (`~`)
+
+Search for elements whose visible text contains a substring:
+
+```bash
+winapp ui search "~Save" -a notepad        # find elements containing "Save"
+winapp ui search "~error" -a myapp          # case-insensitive match
+```
+
+For text matches on non-invokable elements (e.g., a TextBlock inside a Button), the search
+also surfaces the nearest **invokable ancestor** — the parent element you can use with `invoke`:
+
+```
+  e3  Text "Save changes"  (120,40 80x20)
+        ↑ invoke via: e2  Button "Save"
+```
+
+The invokable ancestor's element ID is cached, so you can immediately use it:
+```bash
+winapp ui invoke e2 -a myapp    # invoke the parent Button
+```
 
 ## Commands
 

@@ -108,4 +108,35 @@ public class SelectorServiceTests
     {
         Assert.ThrowsExactly<ArgumentException>(() => _sut.Parse("   "));
     }
+
+    [TestMethod]
+    public void Parse_TextSearch_ReturnsText()
+    {
+        var result = _sut.Parse("~hello");
+        Assert.AreEqual("hello", result.Text);
+        Assert.IsTrue(result.IsTextSearch);
+        Assert.IsNull(result.Name);
+        Assert.IsNull(result.Type);
+        Assert.IsNull(result.ElementId);
+    }
+
+    [TestMethod]
+    public void Parse_TextSearchWithSpaces_ReturnsText()
+    {
+        var result = _sut.Parse("~hello world");
+        Assert.AreEqual("hello world", result.Text);
+        Assert.IsTrue(result.IsTextSearch);
+    }
+
+    [TestMethod]
+    public void Parse_TextSearchEmpty_Throws()
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => _sut.Parse("~"));
+    }
+
+    [TestMethod]
+    public void Parse_TextSearchWhitespace_Throws()
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => _sut.Parse("~   "));
+    }
 }
