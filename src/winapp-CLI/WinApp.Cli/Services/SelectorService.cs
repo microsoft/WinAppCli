@@ -21,6 +21,18 @@ internal sealed partial class SelectorService : ISelectorService
             return new SelectorExpression { ElementId = selector };
         }
 
+        // ~partial text — text content substring search (case-insensitive)
+        if (selector.StartsWith('~'))
+        {
+            var text = selector[1..];
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentException("Text search requires content after ~");
+            }
+
+            return new SelectorExpression { Text = text };
+        }
+
         // #Submit — Name selector
         if (selector.StartsWith('#'))
         {

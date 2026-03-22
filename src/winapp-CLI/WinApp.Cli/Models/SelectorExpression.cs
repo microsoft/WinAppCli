@@ -4,8 +4,8 @@
 namespace WinApp.Cli.Models;
 
 /// <summary>
-/// A parsed selector expression. Selectors target elements by ID, Name, AutomationId, or Type.
-/// Examples: e5, #Submit, @SearchBox, Button, Button#OK
+/// A parsed selector expression. Selectors target elements by ID, Name, AutomationId, Type, or text content.
+/// Examples: e5, #Submit, @SearchBox, Button, Button#OK, ~partial text
 /// </summary>
 internal sealed record SelectorExpression
 {
@@ -21,5 +21,9 @@ internal sealed record SelectorExpression
     /// <summary>Control type, e.g., "Button" (bare type selector)</summary>
     public string? Type { get; init; }
 
+    /// <summary>Text content substring match, e.g., "bla" (from ~bla selector). Case-insensitive.</summary>
+    public string? Text { get; init; }
+
     public bool IsElementId => ElementId is not null;
+    public bool IsTextSearch => Text is not null;
 }

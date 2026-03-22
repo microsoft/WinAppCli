@@ -87,6 +87,19 @@ internal class UiSearchCommand : Command, IShortDescription
                                 X = el.X,
                                 Y = el.Y
                             };
+
+                            // Also cache invokable ancestors so they can be used with invoke
+                            if (el.InvokableAncestor is { } ancestor)
+                            {
+                                session.Elements[ancestor.Id] = new Models.CachedElement
+                                {
+                                    AutomationId = ancestor.AutomationId,
+                                    Name = ancestor.Name,
+                                    Type = ancestor.Type,
+                                    X = ancestor.X,
+                                    Y = ancestor.Y
+                                };
+                            }
                         }
                         await sessionService.SaveSessionAsync(session, ct);
 
@@ -110,6 +123,13 @@ internal class UiSearchCommand : Command, IShortDescription
                                 var autoId = el.AutomationId is not null ? $" ${el.AutomationId}" : "";
                                 var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
                                 ansiConsole.WriteLine($"  {el.Id}  {el.Type}{name}{autoId}{bounds}");
+
+                                if (el.InvokableAncestor is { } ancestor)
+                                {
+                                    var aName = ancestor.Name is not null ? $" \"{ancestor.Name}\"" : "";
+                                    var aAutoId = ancestor.AutomationId is not null ? $" ${ancestor.AutomationId}" : "";
+                                    ansiConsole.WriteLine($"        \u2191 invoke via: {ancestor.Id}  {ancestor.Type}{aName}{aAutoId}");
+                                }
                             }
                         }
 

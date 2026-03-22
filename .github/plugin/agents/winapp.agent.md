@@ -196,7 +196,7 @@ Want to inspect or interact with a running app's UI?
 
 **Targeting apps:** Use `-a <name>` (fuzzy match by process name, window title, or PID) or `-w <hwnd>` for stable window targeting.
 
-**Selectors:** `e5` (element ID from last inspect/search), `#Submit` (by Name), `$SearchBox` (by AutomationId), `Button` (by type), `Button#OK` (type + name).
+**Selectors:** `e5` (element ID from last inspect/search), `#Submit` (by Name), `$SearchBox` (by AutomationId), `Button` (by type), `Button#OK` (type + name), `~partial text` (text content substring, case-insensitive — also surfaces nearest invokable ancestor).
 
 **Key subcommands:**
 - `ui status -a <app>` — connect and show app info

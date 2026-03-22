@@ -21,4 +21,10 @@ internal sealed class UiElement
     public double Width { get; set; }
     public double Height { get; set; }
     public UiElement[]? Children { get; set; }
+
+    /// <summary>
+    /// Nearest ancestor that supports an invoke pattern (InvokePattern, TogglePattern, etc.).
+    /// Populated during text content search (~selector) when the matched element itself is not invokable.
+    /// </summary>
+    public UiElement? InvokableAncestor { get; set; }
 }

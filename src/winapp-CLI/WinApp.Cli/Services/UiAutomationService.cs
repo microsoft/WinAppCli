@@ -187,7 +187,7 @@ return Task.FromResult(elements.ToArray());
         var condition = BuildCondition(selector);
         if (condition is null)
         {
-return Task.FromResult<UiElement[]>([]);
+            return Task.FromResult<UiElement[]>([]);
         }
 
         IUIAutomationElementArray? found;
@@ -197,8 +197,7 @@ return Task.FromResult<UiElement[]>([]);
         }
         finally
         {
-
-}
+        }
 
         if (found is null)
         {
@@ -212,8 +211,19 @@ return Task.FromResult<UiElement[]>([]);
         {
             var el = found.GetElement(i);
             results[i] = ToUiElement(el, "");
-}
-return Task.FromResult(results);
+
+            // For text content searches, find the nearest invokable ancestor
+            if (selector.IsTextSearch && !IsInvokable(el))
+            {
+                var ancestor = FindInvokableAncestor(el, root);
+                if (ancestor is not null)
+                {
+                    results[i].InvokableAncestor = ToUiElement(ancestor, "");
+                }
+            }
+        }
+
+        return Task.FromResult(results);
     }
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
@@ -739,6 +749,18 @@ return Task.FromResult<UiElement?>(result);
                 ComVariant.Create(selector.AutomationId));
         }
 
+        // Text content search — substring, case-insensitive match on Name
+        if (selector.Text is not null)
+        {
+            var textCondition = _automation.CreatePropertyConditionEx(
+                UIA_PROPERTY_ID.UIA_NamePropertyId,
+                ComVariant.Create(selector.Text),
+                PropertyConditionFlags.PropertyConditionFlags_MatchSubstring | PropertyConditionFlags.PropertyConditionFlags_IgnoreCase);
+            condition = condition is not null
+                ? _automation.CreateAndCondition(condition, textCondition)
+                : textCondition;
+        }
+
         if (selector.Name is not null)
         {
             var nameCondition = _automation.CreatePropertyCondition(
@@ -764,6 +786,61 @@ return Task.FromResult<UiElement?>(result);
         }
 
         return condition;
+    }
+
+    /// <summary>
+    /// Checks if an element supports any invokable pattern (Invoke, Toggle, SelectionItem, ExpandCollapse).
+    /// </summary>
+    private static bool IsInvokable(IUIAutomationElement element)
+    {
+        try { _ = (IUIAutomationInvokePattern)element.GetCurrentPattern(UIA_PATTERN_ID.UIA_InvokePatternId); return true; } catch { }
+        try { _ = (IUIAutomationTogglePattern)element.GetCurrentPattern(UIA_PATTERN_ID.UIA_TogglePatternId); return true; } catch { }
+        try { _ = (IUIAutomationSelectionItemPattern)element.GetCurrentPattern(UIA_PATTERN_ID.UIA_SelectionItemPatternId); return true; } catch { }
+        try { _ = (IUIAutomationExpandCollapsePattern)element.GetCurrentPattern(UIA_PATTERN_ID.UIA_ExpandCollapsePatternId); return true; } catch { }
+        return false;
+    }
+
+    /// <summary>
+    /// Walks up the tree from an element to find the nearest ancestor that supports an invoke pattern.
+    /// Stops at the root element to avoid walking past the target window.
+    /// </summary>
+    private IUIAutomationElement? FindInvokableAncestor(IUIAutomationElement element, IUIAutomationElement root)
+    {
+        var walker = _automation.get_ControlViewWalker();
+        var current = walker.GetParentElement(element);
+        var maxDepth = 10; // prevent runaway walks
+
+        while (current is not null && maxDepth-- > 0)
+        {
+            // Stop at the root window
+            try
+            {
+                if (_automation.CompareElements(current, root))
+                {
+                    break;
+                }
+            }
+            catch
+            {
+                break;
+            }
+
+            if (IsInvokable(current))
+            {
+                return current;
+            }
+
+            try
+            {
+                current = walker.GetParentElement(current);
+            }
+            catch
+            {
+                break;
+            }
+        }
+
+        return null;
     }
 
     private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results)
