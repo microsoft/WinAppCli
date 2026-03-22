@@ -7,11 +7,9 @@
 
 ## Prerequisites
 - For UIA mode (any app): No setup needed — works with any running Windows app
-- For DevTools mode (WinUI 3): Add `window.UseWinAppTools()` to your app startup
 
 ## Key concepts
 - **Selectors**: Target elements by ID (`e5`), name (`#Submit`), AutomationId (`$SearchBox`), or type (`Button`)
-- **Auto-detection**: `winapp ui` auto-detects UIA or DevTools mode. UIA works everywhere; DevTools provides deeper access for WinUI 3 apps
 - **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting (survives tab switches)
 - **Element IDs**: Assigned by `inspect`/`search`. Valid until the next `inspect`/`search`. Use selectors (`#Name`, `$AutomationId`) for stable references
 
