@@ -404,6 +404,254 @@ function tool(options?: ToolOptions): Promise<WinappResult>
 
 ---
 
+### `uiFocus()`
+
+Move keyboard focus to the specified element using UIA SetFocus.
+
+```typescript
+function uiFocus(options?: UiFocusOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiGetProperty()`
+
+Read UIA property values from an element. Specify --property for a single property or omit for all.
+
+```typescript
+function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `property` | `string \| undefined` | No | Property name to read or filter on |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiInspect()`
+
+View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.
+
+```typescript
+function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `depth` | `number \| undefined` | No | Tree inspection depth |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiInvoke()`
+
+Programmatically activate an element. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
+
+```typescript
+function uiInvoke(options?: UiInvokeOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiListWindows()`
+
+List all visible windows with their HWND, title, process, and size. Use -a to filter by app name. Use the HWND with -w to target a specific window.
+
+```typescript
+function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiScreenshot()`
+
+Capture the target window or a specific element as a PNG image. With --json, returns base64-encoded PNG inline. With --output, saves to file.
+
+```typescript
+function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiScrollIntoView()`
+
+Scroll the specified element into the visible area using UIA ScrollItemPattern.
+
+```typescript
+function uiScrollIntoView(options?: UiScrollIntoViewOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiSearch()`
+
+Search the element tree for elements matching a selector. Returns all matches with IDs.
+
+```typescript
+function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `max` | `number \| undefined` | No | Maximum search results |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiSetValue()`
+
+Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.
+
+```typescript
+function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `text` | `string \| undefined` | No | Text value to set or type |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiStatus()`
+
+Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+
+```typescript
+function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiWaitFor()`
+
+Wait for an element to appear, disappear, or have a property reach a target value. Polls at 100ms intervals until condition met or timeout.
+
+```typescript
+function uiWaitFor(options?: UiWaitForOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `property` | `string \| undefined` | No | Property name to read or filter on |
+| `timeout` | `number \| undefined` | No | Timeout in milliseconds |
+| `value` | `string \| undefined` | No | Wait for property to equal this value (use with --property) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `update()`
 
 Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.
@@ -926,6 +1174,155 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `toolArgs` | `string[] \| undefined` | No | Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiFocusOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiGetPropertyOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `property` | `string \| undefined` | No | Property name to read or filter on |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiInspectOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `depth` | `number \| undefined` | No | Tree inspection depth |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiInvokeOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiListWindowsOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiScreenshotOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiScrollIntoViewOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiSearchOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `max` | `number \| undefined` | No | Maximum search results |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiSetValueOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `text` | `string \| undefined` | No | Text value to set or type |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiStatusOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiWaitForOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `property` | `string \| undefined` | No | Property name to read or filter on |
+| `timeout` | `number \| undefined` | No | Timeout in milliseconds |
+| `value` | `string \| undefined` | No | Wait for property to equal this value (use with --property) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

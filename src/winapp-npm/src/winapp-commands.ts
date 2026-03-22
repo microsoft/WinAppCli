@@ -341,8 +341,10 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
 // ---------------------------------------------------------------------------
 
 export interface ManifestUpdateAssetsOptions extends CommonOptions {
-  /** Path to source image file */
+  /** Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) */
   imagePath: string;
+  /** Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) */
+  lightImage?: string;
   /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
   manifest?: string;
 }
@@ -353,6 +355,7 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
 export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<WinappResult> {
   const args: string[] = ['manifest', 'update-assets'];
   args.push(options.imagePath);
+  if (options.lightImage) args.push('--light-image', options.lightImage);
   if (options.manifest) args.push('--manifest', options.manifest);
   return execCommand(args, options);
 }
@@ -530,6 +533,354 @@ export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   if (options.toolArgs && options.toolArgs.length > 0) {
     args.push('--', ...options.toolArgs);
   }
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui focus
+// ---------------------------------------------------------------------------
+
+export interface UiFocusOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Move keyboard focus to the specified element using UIA SetFocus.
+ */
+export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'focus'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui get-property
+// ---------------------------------------------------------------------------
+
+export interface UiGetPropertyOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Property name to read or filter on */
+  property?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Read UIA property values from an element. Specify --property for a single property or omit for all.
+ */
+export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'get-property'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.property) args.push('--property', options.property);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui inspect
+// ---------------------------------------------------------------------------
+
+export interface UiInspectOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Walk up the tree from the specified element to the root */
+  ancestors?: boolean;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Tree inspection depth */
+  depth?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.
+ */
+export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'inspect'];
+  if (options.selector) args.push(options.selector);
+  if (options.ancestors) args.push('--ancestors');
+  if (options.app) args.push('--app', options.app);
+  if (options.depth !== undefined) args.push('--depth', options.depth.toString());
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui invoke
+// ---------------------------------------------------------------------------
+
+export interface UiInvokeOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Programmatically activate an element. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
+ */
+export async function uiInvoke(options: UiInvokeOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'invoke'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui list-windows
+// ---------------------------------------------------------------------------
+
+export interface UiListWindowsOptions extends CommonOptions {
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+}
+
+/**
+ * List all visible windows with their HWND, title, process, and size. Use -a to filter by app name. Use the HWND with -w to target a specific window.
+ */
+export async function uiListWindows(options: UiListWindowsOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'list-windows'];
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui screenshot
+// ---------------------------------------------------------------------------
+
+export interface UiScreenshotOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Save output to file path (e.g., screenshot) */
+  output?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Capture the target window or a specific element as a PNG image. With --json, returns base64-encoded PNG inline. With --output, saves to file.
+ */
+export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'screenshot'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.output) args.push('--output', options.output);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui scroll-into-view
+// ---------------------------------------------------------------------------
+
+export interface UiScrollIntoViewOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Scroll the specified element into the visible area using UIA ScrollItemPattern.
+ */
+export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'scroll-into-view'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui search
+// ---------------------------------------------------------------------------
+
+export interface UiSearchOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Maximum search results */
+  max?: number;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Search the element tree for elements matching a selector. Returns all matches with IDs.
+ */
+export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'search'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.max !== undefined) args.push('--max', options.max.toString());
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui set-value
+// ---------------------------------------------------------------------------
+
+export interface UiSetValueOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Text value to set or type */
+  text?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.
+ */
+export async function uiSetValue(options: UiSetValueOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'set-value'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.text) args.push('--text', options.text);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui status
+// ---------------------------------------------------------------------------
+
+export interface UiStatusOptions extends CommonOptions {
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+ */
+export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'status'];
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui wait-for
+// ---------------------------------------------------------------------------
+
+export interface UiWaitForOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Wait for element to disappear instead of appear */
+  gone?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Property name to read or filter on */
+  property?: string;
+  /** Timeout in milliseconds */
+  timeout?: number;
+  /** Wait for property to equal this value (use with --property) */
+  value?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Wait for an element to appear, disappear, or have a property reach a target value. Polls at 100ms intervals until condition met or timeout.
+ */
+export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'wait-for'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.gone) args.push('--gone');
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.property) args.push('--property', options.property);
+  if (options.timeout !== undefined) args.push('--timeout', options.timeout.toString());
+  if (options.value) args.push('--value', options.value);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
 

@@ -21,6 +21,7 @@ The plugin is at `.github/plugin/` and includes:
   - `manifest/SKILL.md` — appxmanifest.xml generation
   - `troubleshoot/SKILL.md` — error diagnosis and SDK tools
   - `frameworks/SKILL.md` — Electron, .NET, C++, Rust, Flutter, Tauri guidance
+  - `ui-automation/SKILL.md` — inspect, interact with, and screenshot running Windows app UIs
 
 ## Docs
 
