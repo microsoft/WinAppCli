@@ -54,6 +54,8 @@ IUIAutomationSelectionItemPattern
 IUIAutomationExpandCollapsePattern
 IUIAutomationValuePattern
 IUIAutomationScrollItemPattern
+IUIAutomationScrollPattern
+IUIAutomationRangeValuePattern
 GetForegroundWindow
 GetWindowRect
 PrintWindow
@@ -73,3 +75,4 @@ FindWindowEx
 GetWindowThreadProcessId
 GetWindowText
 IsWindowVisible
+SetForegroundWindow

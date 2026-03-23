@@ -13,8 +13,6 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiElement))]
 [JsonSerializable(typeof(UiElement[]))]
 [JsonSerializable(typeof(UiSessionInfo))]
-[JsonSerializable(typeof(CachedElement))]
-[JsonSerializable(typeof(Dictionary<string, CachedElement>))]
 [JsonSerializable(typeof(UiStatusResult))]
 [JsonSerializable(typeof(UiInspectResult))]
 [JsonSerializable(typeof(UiSearchResult))]
@@ -38,19 +36,15 @@ internal sealed class UiStatusResult
     public int ProcessId { get; set; }
     public string ProcessName { get; set; } = "";
     public string? WindowTitle { get; set; }
-    public string Mode { get; set; } = "";
-    public int RootElementCount { get; set; }
 }
 
 internal sealed class UiInspectResult
 {
-    public string Mode { get; set; } = "";
     public UiElement[] Elements { get; set; } = [];
 }
 
 internal sealed class UiSearchResult
 {
-    public string Mode { get; set; } = "";
     public int MatchCount { get; set; }
     public bool HasMore { get; set; }
     public UiElement[] Matches { get; set; } = [];

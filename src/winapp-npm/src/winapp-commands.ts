@@ -567,6 +567,33 @@ export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResul
 }
 
 // ---------------------------------------------------------------------------
+// ui get-focused
+// ---------------------------------------------------------------------------
+
+export interface UiGetFocusedOptions extends CommonOptions {
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Show the element that currently has keyboard focus in the target app.
+ */
+export async function uiGetFocused(options: UiGetFocusedOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'get-focused'];
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui get-property
 // ---------------------------------------------------------------------------
 
@@ -612,6 +639,12 @@ export interface UiInspectOptions extends CommonOptions {
   app?: string;
   /** Tree inspection depth */
   depth?: number;
+  /** Hide disabled elements from output */
+  hideDisabled?: boolean;
+  /** Hide offscreen elements from output */
+  hideOffscreen?: boolean;
+  /** Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. */
+  interactive?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
@@ -629,6 +662,9 @@ export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappR
   if (options.ancestors) args.push('--ancestors');
   if (options.app) args.push('--app', options.app);
   if (options.depth !== undefined) args.push('--depth', options.depth.toString());
+  if (options.hideDisabled) args.push('--hide-disabled');
+  if (options.hideOffscreen) args.push('--hide-offscreen');
+  if (options.interactive) args.push('--interactive');
   if (options.json) args.push('--json');
   if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -695,6 +731,8 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
+  /** Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. */
+  captureScreen?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
@@ -706,15 +744,49 @@ export interface UiScreenshotOptions extends CommonOptions {
 }
 
 /**
- * Capture the target window or a specific element as a PNG image. With --json, returns base64-encoded PNG inline. With --output, saves to file.
+ * Capture the target window or a specific element as a PNG image. With --json, returns file path and dimensions as JSON. With --output, saves to a custom path.
  */
 export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'screenshot'];
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
+  if (options.captureScreen) args.push('--capture-screen');
   if (options.json) args.push('--json');
   if (options.mode) args.push('--mode', options.mode);
   if (options.output) args.push('--output', options.output);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui scroll
+// ---------------------------------------------------------------------------
+
+export interface UiScrollOptions extends CommonOptions {
+  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Scroll direction: up, down, left, right */
+  direction?: string;
+  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
+  mode?: string;
+  /** Scroll to position: top, bottom */
+  to?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+ */
+export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'scroll'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.direction) args.push('--direction', options.direction);
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.to) args.push('--to', options.to);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

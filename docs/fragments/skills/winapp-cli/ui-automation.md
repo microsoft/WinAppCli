@@ -8,79 +8,156 @@
 ## Prerequisites
 - For UIA mode (any app): No setup needed — works with any running Windows app
 
+## Common patterns
+
+### Discover and interact
+```powershell
+# See what's clickable, then screenshot for context
+winapp ui inspect -a myapp --interactive; winapp ui screenshot -a myapp
+
+# Click and verify the page changed
+winapp ui invoke btn-settings-a1b2 -a myapp; winapp ui wait-for pn-settingspage-c3d4 -a myapp --timeout 3000; winapp ui screenshot -a myapp
+
+# Fill a form and submit
+winapp ui set-value txt-searchbox-e5f6 --text "hello" -a myapp; winapp ui invoke btn-submit-7a90 -a myapp; winapp ui screenshot -a myapp
+```
+
+### Find visible text and click it
+```powershell
+# Search by text — output shows invokable ancestor
+winapp ui search "~Save changes" -a myapp
+# Output:
+#   lbl-savechanges-a1b2 "Save changes" (120,40 80x20)
+#         ↑ invoke via: btn-save-c3d4 "Save"
+
+# Invoke by text — auto-walks to parent Button
+winapp ui invoke '~Save changes' -a myapp
+```
+
+### Navigate multi-page apps
+```powershell
+# Click nav item, wait for page, inspect what's available
+winapp ui invoke itm-samples-3f2c -a myapp; winapp ui wait-for pn-samplespage-b4e7 -a myapp; winapp ui inspect -a myapp --interactive
+```
+
+### Disambiguate duplicate elements
+```powershell
+# When text search matches multiple elements, the error shows slugs for each — pick the right one
+winapp ui invoke Submit -a myapp
+# → Selector matched 3 elements:
+#   [0] Button "Submit Order" → btn-submitorder-a1b2
+#   [1] Button "Submit" → btn-submit-c3d4
+# Use the slug: winapp ui invoke btn-submit-c3d4 -a myapp
+```
+
 ## Key concepts
-- **Selectors**: Target elements by ID (`e5`), name (`#Submit`), AutomationId (`$SearchBox`), type (`Button`), or text content (`~partial text`)
-- **Text search (`~`)**: `~hello` finds elements whose visible text contains "hello" (case-insensitive). Also surfaces the nearest invokable ancestor (e.g., parent Button) so agents can act on it immediately
-- **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting (survives tab switches)
-- **Element IDs**: Assigned by `inspect`/`search`. Valid until the next `inspect`/`search`. Use selectors (`#Name`, `$AutomationId`) for stable references
+- **Semantic slugs**: `inspect` and `search` output shell-safe slugs like `btn-minimize-d1a0`, `itm-samples-3f2c`. Format: `prefix-name-hash`. No special characters — works unquoted in any shell.
+- **Plain text search**: `search` and `invoke` accept plain text — `search Minimize` finds elements with "Minimize" in their Name or AutomationId (substring, case-insensitive). No special syntax needed.
+- **Two ways to target**: Use **slugs** from inspect/search output (exact, hash-validated) or **plain text** (fuzzy, may need disambiguation).
+- **`--interactive` flag**: Filters to invokable elements only with auto-depth 8 — the fastest way to see what you can click
+- **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its slug
+- **`;` chaining**: Chain commands with `;` to run multiple operations in one call, reducing agent round-trips
+- **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting
+- **Element markers**: `[on]`/`[off]` for toggles, `[collapsed]`/`[expanded]`, `[scroll:v]`/`[scroll:h]`/`[scroll:vh]` for scrollable containers, `[offscreen]`, `[disabled]`, `value="..."` for editable elements
 
 ## Usage
 
-### Discover and connect
+### Connect and discover
 ```powershell
-# Find an app
-winapp ui status -a notepad
-
-# List windows when ambiguous
-winapp ui list-windows -a Terminal
-# → HWND 985238: "Tab 1" (WindowsTerminal, PID 21228)
-# → HWND 131906: "Tab 2" (WindowsTerminal, PID 21228)
+# Connect and see interactive elements in one call
+winapp ui status -a myapp; winapp ui inspect -a myapp --interactive
 ```
 
 ### Inspect element tree
 ```powershell
-winapp ui inspect -a notepad
-winapp ui inspect -w 131906 --depth 5
+winapp ui inspect -a myapp --interactive      # invokable elements only, auto-depth 8
+winapp ui inspect -a myapp --depth 5          # full tree at depth 5
+winapp ui inspect txt-searchbox-e5f6 -a myapp  # subtree rooted at element
+winapp ui inspect btn-settings-a1b2 -a myapp --ancestors  # walk up from element to root
+winapp ui inspect -a myapp --hide-offscreen   # hide offscreen elements
 ```
 
 ### Find elements
 ```powershell
-winapp ui search Button -a notepad
-winapp ui search "#Close" -a notepad
-winapp ui search ComboBox -a imageresizer
-```
-
-### Interact
-```powershell
-# Click a button
-winapp ui invoke "#Submit" -a myapp
-
-# Type text
-winapp ui set-value e2 --text "Hello" -a notepad
-
-# Expand a combo box
-winapp ui invoke '$SizeComboBox' -a imageresizer
-
-# Focus an element
-winapp ui focus e5 -a myapp
+winapp ui search Close -a myapp               # finds elements with "Close" in name or automationId
+winapp ui search Button -a myapp              # finds elements with "Button" in name (also matches type names)
+winapp ui search image -a myapp               # case-insensitive substring match
 ```
 
 ### Screenshot
 ```powershell
-# Save to file
-winapp ui screenshot -a myapp
+# Full window screenshot
+winapp ui screenshot -a myapp --output page.png
 
-# JSON response with file path (for agents)
-winapp ui screenshot -a myapp --json
+# Crop to element; capture with popups visible
+winapp ui screenshot txt-searchbox-e5f6 -a myapp --output search.png
+winapp ui screenshot -a myapp --capture-screen --output with-popups.png
+```
 
-# Screenshot a popup (use list-windows to find HWND)
-winapp ui list-windows -a myapp
-winapp ui screenshot -w <popup-hwnd>
+### Read element state
+```powershell
+# Check toggle/selection state, value, scroll position
+winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
+winapp ui get-property txt-textbox-a4b1 -a myapp --property Value
+winapp ui get-property cmb-modellist-d5e6 -a myapp --property IsSelected
+
+# See what has keyboard focus
+winapp ui get-focused -a myapp
+```
+
+### Scroll containers
+```powershell
+# Find scrollable containers — look for [scroll:v] (vertical) or [scroll:h] (horizontal)
+winapp ui search scroll -a myapp
+# Output:
+#   pn-scrollview-bfef Pane "scrollView" [scroll:v] (2127,296 1191x965)
+#   pn-scrollviewer-bfb1 Pane "scrollViewer" [scroll:h] (2127,296 1191x216)
+
+# Scroll vertically
+winapp ui scroll pn-scrollview-bfef --direction down -a myapp
+
+# Scroll to top/bottom
+winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
+
+# Scroll and then inspect for newly visible elements
+winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search TargetItem -a myapp
 ```
 
 ### Wait for UI state
 ```powershell
-winapp ui wait-for "#Submit" -a myapp --timeout 5000
-winapp ui wait-for e5 --gone -a myapp --timeout 2000
+winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
+winapp ui wait-for itm-status-c3d4 -a myapp --property Name --value "Complete" --timeout 5000
 ```
 
 ## Tips
-- Use `list-windows` to discover popup windows, dialogs, and dropdown overlays
-- When `-a` shows "multiple windows", switch to `-w <HWND>` for stability
-- Element IDs reset on each `inspect`/`search` — use them immediately
-- For elements with duplicate names, element IDs disambiguate by position
-- Use `--json` for machine-readable output, omit for human-readable tables/lists
-- Use `--mode uia` to force UIA mode when DevTools detection causes issues
+- Use `--interactive` with `inspect` as your first command — it shows only what you can click
+- Chain commands with `;` to reduce round-trips (see note below on why not `&&`)
+- Use slugs from output to target specific elements — they're hash-validated and shell-safe
+- Use plain text search to find elements: `search Minimize`, `invoke Submit`
+- When multiple elements match text search, the error shows slugs for each — pick the right one
+- Use `get-property --property ToggleState` to verify checkbox/toggle state after invoke
+- `scroll` auto-finds the nearest scrollable parent
+- Use `--capture-screen` to capture popup overlays, dropdown menus, and flyouts
+- Use `--hide-disabled` and `--hide-offscreen` to reduce noise
+
+### Why `;` instead of `&&`
+Use `;` (not `&&`) to chain commands. PowerShell's `&&` operator can freeze when a native CLI writes to stderr or uses ANSI escape sequences — this causes a pipeline deadlock. `;` runs each command unconditionally and avoids this issue. This is also better for agent workflows: you usually want the screenshot to run even if the invoke had a non-zero exit (to see what went wrong).
+
+### File dialog workaround
+File open/save dialogs are standard Windows dialogs with UIA support. Interact with them using existing commands:
+```powershell
+# 1. Trigger the dialog (e.g., click "Open File" button)
+winapp ui invoke btn-openfilebtn-a2b3 -a myapp
+
+# 2. Find the dialog window
+winapp ui list-windows -a myapp
+# → Shows the main window + the dialog HWND
+
+# 3. Target the dialog, type the file path, and confirm
+winapp ui set-value txt-1148-c4d5 --text "C:\path\to\file.png" -w <dialog-hwnd>
+winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
+```
+Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
 
 ## Related skills
 - `winapp-setup` for adding Windows SDK and DevTools to your project
@@ -91,6 +168,8 @@ winapp ui wait-for e5 --gone -a myapp --timeout 2000
 |---|---|---|
 | "No running app found" | Wrong name or app not running | Try process name, window title, or PID |
 | "Multiple windows match" | Several windows match `-a` | Use `-w <HWND>` from the listed options |
-| "Element is stale" | UI changed since inspect/search | Re-run `inspect` or `search` |
-| "does not support pattern" | Element can't be invoked | Try `search` to find the right control type |
+| "Selector matched N elements" | Text query matches multiple elements | Use a slug from the suggestions shown in the error, or from `inspect` output |
+| "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` to get fresh slugs |
+| "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
+| Popup not in screenshot | PrintWindow misses overlays | Use `--capture-screen` flag |

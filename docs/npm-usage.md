@@ -426,6 +426,27 @@ function uiFocus(options?: UiFocusOptions): Promise<WinappResult>
 
 ---
 
+### `uiGetFocused()`
+
+Show the element that currently has keyboard focus in the target app.
+
+```typescript
+function uiGetFocused(options?: UiGetFocusedOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `uiGetProperty()`
 
 Read UIA property values from an element. Specify --property for a single property or omit for all.
@@ -465,6 +486,9 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
+| `hideDisabled` | `boolean \| undefined` | No | Hide disabled elements from output |
+| `hideOffscreen` | `boolean \| undefined` | No | Hide offscreen elements from output |
+| `interactive` | `boolean \| undefined` | No | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -516,7 +540,7 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 
 ### `uiScreenshot()`
 
-Capture the target window or a specific element as a PNG image. With --json, returns base64-encoded PNG inline. With --output, saves to file.
+Capture the target window or a specific element as a PNG image. With --json, returns file path and dimensions as JSON. With --output, saves to a custom path.
 
 ```typescript
 function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
@@ -528,9 +552,33 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiScroll()`
+
+Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+
+```typescript
+function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -1191,6 +1239,18 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `UiGetFocusedOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `UiGetPropertyOptions`
 
 | Property | Type | Required | Description |
@@ -1213,6 +1273,9 @@ type ManifestTemplates = "packaged" | "sparse"
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
+| `hideDisabled` | `boolean \| undefined` | No | Hide disabled elements from output |
+| `hideOffscreen` | `boolean \| undefined` | No | Hide offscreen elements from output |
+| `interactive` | `boolean \| undefined` | No | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1249,9 +1312,24 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiScrollOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
+| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
+| `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

@@ -1607,7 +1607,7 @@
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1647,13 +1647,82 @@
               "required": false,
               "recursive": false
             },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
+            "--quiet": {
+              "description": "Suppress progress messages",
               "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "get-focused": {
+          "description": "Show the element that currently has keyboard focus in the target app.",
+          "hidden": false,
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
               "valueType": "System.String",
               "hasDefaultValue": false,
               "arity": {
                 "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,
@@ -1713,7 +1782,7 @@
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1748,18 +1817,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,
@@ -1830,11 +1887,11 @@
           }
         },
         "inspect": {
-          "description": "View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.",
+          "description": "View the UI element tree with semantic slugs, element types, names, and bounds.",
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1890,8 +1947,8 @@
               "required": false,
               "recursive": false
             },
-            "--json": {
-              "description": "Format output as JSON",
+            "--hide-disabled": {
+              "description": "Hide disabled elements from output",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -1903,13 +1960,43 @@
               "required": false,
               "recursive": false
             },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
+            "--hide-offscreen": {
+              "description": "Hide offscreen elements from output",
               "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
               "arity": {
-                "minimum": 1,
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--interactive": {
+              "description": "Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8.",
+              "hidden": false,
+              "aliases": [
+                "-i"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,
@@ -1965,11 +2052,11 @@
           }
         },
         "invoke": {
-          "description": "Programmatically activate an element. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.",
+          "description": "Activate an element by slug or text search. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.",
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2004,18 +2091,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,
@@ -2137,11 +2212,11 @@
           }
         },
         "screenshot": {
-          "description": "Capture the target window or a specific element as a PNG image. With --json, returns base64-encoded PNG inline. With --output, saves to file.",
+          "description": "Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.",
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2168,8 +2243,8 @@
               "required": false,
               "recursive": false
             },
-            "--json": {
-              "description": "Format output as JSON",
+            "--capture-screen": {
+              "description": "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first.",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -2181,13 +2256,14 @@
               "required": false,
               "recursive": false
             },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
+            "--json": {
+              "description": "Format output as JSON",
               "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
               "arity": {
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,
@@ -2257,12 +2333,117 @@
             }
           }
         },
+        "scroll": {
+          "description": "Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.",
+          "hidden": false,
+          "arguments": {
+            "selector": {
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--direction": {
+              "description": "Scroll direction: up, down, left, right",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--to": {
+              "description": "Scroll to position: top, bottom",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
         "scroll-into-view": {
           "description": "Scroll the specified element into the visible area using UIA ScrollItemPattern.",
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2297,18 +2478,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,
@@ -2364,11 +2533,11 @@
           }
         },
         "search": {
-          "description": "Search the element tree for elements matching a selector. Returns all matches with IDs.",
+          "description": "Search the element tree for elements matching a text query. Returns all matches with semantic slugs.",
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2414,18 +2583,6 @@
               "valueType": "System.Int32",
               "hasDefaultValue": true,
               "defaultValue": 50,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
               "arity": {
                 "minimum": 1,
                 "maximum": 1
@@ -2487,7 +2644,7 @@
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2522,18 +2679,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,
@@ -2632,18 +2777,6 @@
               "required": false,
               "recursive": false
             },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
             "--quiet": {
               "description": "Suppress progress messages",
               "hidden": false,
@@ -2698,7 +2831,7 @@
           "hidden": false,
           "arguments": {
             "selector": {
-              "description": "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -2746,18 +2879,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--mode": {
-              "description": "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

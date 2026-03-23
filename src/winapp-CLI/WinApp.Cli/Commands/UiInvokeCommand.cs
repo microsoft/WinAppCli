@@ -18,12 +18,11 @@ internal class UiInvokeCommand : Command, IShortDescription
     public string ShortDescription => "Activate an element via UIA patterns (Invoke, Toggle, etc.)";
 
     public UiInvokeCommand()
-        : base("invoke", "Programmatically activate an element. " +
+        : base("invoke", "Activate an element by slug or text search. " +
                "Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
-        Options.Add(SharedUiOptions.ModeOption);
         Options.Add(SharedUiOptions.WindowOption);
 
         Options.Add(WinAppRootCommand.JsonOption);
@@ -33,7 +32,6 @@ internal class UiInvokeCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
-        IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<UiInvokeCommand> logger) : AsynchronousCommandLineAction
     {
@@ -41,7 +39,6 @@ internal class UiInvokeCommand : Command, IShortDescription
         {
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var mode = parseResult.GetValue(SharedUiOptions.ModeOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
@@ -57,41 +54,54 @@ internal class UiInvokeCommand : Command, IShortDescription
                 return 1;
             }
 
-            return await statusService.ExecuteWithStatusAsync(
-                "Invoking element...",
-                async (taskContext, ct) =>
+            try
+            {
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var selector = selectorService.Parse(selectorStr);
+                var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+
+                if (element is null)
                 {
-                    try
+                    logger.LogError("No element found matching '{Selector}'", selectorStr);
+                    return 1;
+                }
+
+                string pattern;
+                try
+                {
+                    pattern = await uiAutomation.InvokeAsync(session, element, cancellationToken);
+                }
+                catch (InvalidOperationException) when (element.InvokableAncestor is { } ancestor)
+                {
+                    // Element isn't invokable but has an invokable ancestor — invoke that instead
+                    pattern = await uiAutomation.InvokeAsync(session, ancestor, cancellationToken);
+                    logger.LogInformation("Invoked ancestor {Selector} \"{Name}\" via {Pattern} (matched text element was not invokable)",
+                        ancestor.Selector ?? ancestor.Id, ancestor.Name, pattern);
+                    if (json)
                     {
-                        var session = await sessionService.ResolveSessionAsync(app, window, mode, ct);
-                        var selector = selectorService.Parse(selectorStr);
-                        var element = selector.IsElementId
-                            ? await uiAutomation.FindElementByIdAsync(session, selector.ElementId!, ct)
-                            : await uiAutomation.FindSingleElementAsync(session, selector, ct);
-
-                        if (element is null)
-                        {
-                            return (1, $"{UiSymbols.Error} No element found matching '{selectorStr}'");
-                        }
-
-                        var pattern = await uiAutomation.InvokeAsync(session, element, ct);
-
-                        if (json)
-                        {
-                            var result = new UiInvokeResult { ElementId = element.Id, Pattern = pattern };
-                            ansiConsole.Profile.Out.Writer.WriteLine(
-                                JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
-                        }
-
-                        return (0, $"Invoked {element.Id} via {pattern}");
+                        var result = new UiInvokeResult { ElementId = ancestor.Selector ?? ancestor.Id, Pattern = pattern };
+                        ansiConsole.Profile.Out.Writer.WriteLine(
+                            JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                     }
-                    catch (Exception ex)
-                    {
-                        taskContext.AddDebugMessage($"Stack trace: {ex.StackTrace}");
-                        return (1, $"{UiSymbols.Error} {ex.Message}");
-                    }
-                },
-                cancellationToken);
+                    return 0;
+                }
+
+                if (json)
+                {
+                    var result = new UiInvokeResult { ElementId = element.Selector ?? element.Id, Pattern = pattern };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
+                }
+
+                logger.LogInformation("Invoked {ElementId} via {Pattern}", element.Selector ?? element.Id, pattern);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
+                logger.LogError("{Message}", ex.Message);
+                return 1;
+            }
         }
     }
 }

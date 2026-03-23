@@ -15,14 +15,13 @@ namespace WinApp.Cli.Commands;
 
 internal class UiSearchCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Find elements matching a selector";
+    public string ShortDescription => "Find elements by text";
 
     public UiSearchCommand()
-        : base("search", "Search the element tree for elements matching a selector. Returns all matches with IDs.")
+        : base("search", "Search the element tree for elements matching a text query. Returns all matches with semantic slugs.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
-        Options.Add(SharedUiOptions.ModeOption);
         Options.Add(SharedUiOptions.WindowOption);
 
         Options.Add(WinAppRootCommand.JsonOption);
@@ -33,7 +32,6 @@ internal class UiSearchCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
-        IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<UiSearchCommand> logger) : AsynchronousCommandLineAction
     {
@@ -41,7 +39,6 @@ internal class UiSearchCommand : Command, IShortDescription
         {
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var mode = parseResult.GetValue(SharedUiOptions.ModeOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
@@ -58,91 +55,62 @@ internal class UiSearchCommand : Command, IShortDescription
                 return 1;
             }
 
-            return await statusService.ExecuteWithStatusAsync(
-                "Searching...",
-                async (taskContext, ct) =>
+            try
+            {
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var selector = selectorService.Parse(selectorStr);
+                var matches = await uiAutomation.SearchAsync(session, selector, maxResults + 1, cancellationToken);
+
+                var hasMore = matches.Length > maxResults;
+                if (hasMore)
                 {
-                    try
+                    matches = matches[..maxResults];
+                }
+
+                if (json)
+                {
+                    var result = new UiSearchResult
                     {
-                        var session = await sessionService.ResolveSessionAsync(app, window, mode, ct);
-                        var selector = selectorService.Parse(selectorStr);
-                        var matches = await uiAutomation.SearchAsync(session, selector, maxResults + 1, ct);
-
-                        var hasMore = matches.Length > maxResults;
-                        if (hasMore)
-                        {
-                            matches = matches[..maxResults];
-                        }
-
-                        // Update element cache
-                        // Replace element cache with current results (IDs are per-command)
-                        session.Elements = new Dictionary<string, Models.CachedElement>();
-                        foreach (var el in matches)
-                        {
-                            session.Elements[el.Id] = new Models.CachedElement
-                            {
-                                AutomationId = el.AutomationId,
-                                Name = el.Name,
-                                Type = el.Type,
-                                X = el.X,
-                                Y = el.Y
-                            };
-
-                            // Also cache invokable ancestors so they can be used with invoke
-                            if (el.InvokableAncestor is { } ancestor)
-                            {
-                                session.Elements[ancestor.Id] = new Models.CachedElement
-                                {
-                                    AutomationId = ancestor.AutomationId,
-                                    Name = ancestor.Name,
-                                    Type = ancestor.Type,
-                                    X = ancestor.X,
-                                    Y = ancestor.Y
-                                };
-                            }
-                        }
-                        await sessionService.SaveSessionAsync(session, ct);
-
-                        if (json)
-                        {
-                            var result = new UiSearchResult
-                            {
-                                Mode = session.Mode,
-                                MatchCount = matches.Length,
-                                HasMore = hasMore,
-                                Matches = matches
-                            };
-                            ansiConsole.Profile.Out.Writer.WriteLine(
-                                JsonSerializer.Serialize(result, UiJsonContext.Default.UiSearchResult));
-                        }
-                        else
-                        {
-                            foreach (var el in matches)
-                            {
-                                var name = el.Name is not null ? $" \"{el.Name}\"" : "";
-                                var autoId = el.AutomationId is not null ? $" ${el.AutomationId}" : "";
-                                var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
-                                ansiConsole.WriteLine($"  {el.Id}  {el.Type}{name}{autoId}{bounds}");
-
-                                if (el.InvokableAncestor is { } ancestor)
-                                {
-                                    var aName = ancestor.Name is not null ? $" \"{ancestor.Name}\"" : "";
-                                    var aAutoId = ancestor.AutomationId is not null ? $" ${ancestor.AutomationId}" : "";
-                                    ansiConsole.WriteLine($"        \u2191 invoke via: {ancestor.Id}  {ancestor.Type}{aName}{aAutoId}");
-                                }
-                            }
-                        }
-
-                        var moreText = hasMore ? $" (showing first {maxResults})" : "";
-                        return (0, $"Found {matches.Length} matches{moreText}");
-                    }
-                    catch (Exception ex)
+                        MatchCount = matches.Length,
+                        HasMore = hasMore,
+                        Matches = matches
+                    };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiSearchResult));
+                }
+                else
+                {
+                    foreach (var el in matches)
                     {
-                        taskContext.AddDebugMessage($"Stack trace: {ex.StackTrace}");
-                        return (1, $"{UiSymbols.Error} {ex.Message}");
+                        var elSelector = el.Selector ?? el.Id;
+                        var displayName = el.Name ?? el.AutomationId;
+                        var name = displayName is not null ? $" \"{displayName}\"" : "";
+                        var value = el.Value is not null && el.Value != el.Name ? $" value=\"{el.Value}\"" : "";
+                        var toggle = el.ToggleState is not null ? $" [{el.ToggleState}]" : "";
+                        var expand = el.ExpandState is not null ? $" [{el.ExpandState}]" : "";
+                        var scroll = el.ScrollDir is not null ? $" [scroll:{el.ScrollDir}]" : "";
+                        var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
+                        ansiConsole.WriteLine($"  {elSelector} {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}");
+
+                        if (el.InvokableAncestor is { } ancestor)
+                        {
+                            var ancestorSel = ancestor.Selector ?? ancestor.Id;
+                            var aName = ancestor.Name is not null ? $" \"{ancestor.Name}\"" : "";
+                            ansiConsole.WriteLine($"        \u2191 invoke via: {ancestorSel}{aName}");
+                        }
                     }
-                },
-                cancellationToken);
+                }
+
+                var moreText = hasMore ? $" (showing first {maxResults})" : "";
+                logger.LogInformation("Found {Count} matches{MoreText}", matches.Length, moreText);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
+                logger.LogError("{Message}", ex.Message);
+                return 1;
+            }
         }
     }
 }

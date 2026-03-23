@@ -4,26 +4,16 @@
 namespace WinApp.Cli.Models;
 
 /// <summary>
-/// A parsed selector expression. Selectors target elements by ID, Name, AutomationId, Type, or text content.
-/// Examples: e5, #Submit, @SearchBox, Button, Button#OK, ~partial text
+/// A parsed selector expression. Either a semantic slug (btn-minimize-c4b9) or a plain text search query.
 /// </summary>
 internal sealed record SelectorExpression
 {
-    /// <summary>Runtime element ID, e.g., "e5". Regex: ^e\d+$</summary>
-    public string? ElementId { get; init; }
+    /// <summary>Semantic slug selector, e.g., "btn-minimize-c4b9".</summary>
+    public string? Slug { get; init; }
 
-    /// <summary>Element Name, e.g., "Submit" (from #Submit selector)</summary>
-    public string? Name { get; init; }
+    /// <summary>Plain text search query — matches against Name and AutomationId (substring, case-insensitive).</summary>
+    public string? Query { get; init; }
 
-    /// <summary>AutomationId, e.g., "SearchBox" (from $SearchBox selector)</summary>
-    public string? AutomationId { get; init; }
-
-    /// <summary>Control type, e.g., "Button" (bare type selector)</summary>
-    public string? Type { get; init; }
-
-    /// <summary>Text content substring match, e.g., "bla" (from ~bla selector). Case-insensitive.</summary>
-    public string? Text { get; init; }
-
-    public bool IsElementId => ElementId is not null;
-    public bool IsTextSearch => Text is not null;
+    public bool IsSlug => Slug is not null;
+    public bool IsQuery => Query is not null;
 }

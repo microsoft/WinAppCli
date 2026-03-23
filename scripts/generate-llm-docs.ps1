@@ -95,7 +95,7 @@ $SkillCommandMap = @{
     "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot"    = @("get-winapp-path", "tool", "store")
     "frameworks"      = @()       # No auto-generated command sections — links to guides
-    "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui screenshot", "ui invoke", "ui set-value", "ui focus", "ui scroll-into-view", "ui wait-for", "ui list-windows")
+    "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui screenshot", "ui invoke", "ui set-value", "ui focus", "ui scroll-into-view", "ui scroll", "ui wait-for", "ui list-windows", "ui get-focused")
 }
 
 # Validate that all CLI commands are covered by at least one skill

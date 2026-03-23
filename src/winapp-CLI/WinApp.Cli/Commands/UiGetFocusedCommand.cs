@@ -8,28 +8,27 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
-using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class UiStatusCommand : Command, IShortDescription
+internal class UiGetFocusedCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Connect to a running app and show connection info";
+    public string ShortDescription => "Show the element that currently has keyboard focus";
 
-    public UiStatusCommand()
-        : base("status", "Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.")
+    public UiGetFocusedCommand()
+        : base("get-focused", "Show the element that currently has keyboard focus in the target app.")
     {
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
-
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
+        IUiAutomationService uiAutomation,
         IAnsiConsole ansiConsole,
-        ILogger<UiStatusCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiGetFocusedCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -38,7 +37,7 @@ internal class UiStatusCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                logger.LogError("{Symbol} Specify --app (name/title/PID) or --window (HWND).", UiSymbols.Error);
+                logger.LogError("Specify --app (name/title/PID) or --window (HWND).");
                 return 1;
             }
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -46,30 +45,30 @@ internal class UiStatusCommand : Command, IShortDescription
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var element = await uiAutomation.GetFocusedElementAsync(session, cancellationToken);
+
+                if (element is null)
+                {
+                    logger.LogInformation("No element has keyboard focus in this app");
+                    return 0;
+                }
 
                 if (json)
                 {
-                    var result = new UiStatusResult
-                    {
-                        ProcessId = session.ProcessId,
-                        ProcessName = session.ProcessName,
-                        WindowTitle = session.WindowTitle,
-                    };
                     ansiConsole.Profile.Out.Writer.WriteLine(
-                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiStatusResult));
+                        JsonSerializer.Serialize(element, UiJsonContext.Default.UiElement));
                 }
                 else
                 {
-                    ansiConsole.WriteLine($"Process: {session.ProcessName}");
-                    ansiConsole.WriteLine($"PID: {session.ProcessId}");
-                    ansiConsole.WriteLine($"Window: {session.WindowTitle ?? "(none)"}");
-                    if (session.WindowHandle != 0)
-                    {
-                        ansiConsole.WriteLine($"HWND: {session.WindowHandle}");
-                    }
+                    var sel = element.Selector ?? element.Id;
+                    var displayName = element.Name ?? element.AutomationId;
+                    var name = displayName is not null ? $" \"{displayName}\"" : "";
+                    var value = element.Value is not null && element.Value != element.Name ? $" value=\"{element.Value}\"" : "";
+                    var bounds = element.Width > 0 ? $" ({element.X},{element.Y} {element.Width}x{element.Height})" : "";
+                    ansiConsole.WriteLine($"{sel} {element.Type}{name}{value}{bounds}");
                 }
 
-                logger.LogInformation("Connected to {ProcessName} (PID {ProcessId})", session.ProcessName, session.ProcessId);
+                logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");
                 return 0;
             }
             catch (Exception ex)
