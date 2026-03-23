@@ -36,6 +36,7 @@ internal sealed class UiStatusResult
     public int ProcessId { get; set; }
     public string ProcessName { get; set; } = "";
     public string? WindowTitle { get; set; }
+    public long Hwnd { get; set; }
 }
 
 internal sealed class UiInspectResult

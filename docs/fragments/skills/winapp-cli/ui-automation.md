@@ -25,13 +25,13 @@ winapp ui set-value txt-searchbox-e5f6 --text "hello" -a myapp; winapp ui invoke
 ### Find visible text and click it
 ```powershell
 # Search by text — output shows invokable ancestor
-winapp ui search "~Save changes" -a myapp
+winapp ui search "Save changes" -a myapp
 # Output:
 #   lbl-savechanges-a1b2 "Save changes" (120,40 80x20)
-#         ↑ invoke via: btn-save-c3d4 "Save"
+#         ^ invoke via: btn-save-c3d4 "Save"
 
 # Invoke by text — auto-walks to parent Button
-winapp ui invoke '~Save changes' -a myapp
+winapp ui invoke 'Save changes' -a myapp
 ```
 
 ### Navigate multi-page apps

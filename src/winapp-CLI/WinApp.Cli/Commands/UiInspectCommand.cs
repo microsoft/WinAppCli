@@ -128,6 +128,12 @@ internal class UiInspectCommand : Command, IShortDescription
                 logger.LogInformation("Found {Count} elements (depth {Depth})", elements.Length, depth);
                 return 0;
             }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
+                logger.LogError("Failed to access UI element — the element may no longer exist or the app may have navigated. Try re-running 'inspect'.");
+                return 1;
+            }
             catch (Exception ex)
             {
                 logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
@@ -135,7 +141,6 @@ internal class UiInspectCommand : Command, IShortDescription
                 return 1;
             }
         }
-
         private static readonly HashSet<string> InteractiveTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "Button", "CheckBox", "ComboBox", "Edit", "TextBox", "Hyperlink",

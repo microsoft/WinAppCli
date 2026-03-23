@@ -74,6 +74,12 @@ internal class UiSetValueCommand : Command, IShortDescription
                 logger.LogInformation("Set value on {ElementId}", element.Id);
                 return 0;
             }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
+                logger.LogError("Failed to access UI element — the element may no longer exist or the app may have navigated. Try re-running 'inspect'.");
+                return 1;
+            }
             catch (Exception ex)
             {
                 logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
