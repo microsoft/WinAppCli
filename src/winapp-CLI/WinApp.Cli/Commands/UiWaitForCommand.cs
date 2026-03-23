@@ -169,12 +169,18 @@ internal class UiWaitForCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken);
                 }
 
-                logger.LogError("Condition not met after {Timeout}ms", timeout);
+                logger.LogError("'{Selector}' not found after {Timeout}ms", selectorStr, timeout);
                 return 1;
             }
             catch (OperationCanceledException)
             {
                 logger.LogError("Wait cancelled");
+                return 1;
+            }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
+                logger.LogError("Failed to access UI element — the element may no longer exist or the app may have navigated. Try re-running 'inspect'.");
                 return 1;
             }
             catch (Exception ex)

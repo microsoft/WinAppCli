@@ -416,10 +416,9 @@ function uiFocus(options?: UiFocusOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -440,7 +439,6 @@ function uiGetFocused(options?: UiGetFocusedOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -459,10 +457,9 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
@@ -472,7 +469,7 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 
 ### `uiInspect()`
 
-View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.
+View the UI element tree with semantic slugs, element types, names, and bounds.
 
 ```typescript
 function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
@@ -482,7 +479,7 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
@@ -490,7 +487,6 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 | `hideOffscreen` | `boolean \| undefined` | No | Hide offscreen elements from output |
 | `interactive` | `boolean \| undefined` | No | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -499,7 +495,7 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 
 ### `uiInvoke()`
 
-Programmatically activate an element. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
+Activate an element by slug or text search. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
 
 ```typescript
 function uiInvoke(options?: UiInvokeOptions): Promise<WinappResult>
@@ -509,10 +505,9 @@ function uiInvoke(options?: UiInvokeOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -540,7 +535,7 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 
 ### `uiScreenshot()`
 
-Capture the target window or a specific element as a PNG image. With --json, returns file path and dimensions as JSON. With --output, saves to a custom path.
+Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
 
 ```typescript
 function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
@@ -550,11 +545,10 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
@@ -574,10 +568,9 @@ function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
@@ -597,10 +590,9 @@ function uiScrollIntoView(options?: UiScrollIntoViewOptions): Promise<WinappResu
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -609,7 +601,7 @@ function uiScrollIntoView(options?: UiScrollIntoViewOptions): Promise<WinappResu
 
 ### `uiSearch()`
 
-Search the element tree for elements matching a selector. Returns all matches with IDs.
+Search the element tree for elements matching a text query. Returns all matches with semantic slugs.
 
 ```typescript
 function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
@@ -619,11 +611,10 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum search results |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -642,10 +633,9 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `text` | `string \| undefined` | No | Text value to set or type |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
@@ -667,7 +657,6 @@ function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -686,11 +675,10 @@ function uiWaitFor(options?: UiWaitForOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `timeout` | `number \| undefined` | No | Timeout in milliseconds |
 | `value` | `string \| undefined` | No | Wait for property to equal this value (use with --property) |
@@ -1230,10 +1218,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1245,7 +1232,6 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1255,10 +1241,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1269,7 +1254,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
@@ -1277,7 +1262,6 @@ type ManifestTemplates = "packaged" | "sparse"
 | `hideOffscreen` | `boolean \| undefined` | No | Hide offscreen elements from output |
 | `interactive` | `boolean \| undefined` | No | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1287,10 +1271,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1310,11 +1293,10 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1325,10 +1307,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1339,10 +1320,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1352,11 +1332,10 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum search results |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1366,10 +1345,9 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `text` | `string \| undefined` | No | Text value to set or type |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1382,7 +1360,6 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1392,11 +1369,10 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name |
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `mode` | `string \| undefined` | No | Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `timeout` | `number \| undefined` | No | Timeout in milliseconds |
 | `value` | `string \| undefined` | No | Wait for property to equal this value (use with --property) |

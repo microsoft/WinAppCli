@@ -85,6 +85,12 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", session.WindowTitle, session.ProcessId, absolutePath, width, height, pngBytes.Length / 1024);
                 return 0;
             }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
+                logger.LogError("Failed to access UI element — the element may no longer exist or the app may have navigated. Try re-running 'inspect'.");
+                return 1;
+            }
             catch (Exception ex)
             {
                 logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);

@@ -54,6 +54,7 @@ internal class UiStatusCommand : Command, IShortDescription
                         ProcessId = session.ProcessId,
                         ProcessName = session.ProcessName,
                         WindowTitle = session.WindowTitle,
+                        Hwnd = session.WindowHandle,
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiStatusResult));

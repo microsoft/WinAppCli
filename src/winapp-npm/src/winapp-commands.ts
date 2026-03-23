@@ -541,14 +541,12 @@ export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
 // ---------------------------------------------------------------------------
 
 export interface UiFocusOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
@@ -561,7 +559,6 @@ export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResul
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -575,8 +572,6 @@ export interface UiGetFocusedOptions extends CommonOptions {
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
@@ -588,7 +583,6 @@ export async function uiGetFocused(options: UiGetFocusedOptions = {}): Promise<W
   const args: string[] = ['ui', 'get-focused'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -598,14 +592,12 @@ export async function uiGetFocused(options: UiGetFocusedOptions = {}): Promise<W
 // ---------------------------------------------------------------------------
 
 export interface UiGetPropertyOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Property name to read or filter on */
   property?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
@@ -620,7 +612,6 @@ export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.property) args.push('--property', options.property);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
@@ -631,7 +622,7 @@ export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise
 // ---------------------------------------------------------------------------
 
 export interface UiInspectOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Walk up the tree from the specified element to the root */
   ancestors?: boolean;
@@ -647,14 +638,12 @@ export interface UiInspectOptions extends CommonOptions {
   interactive?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.
+ * View the UI element tree with semantic slugs, element types, names, and bounds.
  */
 export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'inspect'];
@@ -666,7 +655,6 @@ export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappR
   if (options.hideOffscreen) args.push('--hide-offscreen');
   if (options.interactive) args.push('--interactive');
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -676,27 +664,24 @@ export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappR
 // ---------------------------------------------------------------------------
 
 export interface UiInvokeOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Programmatically activate an element. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
+ * Activate an element by slug or text search. Tries InvokePattern, TogglePattern, SelectionItemPattern, and ExpandCollapsePattern in order.
  */
 export async function uiInvoke(options: UiInvokeOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'invoke'];
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -727,7 +712,7 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 // ---------------------------------------------------------------------------
 
 export interface UiScreenshotOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -735,8 +720,6 @@ export interface UiScreenshotOptions extends CommonOptions {
   captureScreen?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Save output to file path (e.g., screenshot) */
   output?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
@@ -744,7 +727,7 @@ export interface UiScreenshotOptions extends CommonOptions {
 }
 
 /**
- * Capture the target window or a specific element as a PNG image. With --json, returns file path and dimensions as JSON. With --output, saves to a custom path.
+ * Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
  */
 export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'screenshot'];
@@ -752,7 +735,6 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
@@ -763,14 +745,12 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
 // ---------------------------------------------------------------------------
 
 export interface UiScrollOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Scroll direction: up, down, left, right */
   direction?: string;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Scroll to position: top, bottom */
   to?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
@@ -785,7 +765,6 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.direction) args.push('--direction', options.direction);
-  if (options.mode) args.push('--mode', options.mode);
   if (options.to) args.push('--to', options.to);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
@@ -796,14 +775,12 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
 // ---------------------------------------------------------------------------
 
 export interface UiScrollIntoViewOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
@@ -816,7 +793,6 @@ export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): P
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -826,7 +802,7 @@ export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): P
 // ---------------------------------------------------------------------------
 
 export interface UiSearchOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -834,14 +810,12 @@ export interface UiSearchOptions extends CommonOptions {
   json?: boolean;
   /** Maximum search results */
   max?: number;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Search the element tree for elements matching a selector. Returns all matches with IDs.
+ * Search the element tree for elements matching a text query. Returns all matches with semantic slugs.
  */
 export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'search'];
@@ -849,7 +823,6 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -859,14 +832,12 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
 // ---------------------------------------------------------------------------
 
 export interface UiSetValueOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Text value to set or type */
   text?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
@@ -881,7 +852,6 @@ export async function uiSetValue(options: UiSetValueOptions = {}): Promise<Winap
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.text) args.push('--text', options.text);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
@@ -896,8 +866,6 @@ export interface UiStatusOptions extends CommonOptions {
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
@@ -909,7 +877,6 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
   const args: string[] = ['ui', 'status'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -919,7 +886,7 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
 // ---------------------------------------------------------------------------
 
 export interface UiWaitForOptions extends CommonOptions {
-  /** Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name */
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -927,8 +894,6 @@ export interface UiWaitForOptions extends CommonOptions {
   gone?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default) */
-  mode?: string;
   /** Property name to read or filter on */
   property?: string;
   /** Timeout in milliseconds */
@@ -948,7 +913,6 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
   if (options.app) args.push('--app', options.app);
   if (options.gone) args.push('--gone');
   if (options.json) args.push('--json');
-  if (options.mode) args.push('--mode', options.mode);
   if (options.property) args.push('--property', options.property);
   if (options.timeout !== undefined) args.push('--timeout', options.timeout.toString());
   if (options.value) args.push('--value', options.value);

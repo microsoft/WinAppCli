@@ -73,7 +73,7 @@ Target elements by name, AutomationId, type, or text content:
 | `#Submit` | Name="Submit" (legacy, still works) | `winapp ui invoke "#Submit" -a myapp` |
 | `$SearchBox` | AutomationId="SearchBox" (legacy) | `winapp ui invoke '$SearchBox' -a myapp` |
 | `Button` | Type=Button | `winapp ui search Button -a myapp` |
-| `~hello` | Text contains "hello" (case-insensitive) | `winapp ui search "~hello" -a myapp` |
+| `hello` | Text contains "hello" (case-insensitive) | `winapp ui search "hello" -a myapp` |
 | `#Image[1]` | Index disambiguation (legacy, 0-based) | `winapp ui invoke "#Image[1]" -a myapp` |
 
 ### Semantic slugs in output
@@ -106,22 +106,22 @@ winapp ui search Close -a notepad           # case-insensitive substring match
 winapp ui invoke Minimize -a notepad        # search + invoke in one step (disambiguates if needed)
 ```
 
-### Text content search (`~`)
+### Plain text search
 
 Search for elements whose visible text contains a substring:
 
 ```bash
-winapp ui search "~Save" -a notepad        # find elements containing "Save"
-winapp ui search "~error" -a myapp          # case-insensitive match
+winapp ui search "Save" -a notepad        # find elements containing "Save"
+winapp ui search "error" -a myapp          # case-insensitive match
 ```
 
 For non-invokable search results (e.g., a TextBlock inside a Button), the search
 automatically surfaces the nearest **invokable ancestor** — the parent element you can use with `invoke`.
-This works for all search selectors (not just `~text`):
+This works for all search selectors:
 
 ```
   lbl-savechanges-a1b2 "Save changes" (120,40 80x20)
-        ↑ invoke via: btn-save-c3d4 "Save"
+        ^ invoke via: btn-save-c3d4 "Save"
 ```
 
 The surfaced selector can be used directly:
@@ -328,10 +328,10 @@ winapp ui screenshot -a myapp --output settings.png  # verify visually
 ### Find text and invoke its parent
 ```powershell
 # Search shows invokable ancestor; invoke auto-walks to it
-winapp ui invoke '~Save changes' -a myapp
+winapp ui invoke 'Save changes' -a myapp
 
 # Or search first to see what matches, then invoke
-winapp ui search "~Save changes" -a myapp; winapp ui invoke btn-save-c3d4 -a myapp
+winapp ui search "Save changes" -a myapp; winapp ui invoke btn-save-c3d4 -a myapp
 ```
 
 ### Disambiguate duplicate elements

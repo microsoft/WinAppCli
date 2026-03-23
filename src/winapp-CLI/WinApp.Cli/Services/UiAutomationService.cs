@@ -333,13 +333,13 @@ return Task.FromResult<UiElement?>(null);
                     }
                 }
                 catch { slugSuggestion = $"{SlugGenerator.GetPrefix(mType)}[{i}]"; }
-                listing.AppendLine($"  [{i}] {mType}{nameStr}{boundsStr}  → {slugSuggestion}");
+                listing.AppendLine($"  [{i}] {mType}{nameStr}{boundsStr}  -> {slugSuggestion}");
             }
             if (matchCount > 5)
             {
                 listing.AppendLine($"  ... and {matchCount - 5} more");
             }
-            listing.Append($"Append [0]-[{matchCount - 1}] to pick by index, or use a slug from 'inspect'.");
+            listing.Append("Use a slug from 'inspect' to target a specific element.");
             throw new InvalidOperationException(listing.ToString());
         }
 
@@ -886,6 +886,13 @@ return Task.FromResult<UiElement?>(null);
 
         if (to is not null)
         {
+            var canScrollV = (bool)scrollPattern.get_CurrentVerticallyScrollable();
+            if (!canScrollV)
+            {
+                throw new InvalidOperationException(
+                    $"Element {element.Selector ?? element.Id} cannot scroll vertically (required for --to top/bottom).");
+            }
+
             switch (to.ToLowerInvariant())
             {
                 case "top":
@@ -1186,6 +1193,49 @@ return Task.FromResult<UiElement?>(null);
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());
                     _logger.LogDebug("ElementFromHandle(stored HWND {Hwnd}): \"{Name}\"", session.WindowHandle, name ?? "(null)");
+
+                    // For WinUI 3 apps, ElementFromHandle returns the outer frame.
+                    // Walk into the first content pane if the root only has TitleBar/chrome elements.
+                    var walker = _automation.get_ControlViewWalker();
+                    var firstChild = walker.GetFirstChildElement(element);
+                    if (firstChild is not null)
+                    {
+                        var childType = firstChild.get_CurrentControlType();
+                        // If the first child is a non-client pane or titlebar, look for a content pane
+                        if (childType == UIA_CONTROLTYPE_ID.UIA_PaneControlTypeId || childType == UIA_CONTROLTYPE_ID.UIA_TitleBarControlTypeId)
+                        {
+                            // Find the largest child pane — that's likely the content area
+                            IUIAutomationElement? contentPane = null;
+                            long bestArea = 0;
+                            var child = firstChild;
+                            while (child is not null)
+                            {
+                                try
+                                {
+                                    var r = child.get_CurrentBoundingRectangle();
+                                    long area = (long)(r.right - r.left) * (r.bottom - r.top);
+                                    if (area > bestArea && child.get_CurrentControlType() == UIA_CONTROLTYPE_ID.UIA_PaneControlTypeId)
+                                    {
+                                        contentPane = child;
+                                        bestArea = area;
+                                    }
+                                    child = walker.GetNextSiblingElement(child);
+                                }
+                                catch { break; }
+                            }
+                            // If we found a large content pane, use it but keep the original as fallback
+                            // Only switch if the content pane has more children than the frame
+                            if (contentPane is not null)
+                            {
+                                var contentChild = walker.GetFirstChildElement(contentPane);
+                                if (contentChild is not null)
+                                {
+                                    element = contentPane;
+                                }
+                            }
+                        }
+                    }
+
                     return element;
                 }
             }
