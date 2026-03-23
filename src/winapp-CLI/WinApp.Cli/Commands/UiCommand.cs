@@ -19,8 +19,10 @@ internal class UiCommand : Command, IShortDescription
         UiSetValueCommand setValueCommand,
         UiFocusCommand focusCommand,
         UiScrollIntoViewCommand scrollIntoViewCommand,
+        UiScrollCommand scrollCommand,
         UiWaitForCommand waitForCommand,
-        UiListWindowsCommand listWindowsCommand)
+        UiListWindowsCommand listWindowsCommand,
+        UiGetFocusedCommand getFocusedCommand)
         : base("ui", "Inspect and interact with any running Windows app using UI Automation (UIA). " +
                "Auto-detects DevTools mode for WinUI 3 apps with the WinApp NuGet. " +
                "Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.")
@@ -34,7 +36,9 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(setValueCommand);
         Subcommands.Add(focusCommand);
         Subcommands.Add(scrollIntoViewCommand);
+        Subcommands.Add(scrollCommand);
         Subcommands.Add(waitForCommand);
         Subcommands.Add(listWindowsCommand);
+        Subcommands.Add(getFocusedCommand);
     }
 }

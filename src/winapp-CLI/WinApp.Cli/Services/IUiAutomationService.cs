@@ -26,11 +26,12 @@ internal interface IUiAutomationService
     Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct);
     Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct);
     Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct);
-    Task<UiElement?> FindElementByIdAsync(UiSessionInfo session, string elementId, CancellationToken ct);
     Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct);
-    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, CancellationToken ct);
+    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct);
     Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct);
     Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
+    Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct);
+    Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct);
 }

@@ -19,22 +19,21 @@ internal class UiScreenshotCommand : Command, IShortDescription
     public string ShortDescription => "Capture a screenshot of a window or element";
 
     public UiScreenshotCommand()
-        : base("screenshot", "Capture the target window or a specific element as a PNG image. " +
-               "With --json, returns base64-encoded PNG inline. With --output, saves to file.")
+        : base("screenshot", "Capture the target window or element as a PNG image. " +
+               "With --json, returns file path and dimensions. Use --capture-screen for popup overlays.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
-        Options.Add(SharedUiOptions.ModeOption);
         Options.Add(SharedUiOptions.WindowOption);
 
         Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(SharedUiOptions.OutputOption);
+        Options.Add(SharedUiOptions.CaptureScreenOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
-        IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<UiScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
@@ -42,7 +41,6 @@ internal class UiScreenshotCommand : Command, IShortDescription
         {
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var mode = parseResult.GetValue(SharedUiOptions.ModeOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
@@ -52,50 +50,47 @@ internal class UiScreenshotCommand : Command, IShortDescription
             }
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
 
-            return await statusService.ExecuteWithStatusAsync(
-                "Capturing screenshot...",
-                async (taskContext, ct) =>
+            try
+            {
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var (pixels, width, height) = await uiAutomation.ScreenshotAsync(session, selector, captureScreen, cancellationToken);
+
+                // Encode raw BGRA pixels to PNG via SkiaSharp
+                var pngBytes = EncodePng(pixels, width, height);
+
+                // Determine save path: --output explicit path, or screenshot.png in cwd
+                var filePath = output ?? "screenshot.png";
+                await File.WriteAllBytesAsync(filePath, pngBytes, cancellationToken);
+                // Return absolute path for clarity
+                var absolutePath = Path.GetFullPath(filePath);
+
+                if (json)
                 {
-                    try
+                    var result = new UiScreenshotResult
                     {
-                        var session = await sessionService.ResolveSessionAsync(app, window, mode, ct);
-                        var (pixels, width, height) = await uiAutomation.ScreenshotAsync(session, selector, ct);
+                        ElementId = selector,
+                        FilePath = absolutePath,
+                        Width = width,
+                        Height = height,
+                        ProcessId = session.ProcessId,
+                        WindowTitle = session.WindowTitle
+                    };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
+                    return 0;
+                }
 
-                        // Encode raw BGRA pixels to PNG via SkiaSharp
-                        var pngBytes = EncodePng(pixels, width, height);
-
-                        // Determine save path: --output explicit path, or screenshot.png in cwd
-                        var filePath = output ?? "screenshot.png";
-                        await File.WriteAllBytesAsync(filePath, pngBytes, ct);
-                        // Return absolute path for clarity
-                        var absolutePath = Path.GetFullPath(filePath);
-
-                        if (json)
-                        {
-                            var result = new UiScreenshotResult
-                            {
-                                ElementId = selector,
-                                FilePath = absolutePath,
-                                Width = width,
-                                Height = height,
-                                ProcessId = session.ProcessId,
-                                WindowTitle = session.WindowTitle
-                            };
-                            ansiConsole.Profile.Out.Writer.WriteLine(
-                                JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
-                            return (0, "");
-                        }
-
-                        return (0, $"Screenshot of \"{session.WindowTitle}\" (PID {session.ProcessId}) saved to {absolutePath} ({width}x{height}, {pngBytes.Length / 1024}KB)");
-                    }
-                    catch (Exception ex)
-                    {
-                        taskContext.AddDebugMessage($"Stack trace: {ex.StackTrace}");
-                        return (1, $"{UiSymbols.Error} {ex.Message}");
-                    }
-                },
-                cancellationToken);
+                logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", session.WindowTitle, session.ProcessId, absolutePath, width, height, pngBytes.Length / 1024);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
+                logger.LogError("{Message}", ex.Message);
+                return 1;
+            }
         }
 
         private static byte[] EncodePng(byte[] bgraPixels, int width, int height)

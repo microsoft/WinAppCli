@@ -27,101 +27,97 @@ internal class UiListWindowsCommand : Command, IShortDescription
 
     public class Handler(
         IUiAutomationService uiAutomation,
-        IStatusService statusService,
-        IAnsiConsole ansiConsole) : AsynchronousCommandLineAction
+        IAnsiConsole ansiConsole,
+        ILogger<UiListWindowsCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
-            return await statusService.ExecuteWithStatusAsync(
-                "Listing windows...",
-                async (taskContext, ct) =>
+            try
+            {
+                List<(nint Hwnd, int Pid, string Title)> windows;
+
+                if (!string.IsNullOrWhiteSpace(app))
                 {
-                    try
+                    // Try as PID first
+                    if (int.TryParse(app, out var pid))
                     {
-                        List<(nint Hwnd, int Pid, string Title)> windows;
-
-                        if (!string.IsNullOrWhiteSpace(app))
+                        windows = uiAutomation.FindWindowsByPid(pid);
+                    }
+                    else
+                    {
+                        // Try process name match, then title match
+                        var byName = System.Diagnostics.Process.GetProcessesByName(app);
+                        if (byName.Length > 0)
                         {
-                            // Try as PID first
-                            if (int.TryParse(app, out var pid))
-                            {
-                                windows = uiAutomation.FindWindowsByPid(pid);
-                            }
-                            else
-                            {
-                                // Try process name match, then title match
-                                var byName = System.Diagnostics.Process.GetProcessesByName(app);
-                                if (byName.Length > 0)
-                                {
-                                    windows = uiAutomation.FindWindowsByPid(byName[0].Id);
-                                }
-                                else
-                                {
-                                    // Partial process name
-                                    var partial = System.Diagnostics.Process.GetProcesses()
-                                        .Where(p =>
-                                        {
-                                            try { return p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase); }
-                                            catch { return false; }
-                                        })
-                                        .ToArray();
-
-                                    if (partial.Length > 0)
-                                    {
-                                        windows = [];
-                                        foreach (var p in partial)
-                                        {
-                                            windows.AddRange(uiAutomation.FindWindowsByPid(p.Id));
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // Fall back to title search
-                                        windows = uiAutomation.FindWindowsByTitle(app);
-                                    }
-                                }
-                            }
+                            windows = uiAutomation.FindWindowsByPid(byName[0].Id);
                         }
                         else
                         {
-                            // No filter — list ALL visible windows
-                            windows = uiAutomation.FindWindowsByTitle("");
-                        }
+                            // Partial process name
+                            var partial = System.Diagnostics.Process.GetProcesses()
+                                .Where(p =>
+                                {
+                                    try { return p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase); }
+                                    catch { return false; }
+                                })
+                                .ToArray();
 
-                        if (json)
-                        {
-                            var results = windows.Select(w => new WindowInfo
+                            if (partial.Length > 0)
                             {
-                                Hwnd = w.Hwnd,
-                                ProcessId = w.Pid,
-                                ProcessName = GetProcessNameSafe(w.Pid),
-                                Title = string.IsNullOrEmpty(w.Title) ? null : w.Title
-                            }).ToArray();
-                            ansiConsole.Profile.Out.Writer.WriteLine(
-                                JsonSerializer.Serialize(results, UiJsonContext.Default.WindowInfoArray));
-                            return (0, "");
+                                windows = [];
+                                foreach (var p in partial)
+                                {
+                                    windows.AddRange(uiAutomation.FindWindowsByPid(p.Id));
+                                }
+                            }
+                            else
+                            {
+                                // Fall back to title search
+                                windows = uiAutomation.FindWindowsByTitle(app);
+                            }
                         }
-
-                        // Human-readable table
-                        foreach (var w in windows)
-                        {
-                            var procName = GetProcessNameSafe(w.Pid);
-                            var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
-                            ansiConsole.WriteLine($"  HWND {w.Hwnd}: \"{title}\" ({procName}, PID {w.Pid})");
-                        }
-
-                        return (0, $"Found {windows.Count} windows");
                     }
-                    catch (Exception ex)
+                }
+                else
+                {
+                    // No filter — list ALL visible windows
+                    windows = uiAutomation.FindWindowsByTitle("");
+                }
+
+                if (json)
+                {
+                    var results = windows.Select(w => new WindowInfo
                     {
-                        taskContext.AddDebugMessage($"Stack trace: {ex.StackTrace}");
-                        return (1, $"{UiSymbols.Error} {ex.Message}");
-                    }
-                },
-                cancellationToken);
+                        Hwnd = w.Hwnd,
+                        ProcessId = w.Pid,
+                        ProcessName = GetProcessNameSafe(w.Pid),
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title
+                    }).ToArray();
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(results, UiJsonContext.Default.WindowInfoArray));
+                    return 0;
+                }
+
+                // Human-readable table
+                foreach (var w in windows)
+                {
+                    var procName = GetProcessNameSafe(w.Pid);
+                    var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
+                    ansiConsole.WriteLine($"  HWND {w.Hwnd}: \"{title}\" ({procName}, PID {w.Pid})");
+                }
+
+                logger.LogInformation("Found {Count} windows", windows.Count);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
+                logger.LogError("{Message}", ex.Message);
+                return 1;
+            }
         }
 
         private static string GetProcessNameSafe(int pid)

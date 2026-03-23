@@ -1,73 +1,24 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text.RegularExpressions;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-internal sealed partial class SelectorService : ISelectorService
+internal sealed class SelectorService : ISelectorService
 {
-    [GeneratedRegex(@"^e\d+$")]
-    private static partial Regex ElementIdPattern();
-
     public SelectorExpression Parse(string selector)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(selector);
 
-        // e5, e12, e0 — runtime element ID
-        if (ElementIdPattern().IsMatch(selector))
+        // Semantic slug format: btn-minimize-c4b9 (lowercase, dashes, ends with 4-char hex)
+        var slugParsed = SlugGenerator.ParseSlug(selector);
+        if (slugParsed is not null)
         {
-            return new SelectorExpression { ElementId = selector };
+            return new SelectorExpression { Slug = selector };
         }
 
-        // ~partial text — text content substring search (case-insensitive)
-        if (selector.StartsWith('~'))
-        {
-            var text = selector[1..];
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                throw new ArgumentException("Text search requires content after ~");
-            }
-
-            return new SelectorExpression { Text = text };
-        }
-
-        // #Submit — Name selector
-        if (selector.StartsWith('#'))
-        {
-            return new SelectorExpression { Name = selector[1..] };
-        }
-
-        // $SearchBox — AutomationId selector
-        if (selector.StartsWith('$'))
-        {
-            return new SelectorExpression { AutomationId = selector[1..] };
-        }
-
-        // Button#OK — Type + Name
-        var hashIndex = selector.IndexOf('#');
-        if (hashIndex > 0)
-        {
-            return new SelectorExpression
-            {
-                Type = selector[..hashIndex],
-                Name = selector[(hashIndex + 1)..]
-            };
-        }
-
-        // TextBox$Search — Type + AutomationId
-        var dollarIndex = selector.IndexOf('$');
-        if (dollarIndex > 0)
-        {
-            return new SelectorExpression
-            {
-                Type = selector[..dollarIndex],
-                AutomationId = selector[(dollarIndex + 1)..]
-            };
-        }
-
-        // Button — bare type selector
-        return new SelectorExpression { Type = selector };
+        // Everything else is a plain text search query
+        return new SelectorExpression { Query = selector };
     }
 }

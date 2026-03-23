@@ -12,7 +12,6 @@ internal static class SharedUiOptions
 {
     public static Option<string?> AppOption { get; }
     public static Option<long?> WindowOption { get; }
-    public static Option<string?> ModeOption { get; }
     public static Argument<string?> SelectorArgument { get; }
     public static Option<int> DepthOption { get; }
     public static Option<int> MaxResultsOption { get; }
@@ -20,6 +19,10 @@ internal static class SharedUiOptions
     public static Option<int> TimeoutOption { get; }
     public static Option<string?> PropertyOption { get; }
     public static Option<string?> TextOption { get; }
+    public static Option<bool> CaptureScreenOption { get; }
+    public static Option<bool> InteractiveOption { get; }
+    public static Option<bool> HideDisabledOption { get; }
+    public static Option<bool> HideOffscreenOption { get; }
 
     static SharedUiOptions()
     {
@@ -33,14 +36,9 @@ internal static class SharedUiOptions
             Description = "Target window by HWND (stable handle from list output). Takes precedence over --app."
         };
 
-        ModeOption = new Option<string?>("--mode")
+        SelectorArgument= new Argument<string?>("selector")
         {
-            Description = "Force connection mode: 'uia' (skip DevTools detection) or 'auto' (default)"
-        };
-
-        SelectorArgument = new Argument<string?>("selector")
-        {
-            Description = "Element selector: e5 (ID), #Name, $AutomationId, Type, or Type#Name",
+            Description = "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
             Arity = ArgumentArity.ZeroOrOne
         };
 
@@ -75,6 +73,26 @@ internal static class SharedUiOptions
         TextOption = new Option<string?>("--text")
         {
             Description = "Text value to set or type"
+        };
+
+        CaptureScreenOption = new Option<bool>("--capture-screen")
+        {
+            Description = "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first."
+        };
+
+        InteractiveOption = new Option<bool>("--interactive", "-i")
+        {
+            Description = "Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8."
+        };
+
+        HideDisabledOption = new Option<bool>("--hide-disabled")
+        {
+            Description = "Hide disabled elements from output"
+        };
+
+        HideOffscreenOption = new Option<bool>("--hide-offscreen")
+        {
+            Description = "Hide offscreen elements from output"
         };
     }
 }

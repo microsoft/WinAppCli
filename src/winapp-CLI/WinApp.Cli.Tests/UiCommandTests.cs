@@ -30,7 +30,6 @@ public class UiCommandTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
         Assert.AreEqual(0, exitCode);
         StringAssert.Contains(TestAnsiConsole.Output, "\"processId\": 1234");
-        StringAssert.Contains(TestAnsiConsole.Output, "\"mode\": \"uia\"");
     }
 
     [TestMethod]
@@ -103,7 +102,7 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task Invoke_ByElementId_ReturnsSuccess()
     {
-        _fakeUia.FindByIdResult = new UiElement { Id = "e0", Type = "Button", Name = "TestButton" };
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Name = "TestButton" };
 
         var command = GetRequiredService<UiInvokeCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e0", "-a", "TestApp", "--json"]);
@@ -113,7 +112,7 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task GetProperty_ReturnsProperties()
     {
-        _fakeUia.FindByIdResult = new UiElement { Id = "e0", Type = "Button", Name = "OK", IsEnabled = true };
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Name = "OK", IsEnabled = true };
         _fakeUia.PropertiesResult = new Dictionary<string, object?> { ["IsEnabled"] = true, ["Name"] = "OK" };
 
         var command = GetRequiredService<UiGetPropertyCommand>();
@@ -138,7 +137,7 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task SetValue_WithText_ReturnsSuccess()
     {
-        _fakeUia.FindByIdResult = new UiElement { Id = "e1", Type = "Edit", Name = "TestEdit" };
+        _fakeUia.FindSingleResult = new UiElement { Id = "e1", Type = "Edit", Name = "TestEdit" };
 
         var command = GetRequiredService<UiSetValueCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e1", "--text", "Hello", "-a", "TestApp"]);
@@ -156,7 +155,7 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task Focus_ReturnsSuccess()
     {
-        _fakeUia.FindByIdResult = new UiElement { Id = "e0", Type = "Button", Name = "OK" };
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Name = "OK" };
 
         var command = GetRequiredService<UiFocusCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e0", "-a", "TestApp"]);

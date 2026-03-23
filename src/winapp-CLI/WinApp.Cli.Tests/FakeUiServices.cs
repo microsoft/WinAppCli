@@ -14,7 +14,6 @@ internal class FakeUiAutomationService : IUiAutomationService
     public UiElement[] InspectResult { get; set; } = [];
     public UiElement[] SearchResult { get; set; } = [];
     public UiElement? FindSingleResult { get; set; }
-    public UiElement? FindByIdResult { get; set; }
     public Dictionary<string, object?> PropertiesResult { get; set; } = [];
     public string InvokeResult { get; set; } = "InvokePattern";
     public (byte[] Pixels, int Width, int Height) ScreenshotResult { get; set; } = (new byte[4], 1, 1);
@@ -36,13 +35,10 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
         => Task.FromResult(FindSingleResult);
 
-    public Task<UiElement?> FindElementByIdAsync(UiSessionInfo session, string elementId, CancellationToken ct)
-        => Task.FromResult(FindByIdResult);
-
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
         => Task.FromResult(ScreenshotResult);
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
@@ -56,6 +52,12 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
         => Task.CompletedTask;
+
+    public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
+        => Task.CompletedTask;
+
+    public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
+        => Task.FromResult<UiElement?>(new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" });
 }
 
 /// <summary>
@@ -67,19 +69,9 @@ internal class FakeUiSessionService : IUiSessionService
     {
         ProcessId = 1234,
         ProcessName = "TestApp",
-        WindowTitle = "Test Window",
-        Mode = "uia",
-        ConnectedAt = DateTime.UtcNow,
-        Elements = new Dictionary<string, CachedElement>
-        {
-            ["e0"] = new() { Name = "TestButton", Type = "Button", X = 100, Y = 100 },
-            ["e1"] = new() { Name = "TestEdit", Type = "Edit", X = 200, Y = 200 }
-        }
+        WindowTitle = "Test Window"
     };
 
-    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, string? forceMode, CancellationToken ct)
+    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
         => Task.FromResult(SessionResult);
-
-    public Task SaveSessionAsync(UiSessionInfo session, CancellationToken ct)
-        => Task.CompletedTask;
 }

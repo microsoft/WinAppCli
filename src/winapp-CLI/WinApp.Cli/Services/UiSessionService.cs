@@ -2,27 +2,20 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
-using System.IO.Pipes;
-using System.Text;
-using System.Text.Json;
-using Microsoft.Extensions.Logging;
-using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
 internal sealed class UiSessionService(
-    IWinappDirectoryService winappDirectoryService,
-    IUiAutomationService uiAutomation,
-    ILogger<UiSessionService> logger) : IUiSessionService
+    IUiAutomationService uiAutomation) : IUiSessionService
 {
 
-    public async Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, string? forceMode, CancellationToken ct)
+    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
         // Direct HWND targeting — most stable, used after discovery
         if (hwnd is not null and > 0)
         {
-            return await ResolveByHwndAsync(hwnd.Value, forceMode, ct);
+            return Task.FromResult(ResolveByHwnd(hwnd.Value));
         }
 
         if (string.IsNullOrWhiteSpace(app))
@@ -51,7 +44,7 @@ internal sealed class UiSessionService(
             }
             // Single match
             var match = windows[0];
-            return await CreateSessionForWindow(match.Hwnd, match.Pid, match.Title, app, forceMode, ct);
+            return Task.FromResult(CreateSession(match.Pid, match.Hwnd, match.Title));
         }
 
         // Process found — check for multiple windows
@@ -65,64 +58,45 @@ internal sealed class UiSessionService(
                 "Use -w <HWND> to target a specific window.");
         }
 
-        // Single window or no windows — use existing session logic
-        var existing = await LoadSessionAsync(process.Id, ct);
-        if (existing is not null && IsProcessAlive(existing.ProcessId))
-        {
-            existing.AppQuery = app;
-            if (processWindows.Count == 1)
-            {
-                existing.WindowHandle = processWindows[0].Hwnd;
-                existing.WindowTitle = processWindows[0].Title;
-            }
-            RefreshWindowTitle(existing);
-            return existing;
-        }
-
-        var session = await CreateSessionAsync(process, app, forceMode, ct);
         if (processWindows.Count == 1)
         {
-            session.WindowHandle = processWindows[0].Hwnd;
-            session.WindowTitle = processWindows[0].Title;
+            return Task.FromResult(CreateSession(process.Id, processWindows[0].Hwnd, processWindows[0].Title));
         }
-        await SaveSessionAsync(session, ct);
-        return session;
+
+        return Task.FromResult(new UiSessionInfo
+        {
+            ProcessId = process.Id,
+            ProcessName = process.ProcessName,
+            WindowTitle = GetMainWindowTitle(process)
+        });
     }
 
-    private async Task<UiSessionInfo> ResolveByHwndAsync(long hwnd, string? forceMode, CancellationToken ct)
+    private static UiSessionInfo ResolveByHwnd(long hwnd)
     {
-        // Get PID from HWND
         var pid = GetPidFromHwnd(hwnd);
         if (pid == 0)
         {
             throw new InvalidOperationException($"Window HWND {hwnd} not found or not accessible.");
         }
 
-        var process = Process.GetProcessById((int)pid);
-
-        // Check session cache
-        var existing = await LoadSessionAsync(process.Id, ct);
-        if (existing is not null && IsProcessAlive(existing.ProcessId))
-        {
-            existing.WindowHandle = hwnd;
-            RefreshWindowTitle(existing);
-            return existing;
-        }
-
-        return await CreateSessionForWindow((nint)hwnd, (int)pid, null, hwnd.ToString(), forceMode, ct);
+        var session = CreateSession((int)pid, (nint)hwnd, null);
+        RefreshWindowTitle(session);
+        return session;
     }
 
-    private async Task<UiSessionInfo> CreateSessionForWindow(nint hwnd, int pid, string? title, string appQuery, string? forceMode, CancellationToken ct)
+    private static UiSessionInfo CreateSession(int pid, nint hwnd, string? title)
     {
-        var process = Process.GetProcessById(pid);
-        var session = await CreateSessionAsync(process, appQuery, forceMode, ct);
-        session.WindowHandle = hwnd;
-        if (title is not null)
+        string processName;
+        try { processName = Process.GetProcessById(pid).ProcessName; }
+        catch { processName = "Unknown"; }
+
+        return new UiSessionInfo
         {
-            session.WindowTitle = title;
-        }
-        await SaveSessionAsync(session, ct);
-        return session;
+            ProcessId = pid,
+            ProcessName = processName,
+            WindowTitle = title,
+            WindowHandle = hwnd
+        };
     }
 
     private static string GetProcessNameSafe(int pid)
@@ -131,63 +105,31 @@ internal sealed class UiSessionService(
         catch { return "Unknown"; }
     }
 
-    public async Task SaveSessionAsync(UiSessionInfo session, CancellationToken ct)
-    {
-        var path = GetSessionPath(session.ProcessId);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var json = JsonSerializer.Serialize(session, UiJsonContext.Default.UiSessionInfo);
-        await File.WriteAllTextAsync(path, json, new UTF8Encoding(false), ct);
-    }
-
-    private async Task<UiSessionInfo> CreateSessionAsync(Process process, string appQuery, string? forceMode, CancellationToken ct)
-    {
-        var pipeName = $"winapp-winui-{process.Id}";
-        var mode = "uia";
-        string? connectedPipeName = null;
-
-        if (forceMode is "uia")
-        {
-            // Forced UIA — skip all detection
-            mode = "uia";
-        }
-        else if (NamedPipeExists(pipeName))
-        {
-            mode = "devtools";
-            connectedPipeName = pipeName;
-            logger.LogDebug("DevTools pipe found: {PipeName}", pipeName);
-        }
-        else if (HasDevToolsDll(process))
-        {
-            throw new InvalidOperationException(
-                $"WinApp.WinUI detected in '{process.ProcessName}' but DevTools pipe is not ready. " +
-                "Ensure window.UseWinAppTools() is called in your app startup. " +
-                "Or use --mode uia to force UIA mode.");
-        }
-
-        var session = new UiSessionInfo
-        {
-            ProcessId = process.Id,
-            ProcessName = process.ProcessName,
-            WindowTitle = GetMainWindowTitle(process),
-            AppQuery = appQuery,
-            PipeName = connectedPipeName,
-            Mode = mode,
-            ConnectedAt = DateTime.UtcNow,
-            Elements = new Dictionary<string, CachedElement>()
-        };
-
-        await SaveSessionAsync(session, ct);
-        return session;
-    }
-
     /// <summary>
-    /// Refresh the window title from the live process (it changes with tab switches).
+    /// Refresh the window title. When a specific HWND is set, reads from that HWND.
     /// </summary>
     private static void RefreshWindowTitle(UiSessionInfo session)
     {
-        // Don't overwrite title if we have a specific HWND (title from UIA is more accurate)
         if (session.WindowHandle != 0)
         {
+            try
+            {
+                var hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
+                var title = new char[256];
+                int len;
+                unsafe
+                {
+                    fixed (char* pTitle = title)
+                    {
+                        len = Windows.Win32.PInvoke.GetWindowText(hwnd, pTitle, title.Length);
+                    }
+                }
+                if (len > 0)
+                {
+                    session.WindowTitle = new string(title, 0, len);
+                }
+            }
+            catch { }
             return;
         }
 
@@ -201,31 +143,6 @@ internal sealed class UiSessionService(
             }
         }
         catch { }
-    }
-
-    private async Task<UiSessionInfo?> LoadSessionAsync(int pid, CancellationToken ct)
-    {
-        var path = GetSessionPath(pid);
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            var json = await File.ReadAllTextAsync(path, ct);
-            return JsonSerializer.Deserialize(json, UiJsonContext.Default.UiSessionInfo);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private string GetSessionPath(int pid)
-    {
-        var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
-        return Path.Combine(globalDir.FullName, "sessions", $"ui-session-{pid}.json");
     }
 
     private static Process? TryResolveProcess(string app)
@@ -295,7 +212,6 @@ internal sealed class UiSessionService(
 
         if (partialMatches.Length > 1)
         {
-            // Filter to those with visible windows for better disambiguation
             var withWindow = partialMatches
                 .Where(p =>
                 {
@@ -308,11 +224,8 @@ internal sealed class UiSessionService(
             {
                 return withWindow[0];
             }
-
-            // Return null — let the UIA title search + window enumeration handle disambiguation
         }
 
-        // Not found by PID or process name — return null to trigger UIA title search
         return null;
     }
 
@@ -327,19 +240,6 @@ internal sealed class UiSessionService(
         return pid;
     }
 
-    private static bool IsProcessAlive(int pid)
-    {
-        try
-        {
-            var proc = Process.GetProcessById(pid);
-            return !proc.HasExited;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static string? GetMainWindowTitle(Process process)
     {
         try
@@ -350,31 +250,5 @@ internal sealed class UiSessionService(
         {
             return null;
         }
-    }
-
-    private static bool NamedPipeExists(string pipeName)
-    {
-        return File.Exists($@"\\.\pipe\{pipeName}");
-    }
-
-    private static bool HasDevToolsDll(Process process)
-    {
-        try
-        {
-            foreach (ProcessModule module in process.Modules)
-            {
-                if (module.ModuleName is not null &&
-                    module.ModuleName.Contains("WinApp.WinUI", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-        catch
-        {
-            // Access denied or process exited — can't enumerate modules
-        }
-
-        return false;
     }
 }

@@ -49,6 +49,7 @@ Does the project already have an appxmanifest.xml?
 
 Want to inspect or interact with a running app's UI?
 ├─ See element tree → winapp ui inspect -a <appname>
+├─ See only clickable elements → winapp ui inspect -a <appname> --interactive
 ├─ Find specific elements → winapp ui search <selector> -a <appname>
 ├─ Click/activate an element → winapp ui invoke <selector> -a <appname>
 ├─ Take a screenshot → winapp ui screenshot -a <appname>
@@ -196,20 +197,22 @@ Want to inspect or interact with a running app's UI?
 
 **Targeting apps:** Use `-a <name>` (fuzzy match by process name, window title, or PID) or `-w <hwnd>` for stable window targeting.
 
-**Selectors:** `e5` (element ID from last inspect/search), `#Submit` (by Name), `$SearchBox` (by AutomationId), `Button` (by type), `Button#OK` (type + name), `~partial text` (text content substring, case-insensitive — also surfaces nearest invokable ancestor).
+**Selectors:** Use semantic slugs from inspect/search output (e.g., `btn-minimize-d1a0`, `itm-samples-3f2c`) for exact element targeting, or plain text for search (e.g., `search Minimize`, `invoke Submit`). Slugs are shell-safe, hash-validated, and work unquoted.
 
 **Key subcommands:**
 - `ui status -a <app>` — connect and show app info
-- `ui inspect -a <app> [--depth N]` — view element tree
-- `ui search <selector> -a <app> [--max N]` — find elements
-- `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties
-- `ui screenshot -a <app> [--output file.png] [--json]` — capture window as PNG
-- `ui invoke <selector> -a <app>` — activate element (click, toggle, expand)
-- `ui set-value <selector> --text "value" -a <app>` — set text
+- `ui inspect -a <app> [--depth N] [--interactive] [--hide-disabled] [--hide-offscreen]` — view element tree with semantic slugs and 2-space indentation. `--interactive` filters to invokable elements only (auto-depth 8) — ideal for discovering clickable elements
+- `ui search <selector> -a <app> [--max N]` — find elements; output shows semantic slugs. Surfaces invokable ancestor for all non-invokable results
+- `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
+- `ui screenshot -a <app> [--output file.png] [--json] [--capture-screen]` — capture window as PNG. Use `--capture-screen` for popup overlays.
+- `ui invoke <selector> -a <app>` — activate element (click, toggle, expand). With `~text`, auto-walks to invokable ancestor.
+- `ui set-value <selector> --text "value" -a <app>` — set text or slider value
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
-- `ui wait-for <selector> -a <app> --timeout <ms> [--gone]` — wait for element state
+- `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)
+- `ui wait-for <selector> -a <app> --timeout <ms> [--gone] [--property X --value Y]` — wait for element state or property value
 - `ui list-windows -a <app>` — list windows, popups, and dialogs with HWNDs
+- `ui get-focused -a <app>` — show the element with keyboard focus
 
 ## Framework-specific guidance
 

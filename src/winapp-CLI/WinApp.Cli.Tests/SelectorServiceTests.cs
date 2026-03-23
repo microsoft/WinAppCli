@@ -11,90 +11,53 @@ public class SelectorServiceTests
     private readonly SelectorService _sut = new();
 
     [TestMethod]
-    public void Parse_ElementId_ReturnsElementId()
+    public void Parse_Slug_ReturnsSlug()
     {
-        var result = _sut.Parse("e5");
-        Assert.AreEqual("e5", result.ElementId);
-        Assert.IsTrue(result.IsElementId);
-        Assert.IsNull(result.Name);
-        Assert.IsNull(result.Type);
+        var result = _sut.Parse("btn-minimize-c4b9");
+        Assert.IsTrue(result.IsSlug);
+        Assert.AreEqual("btn-minimize-c4b9", result.Slug);
+        Assert.IsNull(result.Query);
     }
 
     [TestMethod]
-    public void Parse_ElementIdZero_ReturnsElementId()
+    public void Parse_SlugWithName_ReturnsSlug()
     {
-        var result = _sut.Parse("e0");
-        Assert.AreEqual("e0", result.ElementId);
+        var result = _sut.Parse("itm-samples-3f2c");
+        Assert.IsTrue(result.IsSlug);
+        Assert.AreEqual("itm-samples-3f2c", result.Slug);
     }
 
     [TestMethod]
-    public void Parse_LargeElementId_ReturnsElementId()
+    public void Parse_SlugNameless_ReturnsSlug()
     {
-        var result = _sut.Parse("e12345");
-        Assert.AreEqual("e12345", result.ElementId);
+        var result = _sut.Parse("pn-c8a3");
+        Assert.IsTrue(result.IsSlug);
+        Assert.AreEqual("pn-c8a3", result.Slug);
     }
 
     [TestMethod]
-    public void Parse_NameSelector_ReturnsName()
+    public void Parse_TextQuery_ReturnsQuery()
     {
-        var result = _sut.Parse("#Submit");
-        Assert.AreEqual("Submit", result.Name);
-        Assert.IsNull(result.ElementId);
-        Assert.IsNull(result.Type);
+        var result = _sut.Parse("Submit");
+        Assert.IsTrue(result.IsQuery);
+        Assert.AreEqual("Submit", result.Query);
+        Assert.IsNull(result.Slug);
     }
 
     [TestMethod]
-    public void Parse_AutomationIdSelector_ReturnsAutomationId()
+    public void Parse_TextQueryWithSpaces_ReturnsQuery()
     {
-        var result = _sut.Parse("$SearchBox");
-        Assert.AreEqual("SearchBox", result.AutomationId);
-        Assert.IsNull(result.Name);
-        Assert.IsNull(result.Type);
+        var result = _sut.Parse("Submit Order");
+        Assert.IsTrue(result.IsQuery);
+        Assert.AreEqual("Submit Order", result.Query);
     }
 
     [TestMethod]
-    public void Parse_TypeSelector_ReturnsType()
+    public void Parse_TextQueryMixedCase_ReturnsQuery()
     {
-        var result = _sut.Parse("Button");
-        Assert.AreEqual("Button", result.Type);
-        Assert.IsNull(result.ElementId);
-        Assert.IsNull(result.Name);
-    }
-
-    [TestMethod]
-    public void Parse_TypePlusName_ReturnsBoth()
-    {
-        var result = _sut.Parse("Button#OK");
-        Assert.AreEqual("Button", result.Type);
-        Assert.AreEqual("OK", result.Name);
-        Assert.IsNull(result.AutomationId);
-    }
-
-    [TestMethod]
-    public void Parse_TypePlusAutomationId_ReturnsBoth()
-    {
-        var result = _sut.Parse("TextBox$SearchInput");
-        Assert.AreEqual("TextBox", result.Type);
-        Assert.AreEqual("SearchInput", result.AutomationId);
-        Assert.IsNull(result.Name);
-    }
-
-    [TestMethod]
-    public void Parse_NotElementId_Edit_ReturnsType()
-    {
-        // "Edit" starts with 'E' but isn't e+digits — should be type
-        var result = _sut.Parse("Edit");
-        Assert.AreEqual("Edit", result.Type);
-        Assert.IsNull(result.ElementId);
-    }
-
-    [TestMethod]
-    public void Parse_NotElementId_Element_ReturnsType()
-    {
-        // "Element" starts with 'e' but has non-digit chars
-        var result = _sut.Parse("Element");
-        Assert.AreEqual("Element", result.Type);
-        Assert.IsNull(result.ElementId);
+        var result = _sut.Parse("Minimize");
+        Assert.IsTrue(result.IsQuery);
+        Assert.AreEqual("Minimize", result.Query);
     }
 
     [TestMethod]
@@ -110,33 +73,19 @@ public class SelectorServiceTests
     }
 
     [TestMethod]
-    public void Parse_TextSearch_ReturnsText()
+    public void Parse_NotSlug_UpperCase_ReturnsQuery()
     {
-        var result = _sut.Parse("~hello");
-        Assert.AreEqual("hello", result.Text);
-        Assert.IsTrue(result.IsTextSearch);
-        Assert.IsNull(result.Name);
-        Assert.IsNull(result.Type);
-        Assert.IsNull(result.ElementId);
+        // "Button" has uppercase — not a valid slug (slugs are all lowercase)
+        var result = _sut.Parse("Button");
+        Assert.IsTrue(result.IsQuery);
+        Assert.AreEqual("Button", result.Query);
     }
 
     [TestMethod]
-    public void Parse_TextSearchWithSpaces_ReturnsText()
+    public void Parse_NotSlug_NoDash_ReturnsQuery()
     {
-        var result = _sut.Parse("~hello world");
-        Assert.AreEqual("hello world", result.Text);
-        Assert.IsTrue(result.IsTextSearch);
-    }
-
-    [TestMethod]
-    public void Parse_TextSearchEmpty_Throws()
-    {
-        Assert.ThrowsExactly<ArgumentException>(() => _sut.Parse("~"));
-    }
-
-    [TestMethod]
-    public void Parse_TextSearchWhitespace_Throws()
-    {
-        Assert.ThrowsExactly<ArgumentException>(() => _sut.Parse("~   "));
+        var result = _sut.Parse("minimize");
+        Assert.IsTrue(result.IsQuery);
+        Assert.AreEqual("minimize", result.Query);
     }
 }

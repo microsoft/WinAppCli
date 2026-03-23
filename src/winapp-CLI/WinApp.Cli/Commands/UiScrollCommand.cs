@@ -4,36 +4,49 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
-using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class UiGetPropertyCommand : Command, IShortDescription
+internal class UiScrollCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Read property values from an element";
+    public string ShortDescription => "Scroll a container element";
 
-    public UiGetPropertyCommand()
-        : base("get-property", "Read UIA property values from an element. Specify --property for a single property or omit for all.")
+    public static Option<string?> DirectionOption { get; }
+    public static Option<string?> ToOption { get; }
+
+    static UiScrollCommand()
+    {
+        DirectionOption = new Option<string?>("--direction")
+        {
+            Description = "Scroll direction: up, down, left, right"
+        };
+
+        ToOption = new Option<string?>("--to")
+        {
+            Description = "Scroll to position: top, bottom"
+        };
+    }
+
+    public UiScrollCommand()
+        : base("scroll", "Scroll a container element using ScrollPattern. " +
+               "Use --direction to scroll incrementally, or --to to jump to top/bottom.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
-
-        Options.Add(WinAppRootCommand.JsonOption);
-        Options.Add(SharedUiOptions.PropertyOption);
+        Options.Add(DirectionOption);
+        Options.Add(ToOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
-        IAnsiConsole ansiConsole,
-        ILogger<UiGetPropertyCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiScrollCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -43,15 +56,22 @@ internal class UiGetPropertyCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                logger.LogError("{Symbol} Specify --app (name/title/PID) or --window (HWND).", UiSymbols.Error);
+                logger.LogError("Specify --app (name/title/PID) or --window (HWND).");
                 return 1;
             }
-            var propertyName = parseResult.GetValue(SharedUiOptions.PropertyOption);
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            var direction = parseResult.GetValue(DirectionOption);
+            var to = parseResult.GetValue(ToOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                logger.LogError("{Symbol} A selector is required.", UiSymbols.Error);
+                logger.LogError("A selector for the scrollable container is required.");
+                return 1;
+            }
+
+            if (direction is null && to is null)
+            {
+                logger.LogError("Specify --direction (up/down/left/right) or --to (top/bottom).");
                 return 1;
             }
 
@@ -67,24 +87,9 @@ internal class UiGetPropertyCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var props = await uiAutomation.GetPropertiesAsync(session, element, propertyName, cancellationToken);
+                await uiAutomation.ScrollContainerAsync(session, element, direction, to, cancellationToken);
 
-                if (json)
-                {
-                    var result = new UiPropertyResult { ElementId = element.Id, Properties = props };
-                    ansiConsole.Profile.Out.Writer.WriteLine(
-                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiPropertyResult));
-                }
-                else
-                {
-                    foreach (var kvp in props)
-                    {
-                        var value = kvp.Value?.ToString() ?? "(null)";
-                        ansiConsole.WriteLine($"  {kvp.Key}: {value}");
-                    }
-                }
-
-                logger.LogInformation("{ElementId}: {Count} properties", element.Id, props.Count);
+                logger.LogInformation("Scrolled {Selector}", selectorStr);
                 return 0;
             }
             catch (Exception ex)

@@ -28,23 +28,23 @@ internal class UiInspectCommand : Command, IShortDescription
     }
 
     public UiInspectCommand()
-        : base("inspect", "View the UI element tree. Shows ControlType, Name, AutomationId, and bounds for each element.")
+        : base("inspect", "View the UI element tree with semantic slugs, element types, names, and bounds.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
-        Options.Add(SharedUiOptions.ModeOption);
         Options.Add(SharedUiOptions.WindowOption);
 
         Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(SharedUiOptions.DepthOption);
         Options.Add(AncestorsOption);
+        Options.Add(SharedUiOptions.InteractiveOption);
+        Options.Add(SharedUiOptions.HideDisabledOption);
+        Options.Add(SharedUiOptions.HideOffscreenOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
-        IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<UiInspectCommand> logger) : AsynchronousCommandLineAction
     {
@@ -52,7 +52,6 @@ internal class UiInspectCommand : Command, IShortDescription
         {
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var mode = parseResult.GetValue(SharedUiOptions.ModeOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
@@ -63,69 +62,87 @@ internal class UiInspectCommand : Command, IShortDescription
             var depth = parseResult.GetRequiredValue(SharedUiOptions.DepthOption);
             var ancestors = parseResult.GetValue(AncestorsOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var interactive = parseResult.GetValue(SharedUiOptions.InteractiveOption);
+            var hideDisabled = parseResult.GetValue(SharedUiOptions.HideDisabledOption);
+            var hideOffscreen = parseResult.GetValue(SharedUiOptions.HideOffscreenOption);
 
-            return await statusService.ExecuteWithStatusAsync(
-                "Inspecting element tree...",
-                async (taskContext, ct) =>
+            // --interactive bumps default depth to 8 (sparse tree after filtering)
+            if (interactive && depth == 3)
+            {
+                depth = 8;
+            }
+
+            try
+            {
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                Models.UiElement[] elements;
+
+                if (ancestors && selector is not null)
                 {
-                    try
+                    elements = await uiAutomation.InspectAncestorsAsync(session, selector, cancellationToken);
+                }
+                else
+                {
+                    elements = await uiAutomation.InspectAsync(session, selector, depth, cancellationToken);
+                }
+
+                // Apply filters
+                if (interactive)
+                {
+                    elements = elements.Where(IsInteractiveType).ToArray();
+                }
+                if (hideDisabled)
+                {
+                    elements = elements.Where(e => e.IsEnabled).ToArray();
+                }
+                if (hideOffscreen)
+                {
+                    elements = elements.Where(e => !e.IsOffscreen).ToArray();
+                }
+
+                if (json)
+                {
+                    var result = new UiInspectResult { Elements = elements };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiInspectResult));
+                }
+                else
+                {
+                    foreach (var el in elements)
                     {
-                        var session = await sessionService.ResolveSessionAsync(app, window, mode, ct);
-                        Models.UiElement[] elements;
-
-                        if (ancestors && selector is not null)
-                        {
-                            var parsed = selectorService.Parse(selector);
-                            elements = await uiAutomation.InspectAncestorsAsync(session, parsed.ElementId ?? selector, ct);
-                        }
-                        else
-                        {
-                            elements = await uiAutomation.InspectAsync(session, selector, depth, ct);
-                        }
-
-                        // Update element cache
-                        // Replace element cache with current results (IDs are per-command)
-                        session.Elements = new Dictionary<string, Models.CachedElement>();
-                        foreach (var el in elements)
-                        {
-                            session.Elements[el.Id] = new Models.CachedElement
-                            {
-                                AutomationId = el.AutomationId,
-                                Name = el.Name,
-                                Type = el.Type,
-                                X = el.X,
-                                Y = el.Y
-                            };
-                        }
-                        await sessionService.SaveSessionAsync(session, ct);
-
-                        if (json)
-                        {
-                            var result = new UiInspectResult { Mode = session.Mode, Elements = elements };
-                            ansiConsole.Profile.Out.Writer.WriteLine(
-                                JsonSerializer.Serialize(result, UiJsonContext.Default.UiInspectResult));
-                        }
-                        else
-                        {
-                            foreach (var el in elements)
-                            {
-                                var name = el.Name is not null ? $" \"{el.Name}\"" : "";
-                                var autoId = el.AutomationId is not null ? $" ${el.AutomationId}" : "";
-                                var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
-                                var disabled = el.IsEnabled ? "" : " (disabled)";
-                                ansiConsole.WriteLine($"  {el.Id}  {el.Type}{name}{autoId}{bounds}{disabled}");
-                            }
-                        }
-
-                        return (0, $"Found {elements.Length} elements ({session.Mode} mode)");
+                        var indent = new string(' ', el.Depth * 2);
+                        var elSelector = el.Selector ?? el.Id;
+                        var displayName = el.Name ?? el.AutomationId;
+                        var name = displayName is not null ? $" \"{displayName}\"" : "";
+                        var value = el.Value is not null && el.Value != el.Name ? $" value=\"{el.Value}\"" : "";
+                        var toggle = el.ToggleState is not null ? $" [{el.ToggleState}]" : "";
+                        var expand = el.ExpandState is not null ? $" [{el.ExpandState}]" : "";
+                        var scroll = el.ScrollDir is not null ? $" [scroll:{el.ScrollDir}]" : "";
+                        var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
+                        var disabled = el.IsEnabled ? "" : " [disabled]";
+                        var offscreen = el.IsOffscreen ? " [offscreen]" : "";
+                        ansiConsole.WriteLine($"{indent}{elSelector} {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
                     }
-                    catch (Exception ex)
-                    {
-                        taskContext.AddDebugMessage($"Stack trace: {ex.StackTrace}");
-                        return (1, $"{UiSymbols.Error} {ex.Message}");
-                    }
-                },
-                cancellationToken);
+                }
+
+                logger.LogInformation("Found {Count} elements (depth {Depth})", elements.Length, depth);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
+                logger.LogError("{Message}", ex.Message);
+                return 1;
+            }
         }
+
+        private static readonly HashSet<string> InteractiveTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Button", "CheckBox", "ComboBox", "Edit", "TextBox", "Hyperlink",
+            "ListItem", "MenuItem", "RadioButton", "Tab", "TabItem", "SplitButton",
+            "TreeItem", "DataItem", "Slider"
+        };
+
+        private static bool IsInteractiveType(Models.UiElement el) => InteractiveTypes.Contains(el.Type);
     }
 }
