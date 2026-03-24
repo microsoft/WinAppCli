@@ -483,6 +483,13 @@ return Task.FromResult<UiElement?>(null);
         }
 
         var hwnd = root.get_CurrentNativeWindowHandle();
+        if (hwnd.IsNull && session.WindowHandle != 0)
+        {
+            // UIA element may lack a native handle (e.g. Electron content pane),
+            // but the session already has a validated HWND from -w flag or window enumeration.
+            hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
+            _logger.LogDebug("UIA element has no native handle; using session HWND {Hwnd}", session.WindowHandle);
+        }
         if (hwnd.IsNull)
         {
             throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
@@ -520,6 +527,16 @@ return Task.FromResult<UiElement?>(null);
         {
             // Window render mode: PrintWindow — works even when occluded
             pixelData = CaptureFromWindow(hwnd, width, height);
+
+            // If capture is blank (all zeros), the window may not have rendered yet.
+            // Activate it and retry — common with Electron on first launch.
+            if (IsBlankCapture(pixelData))
+            {
+                _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+                Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+                Thread.Sleep(200);
+                pixelData = CaptureFromWindow(hwnd, width, height);
+            }
         }
 
         // If a selector was provided, crop to the element's bounding rectangle
@@ -603,6 +620,29 @@ return Task.FromResult<UiElement?>(null);
         }
 
         return pixelData;
+    }
+
+    private static bool IsBlankCapture(byte[] pixels)
+    {
+        // Check if all pixels are zero (black/unrendered frame).
+        // Use int-sized chunks for speed on large buffers.
+        var span = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, long>(pixels.AsSpan());
+        foreach (var chunk in span)
+        {
+            if (chunk != 0)
+            {
+                return false;
+            }
+        }
+        // Check remaining bytes
+        for (var i = span.Length * sizeof(long); i < pixels.Length; i++)
+        {
+            if (pixels[i] != 0)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private (byte[] Pixels, int Width, int Height)? CropToElement(
