@@ -535,4 +535,74 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.Contains("CN=Microsoft Corporation", manifestContent,
             "Manifest publisher should be set to Microsoft Corporation from executable");
     }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldDefaultToAppIcoWhenNoExistingIco()
+    {
+        var assetsDir = _tempDirectory.CreateSubdirectory("AssetsEmpty");
+
+        var result = ManifestService.DetermineIcoOutputPath(assetsDir, TestTaskContext);
+
+        Assert.AreEqual(Path.Combine(assetsDir.FullName, "app.ico"), result);
+    }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldDefaultToAppIcoWhenDirectoryDoesNotExist()
+    {
+        var nonExistentDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "NonExistent"));
+
+        var result = ManifestService.DetermineIcoOutputPath(nonExistentDir, TestTaskContext);
+
+        Assert.AreEqual(Path.Combine(nonExistentDir.FullName, "app.ico"), result);
+    }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldReuseSingleExistingIco()
+    {
+        var assetsDir = _tempDirectory.CreateSubdirectory("AssetsSingle");
+        var existingIco = Path.Combine(assetsDir.FullName, "AppIcon.ico");
+        File.WriteAllBytes(existingIco, [0]);
+
+        var result = ManifestService.DetermineIcoOutputPath(assetsDir, TestTaskContext);
+
+        Assert.AreEqual(existingIco, result);
+    }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldPreferAppIconWhenMultipleExist()
+    {
+        var assetsDir = _tempDirectory.CreateSubdirectory("AssetsMulti");
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "AppIcon.ico"), [0]);
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "favicon.ico"), [0]);
+
+        var result = ManifestService.DetermineIcoOutputPath(assetsDir, TestTaskContext);
+
+        Assert.AreEqual(Path.Combine(assetsDir.FullName, "AppIcon.ico"), result);
+    }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldPreferAppOverIconInName()
+    {
+        var assetsDir = _tempDirectory.CreateSubdirectory("AssetsHeuristic");
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "app.ico"), [0]);
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "icon.ico"), [0]);
+
+        // "app" is preferred over "icon" in the heuristic
+        var result = ManifestService.DetermineIcoOutputPath(assetsDir, TestTaskContext);
+
+        Assert.AreEqual(Path.Combine(assetsDir.FullName, "app.ico"), result);
+    }
+
+    [TestMethod]
+    public void DetermineIcoOutputPathShouldCreateAppIcoWhenNoHeuristicMatch()
+    {
+        var assetsDir = _tempDirectory.CreateSubdirectory("AssetsUnrelated");
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "tray.ico"), [0]);
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "cursor.ico"), [0]);
+
+        var result = ManifestService.DetermineIcoOutputPath(assetsDir, TestTaskContext);
+
+        // Unrelated ICO files should not be touched; fall back to app.ico
+        Assert.AreEqual(Path.Combine(assetsDir.FullName, "app.ico"), result);
+    }
 }
