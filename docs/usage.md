@@ -329,7 +329,7 @@ For the app icon (Square44x44Logo / AppList, 44×44 base):
 - **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
 
 Additionally:
-- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration
+- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration. If an existing `.ico` file is found in the assets directory (e.g. `AppIcon.ico` from a project template), it is replaced in-place rather than creating a duplicate
 
 With `--light-image`:
 - **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)

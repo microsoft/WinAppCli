@@ -274,7 +274,7 @@ internal partial class ManifestService(
             assetsDir.Create();
         }
 
-        var icoPath = Path.Combine(assetsDir.FullName, "app.ico");
+        var icoPath = DetermineIcoOutputPath(assetsDir, taskContext);
         await imageAssetService.GenerateIcoAsync(imagePath, icoPath, taskContext, cancellationToken);
     }
 
@@ -480,6 +480,53 @@ internal partial class ManifestService(
 
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
+
+    /// <summary>
+    /// Determines the output path for the generated ICO file.
+    /// If the assets directory already contains an .ico file, reuses its name so that
+    /// project-template icons (e.g. AppIcon.ico) are replaced rather than duplicated.
+    /// When multiple .ico files exist, a name-based heuristic picks the most likely app icon.
+    /// Falls back to "app.ico" when no existing .ico file is found.
+    /// </summary>
+    internal static string DetermineIcoOutputPath(DirectoryInfo assetsDir, TaskContext taskContext)
+    {
+        if (!assetsDir.Exists)
+        {
+            return Path.Combine(assetsDir.FullName, "app.ico");
+        }
+
+        var existingIcoFiles = assetsDir.GetFiles("*.ico");
+
+        if (existingIcoFiles.Length == 0)
+        {
+            return Path.Combine(assetsDir.FullName, "app.ico");
+        }
+
+        if (existingIcoFiles.Length == 1)
+        {
+            taskContext.AddDebugMessage($"Found existing ICO file: {existingIcoFiles[0].Name}, will replace it");
+            return existingIcoFiles[0].FullName;
+        }
+
+        // Multiple .ico files — pick the best candidate by name heuristic
+        var preferredNames = new[] { "appicon", "app", "icon" };
+        foreach (var preferred in preferredNames)
+        {
+            var match = existingIcoFiles.FirstOrDefault(f =>
+                Path.GetFileNameWithoutExtension(f.Name)
+                    .Contains(preferred, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                taskContext.AddDebugMessage($"Found multiple ICO files, replacing best match: {match.Name}");
+                return match.FullName;
+            }
+        }
+
+        // No name heuristic matched — existing ICO files are likely unrelated,
+        // so create app.ico rather than overwriting an unknown file.
+        taskContext.AddDebugMessage($"Found {existingIcoFiles.Length} ICO files but none matched app icon heuristics, creating app.ico");
+        return Path.Combine(assetsDir.FullName, "app.ico");
+    }
 
     /// <summary>
     /// Returns the relative path of the asset whose parent directory appears most often,

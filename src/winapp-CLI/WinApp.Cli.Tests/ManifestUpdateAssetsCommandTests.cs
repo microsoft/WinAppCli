@@ -428,4 +428,34 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         Assert.IsFalse(File.Exists(Path.Combine(assetsDir, "MedTile.targetsize-48.png")),
             "MedTile should not have targetsize variants");
     }
+
+    [TestMethod]
+    public async Task ManifestUpdateAssetsCommandShouldReplaceExistingIcoByName()
+    {
+        // Pre-create an Assets directory with an existing ICO file (simulating a project template)
+        var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        File.WriteAllBytes(Path.Combine(assetsDir, "AppIcon.ico"), [0x00]);
+
+        var updateAssetsCommand = GetRequiredService<ManifestUpdateAssetsCommand>();
+        var args = new[]
+        {
+            _testImagePath,
+            "--manifest", _testManifestPath,
+        };
+
+        var parseResult = updateAssetsCommand.Parse(args);
+        var exitCode = await parseResult.InvokeAsync();
+
+        Assert.AreEqual(0, exitCode, "Update-assets command should complete successfully");
+
+        // The existing AppIcon.ico should be replaced (size > 1 byte placeholder)
+        var replacedIco = Path.Combine(assetsDir, "AppIcon.ico");
+        Assert.IsTrue(File.Exists(replacedIco), "AppIcon.ico should still exist");
+        Assert.IsTrue(new FileInfo(replacedIco).Length > 1, "AppIcon.ico should be regenerated with real content");
+
+        // No duplicate app.ico should be created
+        Assert.IsFalse(File.Exists(Path.Combine(assetsDir, "app.ico")),
+            "app.ico should NOT be created when an existing ICO file is present");
+    }
 }

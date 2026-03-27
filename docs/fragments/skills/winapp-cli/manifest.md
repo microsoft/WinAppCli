@@ -75,7 +75,7 @@ winapp manifest update-assets ./my-logo.png --light-image ./my-logo.png
 The source image should be at least 400x400 pixels (PNG or SVG recommended). The command reads the manifest to determine which asset sizes are needed and generates:
 - **5 scale variants** per asset (100%, 125%, 150%, 200%, 400%)
 - **14 plated + 14 unplated targetsize variants** for the app icon (44x44)
-- **app.ico** — multi-resolution ICO file for shell integration
+- **app.ico** — multi-resolution ICO file for shell integration. If an existing `.ico` file is present in the assets directory, it is replaced in-place (preserving the original filename)
 - With `--light-image`: light theme variants using the correct MRT qualifiers per asset type
 
 ## Manifest structure overview
