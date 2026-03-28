@@ -191,6 +191,29 @@ internal partial class MsixService
             taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {Path.GetFileName(priFilePath)} to resources.pri");
         }
 
+        // Generate resources.pri if not present (matches winapp package behavior)
+        var existingPri = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "resources.pri"));
+        if (!existingPri.Exists)
+        {
+            try
+            {
+                var stagingManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
+                var priExpandedFiles = MrtAssetHelper.GetExpandedManifestReferencedFiles(stagingManifest, taskContext);
+                var priResourceCandidates = priExpandedFiles.Select(file => file.RelativePath);
+                await priService.CreatePriConfigAsync(
+                    outputAppXDirectory,
+                    taskContext,
+                    precomputedPriResourceCandidates: priResourceCandidates,
+                    cancellationToken: cancellationToken);
+                await priService.GeneratePriFileAsync(outputAppXDirectory, taskContext, cancellationToken: cancellationToken);
+                taskContext.AddDebugMessage($"{UiSymbols.Files} Generated resources.pri");
+            }
+            catch (Exception ex)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+            }
+        }
+
         // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
         var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {

@@ -225,9 +225,9 @@ Want to inspect or interact with a running app's UI?
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
 
 ### .NET (WPF, WinForms, Console)
-- **Setup:** `winapp init --use-defaults`
-- **Run with identity:** `winapp init` auto-adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, so just `dotnet run` registers a loose layout package and launches with identity. Without the NuGet package, use `dotnet build` then `winapp run ./bin/Debug`.
-- **Package:** `dotnet build -c Release`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
+- **Setup:** `winapp init --use-defaults` — but if you already have a `Package.appxmanifest` (e.g., WinUI 3 apps), you likely **don't need `winapp init`**. Just ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds.
+- **Run with identity:** Build with `dotnet build <project.csproj> -c Debug -p:Platform=x64`, then `winapp run bin\x64\Debug\<tfm>\win-x64\`. Replace `<tfm>` with your target framework (e.g., `net10.0-windows10.0.26100.0`) and adjust architecture as needed.
+- **Package:** `dotnet build -c Release -p:Platform=x64`, then `winapp package bin\x64\Release\<tfm>\win-x64\ --cert devcert.pfx`
 - No native addons needed — .NET has direct Windows API access via `Microsoft.Windows.SDK.NET.Ref`
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md
 
