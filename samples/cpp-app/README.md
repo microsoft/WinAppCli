@@ -15,8 +15,15 @@ For a complete step-by-step guide, see the [C++ Getting Started Guide](../../doc
 
 - Visual Studio Native Desktop workload or Visual Studio with C++ development tools
 - CMake 3.20 or later
+- WinApp CLI installed
 
 ## Building and Running
+
+### Restore dependencies
+
+```powershell
+winapp restore
+```
 
 ### Build the Application
 

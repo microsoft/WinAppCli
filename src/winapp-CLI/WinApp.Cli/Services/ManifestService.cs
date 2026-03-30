@@ -151,7 +151,7 @@ internal partial class ManifestService(
         if (logoPath?.Exists == true)
         {
             var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-            await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken);
+            await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken: cancellationToken);
         }
 
         if (extractedLogoPath != null)
@@ -234,32 +234,48 @@ internal partial class ManifestService(
         FileInfo manifestPath,
         FileInfo imagePath,
         TaskContext taskContext,
+        FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default)
     {
         taskContext.AddStatusMessage($"{UiSymbols.Info} Updating assets for manifest: {manifestPath.FullName}");
 
-        // Determine the manifest directory
         var manifestDir = manifestPath.Directory;
         if (manifestDir == null)
         {
             throw new InvalidOperationException("Could not determine manifest directory");
         }
 
-        // Extract asset references from the manifest
         var assetReferences = ExtractAssetReferencesFromManifest(manifestPath, taskContext);
+        DirectoryInfo assetsDir;
 
         if (assetReferences.Count > 0)
         {
-            // Generate assets based on manifest references
-            await imageAssetService.GenerateAssetsFromManifestAsync(imagePath, manifestDir, assetReferences, taskContext, cancellationToken);
+            await imageAssetService.GenerateAssetsFromManifestAsync(imagePath, manifestDir, assetReferences, taskContext, lightImagePath, cancellationToken);
+
+            // Place app.ico alongside the app icon asset (44x44), falling back to
+            // the most common asset directory so we don't depend on parse order.
+            var appIconRef = assetReferences.FirstOrDefault(r => r.BaseWidth == 44 && r.BaseHeight == 44);
+            var relativeAssetsDirectory = Path.GetDirectoryName(
+                appIconRef?.RelativePath ?? GetMostCommonAssetDirectory(assetReferences));
+            var assetsDirectoryPath = string.IsNullOrWhiteSpace(relativeAssetsDirectory)
+                ? manifestDir.FullName
+                : Path.Combine(manifestDir.FullName, relativeAssetsDirectory);
+            assetsDir = new DirectoryInfo(assetsDirectoryPath);
         }
         else
         {
-            // Fallback to default behavior if no asset references found
             taskContext.AddStatusMessage($"{UiSymbols.Warning} No asset references found in manifest, generating default assets");
-            var assetsDir = manifestDir.CreateSubdirectory("Assets");
-            await imageAssetService.GenerateAssetsAsync(imagePath, assetsDir, taskContext, cancellationToken);
+            assetsDir = manifestDir.CreateSubdirectory("Assets");
+            await imageAssetService.GenerateAssetsAsync(imagePath, assetsDir, taskContext, lightImagePath, cancellationToken);
         }
+
+        if (!assetsDir.Exists)
+        {
+            assetsDir.Create();
+        }
+
+        var icoPath = DetermineIcoOutputPath(assetsDir, taskContext);
+        await imageAssetService.GenerateIcoAsync(imagePath, icoPath, taskContext, cancellationToken);
     }
 
     /// <summary>
@@ -283,13 +299,19 @@ internal partial class ManifestService(
             // Known asset types and their base dimensions
             var assetTypeDimensions = new Dictionary<string, (int Width, int Height)>(StringComparer.OrdinalIgnoreCase)
             {
-                // Square logos
+                // Square logos (old naming)
                 { "Square44x44Logo", (44, 44) },
                 { "Square71x71Logo", (71, 71) },
                 { "Square150x150Logo", (150, 150) },
                 { "Square310x310Logo", (310, 310) },
-                // Wide logos
+                // Wide logos (old naming)
                 { "Wide310x150Logo", (310, 150) },
+                // New naming convention
+                { "AppList", (44, 44) },
+                { "SmallTile", (71, 71) },
+                { "MedTile", (150, 150) },
+                { "WideTile", (310, 150) },
+                { "LargeTile", (310, 310) },
                 // Store logo (typically 50x50)
                 { "Logo", (50, 50) },
                 { "StoreLogo", (50, 50) },
@@ -458,4 +480,65 @@ internal partial class ManifestService(
 
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
+
+    /// <summary>
+    /// Determines the output path for the generated ICO file.
+    /// If the assets directory already contains an .ico file, reuses its name so that
+    /// project-template icons (e.g. AppIcon.ico) are replaced rather than duplicated.
+    /// When multiple .ico files exist, a name-based heuristic picks the most likely app icon.
+    /// Falls back to "app.ico" when no existing .ico file is found.
+    /// </summary>
+    internal static string DetermineIcoOutputPath(DirectoryInfo assetsDir, TaskContext taskContext)
+    {
+        if (!assetsDir.Exists)
+        {
+            return Path.Combine(assetsDir.FullName, "app.ico");
+        }
+
+        var existingIcoFiles = assetsDir.GetFiles("*.ico");
+
+        if (existingIcoFiles.Length == 0)
+        {
+            return Path.Combine(assetsDir.FullName, "app.ico");
+        }
+
+        if (existingIcoFiles.Length == 1)
+        {
+            taskContext.AddDebugMessage($"Found existing ICO file: {existingIcoFiles[0].Name}, will replace it");
+            return existingIcoFiles[0].FullName;
+        }
+
+        // Multiple .ico files — pick the best candidate by name heuristic
+        var preferredNames = new[] { "appicon", "app", "icon" };
+        foreach (var preferred in preferredNames)
+        {
+            var match = existingIcoFiles.FirstOrDefault(f =>
+                Path.GetFileNameWithoutExtension(f.Name)
+                    .Contains(preferred, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                taskContext.AddDebugMessage($"Found multiple ICO files, replacing best match: {match.Name}");
+                return match.FullName;
+            }
+        }
+
+        // No name heuristic matched — existing ICO files are likely unrelated,
+        // so create app.ico rather than overwriting an unknown file.
+        taskContext.AddDebugMessage($"Found {existingIcoFiles.Length} ICO files but none matched app icon heuristics, creating app.ico");
+        return Path.Combine(assetsDir.FullName, "app.ico");
+    }
+
+    /// <summary>
+    /// Returns the relative path of the asset whose parent directory appears most often,
+    /// so the ICO file lands in the majority directory even for non-standard manifests.
+    /// </summary>
+    private static string GetMostCommonAssetDirectory(IReadOnlyList<ManifestAssetReference> assetReferences)
+    {
+        return assetReferences
+            .GroupBy(r => Path.GetDirectoryName(r.RelativePath) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .First()
+            .First()
+            .RelativePath;
+    }
 }

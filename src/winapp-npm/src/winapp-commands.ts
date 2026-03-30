@@ -317,8 +317,10 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
 // ---------------------------------------------------------------------------
 
 export interface ManifestUpdateAssetsOptions extends CommonOptions {
-  /** Path to source image file */
+  /** Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) */
   imagePath: string;
+  /** Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) */
+  lightImage?: string;
   /** Path to AppxManifest.xml file (default: search current directory) */
   manifest?: string;
 }
@@ -329,6 +331,7 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
 export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<WinappResult> {
   const args: string[] = ['manifest', 'update-assets'];
   args.push(options.imagePath);
+  if (options.lightImage) args.push('--light-image', options.lightImage);
   if (options.manifest) args.push('--manifest', options.manifest);
   return run(args, options);
 }
@@ -365,7 +368,7 @@ export interface PackageOptions extends CommonOptions {
 }
 
 /**
- * Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
+ * Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];

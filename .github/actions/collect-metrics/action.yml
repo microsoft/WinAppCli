@@ -18,14 +18,15 @@ runs:
         $artifacts = "${{ inputs.artifacts-path }}"
         $sizes = @{}
 
-        $x64Exe = Get-Item "$artifacts/cli/win-x64/winapp.exe" -ErrorAction SilentlyContinue
-        $arm64Exe = Get-Item "$artifacts/cli/win-arm64/winapp.exe" -ErrorAction SilentlyContinue
+        # Sum all files excluding PDBs to get total CLI distribution size
+        $x64Files = Get-ChildItem "$artifacts/cli/win-x64" -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.pdb' }
+        $arm64Files = Get-ChildItem "$artifacts/cli/win-arm64" -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.pdb' }
         $npmPkg = Get-ChildItem "$artifacts/*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
         $msixX64 = Get-ChildItem "$artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
         $msixArm64 = Get-ChildItem "$artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
 
-        if ($x64Exe) { $sizes["cli-win-x64"] = $x64Exe.Length }
-        if ($arm64Exe) { $sizes["cli-win-arm64"] = $arm64Exe.Length }
+        if ($x64Files) { $sizes["cli-win-x64"] = ($x64Files | Measure-Object -Property Length -Sum).Sum }
+        if ($arm64Files) { $sizes["cli-win-arm64"] = ($arm64Files | Measure-Object -Property Length -Sum).Sum }
         if ($npmPkg) { $sizes["npm-package"] = $npmPkg.Length }
         if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
         if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
