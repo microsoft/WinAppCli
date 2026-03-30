@@ -104,3 +104,24 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 | "Directory not found" | Target directory doesn't exist | Create the directory first or check the path |
 | SDK download fails | Network issue or firewall | Ensure internet access; check proxy settings |
 | `init` prompts unexpectedly in CI | Missing `--use-defaults` flag | Add `--use-defaults` to skip all prompts |
+
+## Shell completion (PowerShell)
+
+Enable tab completion for `winapp` in PowerShell by adding the following snippet to your PowerShell profile (`$PROFILE`):
+
+```powershell
+Register-ArgumentCompleter -Native -CommandName winapp -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    winapp complete --word "$wordToComplete" --commandline "$commandAst" --position $cursorPosition | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_)
+    }
+}
+```
+
+To apply immediately without restarting PowerShell, run:
+
+```powershell
+. $PROFILE
+```
+
+Once registered, pressing <kbd>Tab</kbd> after `winapp` will suggest commands, subcommands, and options.

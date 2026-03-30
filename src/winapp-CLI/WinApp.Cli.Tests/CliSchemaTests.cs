@@ -84,7 +84,7 @@ public class CliSchemaTests : BaseCommandTests
         Assert.AreEqual(JsonValueKind.Object, subcommands.ValueKind, "Subcommands should be an object");
 
         // Verify some known commands exist
-        var expectedCommands = new[] { "init", "restore", "package", "manifest", "cert", "sign" };
+        var expectedCommands = new[] { "init", "restore", "package", "manifest", "cert", "sign", "complete" };
         foreach (var commandName in expectedCommands)
         {
             Assert.IsTrue(subcommands.TryGetProperty(commandName, out _),

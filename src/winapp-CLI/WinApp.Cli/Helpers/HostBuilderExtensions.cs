@@ -63,7 +63,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
-                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>();
+                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>()
+                .UseCommandHandler<CompleteCommand, CompleteCommand.Handler>(false);
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)

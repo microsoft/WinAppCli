@@ -606,6 +606,37 @@ winapp get-winapp-path [options]
 
 ---
 
+### complete
+
+Output shell completion suggestions for a partial command line. Designed for use with `Register-ArgumentCompleter` in PowerShell to enable tab completion.
+
+```bash
+winapp complete [options]
+```
+
+**Options:**
+
+- `--word <word>` - The word currently being completed
+- `--commandline <commandline>` - The full command line text as typed so far
+- `--position <position>` - The cursor position within the command line
+
+**PowerShell profile setup:**
+
+Add the following snippet to your PowerShell profile (`$PROFILE`) to enable tab completion for `winapp`:
+
+```powershell
+Register-ArgumentCompleter -Native -CommandName winapp -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    winapp complete --word "$wordToComplete" --commandline "$commandAst" --position $cursorPosition | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_)
+    }
+}
+```
+
+After saving the profile, restart PowerShell (or run `. $PROFILE`) to activate tab completion.
+
+---
+
 ### node create-addon
 
 *(Available in NPM package only)* Generate native C++ or C# addon templates with Windows SDK and Windows App SDK integration.
