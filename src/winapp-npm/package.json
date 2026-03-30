@@ -53,13 +53,13 @@
   ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.3.0",
-    "eslint": "^10.0.1",
+    "@types/node": "^25.5.0",
+    "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.3.0",
+    "globals": "^17.4.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.57.2"
   },
   "files": [
     "dist/**/*.js",
