@@ -1,7 +1,7 @@
 ---
 name: winapp-troubleshoot
 description: Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation.
-version: 0.2.1
+version: 0.2.2
 ---
 ## When to use
 

@@ -1,7 +1,7 @@
 ---
 name: winapp-frameworks
 description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
-version: 0.2.1
+version: 0.2.2
 ---
 ## When to use
 

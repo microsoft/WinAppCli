@@ -1,7 +1,7 @@
 ---
 name: winapp-package
 description: Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline.
-version: 0.2.1
+version: 0.2.2
 ---
 ## When to use
 
