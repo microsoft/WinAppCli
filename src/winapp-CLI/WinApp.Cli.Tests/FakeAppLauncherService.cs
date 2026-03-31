@@ -11,7 +11,9 @@ namespace WinApp.Cli.Tests;
 internal class FakeAppLauncherService : IAppLauncherService
 {
     public List<(string Aumid, string? Arguments)> LaunchCalls { get; } = [];
+    public List<(string? PackageFullName, uint ProcessId)> TerminateCalls { get; } = [];
     public uint FakeProcessId { get; set; } = 12345;
+    public string? FakePackageFullName { get; set; } = "FakePackage_1.0.0.0_x64__fakefamily";
 
     public uint LaunchByAumid(string aumid, string? arguments = null)
     {
@@ -22,5 +24,15 @@ internal class FakeAppLauncherService : IAppLauncherService
     public string ComputePackageFamilyName(string packageName, string publisher)
     {
         return $"{packageName}_fakefamily";
+    }
+
+    public string? GetPackageFullName(string packageFamilyName)
+    {
+        return FakePackageFullName;
+    }
+
+    public void TerminatePackageProcesses(string? packageFullName, uint processId)
+    {
+        TerminateCalls.Add((packageFullName, processId));
     }
 }

@@ -8,7 +8,8 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class AppLauncherServiceTests
 {
-    private readonly AppLauncherService _service = new();
+    private readonly AppLauncherService _service = new(
+        new Microsoft.Extensions.Logging.Abstractions.NullLogger<AppLauncherService>());
 
     // Known publisher → publisherId mappings obtained from Get-AppxPackage on Windows.
     // These are the ground truth values computed by the Windows platform.

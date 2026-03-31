@@ -19,7 +19,6 @@ internal partial class MsixService(
     IWinappDirectoryService winappDirectoryService,
     IConfigService configService,
     IBuildToolsService buildToolsService,
-    IPowerShellService powerShellService,
     ICertificateService certificateService,
     IWorkspaceSetupService workspaceSetupService,
     IDevModeService devModeService,
@@ -27,6 +26,7 @@ internal partial class MsixService(
     INugetService nugetService,
     IWinmdService winmdService,
     IPriService priService,
+    IPackageRegistrationService packageRegistrationService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {

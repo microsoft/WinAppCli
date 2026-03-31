@@ -1,15 +1,18 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Windows.Management.Deployment;
 using Windows.Win32;
 using Windows.Win32.UI.Shell;
 
 namespace WinApp.Cli.Services;
 
-internal class AppLauncherService : IAppLauncherService
+internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLauncherService
 {
     // Crockford's Base32 alphabet (used by Windows for publisher ID)
     private static readonly char[] Base32Chars = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".ToCharArray();
@@ -30,6 +33,21 @@ internal class AppLauncherService : IAppLauncherService
         // of the first 8 bytes of the SHA256 hash of the publisher DN (UTF-16LE, uppercase)
         var publisherId = ComputePublisherId(publisher);
         return $"{packageName}_{publisherId}";
+    }
+
+    /// <inheritdoc />
+    public string? GetPackageFullName(string packageFamilyName)
+    {
+        try
+        {
+            var pm = new PackageManager();
+            var packages = pm.FindPackages(packageFamilyName);
+            return packages.FirstOrDefault()?.Id.FullName;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -88,5 +106,46 @@ internal class AppLauncherService : IAppLauncherService
         }
 
         return new string(result).ToLowerInvariant();
+    }
+
+    /// <inheritdoc />
+    [SupportedOSPlatform("windows8.0")]
+    public void TerminatePackageProcesses(string? packageFullName, uint processId)
+    {
+        if (packageFullName is not null)
+        {
+            try
+            {
+                var debugSettings = PackageDebugSettings.CreateInstance<IPackageDebugSettings>();
+                debugSettings.TerminateAllProcesses(packageFullName);
+                logger.LogDebug("Terminated all processes for package {PackageFullName}.", packageFullName);
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug("IPackageDebugSettings.TerminateAllProcesses failed: {Message}. Falling back to PID-based kill.", ex.Message);
+            }
+        }
+
+        // Fallback: kill the specific process by PID
+        if (processId == 0 || processId > int.MaxValue)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(unchecked((int)processId));
+            process.Kill(entireProcessTree: true);
+            logger.LogDebug("Terminated process tree for PID {PID}.", processId);
+        }
+        catch (ArgumentException)
+        {
+            // Process already exited.
+        }
+        catch (InvalidOperationException)
+        {
+            // Process already exited.
+        }
     }
 }

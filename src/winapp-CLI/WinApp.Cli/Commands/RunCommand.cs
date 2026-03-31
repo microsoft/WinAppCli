@@ -126,6 +126,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             uint processId = 0;
             string? packageFamilyName = null;
+            string? packageFullName = null;
             string? publisher = null;
             string? applicationId = null;
             string? aumid = null;
@@ -182,6 +183,7 @@ internal partial class RunCommand : Command, IShortDescription
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
                         identityResult.PackageName,
                         identityResult.Publisher);
+                    packageFullName = appLauncherService.GetPackageFullName(packageFamilyName);
                     publisher = identityResult.Publisher;
                     applicationId = identityResult.ApplicationId;
                     aumid = $"{packageFamilyName}!{applicationId}";
@@ -237,7 +239,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, cancellationToken);
+                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
             }
 
             if (isJson)
@@ -252,7 +254,7 @@ internal partial class RunCommand : Command, IShortDescription
                 var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    TerminateProcess(processId);
+                    appLauncherService.TerminatePackageProcesses(packageFullName, processId);
                 }
                 return exitCode;
             }
@@ -280,8 +282,8 @@ internal partial class RunCommand : Command, IShortDescription
             }
             catch (OperationCanceledException)
             {
-                // Ctrl+C — terminate the launched process before exiting.
-                TerminateProcess(processId);
+                // Ctrl+C — terminate all processes belonging to the package before exiting.
+                appLauncherService.TerminatePackageProcesses(packageFullName, processId);
                 return -1;
             }
         }
@@ -311,32 +313,6 @@ internal partial class RunCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Terminates a process by PID. Safe to call if the process has already exited.
-        /// </summary>
-        private void TerminateProcess(uint processId)
-        {
-            if (processId == 0 || processId > int.MaxValue)
-            {
-                return;
-            }
-
-            try
-            {
-                using var process = Process.GetProcessById(unchecked((int)processId));
-                process.Kill();
-                logger.LogDebug("Terminated process {PID}.", processId);
-            }
-            catch (ArgumentException)
-            {
-                // Process already exited.
-            }
-            catch (InvalidOperationException)
-            {
-                // Process already exited.
-            }
-        }
-
-        /// <summary>
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
@@ -344,6 +320,7 @@ internal partial class RunCommand : Command, IShortDescription
             DirectoryInfo outputAppXDirectory,
             string? appArgs,
             bool debugOutput,
+            string? packageFullName,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
@@ -394,7 +371,7 @@ internal partial class RunCommand : Command, IShortDescription
                     var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
                     if (cancellationToken.IsCancellationRequested)
                     {
-                        TerminateProcess(unchecked((uint)process.Id));
+                        appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));
                     }
                     return exitCode;
                 }
@@ -406,8 +383,8 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 catch (OperationCanceledException)
                 {
-                    // Ctrl+C — terminate the launched process before exiting.
-                    TerminateProcess(unchecked((uint)process.Id));
+                    // Ctrl+C — terminate all processes belonging to the package before exiting.
+                    appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));
                     return -1;
                 }
             }

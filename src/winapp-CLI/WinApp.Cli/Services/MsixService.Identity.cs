@@ -708,27 +708,18 @@ internal partial class MsixService
 
         try
         {
-            // First check if package exists
-            var checkCommand = $"Get-AppxPackage -Name '{packageName}'";
-            var (_, checkResult, _) = await powerShellService.RunCommandAsync(checkCommand, taskContext, cancellationToken: cancellationToken);
+            var removed = await packageRegistrationService.UnregisterAsync(packageName, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(checkResult))
+            if (removed)
             {
-                // Package exists, remove it
-                taskContext.AddDebugMessage($"{UiSymbols.Package} Found existing package '{packageName}', removing it...");
-
-                var unregisterCommand = $"Get-AppxPackage -Name '{packageName}' | Remove-AppxPackage";
-                await powerShellService.RunCommandAsync(unregisterCommand, taskContext, cancellationToken: cancellationToken);
-
                 taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully");
-                return true;
             }
             else
             {
-                // No package found
                 taskContext.AddDebugMessage($"{UiSymbols.Note} No existing package found");
-                return false;
             }
+
+            return removed;
         }
         catch (Exception ex)
         {
@@ -748,21 +739,10 @@ internal partial class MsixService
     {
         taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering sparse package with external location...");
 
-        var registerCommand = $"Add-AppxPackage -Path '{manifestPath.FullName}' -ExternalLocation '{externalLocation.FullName}' -Register -ForceUpdateFromAnyVersion";
-
         try
         {
-            var (exitCode, output, error) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
-
-            if (exitCode != 0)
-            {
-                if (string.IsNullOrWhiteSpace(error))
-                {
-                    throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
-                }
-
-                throw new InvalidOperationException(error.Trim());
-            }
+            await packageRegistrationService.RegisterSparseAsync(
+                manifestPath.FullName, externalLocation.FullName, cancellationToken);
 
             taskContext.AddDebugMessage($"{UiSymbols.Check} Sparse package registered successfully");
         }
@@ -776,21 +756,10 @@ internal partial class MsixService
     {
         taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering loose layout package...");
 
-        var registerCommand = $"Add-AppxPackage -Register '{manifestPath.FullName}'";
-
         try
         {
-            var (exitCode, output, _) = await powerShellService.RunCommandAsync(registerCommand, taskContext, cancellationToken: cancellationToken);
-
-            if (exitCode != 0)
-            {
-                if (string.IsNullOrWhiteSpace(output))
-                {
-                    throw new InvalidOperationException($"PowerShell command failed with exit code {exitCode}");
-                }
-
-                throw new InvalidOperationException(output.Trim());
-            }
+            await packageRegistrationService.RegisterLooseLayoutAsync(
+                manifestPath.FullName, cancellationToken);
 
             taskContext.AddDebugMessage($"{UiSymbols.Check} Package registered successfully");
         }
