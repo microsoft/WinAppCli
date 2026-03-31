@@ -79,7 +79,7 @@ export interface CertGenerateOptions extends CommonOptions {
   install?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to appxmanifest.xml file to extract publisher information from */
+  /** Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from */
   manifest?: string;
   /** Output path for the generated PFX file */
   output?: string;
@@ -271,6 +271,30 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
 }
 
 // ---------------------------------------------------------------------------
+// manifest add-alias
+// ---------------------------------------------------------------------------
+
+export interface ManifestAddAliasOptions extends CommonOptions {
+  /** Application Id to add the alias to (default: first Application element) */
+  appId?: string;
+  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
+  manifest?: string;
+  /** Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. */
+  name?: string;
+}
+
+/**
+ * Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+ */
+export async function manifestAddAlias(options: ManifestAddAliasOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['manifest', 'add-alias'];
+  if (options.appId) args.push('--app-id', options.appId);
+  if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.name) args.push('--name', options.name);
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // manifest generate
 // ---------------------------------------------------------------------------
 
@@ -319,7 +343,7 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
 export interface ManifestUpdateAssetsOptions extends CommonOptions {
   /** Path to source image file */
   imagePath: string;
-  /** Path to AppxManifest.xml file (default: search current directory) */
+  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
   manifest?: string;
 }
 
@@ -365,7 +389,7 @@ export interface PackageOptions extends CommonOptions {
 }
 
 /**
- * Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
+ * Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];
@@ -402,6 +426,42 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
   const args: string[] = ['restore'];
   if (options.baseDirectory) args.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// run
+// ---------------------------------------------------------------------------
+
+export interface RunOptions extends CommonOptions {
+  /** Input folder containing the app to run */
+  inputFolder: string;
+  /** Command-line arguments to pass to the application */
+  args?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) */
+  manifest?: string;
+  /** Only create the debug identity and register the package without launching the application */
+  noLaunch?: boolean;
+  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
+  outputAppxDirectory?: string;
+  /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
+  withAlias?: boolean;
+}
+
+/**
+ * Creates packaged layout, registers the Application, and launches the packaged application.
+ */
+export async function run(options: RunOptions): Promise<WinappResult> {
+  const args: string[] = ['run'];
+  args.push(options.inputFolder);
+  if (options.args) args.push('--args', options.args);
+  if (options.json) args.push('--json');
+  if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.noLaunch) args.push('--no-launch');
+  if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.withAlias) args.push('--with-alias');
   return run(args, options);
 }
 

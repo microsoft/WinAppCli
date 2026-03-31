@@ -3,6 +3,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { glob } from 'glob';
+import { ManifestEditorProvider } from './manifest-editor/manifest-editor-provider';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
@@ -325,6 +326,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.debug.registerDebugAdapterDescriptorFactory(WINAPP_DEBUG_TYPE, factory)
 	);
+
+	// Register the AppxManifest visual editor
+	context.subscriptions.push(ManifestEditorProvider.register(context));
 
 	// Register winapp.init command
 	context.subscriptions.push(

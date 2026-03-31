@@ -99,6 +99,21 @@
         "category": "WinApp"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "winapp.manifestEditor",
+        "displayName": "AppxManifest Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/[Aa]ppx[Mm]anifest.xml"
+          },
+          {
+            "filenamePattern": "**/*.appxmanifest"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "debuggers": [
       {
         "type": "winapp",
@@ -173,6 +188,7 @@
     "copy-cli-arm64": "node -e \"const fs = require('fs'); const src = '../winapp-CLI/WinApp.Cli/bin/Release/net10.0-windows/win-arm64/publish'; const dest = 'bin/win-arm64'; fs.mkdirSync(dest, {recursive: true}); fs.cpSync(src, dest, {recursive: true});\""
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.9",
     "glob": "^13.0.6"
   },
   "devDependencies": {
