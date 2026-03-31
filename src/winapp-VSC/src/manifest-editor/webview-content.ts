@@ -91,6 +91,24 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             padding-bottom: 6px;
             border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border));
         }
+        .section-header-spaced {
+            margin-top: 64px;
+        }
+
+        /* ─── Page description ────────────────────────────── */
+        .page-description {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            margin-bottom: 36px;
+        }
+
+        /* ─── Utility classes (avoid inline styles blocked by CSP) ─── */
+        .hidden { display: none; }
+        .mt-8 { margin-top: 8px; }
+        .mt-12 { margin-top: 12px; }
+        .mb-12 { margin-bottom: 12px; }
+        .ext-field-readonly { opacity: 0.8; }
+        .ext-field-computed { opacity: 0.6; font-style: italic; }
 
         /* ─── Form groups ──────────────────────────────────── */
         .form-group {
@@ -369,7 +387,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Identity ───── -->
     <div class="tab-content active" id="tab-identity" role="tabpanel">
         <div class="section-header">Package Identity</div>
-        <p class="description" style="margin-bottom:28px;">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others.</p>
+        <p class="page-description">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others.</p>
         <div class="form-group" data-field="identity.name">
             <label for="identity-name">Package Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
@@ -401,7 +419,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Properties ───── -->
     <div class="tab-content" id="tab-properties" role="tabpanel">
         <div class="section-header">Package Properties</div>
-        <p class="description" style="margin-bottom:28px;">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell.</p>
+        <p class="page-description">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell.</p>
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
@@ -429,7 +447,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     <div class="validation-msg"></div>
                 </div>
                 <div class="logo-preview-col">
-                    <img id="store-logo-preview" class="logo-preview" style="display:none;" alt="Store Logo preview" />
+                    <img id="store-logo-preview" class="logo-preview hidden" alt="Store Logo preview" />
                     <div id="store-logo-caption" class="logo-caption"></div>
                 </div>
             </div>
@@ -439,7 +457,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Dependencies ───── -->
     <div class="tab-content" id="tab-dependencies" role="tabpanel">
         <div class="section-header">Target Device Families</div>
-        <p class="description" style="margin-bottom:28px;">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package.</p>
+        <p class="page-description">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package.</p>
         <div id="target-device-families" class="list-container"></div>
         <div class="custom-dropdown" id="add-family-dropdown">
             <button class="custom-dropdown-btn" id="add-target-family">+ Add Target Device Family</button>
@@ -448,7 +466,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             </div>
         </div>
 
-        <div class="section-header" style="margin-top:48px;">Package Dependencies</div>
+        <div class="section-header section-header-spaced">Package Dependencies</div>
         <div id="package-dependencies" class="list-container"></div>
         <button class="btn" id="add-package-dep">+ Add Package Dependency</button>
     </div>
@@ -456,14 +474,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
-        <p class="description" style="margin-bottom:28px;">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package.</p>
+        <p class="page-description">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package.</p>
         <div id="applications-list"></div>
     </div>
 
     <!-- ───── Capabilities ───── -->
     <div class="tab-content" id="tab-capabilities" role="tabpanel">
         <div class="section-header">Capabilities</div>
-        <p class="description" style="margin-bottom:28px;">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Hover over a capability to see its description. Only request capabilities your app actually uses.</p>
+        <p class="page-description">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Hover over a capability to see its description. Only request capabilities your app actually uses.</p>
         <div class="capabilities-columns">
             <div class="capabilities-left">
                 <div class="cap-category">
@@ -484,7 +502,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <input type="text" id="custom-cap-input" placeholder="e.g. rescap:broadFileSystemAccess" />
                         <button class="btn" id="add-custom-cap">Add</button>
                     </div>
-                    <div id="custom-caps-list" class="cap-list" style="margin-top:8px;"></div>
+                    <div id="custom-caps-list" class="cap-list mt-8"></div>
                 </div>
             </div>
             <div class="capabilities-right">
@@ -618,17 +636,32 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function populateForm(data) {
             currentData = data;
 
+            // Save focused element info before DOM rebuild
+            const focused = document.activeElement;
+            let focusInfo = null;
+            if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT')) {
+                focusInfo = {
+                    section: focused.getAttribute('data-section'),
+                    fieldName: focused.getAttribute('data-field-name'),
+                    index: focused.getAttribute('data-index'),
+                    id: focused.id,
+                    selectionStart: focused.selectionStart,
+                    selectionEnd: focused.selectionEnd,
+                    type: focused.type
+                };
+            }
+
             // Identity
-            document.getElementById('identity-name').value = data.identity.name;
-            document.getElementById('identity-publisher').value = data.identity.publisher;
-            document.getElementById('identity-version').value = data.identity.version;
-            document.getElementById('identity-arch').value = data.identity.processorArchitecture;
+            setValueIfNotFocused('identity-name', data.identity.name, focused);
+            setValueIfNotFocused('identity-publisher', data.identity.publisher, focused);
+            setValueIfNotFocused('identity-version', data.identity.version, focused);
+            setValueIfNotFocused('identity-arch', data.identity.processorArchitecture, focused);
 
             // Properties
-            document.getElementById('props-displayname').value = data.properties.displayName;
-            document.getElementById('props-pubdisplayname').value = data.properties.publisherDisplayName;
-            document.getElementById('props-description').value = data.properties.description;
-            document.getElementById('props-logo').value = data.properties.logo;
+            setValueIfNotFocused('props-displayname', data.properties.displayName, focused);
+            setValueIfNotFocused('props-pubdisplayname', data.properties.publisherDisplayName, focused);
+            setValueIfNotFocused('props-description', data.properties.description, focused);
+            setValueIfNotFocused('props-logo', data.properties.logo, focused);
 
             updateLogoPreview(
                 document.getElementById('store-logo-preview'),
@@ -645,6 +678,45 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
             // Capabilities
             updateCapabilityCheckboxes(data.capabilities);
+
+            // Restore focus after DOM rebuild
+            if (focusInfo) {
+                restoreFocus(focusInfo);
+            }
+        }
+
+        function setValueIfNotFocused(elementId, value, focusedEl) {
+            const el = document.getElementById(elementId);
+            if (el && el !== focusedEl) {
+                el.value = value;
+            }
+        }
+
+        function restoreFocus(info) {
+            let target = null;
+            // Try by ID first (for static inputs)
+            if (info.id) {
+                target = document.getElementById(info.id);
+            }
+            // Fall back to data attributes (for dynamically rendered inputs)
+            if (!target && info.section && info.fieldName) {
+                const selector = (info.type === 'color' ? 'input[type="color"]' : 'input:not([type="color"]), textarea, select');
+                document.querySelectorAll(selector).forEach(el => {
+                    if (el.getAttribute('data-section') === info.section &&
+                        el.getAttribute('data-field-name') === info.fieldName &&
+                        el.getAttribute('data-index') === info.index) {
+                        target = el;
+                    }
+                });
+            }
+            if (target) {
+                target.focus();
+                // Restore cursor position for text inputs
+                if (info.selectionStart !== null && info.selectionStart !== undefined &&
+                    typeof target.setSelectionRange === 'function') {
+                    try { target.setSelectionRange(info.selectionStart, info.selectionEnd); } catch(e) {}
+                }
+            }
         }
 
         function renderTargetDeviceFamilies(families) {
@@ -734,8 +806,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         let fieldsHtml = fields.map(f =>
                             '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
                             (f.editable
-                                ? '<input type="text" value="' + escapeHtml(f.value) + '" readonly style="opacity:0.8;" />'
-                                : '<input type="text" value="' + escapeHtml(f.value) + '" readonly style="opacity:0.6;font-style:italic;" />'
+                                ? '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-readonly" />'
+                                : '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />'
                             ) + '</div>'
                         ).join('');
                         extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn btn-danger btn-sm remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '">Remove</button></div>' + fieldsHtml + '</div>';
@@ -781,12 +853,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         </div>
                     </div>
                     <div class="app-sub-content \${activeTab === 'extensions' ? 'active' : ''}" data-subcontent="extensions" data-app-idx="\${idx}">
-                        <p class="description" style="margin-bottom:12px;">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases.</p>
+                        <p class="description mb-12">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases.</p>
                         \${extListHtml}
                         \${addExtDropdown}
                     </div>
                     <div class="app-sub-content \${activeTab === 'visual' ? 'active' : ''}" data-subcontent="visual" data-app-idx="\${idx}">
-                        <p class="description" style="margin-bottom:12px;">Visual assets define how your app appears in the Start menu, taskbar, and task switcher. Provide high-quality images at the correct sizes for a polished look.</p>
+                        <p class="description mb-12">Visual assets define how your app appears in the Start menu, taskbar, and task switcher. Provide high-quality images at the correct sizes for a polished look.</p>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.displayName">
                             <label>Display Name:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.displayName" data-index="\${idx}" value="\${escapeHtml(app.visualElements.displayName)}" />
@@ -808,7 +880,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">The background color for the app tile. Use a hex color like #FFFFFF or 'transparent'. This fills the area behind your tile image.</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <div class="logo-side-by-side" style="margin-top:12px;">
+                        <div class="logo-side-by-side mt-12">
                             <div class="logo-input-col">
                                 <div class="form-group" data-field="applications.\${idx}.visualElements.square150x150Logo">
                                     <label>Square 150x150 Logo:</label>
@@ -824,7 +896,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 </div>
                             </div>
                             <div class="logo-preview-col">
-                                <img class="logo-preview app-logo-preview" data-app-idx="\${idx}" style="display:none;" alt="Logo preview" />
+                                <img class="logo-preview app-logo-preview hidden" data-app-idx="\${idx}" alt="Logo preview" />
                                 <div class="logo-caption app-logo-caption" data-app-idx="\${idx}"></div>
                             </div>
                         </div>
@@ -834,7 +906,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Optional wide tile image for the Start menu. Relative path to a 310×150 pixel PNG. Stored in the DefaultTile child element.</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn update-assets-btn" style="margin-top:12px;">Regenerate Assets</button>
+                        <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
@@ -995,14 +1067,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function updateLogoPreview(imgEl, logoPath, captionEl) {
             if (logoPath && manifestDirUri && imgEl) {
                 imgEl.src = manifestDirUri + '/' + logoPath.replace(/\\\\/g, '/') + '?t=' + Date.now();
-                imgEl.style.display = 'block';
-                imgEl.onerror = function() { imgEl.style.display = 'none'; if (captionEl) captionEl.textContent = ''; };
+                imgEl.classList.remove('hidden');
+                imgEl.onerror = function() { imgEl.classList.add('hidden'); if (captionEl) captionEl.textContent = ''; };
                 if (captionEl) {
                     const parts = logoPath.replace(/\\\\/g, '/').split('/');
                     captionEl.textContent = parts[parts.length - 1];
                 }
             } else if (imgEl) {
-                imgEl.style.display = 'none';
+                imgEl.classList.add('hidden');
                 if (captionEl) captionEl.textContent = '';
             }
         }
