@@ -85,6 +85,7 @@ export type WebviewToExtensionMessage =
     | { type: 'removeApplication'; index: number }
     | { type: 'addExtension'; index: number; xml: string }
     | { type: 'removeExtension'; appIndex: number; extIndex: number }
+    | { type: 'updateExtensionField'; appIndex: number; extIndex: number; fieldPath: string; value: string }
     | { type: 'updateAssets' }
     | { type: 'ready' };
 

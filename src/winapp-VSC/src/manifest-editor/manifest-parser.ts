@@ -215,32 +215,62 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     const apps = getChildrenByLocalName(appsEl, 'Application');
     if (appIndex >= apps.length) { return xmlText; }
     const appEl = apps[appIndex];
+    const hasExtensions = getChildByLocalName(appEl, 'Extensions') !== null;
 
-    let extEl = getChildByLocalName(appEl, 'Extensions');
-    if (!extEl) {
-        extEl = doc.createElementNS(NS.default, 'Extensions');
-        appEl.appendChild(doc.createTextNode('  '));
-        appEl.appendChild(extEl);
-        appEl.appendChild(doc.createTextNode('\n    '));
-    }
+    let result = xmlText;
 
-    const fragment = new DOMParser().parseFromString(
-        `<root xmlns:uap="${NS.uap}" xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10" xmlns:desktop="${NS.desktop}">${extensionXml}</root>`,
-        'application/xml',
-    );
-    const fragRoot = fragment.documentElement!;
-    const children = fragRoot.childNodes;
-    for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (child.nodeType === 1) {
-            const imported = doc.importNode(child, true);
-            extEl.appendChild(doc.createTextNode('\n      '));
-            extEl.appendChild(imported);
+    // Ensure required namespace declarations are on the root <Package> element
+    const nsMap: Record<string, string> = {
+        'com:': 'xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"',
+        'uap:': 'xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"',
+        'uap5:': 'xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"',
+        'desktop:': 'xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"',
+    };
+    for (const [prefix, decl] of Object.entries(nsMap)) {
+        if (extensionXml.includes(prefix) && !result.includes(decl)) {
+            // Insert the namespace declaration into the <Package> opening tag
+            result = result.replace(/<Package\b/, '<Package ' + decl);
         }
     }
-    extEl.appendChild(doc.createTextNode('\n    '));
 
-    return new XMLSerializer().serializeToString(doc);
+    // Detect the file's indentation by looking at existing content
+    const indentMatch = result.match(/^( +)<Extensions>/m);
+    const extIndent = indentMatch ? indentMatch[1] : '      ';
+    const childIndent = extIndent + '  ';
+    // Preserve the template's relative indentation, just add the base indent
+    const indentedExt = extensionXml.split('\n').map(line => childIndent + line).join('\n');
+
+    if (hasExtensions) {
+        // Insert before the closing </Extensions> tag
+        const closeTag = '</Extensions>';
+        const closeIdx = result.lastIndexOf(closeTag);
+        if (closeIdx < 0) { return result; }
+        // Trim trailing whitespace before the close tag so we don't double-indent
+        const beforeClose = result.substring(0, closeIdx).replace(/[ \t]+$/, '');
+        return beforeClose + '\n' +
+            indentedExt + '\n' + extIndent +
+            result.substring(closeIdx);
+    } else {
+        // Insert a new <Extensions> block before the closing </Application> tag
+        let closeIdx = -1;
+        let count = 0;
+        let searchFrom = 0;
+        const closeAppTag = '</Application>';
+        while (count <= appIndex) {
+            closeIdx = result.indexOf(closeAppTag, searchFrom);
+            if (closeIdx < 0) { return result; }
+            if (count === appIndex) { break; }
+            searchFrom = closeIdx + closeAppTag.length;
+            count++;
+        }
+
+        const appIndent = extIndent.substring(0, extIndent.length - 2) || '    ';
+        const block = extIndent + '<Extensions>\n' +
+            indentedExt + '\n' +
+            extIndent + '</Extensions>\n' +
+            appIndent;
+        return result.substring(0, closeIdx) + block + result.substring(closeIdx);
+    }
 }
 
 /** Remove an extension element from an application. */
@@ -267,6 +297,59 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
     }
 
     return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+}
+
+/**
+ * Update an attribute on an extension element.
+ * fieldPath is "ElementName.AttributeName" as produced by parseExtensionFields in the webview.
+ */
+export function updateExtensionField(
+    xmlText: string, appIndex: number, extIndex: number, fieldPath: string, value: string,
+): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    const appsEl = getChildByLocalName(root, 'Applications');
+    if (!appsEl) { return xmlText; }
+
+    const apps = getChildrenByLocalName(appsEl, 'Application');
+    if (appIndex >= apps.length) { return xmlText; }
+    const appEl = apps[appIndex];
+
+    const extEl = getChildByLocalName(appEl, 'Extensions');
+    if (!extEl) { return xmlText; }
+
+    const extChildren: Element[] = [];
+    const nodes = extEl.childNodes;
+    for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].nodeType === 1) { extChildren.push(nodes[i] as Element); }
+    }
+    if (extIndex < 0 || extIndex >= extChildren.length) { return xmlText; }
+
+    const extRoot = extChildren[extIndex];
+    const dotIdx = fieldPath.indexOf('.');
+    if (dotIdx < 0) { return xmlText; }
+    const elemName = fieldPath.substring(0, dotIdx);
+    const attrName = fieldPath.substring(dotIdx + 1);
+
+    // Find the matching element by walking the extension tree
+    function findElement(el: Element): Element | null {
+        if ((el.localName || el.nodeName) === elemName) { return el; }
+        const children = el.childNodes;
+        for (let i = 0; i < children.length; i++) {
+            if (children[i].nodeType === 1) {
+                const found = findElement(children[i] as Element);
+                if (found) { return found; }
+            }
+        }
+        return null;
+    }
+
+    const targetEl = findElement(extRoot);
+    if (targetEl) {
+        targetEl.setAttribute(attrName, value);
+    }
+
+    return new XMLSerializer().serializeToString(doc);
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────

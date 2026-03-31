@@ -648,7 +648,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     id: focused.id,
                     selectionStart: focused.selectionStart,
                     selectionEnd: focused.selectionEnd,
-                    type: focused.type
+                    type: focused.type,
+                    extField: focused.getAttribute('data-ext-field'),
+                    appIndex: focused.getAttribute('data-app-index'),
+                    extIndex: focused.getAttribute('data-ext-index')
                 };
             }
 
@@ -698,6 +701,16 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             // Try by ID first (for static inputs)
             if (info.id) {
                 target = document.getElementById(info.id);
+            }
+            // Try extension field match
+            if (!target && info.extField) {
+                document.querySelectorAll('input[data-ext-field]').forEach(el => {
+                    if (el.getAttribute('data-ext-field') === info.extField &&
+                        el.getAttribute('data-app-index') === info.appIndex &&
+                        el.getAttribute('data-ext-index') === info.extIndex) {
+                        target = el;
+                    }
+                });
             }
             // Fall back to data attributes (for dynamically rendered inputs)
             if (!target && info.section && info.fieldName) {
@@ -809,13 +822,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 if (app.extensions && app.extensions.length > 0) {
                     app.extensions.forEach((extXml, eidx) => {
                         const fields = parseExtensionFields(extXml);
-                        let fieldsHtml = fields.map(f =>
-                            '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
+                        let fieldsHtml = fields.map(f => {
+                            let descHtml = f.description ? '<div class="description">' + escapeHtml(f.description) + '</div>' : '';
+                            return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
                             (f.editable
-                                ? '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-readonly" />'
+                                ? '<input type="text" value="' + escapeHtml(f.value) + '" data-ext-field="' + escapeHtml(f.label) + '" data-app-index="' + idx + '" data-ext-index="' + eidx + '" />'
                                 : '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />'
-                            ) + '</div>'
-                        ).join('');
+                            ) + descHtml + '</div>';
+                        }).join('');
                         extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn btn-danger btn-sm remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '">Remove</button></div>' + fieldsHtml + '</div>';
                     });
                 }
@@ -951,6 +965,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             appIndex: parseInt(btn.getAttribute('data-app-index'), 10),
                             extIndex: parseInt(btn.getAttribute('data-ext-index'), 10)
                         });
+                    });
+                });
+
+                // Bind editable extension field inputs
+                card.querySelectorAll('input[data-ext-field]').forEach(inp => {
+                    let extDebounce = null;
+                    inp.addEventListener('input', () => {
+                        clearTimeout(extDebounce);
+                        extDebounce = setTimeout(() => {
+                            vscode.postMessage({
+                                type: 'updateExtensionField',
+                                appIndex: parseInt(inp.getAttribute('data-app-index'), 10),
+                                extIndex: parseInt(inp.getAttribute('data-ext-index'), 10),
+                                fieldPath: inp.getAttribute('data-ext-field'),
+                                value: inp.value
+                            });
+                        }, 300);
                     });
                 });
 
@@ -1096,16 +1127,30 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             const parser = new DOMParser();
             const doc = parser.parseFromString(xml, 'application/xml');
             const root = doc.documentElement;
-            if (!root) return [{ label: 'Raw XML', value: xml, editable: false }];
+            if (!root) return [{ label: 'Raw XML', value: xml, editable: false, description: '' }];
+
+            // Descriptions for known extension fields
+            const fieldDescriptions = {
+                'McpServer': 'Registers this app as a Model Context Protocol (MCP) server.',
+                'ExeServer.Executable': 'Relative path to the COM server executable inside the package.',
+                'ExeServer.DisplayName': 'A friendly name for this COM server, shown in system tools.',
+                'Class.Id': 'The CLSID (GUID) that uniquely identifies this COM class. Format: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}.',
+                'Protocol.Name': 'The URI scheme this app handles (e.g., "myapp"). Users can launch your app with myapp://.',
+                'DisplayName': 'A user-friendly display name for this extension.',
+                'AppExecutionAlias.Alias': 'The command-line alias for launching this app (e.g., "myapp.exe"). Users can type this in a terminal.',
+            };
+
             const fields = [];
             const category = root.getAttribute('Category');
-            if (category) fields.push({ label: 'Category', value: category, editable: false });
+            if (category) fields.push({ label: 'Category', value: category, editable: false, description: 'The extension category that Windows uses to identify this integration point.' });
             function walk(el, depth) {
                 for (let i = 0; i < el.attributes.length; i++) {
                     const attr = el.attributes[i];
                     if (attr.name === 'Category' && el === root) continue;
                     if (attr.name.startsWith('xmlns')) continue;
-                    fields.push({ label: (el.localName || el.nodeName) + '.' + attr.name, value: attr.value, editable: true });
+                    const fieldKey = (el.localName || el.nodeName) + '.' + attr.name;
+                    const desc = fieldDescriptions[fieldKey] || '';
+                    fields.push({ label: fieldKey, value: attr.value, editable: true, description: desc });
                 }
                 const children = el.childNodes;
                 for (let j = 0; j < children.length; j++) {
