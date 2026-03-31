@@ -347,7 +347,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
         }
 
-        .logo-preview { max-width:100px; max-height:100px; border-radius:4px; border:1px solid var(--vscode-panel-border); display:block; }
+        .logo-preview { max-width:100px; max-height:100px; border-radius:4px; display:none; }
+        .logo-preview.loaded { display:block; border:1px solid var(--vscode-panel-border); }
         .logo-side-by-side { display:flex; gap:16px; align-items:flex-start; }
         .logo-input-col { flex:1; }
         .logo-preview-col { flex-shrink:0; display:flex; flex-direction:column; align-items:center; }
@@ -447,7 +448,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     <div class="validation-msg"></div>
                 </div>
                 <div class="logo-preview-col">
-                    <img id="store-logo-preview" class="logo-preview hidden" alt="Store Logo preview" />
+                    <img id="store-logo-preview" class="logo-preview" />
                     <div id="store-logo-caption" class="logo-caption"></div>
                 </div>
             </div>
@@ -762,8 +763,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Package Dependency: \${escapeHtml(dep.name) || '(unnamed)'}</span>
+                        <span class="item-title">Package Dependency:</span>
                         <button class="btn btn-danger btn-sm remove-pkg-dep" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group" data-field="dependencies.packageDependency.\${idx}.name">
+                        <input type="text" data-section="dependencies" data-field-name="packageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="Microsoft.VCLibs.140.00" />
+                        <div class="description">The package identity name of the framework dependency. For example, Microsoft.VCLibs.140.00 for the Visual C++ runtime.</div>
+                        <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.minVersion">
                         <label>Min Version:</label>
@@ -896,7 +902,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 </div>
                             </div>
                             <div class="logo-preview-col">
-                                <img class="logo-preview app-logo-preview hidden" data-app-idx="\${idx}" alt="Logo preview" />
+                                <img class="logo-preview app-logo-preview" data-app-idx="\${idx}" />
                                 <div class="logo-caption app-logo-caption" data-app-idx="\${idx}"></div>
                             </div>
                         </div>
@@ -1066,15 +1072,22 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
         function updateLogoPreview(imgEl, logoPath, captionEl) {
             if (logoPath && manifestDirUri && imgEl) {
+                // Start hidden; only show on successful load
+                imgEl.classList.remove('loaded');
+                imgEl.removeAttribute('alt');
+                if (captionEl) captionEl.textContent = '';
+                imgEl.onload = function() {
+                    imgEl.classList.add('loaded');
+                    if (captionEl) {
+                        const parts = logoPath.replace(/\\\\/g, '/').split('/');
+                        captionEl.textContent = parts[parts.length - 1];
+                    }
+                };
+                imgEl.onerror = function() { imgEl.classList.remove('loaded'); if (captionEl) captionEl.textContent = ''; };
                 imgEl.src = manifestDirUri + '/' + logoPath.replace(/\\\\/g, '/') + '?t=' + Date.now();
-                imgEl.classList.remove('hidden');
-                imgEl.onerror = function() { imgEl.classList.add('hidden'); if (captionEl) captionEl.textContent = ''; };
-                if (captionEl) {
-                    const parts = logoPath.replace(/\\\\/g, '/').split('/');
-                    captionEl.textContent = parts[parts.length - 1];
-                }
             } else if (imgEl) {
-                imgEl.classList.add('hidden');
+                imgEl.classList.remove('loaded');
+                imgEl.removeAttribute('alt');
                 if (captionEl) captionEl.textContent = '';
             }
         }
