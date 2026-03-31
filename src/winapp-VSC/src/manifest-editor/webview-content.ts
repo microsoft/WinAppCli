@@ -615,7 +615,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 const name = item.getAttribute('data-family');
                 vscode.postMessage({
                     type: 'addTargetDeviceFamily',
-                    family: { name, minVersion: '10.0.17763.0', maxVersionTested: '10.0.26100.0' }
+                    family: { name, minVersion: '', maxVersionTested: '' }
                 });
                 document.getElementById('add-family-menu').classList.remove('open');
             });
