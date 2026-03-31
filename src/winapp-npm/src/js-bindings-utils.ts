@@ -183,10 +183,14 @@ export async function autoGenerateJsBindings(
  * Append default jsBindings section to winapp.yaml.
  */
 function appendDefaultJsBindingsConfig(yamlPath: string): void {
+  const projectDir = path.dirname(yamlPath);
+  const isTypeScript = fs.existsSync(path.join(projectDir, 'tsconfig.json'));
+  const lang = isTypeScript ? 'ts' : 'js';
+  const output = isTypeScript ? 'generated' : 'generated-js';
   const defaultConfig = `
 jsBindings:
-  lang: js
-  output: generated-js
+  lang: ${lang}
+  output: ${output}
 `;
   let content = fs.readFileSync(yamlPath, 'utf8');
   if (!content.endsWith('\n')) {
