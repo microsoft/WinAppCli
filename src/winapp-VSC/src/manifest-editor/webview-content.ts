@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS } from './manifest-types';
 
-export function getWebviewContent(webview: vscode.Webview, nonce: string): string {
+export function getWebviewContent(webview: vscode.Webview, nonce: string, manifestDirUri: string): string {
     const archOptions = ARCHITECTURE_OPTIONS.map(a => `<option value="${a}">${a}</option>`).join('');
 
     const generalCaps= KNOWN_CAPABILITIES.general.map(c =>
@@ -31,7 +31,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AppxManifest Editor</title>
     <style nonce="${nonce}">
@@ -101,7 +101,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
             margin-bottom: 4px;
             font-weight: 600;
             color: var(--vscode-foreground);
-            font-size: 12px;
+            font-size: 13px;
         }
         .form-group input[type="text"],
         .form-group input[type="color"],
@@ -369,7 +369,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
     <!-- ───── Identity ───── -->
     <div class="tab-content active" id="tab-identity" role="tabpanel">
         <div class="section-header">Package Identity</div>
-        <p class="description" style="margin-bottom:16px;">Uniquely identifies your app package in the Microsoft Store and on devices.</p>
+        <p class="description" style="margin-bottom:24px;">Uniquely identifies your app package in the Microsoft Store and on devices.</p>
         <div class="form-group" data-field="identity.name">
             <label for="identity-name">Package Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
@@ -400,7 +400,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
     <!-- ───── Properties ───── -->
     <div class="tab-content" id="tab-properties" role="tabpanel">
         <div class="section-header">Package Properties</div>
-        <p class="description" style="margin-bottom:16px;">Display information shown to users in the Microsoft Store and on the device.</p>
+        <p class="description" style="margin-bottom:24px;">Display information shown to users in the Microsoft Store and on the device.</p>
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
@@ -431,16 +431,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
                 </div>
             </div>
         </div>
-        <div style="margin-top:12px;">
-            <button class="btn" id="btn-update-assets">Regenerate Assets</button>
-            <div class="description" style="margin-top:4px;">Generate scaled assets from a source image</div>
-        </div>
     </div>
 
     <!-- ───── Dependencies ───── -->
     <div class="tab-content" id="tab-dependencies" role="tabpanel">
         <div class="section-header">Target Device Families</div>
-        <p class="description" style="margin-bottom:16px;">Specifies which Windows device types your app targets.</p>
+        <p class="description" style="margin-bottom:24px;">Specifies which Windows device types your app targets.</p>
         <div id="target-device-families" class="list-container"></div>
         <div class="custom-dropdown" id="add-family-dropdown">
             <button class="custom-dropdown-btn" id="add-target-family">+ Add Target Device Family</button>
@@ -457,14 +453,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
-        <p class="description" style="margin-bottom:16px;">Each application entry defines an executable, its visual assets, and extensions.</p>
+        <p class="description" style="margin-bottom:24px;">Each application entry defines an executable, its visual assets, and extensions.</p>
         <div id="applications-list"></div>
     </div>
 
     <!-- ───── Capabilities ───── -->
     <div class="tab-content" id="tab-capabilities" role="tabpanel">
         <div class="section-header">Capabilities</div>
-        <p class="description" style="margin-bottom:16px;">Hover over a capability to see its description. Capabilities declare what system resources or devices your app can access.</p>
+        <p class="description" style="margin-bottom:24px;">Hover over a capability to see its description. Capabilities declare what system resources or devices your app can access.</p>
         <div class="capabilities-columns">
             <div class="capabilities-left">
                 <div class="cap-category">
@@ -500,6 +496,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
     <script nonce="${nonce}">
     (function() {
         const vscode = acquireVsCodeApi();
+        const manifestDirUri = '${manifestDirUri}';
         let currentData = null;
         const capabilityDescriptions = ${JSON.stringify(CAPABILITY_DESCRIPTIONS)};
         const extensionTemplates = ${JSON.stringify(EXTENSION_TEMPLATES)};
@@ -612,10 +609,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
                 type: 'addPackageDependency',
                 dependency: { name: '', minVersion: '', publisher: '' }
             });
-        });
-
-        document.getElementById('btn-update-assets').addEventListener('click', () => {
-            vscode.postMessage({ type: 'updateAssets' });
         });
 
         // ─── Populate form from data ────────────────────────
@@ -830,6 +823,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
                             <div class="description">Optional, in DefaultTile child element</div>
                             <div class="validation-msg"></div>
                         </div>
+                        <button class="btn update-assets-btn" style="margin-top:12px;">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
@@ -895,6 +889,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
                 const logoPreview = card.querySelector('.app-logo-preview');
                 const logoCaption = card.querySelector('.app-logo-caption');
                 updateLogoPreview(logoPreview, app.visualElements.square150x150Logo, logoCaption);
+
+                // Regenerate Assets button
+                const updateAssetsBtn = card.querySelector('.update-assets-btn');
+                if (updateAssetsBtn) {
+                    updateAssetsBtn.addEventListener('click', () => {
+                        vscode.postMessage({ type: 'updateAssets' });
+                    });
+                }
             });
         }
 
@@ -980,8 +982,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string): strin
         }
 
         function updateLogoPreview(imgEl, logoPath, captionEl) {
-            if (logoPath && imgEl) {
-                imgEl.src = logoPath + '?t=' + Date.now();
+            if (logoPath && manifestDirUri && imgEl) {
+                imgEl.src = manifestDirUri + '/' + logoPath.replace(/\\\\/g, '/') + '?t=' + Date.now();
                 imgEl.style.display = 'block';
                 imgEl.onerror = function() { imgEl.style.display = 'none'; if (captionEl) captionEl.textContent = ''; };
                 if (captionEl) {

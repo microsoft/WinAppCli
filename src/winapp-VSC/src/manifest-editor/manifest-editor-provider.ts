@@ -4,12 +4,14 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addExtension, removeExtension } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
+import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from '../winapp-cli-utils';
 
 export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'winapp.manifestEditor';
@@ -33,13 +35,15 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken,
     ): Promise<void> {
+        const manifestDir = vscode.Uri.file(path.dirname(document.uri.fsPath));
         webviewPanel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.context.extensionUri],
+            localResourceRoots: [this.context.extensionUri, manifestDir],
         };
 
         const nonce = crypto.randomBytes(16).toString('hex');
-        webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce);
+        const manifestDirUri = webviewPanel.webview.asWebviewUri(manifestDir).toString();
+        webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
 
         // Track whether we're currently applying an edit to avoid feedback loops
         let isApplyingEdit = false;
@@ -115,15 +119,32 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         break;
 
                     case 'updateAssets': {
-                        const manifestDir = require('path').dirname(document.uri.fsPath);
+                        const imagePath = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            title: 'Select source image for assets',
+                            filters: { 'Images': ['png', 'jpg', 'jpeg', 'svg'] },
+                        });
+                        if (!imagePath || imagePath.length === 0) { return; }
+
+                        const cliPath = getWinappCliPath(this.context.extensionPath);
+                        const cwd = path.dirname(document.uri.fsPath);
+
                         await vscode.window.withProgress(
-                            { location: vscode.ProgressLocation.Notification, title: 'Regenerating assets...', cancellable: false },
+                            { location: vscode.ProgressLocation.Notification, title: 'Regenerating assets…', cancellable: false },
                             () => new Promise<void>((resolve, reject) => {
-                                execFile('winapp', ['manifest', 'update-assets', '--manifest', document.uri.fsPath], { cwd: manifestDir }, (err) => {
-                                    if (err) { reject(err); } else { resolve(); }
+                                execFile(cliPath, ['manifest', 'update-assets', imagePath[0].fsPath], { cwd, env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE } }, (error) => {
+                                    if (error) {
+                                        vscode.window.showErrorMessage(`Asset regeneration failed: ${error.message}`);
+                                        reject(error);
+                                    } else {
+                                        resolve();
+                                    }
                                 });
                             }),
                         );
+
                         webviewPanel.webview.postMessage({ type: 'refreshImages' });
                         return;
                     }
