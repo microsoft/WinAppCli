@@ -329,10 +329,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
         }
 
-        .logo-preview { max-width:100px; max-height:100px; border-radius:4px; border:1px solid var(--vscode-panel-border); }
+        .logo-preview { max-width:100px; max-height:100px; border-radius:4px; border:1px solid var(--vscode-panel-border); display:block; }
         .logo-side-by-side { display:flex; gap:16px; align-items:flex-start; }
         .logo-input-col { flex:1; }
-        .logo-preview-col { flex-shrink:0; text-align:center; }
+        .logo-preview-col { flex-shrink:0; display:flex; flex-direction:column; align-items:center; }
         .logo-caption { font-size:11px; font-style:italic; color:var(--vscode-descriptionForeground); margin-top:4px; text-align:center; }
 
         .app-sub-tabs { display:flex; border-bottom:1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border)); margin-bottom:16px; }
@@ -351,10 +351,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .custom-dropdown { position:relative; display:inline-block; }
         .custom-dropdown-btn { padding:4px 12px; font-size:12px; font-family:inherit; cursor:pointer; border:none; border-radius:2px; color:var(--vscode-button-foreground); background:var(--vscode-button-background); }
         .custom-dropdown-btn:hover { background:var(--vscode-button-hoverBackground); }
-        .custom-dropdown-menu { display:none; position:absolute; top:100%; left:0; margin-top:4px; min-width:180px; background:var(--vscode-menu-background, var(--vscode-editor-background)); border:1px solid var(--vscode-panel-border); border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:20; overflow:hidden; }
+        .custom-dropdown-menu { display:none; position:absolute; top:100%; left:0; margin-top:4px; min-width:180px; background:var(--vscode-menu-background, var(--vscode-editor-background)); border:1px solid var(--vscode-panel-border); border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:20; padding:4px; }
         .custom-dropdown-menu.open { display:block; }
-        .custom-dropdown-item { padding:6px 12px; cursor:pointer; font-size:12px; color:var(--vscode-foreground); }
-        .custom-dropdown-item:hover { background:var(--vscode-list-hoverBackground, rgba(255,255,255,0.05)); border-radius:4px; }
+        .custom-dropdown-item { padding:6px 12px; cursor:pointer; font-size:12px; color:var(--vscode-foreground); border-radius:4px; }
+        .custom-dropdown-item:hover { background:var(--vscode-list-hoverBackground, rgba(255,255,255,0.05)); }
     </style>
 </head>
 <body>
@@ -369,23 +369,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Identity ───── -->
     <div class="tab-content active" id="tab-identity" role="tabpanel">
         <div class="section-header">Package Identity</div>
-        <p class="description" style="margin-bottom:24px;">Uniquely identifies your app package in the Microsoft Store and on devices.</p>
+        <p class="description" style="margin-bottom:28px;">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others.</p>
         <div class="form-group" data-field="identity.name">
             <label for="identity-name">Package Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
-            <div class="description">Reverse-domain style, e.g. com.company.app</div>
+            <div class="description">A unique identifier for your package in reverse-domain style (e.g. com.company.app). This name is used internally by Windows and the Store — it is not shown to users. Once published, this value cannot be changed.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="identity.publisher">
             <label for="identity-publisher">Publisher:</label>
             <input type="text" id="identity-publisher" data-section="identity" data-field-name="publisher" placeholder="CN=Contoso, O=Contoso Ltd" />
-            <div class="description">X.500 distinguished name, e.g. CN=Contoso, O=Contoso Ltd</div>
+            <div class="description">An X.500 distinguished name that identifies the publisher (e.g. CN=Contoso, O=Contoso Ltd). Must match the subject name of your code-signing certificate. For Store apps, this is assigned by Microsoft Partner Center.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="identity.version">
             <label for="identity-version">Version:</label>
             <input type="text" id="identity-version" data-section="identity" data-field-name="version" placeholder="1.0.0.0" />
-            <div class="description">Format: Major.Minor.Build.Revision (e.g. 1.0.0.0). The revision (last segment) must be 0 for Store submissions.</div>
+            <div class="description">Format: Major.Minor.Build.Revision (e.g. 1.0.0.0). The revision (last segment) must be 0 for Store submissions. Increment the version each time you publish an update.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="identity.processorArchitecture">
@@ -393,6 +393,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <select id="identity-arch" data-section="identity" data-field-name="processorArchitecture">
                 ${archOptions}
             </select>
+            <div class="description">The CPU architecture this package targets. Choose 'x64' for 64-bit Intel/AMD, 'arm64' for ARM devices, or 'neutral' for architecture-independent packages (e.g. script-only apps).</div>
             <div class="validation-msg"></div>
         </div>
     </div>
@@ -400,21 +401,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Properties ───── -->
     <div class="tab-content" id="tab-properties" role="tabpanel">
         <div class="section-header">Package Properties</div>
-        <p class="description" style="margin-bottom:24px;">Display information shown to users in the Microsoft Store and on the device.</p>
+        <p class="description" style="margin-bottom:28px;">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell.</p>
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
-            <div class="description">Max 256 characters</div>
+            <div class="description">The friendly name shown to users in the Start menu and Store. String, max 256 characters. This can differ from the Package Name on the Identity page.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.publisherDisplayName">
             <label for="props-pubdisplayname">Publisher Display Name:</label>
             <input type="text" id="props-pubdisplayname" data-section="properties" data-field-name="publisherDisplayName" placeholder="Contoso" />
+            <div class="description">The human-readable publisher name shown in the Store and app info (e.g. "Contoso"). String, max 256 characters. This should be your company or developer name, not the certificate DN.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.description">
             <label for="props-description">Description:</label>
             <textarea id="props-description" data-section="properties" data-field-name="description" placeholder="A short description of the app (optional, max 2048 chars)"></textarea>
+            <div class="description">A short summary of what your app does. String, max 2048 characters. Displayed in Store listings and app info dialogs. Optional but recommended.</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.logo">
@@ -422,7 +425,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 <div class="logo-input-col">
                     <label for="props-logo">Store Logo:</label>
                     <input type="text" id="props-logo" data-section="properties" data-field-name="logo" placeholder="Assets\\StoreLogo.png" />
-                    <div class="description">Relative path to the store logo image</div>
+                    <div class="description">Relative path to the image displayed in the Microsoft Store and app installer. Should be a 50×50 pixel PNG. Path is relative to the manifest file location.</div>
                     <div class="validation-msg"></div>
                 </div>
                 <div class="logo-preview-col">
@@ -436,7 +439,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Dependencies ───── -->
     <div class="tab-content" id="tab-dependencies" role="tabpanel">
         <div class="section-header">Target Device Families</div>
-        <p class="description" style="margin-bottom:24px;">Specifies which Windows device types your app targets.</p>
+        <p class="description" style="margin-bottom:28px;">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package.</p>
         <div id="target-device-families" class="list-container"></div>
         <div class="custom-dropdown" id="add-family-dropdown">
             <button class="custom-dropdown-btn" id="add-target-family">+ Add Target Device Family</button>
@@ -453,14 +456,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
-        <p class="description" style="margin-bottom:24px;">Each application entry defines an executable, its visual assets, and extensions.</p>
+        <p class="description" style="margin-bottom:28px;">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package.</p>
         <div id="applications-list"></div>
     </div>
 
     <!-- ───── Capabilities ───── -->
     <div class="tab-content" id="tab-capabilities" role="tabpanel">
         <div class="section-header">Capabilities</div>
-        <p class="description" style="margin-bottom:24px;">Hover over a capability to see its description. Capabilities declare what system resources or devices your app can access.</p>
+        <p class="description" style="margin-bottom:28px;">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Hover over a capability to see its description. Only request capabilities your app actually uses.</p>
         <div class="capabilities-columns">
             <div class="capabilities-left">
                 <div class="cap-category">
@@ -658,13 +661,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     <div class="form-group" data-field="dependencies.targetDeviceFamily.\${idx}.minVersion">
                         <label>Min Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="targetDeviceFamily.minVersion" data-index="\${idx}" value="\${escapeHtml(fam.minVersion)}" placeholder="10.0.17763.0" />
-                        <div class="description">10.0.XXXXX.0 format</div>
+                        <div class="description">The minimum Windows version required to install this package. Users on older versions cannot install it. Format: 10.0.XXXXX.0.</div>
                         <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="dependencies.targetDeviceFamily.\${idx}.maxVersionTested">
                         <label>Max Version Tested:</label>
                         <input type="text" data-section="dependencies" data-field-name="targetDeviceFamily.maxVersionTested" data-index="\${idx}" value="\${escapeHtml(fam.maxVersionTested)}" placeholder="10.0.26100.0" />
-                        <div class="description">10.0.XXXXX.0 format</div>
+                        <div class="description">The highest Windows version you have tested against. Must be ≥ Min Version. Windows uses this to determine compatibility behavior. Format: 10.0.XXXXX.0.</div>
                         <div class="validation-msg"></div>
                     </div>
                 \`;
@@ -693,11 +696,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.minVersion">
                         <label>Min Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="packageDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="14.0.0.0" />
+                        <div class="description">The minimum version of this framework package required. Format: Major.Minor.Build.Revision.</div>
                         <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.publisher">
                         <label>Publisher:</label>
                         <input type="text" data-section="dependencies" data-field-name="packageDependency.publisher" data-index="\${idx}" value="\${escapeHtml(dep.publisher)}" placeholder="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+                        <div class="description">The X.500 distinguished name of the dependency package publisher. Must match the publisher of the dependency exactly.</div>
                         <div class="validation-msg"></div>
                     </div>
                 \`;
@@ -759,36 +764,39 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group" data-field="applications.\${idx}.id">
                             <label>Id:</label>
                             <input type="text" data-section="applications" data-field-name="id" data-index="\${idx}" value="\${escapeHtml(app.id)}" />
+                            <div class="description">A unique identifier for this application within the package. Used internally by Windows for activation. String.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.executable">
                             <label>Executable:</label>
                             <input type="text" data-section="applications" data-field-name="executable" data-index="\${idx}" value="\${escapeHtml(app.executable)}" />
+                            <div class="description">Relative path to the .exe file inside the package. Use $targetnametoken$.exe for build-time substitution in Visual Studio projects.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.entryPoint">
                             <label>Entry Point:</label>
                             <input type="text" data-section="applications" data-field-name="entryPoint" data-index="\${idx}" value="\${escapeHtml(app.entryPoint)}" />
+                            <div class="description">The activation type or runtime class. Use 'Windows.FullTrustApplication' for desktop (Win32) apps. UWP apps specify their App class name here.</div>
                             <div class="validation-msg"></div>
                         </div>
                     </div>
                     <div class="app-sub-content \${activeTab === 'extensions' ? 'active' : ''}" data-subcontent="extensions" data-app-idx="\${idx}">
-                        <p class="description" style="margin-bottom:12px;">App extensions register handlers, protocols, and other system integration points.</p>
+                        <p class="description" style="margin-bottom:12px;">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases.</p>
                         \${extListHtml}
                         \${addExtDropdown}
                     </div>
                     <div class="app-sub-content \${activeTab === 'visual' ? 'active' : ''}" data-subcontent="visual" data-app-idx="\${idx}">
-                        <p class="description" style="margin-bottom:12px;">Visual assets control how your app appears in the Start menu, taskbar, and Store.</p>
+                        <p class="description" style="margin-bottom:12px;">Visual assets define how your app appears in the Start menu, taskbar, and task switcher. Provide high-quality images at the correct sizes for a polished look.</p>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.displayName">
                             <label>Display Name:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.displayName" data-index="\${idx}" value="\${escapeHtml(app.visualElements.displayName)}" />
-                            <div class="description">Max 256 characters</div>
+                            <div class="description">The name displayed on the app tile in the Start menu and in search results. String, max 256 characters.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.description">
                             <label>Description:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.description" data-index="\${idx}" value="\${escapeHtml(app.visualElements.description)}" />
-                            <div class="description">Max 2048 characters</div>
+                            <div class="description">A short description shown in app info tooltips and accessibility tools. String, max 2048 characters.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.backgroundColor">
@@ -797,6 +805,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 <input type="color" data-section="applications" data-field-name="visualElements.backgroundColor" data-index="\${idx}" value="\${toColorValue(app.visualElements.backgroundColor)}" />
                                 <input type="text" data-section="applications" data-field-name="visualElements.backgroundColor" data-index="\${idx}" value="\${escapeHtml(app.visualElements.backgroundColor)}" placeholder="#FFFFFF or transparent" />
                             </div>
+                            <div class="description">The background color for the app tile. Use a hex color like #FFFFFF or 'transparent'. This fills the area behind your tile image.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="logo-side-by-side" style="margin-top:12px;">
@@ -804,11 +813,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 <div class="form-group" data-field="applications.\${idx}.visualElements.square150x150Logo">
                                     <label>Square 150x150 Logo:</label>
                                     <input type="text" data-section="applications" data-field-name="visualElements.square150x150Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.square150x150Logo)}" placeholder="Assets\\\\Square150x150Logo.png" />
+                                    <div class="description">The medium tile image shown in the Start menu. Required. Relative path to a 150×150 pixel PNG.</div>
                                     <div class="validation-msg"></div>
                                 </div>
                                 <div class="form-group" data-field="applications.\${idx}.visualElements.square44x44Logo">
                                     <label>Square 44x44 Logo:</label>
                                     <input type="text" data-section="applications" data-field-name="visualElements.square44x44Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.square44x44Logo)}" placeholder="Assets\\\\Square44x44Logo.png" />
+                                    <div class="description">The small app icon shown in the taskbar, task switcher, and notification area. Required. Relative path to a 44×44 pixel PNG.</div>
                                     <div class="validation-msg"></div>
                                 </div>
                             </div>
@@ -820,7 +831,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group" data-field="applications.\${idx}.visualElements.wide310x150Logo">
                             <label>Wide 310x150 Logo:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.wide310x150Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.wide310x150Logo)}" placeholder="Assets\\\\Wide310x150Logo.png" />
-                            <div class="description">Optional, in DefaultTile child element</div>
+                            <div class="description">Optional wide tile image for the Start menu. Relative path to a 310×150 pixel PNG. Stored in the DefaultTile child element.</div>
                             <div class="validation-msg"></div>
                         </div>
                         <button class="btn update-assets-btn" style="margin-top:12px;">Regenerate Assets</button>
