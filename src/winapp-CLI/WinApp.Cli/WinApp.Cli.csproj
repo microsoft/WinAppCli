@@ -27,6 +27,7 @@
     <TrimMode>full</TrimMode>
     <CsWin32RunAsBuildTask>true</CsWin32RunAsBuildTask>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     
     <!-- Faster startup for single-file -->
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>

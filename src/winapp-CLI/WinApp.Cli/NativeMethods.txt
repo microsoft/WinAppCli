@@ -76,3 +76,6 @@ GetWindowThreadProcessId
 GetWindowText
 IsWindowVisible
 SetForegroundWindow
+SetCursorPos
+SendInput
+GetSystemMetrics
