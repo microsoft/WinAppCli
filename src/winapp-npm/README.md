@@ -62,20 +62,62 @@ npx winapp --help
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-create-addon) - Generate native C# or C++ addons
+- [`node generate-bindings`](#js-bindings-generation) - Generate JS/TS bindings from WinRT metadata
 - [`node add-electron-debug-identity`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 
 The full CLI usage can be found here: [Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md)
+
+### JS Bindings Generation
+
+The CLI can automatically generate typed JavaScript bindings for Windows Runtime APIs using [winrt-meta](https://www.npmjs.com/package/winrt-meta).
+
+**How it works:**
+- After `winapp restore` or `winapp init`, the CLI automatically discovers the Windows App SDK AI metadata package from the NuGet dependency chain and generates JS bindings
+- Runs automatically if `winrt-meta` is installed in the project — no manual scripts needed
+- On first run, adds a default `jsBindings` section to `winapp.yaml`
+
+**Setup:**
+
+`winrt-meta` is included as a dependency — no extra install needed.
+
+```bash
+npx winapp restore        # auto-generates bindings after restore
+```
+
+**Manual re-generation:**
+
+```bash
+npx winapp node generate-bindings [--verbose]
+```
+
+**Optional configuration** in `winapp.yaml` for additional Windows SDK types needed by your app:
+
+```yaml
+jsBindings:
+  lang: js                  # js (default) | cjs | ts
+  output: generated-js      # default: generated-js
+  systemTypes:
+    - namespace: Windows.Storage
+      classes: StorageFile
+    - namespace: Windows.Graphics.Imaging
+      classes: BitmapDecoder
+```
+
+The AI metadata package and version are auto-discovered — only `systemTypes` needs manual configuration for app-level dependencies not present in the AI API signatures.
 
 ### Programmatic API
 
 The package also exports typed async functions for all CLI commands and utility helpers, so you can use them directly from TypeScript/JavaScript without spawning a CLI process:
 
 ```typescript
-import { init, packageApp, certGenerate } from '@microsoft/winappcli';
+import { init, packageApp, certGenerate, generateJsBindings } from '@microsoft/winappcli';
 
 await init({ useDefaults: true });
 await certGenerate({ install: true });
 await packageApp({ inputFolder: './dist', cert: './devcert.pfx' });
+
+// Generate JS bindings from WinRT metadata
+await generateJsBindings({ verbose: true });
 ```
 
 Full programmatic API reference: [NPM API Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/npm-usage.md)

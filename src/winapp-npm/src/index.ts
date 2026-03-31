@@ -2,6 +2,7 @@
 import { execSyncWithBuildTools } from './buildtools-utils';
 import { addMsixIdentityToExe, addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getGlobalWinappPath, getLocalWinappPath } from './winapp-path-utils';
+import { generateJsBindings } from './js-bindings-utils';
 import * as winappCommands from './winapp-commands';
 
 // Re-export types from child_process for convenience
@@ -22,6 +23,12 @@ export {
 } from './winapp-cli-utils';
 export { GenerateCppAddonOptions, GenerateCppAddonResult } from './cpp-addon-utils';
 export { GenerateCsAddonOptions, GenerateCsAddonResult } from './cs-addon-utils';
+export {
+  GenerateJsBindingsOptions,
+  GenerateJsBindingsResult,
+  JsBindingsConfig,
+  JsBindingsPackageEntry,
+} from './js-bindings-utils';
 
 // Re-export all command types and functions automatically
 export * from './winapp-commands';
@@ -39,6 +46,9 @@ export {
   // winapp directory utilities
   getGlobalWinappPath,
   getLocalWinappPath,
+
+  // JS/TS bindings generation
+  generateJsBindings,
 };
 
 // Default export for CommonJS compatibility
@@ -49,5 +59,6 @@ export default {
   clearElectronDebugIdentity,
   getGlobalWinappPath,
   getLocalWinappPath,
+  generateJsBindings,
   ...winappCommands,
 };

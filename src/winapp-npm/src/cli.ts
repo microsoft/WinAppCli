@@ -4,6 +4,7 @@ import { generateCppAddonFiles } from './cpp-addon-utils';
 import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { autoGenerateJsBindings, generateJsBindings } from './js-bindings-utils';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 
@@ -61,6 +62,11 @@ export async function main(): Promise<void> {
 
     // Route everything else to winapp-cli
     await callWinappCli(args, { exitOnError: true });
+
+    // Post-restore/init: auto-generate JS bindings if configured
+    if (['restore', 'init'].includes(command)) {
+      await autoGenerateJsBindings({ verbose: args.includes('--verbose') });
+    }
   } catch (error) {
     logErrorAndExit(error);
   }
@@ -123,6 +129,7 @@ async function showCombinedHelp(): Promise<void> {
   console.log('');
   console.log('Node.js Subcommands:');
   console.log('  node create-addon         Generate native addon files for Electron');
+  console.log('  node generate-bindings    Generate JS/TS bindings from WinRT metadata');
   console.log('  node add-electron-debug-identity  Add package identity to Electron debug process');
   console.log('  node clear-electron-debug-identity  Remove package identity from Electron debug process');
   console.log('');
@@ -187,6 +194,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('');
     console.log('Subcommands:');
     console.log('  create-addon                  Generate native addon files for Electron');
+    console.log('  generate-bindings             Generate JS/TS bindings from WinRT metadata');
     console.log('  add-electron-debug-identity   Add package identity to Electron debug process');
     console.log('  clear-electron-debug-identity Remove package identity from Electron debug process');
     console.log('');
@@ -194,6 +202,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log(`  ${CLI_NAME} node create-addon --help`);
     console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
     console.log(`  ${CLI_NAME} node create-addon --name myCsAddon --template cs`);
+    console.log(`  ${CLI_NAME} node generate-bindings`);
     console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
     console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
     console.log('');
@@ -215,6 +224,10 @@ async function handleNode(args: string[]): Promise<void> {
 
     case 'clear-electron-debug-identity':
       await handleClearElectronDebugIdentity(subcommandArgs);
+      break;
+
+    case 'generate-bindings':
+      await handleGenerateBindings(subcommandArgs);
       break;
 
     default:
@@ -417,6 +430,52 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
       console.log(`✅ Electron debug identity cleared successfully!`);
     } else {
       console.log(`ℹ️  No backup found - electron.exe may already be clean.`);
+    }
+  } catch (error) {
+    logErrorAndExit(error);
+  }
+}
+
+async function handleGenerateBindings(args: string[]): Promise<void> {
+  const options = parseArgs(args, { verbose: false });
+
+  if (options.help) {
+    console.log(`Usage: ${CLI_NAME} node generate-bindings [options]`);
+    console.log('');
+    console.log('Generate JS/TS bindings from WinRT metadata');
+    console.log('');
+    console.log('Reads the jsBindings section from winapp.yaml and generates typed');
+    console.log('bindings using winrt-meta. This runs automatically after restore/init');
+    console.log('if configured, but can also be called manually.');
+    console.log('');
+    console.log('Options:');
+    console.log('  --verbose             Enable verbose output (default: false)');
+    console.log('  --help                Show this help');
+    console.log('');
+    console.log('winapp.yaml configuration:');
+    console.log('  jsBindings:');
+    console.log('    lang: js              # js | cjs | ts (default: js)');
+    console.log('    output: generated-js  # output directory');
+    console.log('    packages:             # NuGet packages with .winmd metadata');
+    console.log('      - Microsoft.WindowsAppSDK.AI');
+    console.log('    systemTypes:          # additional Windows SDK classes');
+    console.log('      - namespace: Windows.Storage');
+    console.log('        classes: StorageFile');
+    console.log('');
+    console.log('Prerequisites:');
+    console.log('  - winrt-meta must be installed (npm install -D winrt-meta)');
+    console.log('  - Packages must be restored first (winapp restore)');
+    return;
+  }
+
+  try {
+    const result = await generateJsBindings({
+      verbose: options.verbose as boolean,
+    });
+
+    if (!result.generated) {
+      console.error(`❌ ${result.skipReason}`);
+      process.exit(1);
     }
   } catch (error) {
     logErrorAndExit(error);

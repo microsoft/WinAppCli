@@ -51,6 +51,9 @@
   "os": [
     "win32"
   ],
+  "dependencies": {
+    "winrt-meta": "^0.1.6"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.5.0",
