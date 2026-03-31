@@ -5,7 +5,8 @@
 
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily } from './manifest-parser';
+import { execFile } from 'child_process';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addExtension, removeExtension } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -104,6 +105,28 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'removeTargetDeviceFamily':
                         newText = removeTargetDeviceFamily(text, message.index);
                         break;
+
+                    case 'addExtension':
+                        newText = addExtension(text, message.index, message.xml);
+                        break;
+
+                    case 'removeExtension':
+                        newText = removeExtension(text, message.appIndex, message.extIndex);
+                        break;
+
+                    case 'updateAssets': {
+                        const manifestDir = require('path').dirname(document.uri.fsPath);
+                        await vscode.window.withProgress(
+                            { location: vscode.ProgressLocation.Notification, title: 'Regenerating assets...', cancellable: false },
+                            () => new Promise<void>((resolve, reject) => {
+                                execFile('winapp', ['manifest', 'update-assets', '--manifest', document.uri.fsPath], { cwd: manifestDir }, (err) => {
+                                    if (err) { reject(err); } else { resolve(); }
+                                });
+                            }),
+                        );
+                        webviewPanel.webview.postMessage({ type: 'refreshImages' });
+                        return;
+                    }
                 }
             } catch {
                 // XML manipulation failed — ignore to avoid corrupting the document

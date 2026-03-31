@@ -24,6 +24,20 @@ const NS = {
     desktop: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10',
 };
 
+/** Remove an element and its preceding whitespace text node. */
+function removeElementClean(parent: Element, child: Element): void {
+    const prev = child.previousSibling;
+    if (prev && prev.nodeType === 3 && /^\s*$/.test(prev.nodeValue || '')) {
+        parent.removeChild(prev);
+    }
+    parent.removeChild(child);
+}
+
+/** Collapse consecutive blank lines into a single newline. */
+function cleanupBlankLines(xml: string): string {
+    return xml.replace(/\n[ \t]*\n([ \t]*\n)*/g, '\n');
+}
+
 /** Parse appxmanifest.xml text into a ManifestData object. */
 export function parseManifest(xmlText: string): ManifestData {
     const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
@@ -108,13 +122,13 @@ export function removeCapability(xmlText: string, capability: string): string {
         if (child.nodeType === 1) { // ELEMENT_NODE
             const el = child as Element;
             if (el.getAttribute('Name') === attrName && matchesCapabilityNamespace(el, capNs)) {
-                capsEl.removeChild(el);
+                removeElementClean(capsEl, el);
                 break;
             }
         }
     }
 
-    return new XMLSerializer().serializeToString(doc);
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
 }
 
 /** Add a PackageDependency element. */
@@ -148,10 +162,10 @@ export function removePackageDependency(xmlText: string, index: number): string 
 
     const pkgDeps = getChildrenByLocalName(depsEl, 'PackageDependency');
     if (index >= 0 && index < pkgDeps.length) {
-        depsEl.removeChild(pkgDeps[index]);
+        removeElementClean(depsEl, pkgDeps[index]);
     }
 
-    return new XMLSerializer().serializeToString(doc);
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
 }
 
 /** Add a TargetDeviceFamily element. */
@@ -185,10 +199,74 @@ export function removeTargetDeviceFamily(xmlText: string, index: number): string
 
     const families = getChildrenByLocalName(depsEl, 'TargetDeviceFamily');
     if (index >= 0 && index < families.length) {
-        depsEl.removeChild(families[index]);
+        removeElementClean(depsEl, families[index]);
     }
 
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+}
+
+/** Add an extension element to an application by index. */
+export function addExtension(xmlText: string, appIndex: number, extensionXml: string): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    const appsEl = getChildByLocalName(root, 'Applications');
+    if (!appsEl) { return xmlText; }
+
+    const apps = getChildrenByLocalName(appsEl, 'Application');
+    if (appIndex >= apps.length) { return xmlText; }
+    const appEl = apps[appIndex];
+
+    let extEl = getChildByLocalName(appEl, 'Extensions');
+    if (!extEl) {
+        extEl = doc.createElementNS(NS.default, 'Extensions');
+        appEl.appendChild(doc.createTextNode('  '));
+        appEl.appendChild(extEl);
+        appEl.appendChild(doc.createTextNode('\n    '));
+    }
+
+    const fragment = new DOMParser().parseFromString(
+        `<root xmlns:uap="${NS.uap}" xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10" xmlns:desktop="${NS.desktop}">${extensionXml}</root>`,
+        'application/xml',
+    );
+    const fragRoot = fragment.documentElement!;
+    const children = fragRoot.childNodes;
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.nodeType === 1) {
+            const imported = doc.importNode(child, true);
+            extEl.appendChild(doc.createTextNode('\n      '));
+            extEl.appendChild(imported);
+        }
+    }
+    extEl.appendChild(doc.createTextNode('\n    '));
+
     return new XMLSerializer().serializeToString(doc);
+}
+
+/** Remove an extension element from an application. */
+export function removeExtension(xmlText: string, appIndex: number, extIndex: number): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    const appsEl = getChildByLocalName(root, 'Applications');
+    if (!appsEl) { return xmlText; }
+
+    const apps = getChildrenByLocalName(appsEl, 'Application');
+    if (appIndex >= apps.length) { return xmlText; }
+    const appEl = apps[appIndex];
+
+    const extEl = getChildByLocalName(appEl, 'Extensions');
+    if (!extEl) { return xmlText; }
+
+    const extChildren: Element[] = [];
+    const nodes = extEl.childNodes;
+    for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].nodeType === 1) { extChildren.push(nodes[i] as Element); }
+    }
+    if (extIndex >= 0 && extIndex < extChildren.length) {
+        removeElementClean(extEl, extChildren[extIndex]);
+    }
+
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────
@@ -247,17 +325,16 @@ function parseApplications(root: Element): ApplicationData[] {
         const visualEl = findChildByLocalNameNS(appEl, 'VisualElements');
         const defaultTile = visualEl ? findChildByLocalNameNS(visualEl, 'DefaultTile') : null;
 
-        // Gather extension types for display
+        // Gather extension raw XML for display and editing
         const extensions: string[] = [];
         const extEl = getChildByLocalName(appEl, 'Extensions');
         if (extEl) {
+            const serializer = new XMLSerializer();
             const extChildren = extEl.childNodes;
             for (let i = 0; i < extChildren.length; i++) {
                 const child = extChildren[i];
                 if (child.nodeType === 1) {
-                    const ext = child as Element;
-                    const category = ext.getAttribute('Category') ?? ext.localName ?? '';
-                    if (category) { extensions.push(category); }
+                    extensions.push(serializer.serializeToString(child as Element));
                 }
             }
         }

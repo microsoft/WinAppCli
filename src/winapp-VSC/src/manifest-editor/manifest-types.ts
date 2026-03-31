@@ -69,7 +69,8 @@ export interface ValidationError {
 /** Message types sent from the extension to the webview. */
 export type ExtensionToWebviewMessage =
     | { type: 'update'; data: ManifestData; errors: ValidationError[] }
-    | { type: 'validationErrors'; errors: ValidationError[] };
+    | { type: 'validationErrors'; errors: ValidationError[] }
+    | { type: 'refreshImages' };
 
 /** Message types sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
@@ -82,6 +83,9 @@ export type WebviewToExtensionMessage =
     | { type: 'removeTargetDeviceFamily'; index: number }
     | { type: 'addApplication' }
     | { type: 'removeApplication'; index: number }
+    | { type: 'addExtension'; index: number; xml: string }
+    | { type: 'removeExtension'; appIndex: number; extIndex: number }
+    | { type: 'updateAssets' }
     | { type: 'ready' };
 
 /** Known capabilities organized by category for the checklist UI. */
@@ -105,6 +109,41 @@ export const KNOWN_CAPABILITIES = {
         { name: 'bluetooth', label: 'Bluetooth', namespace: 'device' },
     ],
 } as const;
+
+/** Extension templates for the Add Extension menu. */
+export const EXTENSION_TEMPLATES = [
+    {
+        label: 'MCP Server',
+        category: 'windows.mcpServer',
+        xml: '<uap:Extension Category="windows.mcpServer">\n  <uap:McpServer />\n</uap:Extension>',
+    },
+    {
+        label: 'COM Server',
+        category: 'windows.comServer',
+        xml: '<com:Extension Category="windows.comServer">\n  <com:ComServer>\n    <com:ExeServer Executable="" DisplayName="">\n      <com:Class Id="" />\n    </com:ExeServer>\n  </com:ComServer>\n</com:Extension>',
+    },
+    {
+        label: 'Protocol Handler',
+        category: 'windows.protocol',
+        xml: '<uap:Extension Category="windows.protocol">\n  <uap:Protocol Name="">\n    <uap:DisplayName></uap:DisplayName>\n  </uap:Protocol>\n</uap:Extension>',
+    },
+] as const;
+
+/** Descriptions for known capabilities. */
+export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
+    internetClient: 'Provides outbound access to the internet and networks in public places like airports and coffee shops.',
+    internetClientServer: 'Provides inbound and outbound access to the internet and networks in public places.',
+    privateNetworkClientServer: 'Provides inbound and outbound access to home and work networks through the firewall.',
+    codeGeneration: 'Allows the app to generate code dynamically using JIT compilation.',
+    runFullTrust: 'Allows a desktop app to run with full trust permissions outside the app container.',
+    allowElevation: 'Allows a packaged app to request elevated (admin) privileges at launch.',
+    unvirtualizedResources: 'Allows the app to access file system and registry locations without virtualization.',
+    packagedShellExtension: 'Allows the app to register shell extensions (context menu handlers, preview handlers, etc.).',
+    microphone: 'Provides access to the microphone for audio capture.',
+    webcam: 'Provides access to the webcam for video capture.',
+    location: 'Provides access to the device location (GPS, Wi-Fi, etc.).',
+    bluetooth: 'Provides access to Bluetooth devices for communication.',
+};
 
 /** Processor architecture dropdown options. */
 export const ARCHITECTURE_OPTIONS = ['x86', 'x64', 'arm', 'arm64', 'neutral'] as const;
