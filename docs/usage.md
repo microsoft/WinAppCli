@@ -912,6 +912,7 @@ winapp ui [command] [options]
 - `get-property` - Read element properties
 - `screenshot` - Capture window/element as PNG
 - `invoke` - Activate element (click, toggle, expand)
+- `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `set-value` - Set text on editable element
 - `focus` - Move keyboard focus
 - `scroll-into-view` - Scroll element visible
