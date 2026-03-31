@@ -231,6 +231,15 @@ winapp ui invoke cmb-sizecombobox-b4c5 -a myapp # expand combo box
 
 Tries patterns in order: InvokePattern → TogglePattern → SelectionItemPattern → ExpandCollapsePattern.
 
+### click
+Click an element at its screen coordinates using mouse simulation. Use this for controls that don't support `InvokePattern` (e.g., column headers, list items).
+```bash
+winapp ui click btn-column1-a3f2 -a myapp              # single click by slug
+winapp ui click "Column1" -a myapp                      # single click by text search
+winapp ui click btn-column1-a3f2 -a myapp --double      # double-click
+winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
+```
+
 ### set-value
 Set text on an editable element.
 ```bash
