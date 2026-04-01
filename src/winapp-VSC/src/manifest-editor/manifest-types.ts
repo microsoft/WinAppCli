@@ -87,6 +87,7 @@ export type WebviewToExtensionMessage =
     | { type: 'removeExtension'; appIndex: number; extIndex: number }
     | { type: 'updateExtensionField'; appIndex: number; extIndex: number; fieldPath: string; value: string; isTextContent?: boolean }
     | { type: 'browseFile'; appIndex: number; extIndex: number; fieldPath: string }
+    | { type: 'browseImage'; section: string; field: string; index?: number }
     | { type: 'updateAssets' }
     | { type: 'ready' };
 

@@ -137,6 +137,21 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         break;
                     }
 
+                    case 'browseImage': {
+                        const imgPath = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            title: 'Select image',
+                            filters: { 'Images': ['png', 'jpg', 'jpeg', 'svg', 'ico'] },
+                            defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
+                        });
+                        if (!imgPath || imgPath.length === 0) { return; }
+                        const relPath = path.relative(path.dirname(document.uri.fsPath), imgPath[0].fsPath);
+                        newText = applyFieldChange(text, message.section, message.field, relPath, message.index);
+                        break;
+                    }
+
                     case 'updateAssets': {
                         const imagePath = await vscode.window.showOpenDialog({
                             canSelectFiles: true,
