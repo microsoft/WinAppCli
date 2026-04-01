@@ -4,9 +4,12 @@ import { generateCppAddonFiles } from './cpp-addon-utils';
 import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
-import { autoGenerateJsBindings, generateJsBindings } from './js-bindings-utils';
+import { autoGenerateJsBindings, generateJsBindings, readJsBindingsConfig } from './js-bindings-utils';
+import { getProjectRootDir } from './utils';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
 
 // CLI name - change this to rebrand the tool
 const CLI_NAME = 'winapp';
@@ -63,8 +66,13 @@ export async function main(): Promise<void> {
     // Route everything else to winapp-cli
     await callWinappCli(args, { exitOnError: true });
 
-    // Post-restore/init: auto-generate JS bindings if configured
-    if (['restore', 'init'].includes(command)) {
+    // Post-init: prompt user to generate JS/TS bindings if this is a Node.js project
+    if (command === 'init') {
+      await promptJsBindingsAfterInit({ verbose: args.includes('--verbose') });
+    }
+
+    // Post-restore: auto-generate JS bindings if already configured
+    if (command === 'restore') {
       await autoGenerateJsBindings({ verbose: args.includes('--verbose') });
     }
   } catch (error) {
@@ -480,6 +488,115 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
   } catch (error) {
     logErrorAndExit(error);
   }
+}
+
+// ======================================================================
+// Post-init: interactive JS/TS bindings prompt
+// ======================================================================
+
+function askQuestion(rl: readline.Interface, question: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => resolve(answer.trim()));
+  });
+}
+
+async function promptJsBindingsAfterInit(options: { verbose?: boolean }): Promise<void> {
+  const projectRoot = getProjectRootDir();
+
+  // Only prompt for Node.js projects
+  if (!fs.existsSync(path.join(projectRoot, 'package.json'))) {
+    return;
+  }
+
+  // Skip if jsBindings already configured
+  const yamlPath = findWinappYamlPath(projectRoot);
+  if (yamlPath && readJsBindingsConfig(yamlPath)) {
+    await autoGenerateJsBindings(options);
+    return;
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    console.log('');
+    const generate = await askQuestion(
+      rl,
+      'Would you like to generate JavaScript/TypeScript bindings for WinRT APIs? [Y/n] '
+    );
+
+    if (generate.toLowerCase() === 'n' || generate.toLowerCase() === 'no') {
+      return;
+    }
+
+    console.log('');
+    console.log('Select binding language:');
+    console.log('  1. JavaScript (js)');
+    console.log('  2. TypeScript (ts)');
+    const langChoice = await askQuestion(rl, 'Enter choice [1/2]: ');
+
+    let lang: string;
+    let output: string;
+    if (langChoice === '2' || langChoice.toLowerCase() === 'ts') {
+      lang = 'ts';
+      output = 'generated';
+    } else {
+      lang = 'js';
+      output = 'generated-js';
+    }
+
+    // Write jsBindings config to winapp.yaml
+    if (yamlPath) {
+      let content = fs.readFileSync(yamlPath, 'utf8');
+      if (!content.endsWith('\n')) {
+        content += '\n';
+      }
+      content += `\njsBindings:\n  lang: ${lang}\n  output: ${output}\n`;
+      fs.writeFileSync(yamlPath, content, 'utf8');
+      console.log(`\nAdded jsBindings config to ${path.basename(yamlPath)} (lang: ${lang}, output: ${output})`);
+    }
+
+    // Install dynwinrt-js runtime dependency
+    console.log('\nInstalling dynwinrt-js runtime dependency...');
+    try {
+      const { execSync } = require('child_process');
+      execSync('npm install dynwinrt-js', { cwd: projectRoot, stdio: 'inherit' });
+    } catch {
+      console.warn('Warning: failed to install dynwinrt-js. Install it manually: npm install dynwinrt-js');
+    }
+
+    // Generate bindings
+    const result = await generateJsBindings({ verbose: options.verbose });
+
+    if (result.generated) {
+      console.log('');
+      console.log('To use the generated bindings in your code:');
+      console.log(`  const { ClassName } = require('./${output}/NamespaceName');`);
+      console.log('');
+      console.log('To regenerate bindings manually:');
+      console.log(`  npx ${CLI_NAME} node generate-bindings`);
+      console.log('');
+      console.log(`Bindings will also regenerate automatically on '${CLI_NAME} restore'.`);
+    } else {
+      console.log(`\nNo bindings generated: ${result.skipReason}`);
+      console.log(`You can configure packages in winapp.yaml and run '${CLI_NAME} node generate-bindings' later.`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+function findWinappYamlPath(projectRoot: string): string | null {
+  const candidates = [
+    path.join(projectRoot, 'winapp.yaml'),
+    path.join(projectRoot, '.winapp', 'winapp.yaml'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 function logErrorAndExit(error: unknown): never {

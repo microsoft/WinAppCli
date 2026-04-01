@@ -90,14 +90,17 @@ export async function generateJsBindings(
     console.log(`[js-bindings] winrt-meta: ${winrtMetaPath}`);
   }
 
-  // Resolve packages: use explicit list if provided, otherwise auto-discover AI package
+  // Resolve packages: use explicit list if provided, otherwise auto-discover from winapp.yaml
   let packages = config.packages;
   if (packages.length === 0) {
-    packages = discoverAIPackage(packageVersions, verbose);
+    packages = discoverPackages(packageVersions, verbose);
     if (packages.length === 0) {
-      return { generated: false, skipReason: 'no AI metadata package found in SDK dependencies' };
+      return { generated: false, skipReason: 'no packages with WinRT metadata found in SDK dependencies' };
     }
   }
+
+  // Collect reference winmd paths from non-generated packages (for type resolution only)
+  const refPaths = discoverRefPaths(packageVersions, packages, verbose);
 
   // Clean and recreate output directory
   if (fs.existsSync(outputDir)) {
@@ -119,15 +122,41 @@ export async function generateJsBindings(
       continue;
     }
 
-    if (verbose) {
-      console.log(`[js-bindings] generating from ${metadataDir}`);
+    // Split winmd files: generate from non-excluded, use excluded as ref
+    const allWinmd = fs.readdirSync(metadataDir).filter(f => f.toLowerCase().endsWith('.winmd'));
+    const generateWinmd: string[] = [];
+    const localRefWinmd: string[] = [];
+
+    for (const f of allWinmd) {
+      const lower = f.toLowerCase();
+      if (EXCLUDED_WINMD_PREFIXES.some(prefix => lower.startsWith(prefix))) {
+        localRefWinmd.push(path.join(metadataDir, f));
+      } else {
+        generateWinmd.push(path.join(metadataDir, f));
+      }
     }
 
-    callWinrtMeta(winrtMetaPath, [
-      'generate', '--folder', metadataDir,
+    if (generateWinmd.length === 0) {
+      if (verbose) {
+        console.log(`[js-bindings] skipping ${pkg.name}: all winmd files excluded`);
+      }
+      continue;
+    }
+
+    if (verbose) {
+      console.log(`[js-bindings] generating from ${metadataDir} (${generateWinmd.length} winmd, ${localRefWinmd.length} ref)`);
+    }
+
+    const allRefs = [...refPaths, ...localRefWinmd];
+    const args = [
+      'generate', '--winmd', generateWinmd.join(';'),
       '--output', outputDir,
       '--lang', config.lang,
-    ], verbose);
+    ];
+    if (allRefs.length > 0) {
+      args.push('--ref', allRefs.join(';'));
+    }
+    callWinrtMeta(winrtMetaPath, args, verbose);
   }
 
   // Generate system types (individual classes from Windows SDK)
@@ -400,29 +429,154 @@ function readPackageVersions(yamlPath: string): Map<string, string> {
 // ======================================================================
 
 /**
- * Auto-discover the AI metadata package from WinAppSDK nuspec dependency chain.
- * Looks for a dependency whose id ends with `.AI` (e.g. Microsoft.WindowsAppSDK.AI).
+ * NuGet packages to exclude from auto-discovery (UI frameworks not usable from Electron/Node.js).
  */
-function discoverAIPackage(
+const EXCLUDED_PACKAGES = new Set([
+  'microsoft.windowsappsdk.winui',
+  'microsoft.windowsappsdk.widgets',
+]);
+
+/**
+ * WinMD file prefixes to exclude from generation (UI types not usable from Electron/Node.js).
+ * These are used as --ref for type resolution instead.
+ */
+const EXCLUDED_WINMD_PREFIXES = [
+  'microsoft.ui.',
+  'microsoft.web.webview2.',
+  'microsoft.windows.widgets.',
+];
+
+/**
+ * Auto-discover packages with WinRT metadata (.winmd) from winapp.yaml packages
+ * and their NuGet dependencies. Excludes UI-only packages not usable from Electron.
+ */
+function discoverPackages(
   packageVersions: Map<string, string>,
   verbose: boolean
 ): JsBindingsPackageEntry[] {
   const nugetCache = getNugetCachePath();
+  const discovered: JsBindingsPackageEntry[] = [];
+  const seen = new Set<string>();
 
-  // Scan nuspec of each root package for a .AI dependency
   for (const [name, version] of packageVersions) {
+    // Check the root package itself for .winmd files
+    checkAndAddPackage(name, version, nugetCache, discovered, seen, verbose);
+
+    // Check its NuGet dependencies for .winmd files
     const deps = readNuspecDeps(nugetCache, name, version);
     for (const dep of deps) {
-      if (dep.name.toLowerCase().endsWith('.ai')) {
-        if (verbose) {
-          console.log(`[js-bindings] auto-discovered: ${dep.name} v${dep.version} (from ${name})`);
-        }
-        return [dep];
-      }
+      checkAndAddPackage(dep.name, dep.version, nugetCache, discovered, seen, verbose);
     }
   }
 
-  return [];
+  return discovered;
+}
+
+function checkAndAddPackage(
+  name: string,
+  version: string | undefined,
+  nugetCache: string,
+  discovered: JsBindingsPackageEntry[],
+  seen: Set<string>,
+  verbose: boolean
+): void {
+  const lower = name.toLowerCase();
+  if (seen.has(lower) || EXCLUDED_PACKAGES.has(lower)) return;
+  seen.add(lower);
+
+  if (!version) return;
+
+  const pkgDir = path.join(nugetCache, lower, version);
+  if (!fs.existsSync(pkgDir)) return;
+
+  // Check known .winmd locations
+  const metadataDir = path.join(pkgDir, 'metadata');
+  const libDir = path.join(pkgDir, 'lib', 'uap10.0');
+
+  if ((fs.existsSync(metadataDir) && hasWinmdFiles(metadataDir)) ||
+      (fs.existsSync(libDir) && hasWinmdFiles(libDir))) {
+    if (verbose) {
+      console.log(`[js-bindings] auto-discovered: ${name} v${version}`);
+    }
+    discovered.push({ name, version });
+  }
+}
+
+/**
+ * Collect .winmd file paths from excluded packages (and all their transitive deps)
+ * to use as --ref for type resolution.
+ */
+function discoverRefPaths(
+  packageVersions: Map<string, string>,
+  generatedPackages: JsBindingsPackageEntry[],
+  verbose: boolean
+): string[] {
+  const nugetCache = getNugetCachePath();
+  const refs: string[] = [];
+  const generatedSet = new Set(generatedPackages.map(p => p.name.toLowerCase()));
+  const seen = new Set<string>();
+
+  for (const [name, version] of packageVersions) {
+    collectRefFromPackage(name, version, nugetCache, refs, generatedSet, seen, verbose);
+
+    const deps = readNuspecDeps(nugetCache, name, version);
+    for (const dep of deps) {
+      collectRefFromPackage(dep.name, dep.version, nugetCache, refs, generatedSet, seen, verbose);
+    }
+  }
+
+  return refs;
+}
+
+function collectRefFromPackage(
+  name: string,
+  version: string | undefined,
+  nugetCache: string,
+  refs: string[],
+  generatedSet: Set<string>,
+  seen: Set<string>,
+  verbose: boolean
+): void {
+  const lower = name.toLowerCase();
+  // Skip packages we're generating bindings for, and skip already-processed
+  if (generatedSet.has(lower) || seen.has(lower) || !version) return;
+  seen.add(lower);
+
+  const pkgDir = path.join(nugetCache, lower, version);
+  if (!fs.existsSync(pkgDir)) return;
+
+  // Collect individual .winmd files from known locations
+  for (const subDir of ['metadata', path.join('lib', 'uap10.0')]) {
+    const dir = path.join(pkgDir, subDir);
+    if (!fs.existsSync(dir)) continue;
+    const winmdFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.winmd'));
+    for (const f of winmdFiles) {
+      refs.push(path.join(dir, f));
+    }
+    if (winmdFiles.length > 0 && verbose) {
+      console.log(`[js-bindings] ref: ${name} v${version} (${winmdFiles.length} winmd files)`);
+    }
+  }
+
+  // Also check subdirectories (e.g. metadata/10.0.18362.0/)
+  for (const subDir of ['metadata']) {
+    const dir = path.join(pkgDir, subDir);
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subPath = path.join(dir, entry.name);
+          const winmdFiles = fs.readdirSync(subPath).filter(f => f.toLowerCase().endsWith('.winmd'));
+          for (const f of winmdFiles) {
+            refs.push(path.join(subPath, f));
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**
@@ -543,13 +697,14 @@ function hasWinmdFiles(dir: string): boolean {
 // ======================================================================
 
 /**
- * Find winrt-meta CLI path in the project's node_modules.
- * Returns the path to invoke, or null if not installed.
+ * Find winrt-meta CLI path from winappcli's own dependencies.
  */
-function findWinrtMeta(projectRoot: string): string | null {
-  const cliPath = path.join(projectRoot, 'node_modules', 'winrt-meta', 'cli.js');
-  if (fs.existsSync(cliPath)) return cliPath;
-  return null;
+function findWinrtMeta(_projectRoot: string): string | null {
+  try {
+    return require.resolve('winrt-meta/cli');
+  } catch {
+    return null;
+  }
 }
 
 /**
