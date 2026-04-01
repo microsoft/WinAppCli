@@ -1170,7 +1170,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 'Class.Id': 'The CLSID (GUID) that uniquely identifies this COM class. Format: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}.',
                 'Protocol.Name': 'The URI scheme this app handles (e.g., "myapp"). Users can launch your app with myapp://.',
                 'DisplayName': 'A user-friendly display name for this extension.',
-                'AppExecutionAlias.Alias': 'The command-line alias for launching this app (e.g., "myapp.exe"). Users can type this in a terminal.',
+                'ExecutionAlias.Alias': 'The command-line alias users type to launch your app from a terminal or Run dialog (e.g., "myapp.exe"). Must end with .exe. String type — set this to a short, memorable name for your application.',
             };
 
             const fields = [];

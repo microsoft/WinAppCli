@@ -124,6 +124,11 @@ export const EXTENSION_TEMPLATES = [
         category: 'windows.comServer',
         xml: '<com:Extension Category="windows.comServer">\n  <com:ComServer>\n    <com:ExeServer Executable="" DisplayName="">\n      <com:Class Id="" />\n    </com:ExeServer>\n  </com:ComServer>\n</com:Extension>',
     },
+    {
+        label: 'App Execution Alias',
+        category: 'windows.appExecutionAlias',
+        xml: '<uap5:Extension Category="windows.appExecutionAlias">\n  <uap5:AppExecutionAlias>\n    <uap5:ExecutionAlias Alias="" />\n  </uap5:AppExecutionAlias>\n</uap5:Extension>',
+    },
 ] as const;
 
 /** Descriptions for known capabilities. */
