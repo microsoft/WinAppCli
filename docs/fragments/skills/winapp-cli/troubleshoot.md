@@ -69,6 +69,8 @@ Does the project have an appxmanifest.xml?
 | Register identity, launch manually | `winapp run .\build\Debug --no-launch` | Launch via `start shell:AppsFolder\<AUMID>` or execution alias — **not** the exe directly |
 | F5 startup debugging (IDE launches exe) | `winapp create-debug-identity .\bin\myapp.exe` | Exe has identity regardless of how it's launched; best for debugging activation/startup code |
 | Capture OutputDebugString | `winapp run .\build\Debug --debug-output` | **Blocks other debuggers** — use `--no-launch` if you need VS Code/WinDbg |
+| Run and auto-clean | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
+| Clean up stale registration | `winapp unregister` | Removes dev-mode packages for the current project |
 
 > **Visual Studio users:** If you have a packaging project, VS already handles identity and debugging from F5 — you likely don't need winapp for debugging. These workflows are for VS Code, terminal, and frameworks VS doesn't natively package.
 
@@ -87,6 +89,7 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 | `cert install` | Certificate file + admin | Machine certificate store |
 | `create-debug-identity` | `appxmanifest.xml` + exe + trusted cert | Registers sparse package with Windows |
 | `run` | Build output folder + `appxmanifest.xml` | Registers loose layout package, launches app |
+| `unregister` | `appxmanifest.xml` (auto-detect or `--manifest`) | Removes dev-mode package registrations |
 | `package` | Build output + `appxmanifest.xml` | `.msix` file |
 | `sign` | File + certificate | Signed file (in-place) |
 | `create-external-catalog` | Directory with executables | `CodeIntegrityExternal.cat` |

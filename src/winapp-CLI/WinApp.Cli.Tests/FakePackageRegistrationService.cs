@@ -16,6 +16,7 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     public List<string> UnregisterCalls { get; } = [];
     public List<string> InstallPackageCalls { get; } = [];
     public List<string> GetInstalledVersionCalls { get; } = [];
+    public List<string> FindDevPackagesCalls { get; } = [];
 
     /// <summary>
     /// When set, <see cref="UnregisterAsync"/> returns this value.
@@ -28,6 +29,12 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// Defaults to null (package not installed).
     /// </summary>
     public string? FakeInstalledVersion { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="FindDevPackages"/> returns these values.
+    /// Defaults to empty list.
+    /// </summary>
+    public List<DevPackageInfo> FakeDevPackages { get; set; } = [];
 
     public Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
@@ -57,5 +64,11 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     {
         GetInstalledVersionCalls.Add(packageName);
         return FakeInstalledVersion;
+    }
+
+    public List<DevPackageInfo> FindDevPackages(string packageName)
+    {
+        FindDevPackagesCalls.Add(packageName);
+        return FakeDevPackages;
     }
 }

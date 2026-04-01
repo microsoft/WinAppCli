@@ -155,6 +155,42 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         return null;
     }
 
+    /// <inheritdoc />
+    public List<DevPackageInfo> FindDevPackages(string packageName)
+    {
+        var pm = new PackageManager();
+        var allUserPackages = pm.FindPackagesForUser(string.Empty);
+        var results = new List<DevPackageInfo>();
+
+        foreach (var pkg in allUserPackages)
+        {
+            if (!string.Equals(pkg.Id.Name, packageName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string? installLocation = null;
+            try
+            {
+                installLocation = pkg.InstalledLocation?.Path;
+            }
+            catch
+            {
+                // InstalledLocation can throw if the path no longer exists
+            }
+
+            var v = pkg.Id.Version;
+            results.Add(new DevPackageInfo(
+                FullName: pkg.Id.FullName,
+                Name: pkg.Id.Name,
+                Version: $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}",
+                InstallLocation: installLocation,
+                IsDevelopmentMode: pkg.IsDevelopmentMode));
+        }
+
+        return results;
+    }
+
     private static bool IsDeveloperModeError(Exception ex)
     {
         return ex.HResult == ERROR_PACKAGE_NOT_REGISTERED_FOR_SIDELOAD

@@ -25,6 +25,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
+    public static Option<bool> UnregisterOnExitOption { get; }
 
     static RunCommand()
     {
@@ -65,6 +66,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
         };
+
+        UnregisterOnExitOption = new Option<bool>("--unregister-on-exit")
+        {
+            Description = "Unregister the development package after the application exits. Only removes packages registered in development mode."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -76,12 +82,14 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
+        Options.Add(UnregisterOnExitOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
     public class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
+        IPackageRegistrationService packageRegistrationService,
         IDebugOutputService debugOutputService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
@@ -97,6 +105,7 @@ internal partial class RunCommand : Command, IShortDescription
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
+            var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -124,9 +133,16 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (unregisterOnExit && noLaunch)
+            {
+                logger.LogError("{UISymbol} --unregister-on-exit and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
             uint processId = 0;
             string? packageFamilyName = null;
             string? packageFullName = null;
+            string? packageName = null;
             string? publisher = null;
             string? applicationId = null;
             string? aumid = null;
@@ -184,6 +200,7 @@ internal partial class RunCommand : Command, IShortDescription
                         identityResult.PackageName,
                         identityResult.Publisher);
                     packageFullName = appLauncherService.GetPackageFullName(packageFamilyName);
+                    packageName = identityResult.PackageName;
                     publisher = identityResult.Publisher;
                     applicationId = identityResult.ApplicationId;
                     aumid = $"{packageFamilyName}!{applicationId}";
@@ -239,7 +256,12 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                return await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                if (unregisterOnExit && packageName != null)
+                {
+                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                }
+                return aliasExitCode;
             }
 
             if (isJson)
@@ -256,6 +278,10 @@ internal partial class RunCommand : Command, IShortDescription
                 {
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
                 }
+                if (unregisterOnExit && packageName != null)
+                {
+                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                }
                 return exitCode;
             }
 
@@ -263,29 +289,38 @@ internal partial class RunCommand : Command, IShortDescription
             // The process may have already exited by the time we get here (common for
             // fast-starting apps), in which case GetProcessById throws ArgumentException.
             // PIDs above int.MaxValue cannot be tracked via Process.GetProcessById.
+            int appExitCode;
             if (processId > int.MaxValue)
             {
-                return 0;
+                appExitCode = 0;
+            }
+            else
+            {
+                try
+                {
+                    using var process = Process.GetProcessById(unchecked((int)processId));
+                    await process.WaitForExitAsync(cancellationToken);
+                    appExitCode = process.ExitCode;
+                }
+                catch (ArgumentException)
+                {
+                    // Process already exited before we could attach — treat as success.
+                    appExitCode = 0;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ctrl+C — terminate all processes belonging to the package before exiting.
+                    appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                    appExitCode = -1;
+                }
             }
 
-            try
+            if (unregisterOnExit && packageName != null)
             {
-                using var process = Process.GetProcessById(unchecked((int)processId));
-                await process.WaitForExitAsync(cancellationToken);
-                
-                return process.ExitCode;
+                await UnregisterDevPackageAsync(packageName, cancellationToken);
             }
-            catch (ArgumentException)
-            {
-                // Process already exited before we could attach — treat as success.
-                return 0;
-            }
-            catch (OperationCanceledException)
-            {
-                // Ctrl+C — terminate all processes belonging to the package before exiting.
-                appLauncherService.TerminatePackageProcesses(packageFullName, processId);
-                return -1;
-            }
+
+            return appExitCode;
         }
 
         void PrintJson(string? aumid, uint? processId, string? errorMessage)
@@ -301,15 +336,32 @@ internal partial class RunCommand : Command, IShortDescription
             ansiConsole.WriteLine(json);
         }
 
-        private static FileInfo FindManifest(string directory)
+        private static FileInfo FindManifest(string directory) => ManifestHelper.FindManifest(directory);
+
+        /// <summary>
+        /// Unregisters dev-mode packages matching the given name.
+        /// Only removes packages where <c>IsDevelopmentMode == true</c>.
+        /// </summary>
+        private async Task UnregisterDevPackageAsync(string packageName, CancellationToken cancellationToken)
         {
-            var manifestPath = Path.Combine(directory, "appxmanifest.xml");
-            if (File.Exists(manifestPath))
+            try
             {
-                return new FileInfo(manifestPath);
+                var packages = packageRegistrationService.FindDevPackages(packageName);
+                foreach (var pkg in packages)
+                {
+                    if (!pkg.IsDevelopmentMode)
+                    {
+                        continue;
+                    }
+
+                    await packageRegistrationService.UnregisterAsync(pkg.Name, cancellationToken);
+                    logger.LogDebug("Unregistered package {FullName} on exit.", pkg.FullName);
+                }
             }
-            manifestPath = Path.Combine(directory, "Package.appxmanifest");
-            return new FileInfo(manifestPath);
+            catch (Exception ex)
+            {
+                logger.LogDebug("Failed to unregister package on exit: {Message}", ex.Message);
+            }
         }
 
         /// <summary>

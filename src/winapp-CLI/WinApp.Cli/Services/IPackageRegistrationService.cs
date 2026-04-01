@@ -49,4 +49,23 @@ internal interface IPackageRegistrationService
     /// <param name="packageName">The package identity name.</param>
     /// <returns>The installed version, or null if not found.</returns>
     string? GetInstalledVersion(string packageName);
+
+    /// <summary>
+    /// Finds all installed packages matching the given name that were registered in
+    /// development mode (sideloaded). Returns package metadata including the full name
+    /// and install location for safety checks.
+    /// </summary>
+    /// <param name="packageName">The package identity name to search for.</param>
+    /// <returns>A list of matching dev-mode packages.</returns>
+    List<DevPackageInfo> FindDevPackages(string packageName);
 }
+
+/// <summary>
+/// Information about a development-mode registered package.
+/// </summary>
+internal sealed record DevPackageInfo(
+    string FullName,
+    string Name,
+    string Version,
+    string? InstallLocation,
+    bool IsDevelopmentMode);

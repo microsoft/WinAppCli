@@ -60,6 +60,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
                 .UseCommandHandler<RunCommand, RunCommand.Handler>()
+                .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
