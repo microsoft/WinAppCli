@@ -144,12 +144,18 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     public string? GetInstalledVersion(string packageName)
     {
         var pm = new PackageManager();
-        var packages = pm.FindPackagesForUser(string.Empty, packageName, string.Empty);
+        // Use the single-parameter overload and filter manually.
+        // The (userId, name, publisher) overload rejects empty/null publisher
+        // because string.Empty marshals as null HSTRING in WinRT interop.
+        var allUserPackages = pm.FindPackagesForUser(string.Empty);
 
-        foreach (var pkg in packages)
+        foreach (var pkg in allUserPackages)
         {
-            var v = pkg.Id.Version;
-            return $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
+            if (string.Equals(pkg.Id.Name, packageName, StringComparison.OrdinalIgnoreCase))
+            {
+                var v = pkg.Id.Version;
+                return $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
+            }
         }
 
         return null;
