@@ -235,8 +235,13 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     }
 
     // Detect the file's indentation by looking at existing content
-    const indentMatch = result.match(/^( +)<Extensions>/m);
-    const extIndent = indentMatch ? indentMatch[1] : '      ';
+    let indentMatch = result.match(/^( +)<Extensions>/m);
+    if (!indentMatch) {
+        // No existing Extensions — derive from Application indent + 2 spaces
+        const appIndentMatch = result.match(/^( +)<Application\b/m);
+        indentMatch = appIndentMatch ? [, appIndentMatch[1] + '  '] as unknown as RegExpMatchArray : null;
+    }
+    const extIndent = indentMatch?.[1] ?? '      ';
     const childIndent = extIndent + '  ';
     // Preserve the template's relative indentation, just add the base indent
     const indentedExt = extensionXml.split('\n').map(line => childIndent + line).join('\n');
@@ -265,12 +270,17 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
             count++;
         }
 
-        const appIndent = extIndent.substring(0, extIndent.length - 2) || '    ';
-        const block = extIndent + '<Extensions>\n' +
+        // Detect application indent from the whitespace before </Application>
+        const lineStart = result.lastIndexOf('\n', closeIdx - 1);
+        const appIndent = lineStart >= 0 ? result.substring(lineStart + 1, closeIdx).match(/^(\s*)/)?.[1] ?? '    ' : '    ';
+        const extBlockIndent = appIndent + '  ';
+        // Trim trailing whitespace before </Application> since block includes its own indent
+        const before = result.substring(0, closeIdx).replace(/[ \t]+$/, '');
+        const block = '\n' + extBlockIndent + '<Extensions>\n' +
             indentedExt + '\n' +
-            extIndent + '</Extensions>\n' +
+            extBlockIndent + '</Extensions>\n' +
             appIndent;
-        return result.substring(0, closeIdx) + block + result.substring(closeIdx);
+        return before + block + result.substring(closeIdx);
     }
 }
 
@@ -295,6 +305,15 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
     }
     if (extIndex >= 0 && extIndex < extChildren.length) {
         removeElementClean(extEl, extChildren[extIndex]);
+    }
+
+    // If no extensions remain, remove the empty <Extensions> element
+    let remainingElements = 0;
+    for (let i = 0; i < extEl.childNodes.length; i++) {
+        if (extEl.childNodes[i].nodeType === 1) { remainingElements++; }
+    }
+    if (remainingElements === 0) {
+        removeElementClean(appEl, extEl);
     }
 
     return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
@@ -511,9 +530,20 @@ function applyPropertiesChange(root: Element, doc: Document, field: string, valu
     if (!tag) { return; }
 
     let child = getChildByLocalName(propsEl, tag);
+
+    // Only remove tags for optional fields when value is cleared
+    const optionalFields = ['Description'];
+    if (!value && child && optionalFields.includes(tag)) {
+        removeElementClean(propsEl, child);
+        return;
+    }
+
     if (!child) {
         child = doc.createElementNS(NS.default, tag);
+        // Add whitespace for proper indentation
+        propsEl.appendChild(doc.createTextNode('\n    '));
         propsEl.appendChild(child);
+        propsEl.appendChild(doc.createTextNode('\n  '));
     }
     // Replace text content
     while (child.firstChild) { child.removeChild(child.firstChild); }

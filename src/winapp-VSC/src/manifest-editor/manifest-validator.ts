@@ -41,6 +41,14 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         errors.push({ field: 'properties.displayName', message: 'Display name must be 256 characters or fewer.', severity: 'error' });
     }
 
+    if (!data.properties.publisherDisplayName) {
+        errors.push({ field: 'properties.publisherDisplayName', message: 'Publisher display name is required.', severity: 'error' });
+    }
+
+    if (!data.properties.logo) {
+        errors.push({ field: 'properties.logo', message: 'Store logo path is required.', severity: 'error' });
+    }
+
     if (data.properties.description && data.properties.description.length > 2048) {
         errors.push({ field: 'properties.description', message: 'Description must be 2048 characters or fewer.', severity: 'error' });
     }
@@ -71,7 +79,17 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         const app = data.applications[i];
         const prefix = `applications.${i}`;
 
-        if (app.visualElements.displayName && app.visualElements.displayName.length > 256) {
+        if (!app.id) {
+            errors.push({ field: `${prefix}.id`, message: 'Application Id is required.', severity: 'error' });
+        }
+
+        if (!app.executable) {
+            errors.push({ field: `${prefix}.executable`, message: 'Executable path is required.', severity: 'error' });
+        }
+
+        if (!app.visualElements.displayName) {
+            errors.push({ field: `${prefix}.visualElements.displayName`, message: 'Display name is required.', severity: 'error' });
+        } else if (app.visualElements.displayName.length > 256) {
             errors.push({ field: `${prefix}.visualElements.displayName`, message: 'Display name must be 256 characters or fewer.', severity: 'error' });
         }
 
