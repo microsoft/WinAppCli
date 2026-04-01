@@ -109,6 +109,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .mb-12 { margin-bottom: 12px; }
         .ext-field-readonly { opacity: 0.8; }
         .ext-field-computed { opacity: 0.6; font-style: italic; }
+        .browse-row { display: flex; gap: 8px; align-items: stretch; }
+        .browse-row input[type="text"] { flex: 1; }
+        .browse-row .btn { align-self: stretch; }
+        .browse-file-btn { white-space: nowrap; }
 
         /* ─── Form groups ──────────────────────────────────── */
         .form-group {
@@ -824,11 +828,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         const fields = parseExtensionFields(extXml);
                         let fieldsHtml = fields.map(f => {
                             let descHtml = f.description ? '<div class="description">' + escapeHtml(f.description) + '</div>' : '';
+                            const textContentAttr = f.isTextContent ? ' data-ext-text-content="true"' : '';
+                            if (!f.editable) {
+                                return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
+                                    '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />' +
+                                    descHtml + '</div>';
+                            }
+                            // Add a browse button for Registration fields
+                            const isBrowsable = f.isTextContent && f.label === 'Registration';
+                            const inputHtml = '<input type="text" value="' + escapeHtml(f.value) + '" data-ext-field="' + escapeHtml(f.label) + '" data-app-index="' + idx + '" data-ext-index="' + eidx + '"' + textContentAttr + ' />';
+                            if (isBrowsable) {
+                                return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
+                                    '<div class="browse-row">' + inputHtml +
+                                    '<button class="btn btn-sm browse-file-btn" data-app-index="' + idx + '" data-ext-index="' + eidx + '" data-ext-field="' + escapeHtml(f.label) + '">Browse...</button>' +
+                                    '</div>' + descHtml + '</div>';
+                            }
                             return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
-                            (f.editable
-                                ? '<input type="text" value="' + escapeHtml(f.value) + '" data-ext-field="' + escapeHtml(f.label) + '" data-app-index="' + idx + '" data-ext-index="' + eidx + '" />'
-                                : '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />'
-                            ) + descHtml + '</div>';
+                                inputHtml + descHtml + '</div>';
                         }).join('');
                         extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn btn-danger btn-sm remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '">Remove</button></div>' + fieldsHtml + '</div>';
                     });
@@ -979,9 +995,22 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 appIndex: parseInt(inp.getAttribute('data-app-index'), 10),
                                 extIndex: parseInt(inp.getAttribute('data-ext-index'), 10),
                                 fieldPath: inp.getAttribute('data-ext-field'),
-                                value: inp.value
+                                value: inp.value,
+                                isTextContent: inp.hasAttribute('data-ext-text-content')
                             });
                         }, 300);
+                    });
+                });
+
+                // Bind browse file buttons
+                card.querySelectorAll('.browse-file-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        vscode.postMessage({
+                            type: 'browseFile',
+                            appIndex: parseInt(btn.getAttribute('data-app-index'), 10),
+                            extIndex: parseInt(btn.getAttribute('data-ext-index'), 10),
+                            fieldPath: btn.getAttribute('data-ext-field')
+                        });
                     });
                 });
 
@@ -1131,7 +1160,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
             // Descriptions for known extension fields
             const fieldDescriptions = {
-                'McpServer': 'Registers this app as a Model Context Protocol (MCP) server.',
+                'AppExtension.Name': 'The extension contract name. Use "com.microsoft.windows.ai.mcpServer" to register as an MCP server.',
+                'AppExtension.Id': 'A unique identifier for this app extension within the package. String.',
+                'AppExtension.DisplayName': 'A user-friendly display name shown when discovering this extension.',
+                'AppExtension.PublicFolder': 'A folder in the package accessible to the host app. Typically "Assets" or "Public".',
+                'Registration': 'Path to the MCP server configuration JSON file relative to the PublicFolder.',
                 'ExeServer.Executable': 'Relative path to the COM server executable inside the package.',
                 'ExeServer.DisplayName': 'A friendly name for this COM server, shown in system tools.',
                 'Class.Id': 'The CLSID (GUID) that uniquely identifies this COM class. Format: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}.',
@@ -1152,7 +1185,29 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     const desc = fieldDescriptions[fieldKey] || '';
                     fields.push({ label: fieldKey, value: attr.value, editable: true, description: desc });
                 }
+                // Check for text-content elements (leaf elements with only text children)
+                let hasElementChildren = false;
+                let textContent = '';
                 const children = el.childNodes;
+                for (let j = 0; j < children.length; j++) {
+                    if (children[j].nodeType === 1) { hasElementChildren = true; }
+                    else if (children[j].nodeType === 3) { textContent += children[j].nodeValue || ''; }
+                }
+                if (!hasElementChildren && textContent.trim()) {
+                    const elName = el.localName || el.nodeName;
+                    const desc = fieldDescriptions[elName] || '';
+                    fields.push({ label: elName, value: textContent.trim(), editable: true, description: desc, isTextContent: true });
+                } else if (!hasElementChildren && el !== root) {
+                    // Empty leaf element (ignoring xmlns attrs) — show as editable blank field
+                    let nonXmlnsAttrs = 0;
+                    for (let k = 0; k < el.attributes.length; k++) {
+                        if (!el.attributes[k].name.startsWith('xmlns')) nonXmlnsAttrs++;
+                    }
+                    if (nonXmlnsAttrs > 0) return; // has real attributes, already handled above
+                    const elName = el.localName || el.nodeName;
+                    const desc = fieldDescriptions[elName] || '';
+                    fields.push({ label: elName, value: '', editable: true, description: desc, isTextContent: true });
+                }
                 for (let j = 0; j < children.length; j++) {
                     if (children[j].nodeType === 1) walk(children[j], depth + 1);
                 }

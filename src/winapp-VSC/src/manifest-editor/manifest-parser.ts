@@ -223,6 +223,7 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     const nsMap: Record<string, string> = {
         'com:': 'xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"',
         'uap:': 'xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"',
+        'uap3:': 'xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"',
         'uap5:': 'xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"',
         'desktop:': 'xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"',
     };
@@ -304,7 +305,7 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
  * fieldPath is "ElementName.AttributeName" as produced by parseExtensionFields in the webview.
  */
 export function updateExtensionField(
-    xmlText: string, appIndex: number, extIndex: number, fieldPath: string, value: string,
+    xmlText: string, appIndex: number, extIndex: number, fieldPath: string, value: string, isTextContent?: boolean,
 ): string {
     const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
     const root = doc.documentElement!;
@@ -326,27 +327,37 @@ export function updateExtensionField(
     if (extIndex < 0 || extIndex >= extChildren.length) { return xmlText; }
 
     const extRoot = extChildren[extIndex];
-    const dotIdx = fieldPath.indexOf('.');
-    if (dotIdx < 0) { return xmlText; }
-    const elemName = fieldPath.substring(0, dotIdx);
-    const attrName = fieldPath.substring(dotIdx + 1);
 
     // Find the matching element by walking the extension tree
-    function findElement(el: Element): Element | null {
-        if ((el.localName || el.nodeName) === elemName) { return el; }
+    function findElement(el: Element, name: string): Element | null {
+        if ((el.localName || el.nodeName) === name) { return el; }
         const children = el.childNodes;
         for (let i = 0; i < children.length; i++) {
             if (children[i].nodeType === 1) {
-                const found = findElement(children[i] as Element);
+                const found = findElement(children[i] as Element, name);
                 if (found) { return found; }
             }
         }
         return null;
     }
 
-    const targetEl = findElement(extRoot);
-    if (targetEl) {
-        targetEl.setAttribute(attrName, value);
+    if (isTextContent) {
+        // fieldPath is just the element name (e.g., "Registration")
+        const targetEl = findElement(extRoot, fieldPath);
+        if (targetEl) {
+            // Clear existing text content and set new value
+            while (targetEl.firstChild) { targetEl.removeChild(targetEl.firstChild); }
+            targetEl.appendChild(doc.createTextNode(value));
+        }
+    } else {
+        const dotIdx = fieldPath.indexOf('.');
+        if (dotIdx < 0) { return xmlText; }
+        const elemName = fieldPath.substring(0, dotIdx);
+        const attrName = fieldPath.substring(dotIdx + 1);
+        const targetEl = findElement(extRoot, elemName);
+        if (targetEl) {
+            targetEl.setAttribute(attrName, value);
+        }
     }
 
     return new XMLSerializer().serializeToString(doc);

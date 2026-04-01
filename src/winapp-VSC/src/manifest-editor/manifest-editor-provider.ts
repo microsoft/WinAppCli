@@ -119,8 +119,23 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         break;
 
                     case 'updateExtensionField':
-                        newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, message.value);
+                        newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, message.value, message.isTextContent);
                         break;
+
+                    case 'browseFile': {
+                        const filePath = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            title: 'Select JSON file',
+                            filters: { 'JSON': ['json'] },
+                            defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
+                        });
+                        if (!filePath || filePath.length === 0) { return; }
+                        const relativePath = path.relative(path.dirname(document.uri.fsPath), filePath[0].fsPath);
+                        newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, relativePath, true);
+                        break;
+                    }
 
                     case 'updateAssets': {
                         const imagePath = await vscode.window.showOpenDialog({

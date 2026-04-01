@@ -85,7 +85,8 @@ export type WebviewToExtensionMessage =
     | { type: 'removeApplication'; index: number }
     | { type: 'addExtension'; index: number; xml: string }
     | { type: 'removeExtension'; appIndex: number; extIndex: number }
-    | { type: 'updateExtensionField'; appIndex: number; extIndex: number; fieldPath: string; value: string }
+    | { type: 'updateExtensionField'; appIndex: number; extIndex: number; fieldPath: string; value: string; isTextContent?: boolean }
+    | { type: 'browseFile'; appIndex: number; extIndex: number; fieldPath: string }
     | { type: 'updateAssets' }
     | { type: 'ready' };
 
@@ -115,18 +116,13 @@ export const KNOWN_CAPABILITIES = {
 export const EXTENSION_TEMPLATES = [
     {
         label: 'MCP Server',
-        category: 'windows.mcpServer',
-        xml: '<uap:Extension Category="windows.mcpServer">\n  <uap:McpServer />\n</uap:Extension>',
+        category: 'windows.appExtension',
+        xml: '<uap3:Extension Category="windows.appExtension">\n  <uap3:AppExtension\n    Name=""\n    Id=""\n    DisplayName=""\n    PublicFolder="">\n    <uap3:Properties>\n      <Registration></Registration>\n    </uap3:Properties>\n  </uap3:AppExtension>\n</uap3:Extension>',
     },
     {
         label: 'COM Server',
         category: 'windows.comServer',
         xml: '<com:Extension Category="windows.comServer">\n  <com:ComServer>\n    <com:ExeServer Executable="" DisplayName="">\n      <com:Class Id="" />\n    </com:ExeServer>\n  </com:ComServer>\n</com:Extension>',
-    },
-    {
-        label: 'Protocol Handler',
-        category: 'windows.protocol',
-        xml: '<uap:Extension Category="windows.protocol">\n  <uap:Protocol Name="">\n    <uap:DisplayName></uap:DisplayName>\n  </uap:Protocol>\n</uap:Extension>',
     },
 ] as const;
 
