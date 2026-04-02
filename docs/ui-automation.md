@@ -65,17 +65,20 @@ Use `-a` for discovery, `-w` for stable targeting. When `-a` matches multiple wi
 
 ## Selectors
 
-Target elements by name, AutomationId, type, or text content:
+Target elements by semantic slug, control type, or plain-text matching against element
+name/AutomationId:
 
 | Selector | Meaning | Example |
 |---|---|---|
-| `btn-minimize-d1a0` | Semantic slug from inspect output | `winapp ui invoke btn-minimize-d1a0 -a myapp` |
-| `#Submit` | Name="Submit" (legacy, still works) | `winapp ui invoke "#Submit" -a myapp` |
-| `$SearchBox` | AutomationId="SearchBox" (legacy) | `winapp ui invoke '$SearchBox' -a myapp` |
+| `btn-minimize-d1a0` | Semantic slug from inspect output (preferred, exact element identity) | `winapp ui invoke btn-minimize-d1a0 -a myapp` |
 | `Button` | Type=Button | `winapp ui search Button -a myapp` |
-| `hello` | Text contains "hello" (case-insensitive) | `winapp ui search "hello" -a myapp` |
-| `#Image[1]` | Index disambiguation (legacy, 0-based) | `winapp ui invoke "#Image[1]" -a myapp` |
+| `Submit` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui invoke Submit -a myapp` |
+| `SearchBox` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui search SearchBox -a myapp` |
+| `hello` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui search "hello" -a myapp` |
 
+Legacy selector prefixes such as `#Submit`, `$SearchBox`, and index suffixes like `[1]`
+are not parsed specially by the current UIA selector implementation. Use semantic slugs
+from `inspect`/`search` output for precise targeting, or use plain text/type selectors.
 ### Semantic slugs in output
 
 The `inspect` and `search` commands output **semantic slugs** (e.g., `btn-minimize-d1a0`, `itm-samples-3f2c`, `btn-close-d1a2`). Format: `prefix-normalizedname-hash` where:

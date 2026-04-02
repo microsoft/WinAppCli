@@ -52,7 +52,11 @@ internal class UiListWindowsCommand : Command, IShortDescription
                         var byName = System.Diagnostics.Process.GetProcessesByName(app);
                         if (byName.Length > 0)
                         {
-                            windows = uiAutomation.FindWindowsByPid(byName[0].Id);
+                            windows = [];
+                            foreach (var process in byName)
+                            {
+                                windows.AddRange(uiAutomation.FindWindowsByPid(process.Id));
+                            }
                         }
                         else
                         {

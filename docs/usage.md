@@ -922,6 +922,5 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
-- `--mode uia` - Force UIA mode
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
