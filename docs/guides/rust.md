@@ -93,6 +93,7 @@ When prompted:
 - **Package name**: Press Enter to accept the default (rust-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
+- **Description**: Press Enter to accept the default or enter a description
 - **Setup SDKs**: Select "Do not setup SDKs"
 
 This command will:
