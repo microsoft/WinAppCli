@@ -961,7 +961,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.executable">
                             <label>Executable:</label>
-                            <input type="text" data-section="applications" data-field-name="executable" data-index="\${idx}" value="\${escapeHtml(app.executable)}" />
+                            <div class="browse-row">
+                                <input type="text" data-section="applications" data-field-name="executable" data-index="\${idx}" value="\${escapeHtml(app.executable)}" />
+                                <button class="btn btn-sm browse-exe-btn" data-section="applications" data-field-name="executable" data-index="\${idx}">Choose file</button>
+                            </div>
                             <div class="description">Relative path to the .exe file inside the package</div>
                             <div class="validation-msg"></div>
                         </div>
@@ -1127,6 +1130,20 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     btn.addEventListener('click', () => {
                         const msg = {
                             type: 'browseImage',
+                            section: btn.getAttribute('data-section'),
+                            field: btn.getAttribute('data-field-name'),
+                        };
+                        const bIdx = btn.getAttribute('data-index');
+                        if (bIdx !== null) { msg.index = parseInt(bIdx, 10); }
+                        vscode.postMessage(msg);
+                    });
+                });
+
+                // Bind exe browse buttons (dynamic in app cards)
+                card.querySelectorAll('.browse-exe-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const msg = {
+                            type: 'browseExe',
                             section: btn.getAttribute('data-section'),
                             field: btn.getAttribute('data-field-name'),
                         };

@@ -58,11 +58,15 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         const family = data.dependencies.targetDeviceFamilies[i];
         const prefix = `dependencies.targetDeviceFamily.${i}`;
 
-        if (family.minVersion && !WINDOWS_VERSION_REGEX.test(family.minVersion)) {
+        if (!family.minVersion) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion is required.', severity: 'error' });
+        } else if (!WINDOWS_VERSION_REGEX.test(family.minVersion)) {
             errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be in 10.0.XXXXX.0 format.', severity: 'error' });
         }
 
-        if (family.maxVersionTested && !WINDOWS_VERSION_REGEX.test(family.maxVersionTested)) {
+        if (!family.maxVersionTested) {
+            errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested is required.', severity: 'error' });
+        } else if (!WINDOWS_VERSION_REGEX.test(family.maxVersionTested)) {
             errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested must be in 10.0.XXXXX.0 format.', severity: 'error' });
         }
 
@@ -71,6 +75,24 @@ export function validateManifest(data: ManifestData): ValidationError[] {
             if (compareVersions(family.maxVersionTested, family.minVersion) < 0) {
                 errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested must be greater than or equal to MinVersion.', severity: 'error' });
             }
+        }
+    }
+
+    // Package dependencies validation
+    for (let i = 0; i < data.dependencies.packageDependencies.length; i++) {
+        const dep = data.dependencies.packageDependencies[i];
+        const prefix = `dependencies.packageDependency.${i}`;
+
+        if (!dep.name) {
+            errors.push({ field: `${prefix}.name`, message: 'Package dependency name is required.', severity: 'error' });
+        }
+
+        if (!dep.minVersion) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion is required.', severity: 'error' });
+        }
+
+        if (!dep.publisher) {
+            errors.push({ field: `${prefix}.publisher`, message: 'Publisher is required.', severity: 'error' });
         }
     }
 
@@ -85,6 +107,12 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
         if (!app.executable) {
             errors.push({ field: `${prefix}.executable`, message: 'Executable path is required.', severity: 'error' });
+        } else if (!app.executable.toLowerCase().endsWith('.exe')) {
+            errors.push({ field: `${prefix}.executable`, message: 'Executable must be an .exe file.', severity: 'error' });
+        }
+
+        if (!app.entryPoint) {
+            errors.push({ field: `${prefix}.entryPoint`, message: 'Entry point is required.', severity: 'error' });
         }
 
         if (!app.visualElements.displayName) {
