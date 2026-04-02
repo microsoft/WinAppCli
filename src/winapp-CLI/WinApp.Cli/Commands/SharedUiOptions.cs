@@ -59,7 +59,7 @@ internal static class SharedUiOptions
             Description = "Save output to file path (e.g., screenshot)"
         };
 
-        TimeoutOption = new Option<int>("--timeout", "-w")
+        TimeoutOption = new Option<int>("--timeout", "-t")
         {
             Description = "Timeout in milliseconds",
             DefaultValueFactory = _ => 5000

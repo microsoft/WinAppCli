@@ -107,15 +107,8 @@ Use plain text to search for elements — no special syntax needed:
 winapp ui search Minimize -a notepad        # finds elements with "Minimize" in Name or AutomationId
 winapp ui search Close -a notepad           # case-insensitive substring match
 winapp ui invoke Minimize -a notepad        # search + invoke in one step (disambiguates if needed)
-```
-
-### Plain text search
-
-Search for elements whose visible text contains a substring:
-
-```bash
-winapp ui search "Save" -a notepad        # find elements containing "Save"
-winapp ui search "error" -a myapp          # case-insensitive match
+winapp ui search "Save" -a notepad          # find elements containing "Save"
+winapp ui search "error" -a myapp           # case-insensitive match
 ```
 
 For non-invokable search results (e.g., a TextBlock inside a Button), the search

@@ -7,7 +7,8 @@ namespace WinApp.Cli.Services;
 
 /// <summary>
 /// Parses selector strings into structured expressions.
-/// Supports: e5 (ID), #Name, @AutomationId, Type, Type#Name, Type@AutomationId.
+/// Supports semantic slugs (e.g., btn-ok-a1b2) and plain-text substring queries
+/// matched against element Name and AutomationId.
 /// </summary>
 internal interface ISelectorService
 {

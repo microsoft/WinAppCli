@@ -100,7 +100,7 @@ internal static partial class SlugGenerator
                 hash = hash * 31 + id;
             }
 
-            return Math.Abs(hash).ToString("x8")[4..8];
+            return ((uint)hash).ToString("x8")[4..8];
         }
     }
 
@@ -124,7 +124,7 @@ internal static partial class SlugGenerator
                 hash = hash * 31 + data[i];
             }
 
-            return Math.Abs(hash).ToString("x8")[4..8];
+            return ((uint)hash).ToString("x8")[4..8];
         }
     }
 

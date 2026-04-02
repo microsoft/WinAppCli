@@ -6,8 +6,8 @@ using WinApp.Cli.Models;
 namespace WinApp.Cli.Services;
 
 /// <summary>
-/// Manages UI automation session persistence.
-/// Sessions are stored per-PID at ~/.winapp/sessions/ui-session-{pid}.json.
+/// Resolves a UI automation session for a target application.
+/// Locates the target process and window from an app identifier or HWND.
 /// </summary>
 internal interface IUiSessionService
 {

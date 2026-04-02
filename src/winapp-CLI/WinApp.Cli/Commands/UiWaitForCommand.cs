@@ -79,6 +79,12 @@ internal class UiWaitForCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (value != null && string.IsNullOrWhiteSpace(property))
+            {
+                logger.LogError("{Symbol} --value requires --property to specify which property to check.", UiSymbols.Error);
+                return 1;
+            }
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);

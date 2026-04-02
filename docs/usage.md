@@ -918,6 +918,7 @@ winapp ui [command] [options]
 - `scroll-into-view` - Scroll element visible
 - `wait-for` - Wait for element state
 - `list-windows` - List all windows for an app
+- `get-focused` - Report the currently focused element
 
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
