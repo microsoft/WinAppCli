@@ -252,7 +252,7 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
         const closeIdx = result.lastIndexOf(closeTag);
         if (closeIdx < 0) { return result; }
         // Trim trailing whitespace before the close tag so we don't double-indent
-        const beforeClose = result.substring(0, closeIdx).replace(/[ \t]+$/, '');
+        const beforeClose = result.substring(0, closeIdx).replace(/\s+$/, '');
         return beforeClose + '\n' +
             indentedExt + '\n' + extIndent +
             result.substring(closeIdx);
@@ -275,7 +275,7 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
         const appIndent = lineStart >= 0 ? result.substring(lineStart + 1, closeIdx).match(/^(\s*)/)?.[1] ?? '    ' : '    ';
         const extBlockIndent = appIndent + '  ';
         // Trim trailing whitespace before </Application> since block includes its own indent
-        const before = result.substring(0, closeIdx).replace(/[ \t]+$/, '');
+        const before = result.substring(0, closeIdx).replace(/\s+$/, '');
         const block = '\n' + extBlockIndent + '<Extensions>\n' +
             indentedExt + '\n' +
             extBlockIndent + '</Extensions>\n' +
@@ -540,10 +540,17 @@ function applyPropertiesChange(root: Element, doc: Document, field: string, valu
 
     if (!child) {
         child = doc.createElementNS(NS.default, tag);
-        // Add whitespace for proper indentation
-        propsEl.appendChild(doc.createTextNode('\n    '));
-        propsEl.appendChild(child);
-        propsEl.appendChild(doc.createTextNode('\n  '));
+        // Insert with proper indentation before the closing whitespace of Properties
+        const lastChild = propsEl.lastChild;
+        if (lastChild && lastChild.nodeType === 3 && /^\s*$/.test(lastChild.nodeValue || '')) {
+            // Insert newline + indent before the element, then element, before trailing whitespace
+            propsEl.insertBefore(doc.createTextNode('\n    '), lastChild);
+            propsEl.insertBefore(child, lastChild);
+        } else {
+            propsEl.appendChild(doc.createTextNode('\n    '));
+            propsEl.appendChild(child);
+            propsEl.appendChild(doc.createTextNode('\n  '));
+        }
     }
     // Replace text content
     while (child.firstChild) { child.removeChild(child.firstChild); }

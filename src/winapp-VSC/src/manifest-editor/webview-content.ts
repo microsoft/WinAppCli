@@ -898,12 +898,21 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
                 // Build extensions HTML
                 let extListHtml = '';
+                const requiredExtFields = new Set([
+                    'ExeServer.Executable', 'ExeServer.DisplayName', 'Class.Id',
+                    'AppExtension.Name', 'AppExtension.Id', 'AppExtension.DisplayName', 'AppExtension.PublicFolder',
+                    'Registration', 'ExecutionAlias.Alias'
+                ]);
                 if (app.extensions && app.extensions.length > 0) {
                     app.extensions.forEach((extXml, eidx) => {
                         const fields = parseExtensionFields(extXml);
                         let fieldsHtml = fields.map(f => {
                             let descHtml = f.description ? '<div class="description">' + escapeHtml(f.description) + '</div>' : '';
                             const textContentAttr = f.isTextContent ? ' data-ext-text-content="true"' : '';
+                            const isRequired = f.editable && requiredExtFields.has(f.label);
+                            const isEmpty = f.editable && !f.value;
+                            const errorClass = isRequired && isEmpty ? ' has-error' : '';
+                            const errorMsg = isRequired && isEmpty ? '<div class="validation-msg error">This field is required.</div>' : '<div class="validation-msg"></div>';
                             if (!f.editable) {
                                 return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
                                     '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />' +
@@ -913,13 +922,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             const isBrowsable = f.isTextContent && f.label === 'Registration';
                             const inputHtml = '<input type="text" value="' + escapeHtml(f.value) + '" data-ext-field="' + escapeHtml(f.label) + '" data-app-index="' + idx + '" data-ext-index="' + eidx + '"' + textContentAttr + ' />';
                             if (isBrowsable) {
-                                return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
+                                return '<div class="form-group' + errorClass + '"><label>' + escapeHtml(f.label) + ':</label>' +
                                     '<div class="browse-row">' + inputHtml +
                                     '<button class="btn btn-sm browse-file-btn" data-app-index="' + idx + '" data-ext-index="' + eidx + '" data-ext-field="' + escapeHtml(f.label) + '">Choose file</button>' +
-                                    '</div>' + descHtml + '</div>';
+                                    '</div>' + descHtml + errorMsg + '</div>';
                             }
-                            return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
-                                inputHtml + descHtml + '</div>';
+                            return '<div class="form-group' + errorClass + '"><label>' + escapeHtml(f.label) + ':</label>' +
+                                inputHtml + descHtml + errorMsg + '</div>';
                         }).join('');
                         extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn btn-danger btn-sm remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '">Remove</button></div>' + fieldsHtml + '</div>';
                     });
@@ -1072,6 +1081,21 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 card.querySelectorAll('input[data-ext-field]').forEach(inp => {
                     let extDebounce = null;
                     inp.addEventListener('input', () => {
+                        // Live validation for required extension fields
+                        const fg = inp.closest('.form-group');
+                        const fieldLabel = inp.getAttribute('data-ext-field');
+                        const isReq = requiredExtFields.has(fieldLabel);
+                        if (fg && isReq) {
+                            if (!inp.value) {
+                                fg.classList.add('has-error');
+                                const vm = fg.querySelector('.validation-msg');
+                                if (vm) { vm.className = 'validation-msg error'; vm.textContent = 'This field is required.'; }
+                            } else {
+                                fg.classList.remove('has-error');
+                                const vm = fg.querySelector('.validation-msg');
+                                if (vm) { vm.className = 'validation-msg'; vm.textContent = ''; }
+                            }
+                        }
                         clearTimeout(extDebounce);
                         extDebounce = setTimeout(() => {
                             vscode.postMessage({
@@ -1182,8 +1206,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
         // ─── Validation display ─────────────────────────────
         function showValidationErrors(errors) {
-            // Clear all existing errors
-            document.querySelectorAll('.form-group').forEach(fg => {
+            // Clear only manifest-level validation errors (those with data-field), not extension field errors
+            document.querySelectorAll('.form-group[data-field]').forEach(fg => {
                 fg.classList.remove('has-error');
                 const msg = fg.querySelector('.validation-msg');
                 if (msg) { msg.className = 'validation-msg'; msg.textContent = ''; }
