@@ -123,6 +123,8 @@ winapp create-debug-identity .\bin\Debug\myapp.exe
 | **Register identity, launch via AUMID** | `winapp run .\build\Debug --no-launch` | Launch with `start shell:AppsFolder\<AUMID>` or the execution alias (not the exe directly) |
 | **F5 startup debugging** | `winapp create-debug-identity .\bin\myapp.exe` | IDE controls process from first instruction; best for debugging activation/startup code |
 | **Capture debug output** | `winapp run .\build\Debug --debug-output` | Captures `OutputDebugString`; **blocks other debuggers** (one debugger per process) |
+| **Run and auto-clean** | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
+| **Clean up stale registration** | `winapp unregister` | Removes dev packages for the current project (auto-detects from manifest) |
 
 > **Using Visual Studio with a packaging project?** VS already handles identity, AUMID activation, and debugger attachment from F5. These workflows are most useful for VS Code, terminal-based development, and frameworks VS doesn't natively package (Rust, Flutter, Tauri, Electron, C++).
 
@@ -138,7 +140,7 @@ For full details including IDE setup examples, see the [Debugging Guide](https:/
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "appxmanifest.xml not found" | No manifest in current directory | Run `winapp init` or `winapp manifest generate`, or pass `--manifest` |
-| "Failed to add package identity" | Previous registration stale or cert untrusted | `Get-AppxPackage *yourapp* \| Remove-AppxPackage`, then `winapp cert install ./devcert.pfx` (admin) |
+| "Failed to add package identity" | Previous registration stale or cert untrusted | Run `winapp unregister` to remove stale packages, then `winapp cert install ./devcert.pfx` (admin) |
 | "Access denied" | Cert not trusted or permission issue | Run `winapp cert install ./devcert.pfx` as admin |
 | APIs still fail after registration | App launched before registration completed | Close app, re-run `create-debug-identity`, then relaunch |
 
