@@ -591,6 +591,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="section-header">Applications</div>
         <p class="page-description">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package.</p>
         <div id="applications-list"></div>
+        <button class="btn mt-12" id="add-application-btn">+ Add Application</button>
     </div>
 
     <!-- ───── Capabilities ───── -->
@@ -780,6 +781,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 type: 'addPackageDependency',
                 dependency: { name: '', minVersion: '', publisher: '' }
             });
+        });
+
+        // ─── Add application ────────────────────────────────
+        document.getElementById('add-application-btn').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addApplication' });
         });
 
         // ─── Populate form from data ────────────────────────
@@ -1024,6 +1030,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 card.innerHTML = \`
                     <div class="app-card-header">
                         <span class="app-card-title">Application: \${escapeHtml(app.id || '(unnamed)')}</span>
+                        \${apps.length > 1 ? '<button class="btn btn-danger btn-sm remove-app-btn" data-app-index="' + idx + '">Remove</button>' : ''}
                     </div>
                     <div class="app-sub-tabs">
                         <button class="app-sub-tab \${activeTab === 'info' ? 'active' : ''}" data-subtab="info" data-app-idx="\${idx}">Info</button>
@@ -1133,6 +1140,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         card.querySelector('.app-sub-content[data-subcontent="' + subtab + '"]').classList.add('active');
                     });
                 });
+
+                // Bind remove application button
+                const removeAppBtn = card.querySelector('.remove-app-btn');
+                if (removeAppBtn) {
+                    removeAppBtn.addEventListener('click', () => {
+                        vscode.postMessage({ type: 'removeApplication', index: parseInt(removeAppBtn.getAttribute('data-app-index'), 10) });
+                    });
+                }
 
                 // Bind field events
                 card.querySelectorAll('input[data-section], select[data-section]').forEach(inp => {

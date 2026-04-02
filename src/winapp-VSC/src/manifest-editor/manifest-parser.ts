@@ -206,6 +206,53 @@ export function removeTargetDeviceFamily(xmlText: string, index: number): string
 }
 
 /** Add an extension element to an application by index. */
+/** Add a new Application element to the manifest. */
+export function addApplication(xmlText: string): string {
+    let result = xmlText;
+
+    // Ensure uap namespace is declared
+    const uapDecl = 'xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"';
+    if (!result.includes(uapDecl)) {
+        result = result.replace(/<Package\b/, '<Package ' + uapDecl);
+    }
+
+    // Detect indentation from existing Application elements
+    const appIndentMatch = result.match(/^(\s+)<Application\b/m);
+    const appIndent = appIndentMatch ? appIndentMatch[1] : '    ';
+    const childIndent = appIndent + '  ';
+
+    const template =
+        appIndent + '<Application Id="" Executable="" EntryPoint="Windows.FullTrustApplication">\n' +
+        childIndent + '<uap:VisualElements DisplayName="" Description="" BackgroundColor="transparent" Square150x150Logo="" Square44x44Logo="" />\n' +
+        appIndent + '</Application>';
+
+    // Insert before closing </Applications>
+    const closeTag = '</Applications>';
+    const closeIdx = result.lastIndexOf(closeTag);
+    if (closeIdx < 0) { return result; }
+
+    // Detect indent of </Applications> from its line
+    const lineStart = result.lastIndexOf('\n', closeIdx - 1);
+    const appsIndent = lineStart >= 0 ? result.substring(lineStart + 1, closeIdx).match(/^(\s*)/)?.[1] ?? '  ' : '  ';
+
+    const before = result.substring(0, closeIdx).replace(/\s+$/, '');
+    return before + '\n' + template + '\n' + appsIndent + result.substring(closeIdx);
+}
+
+/** Remove an Application element from the manifest. */
+export function removeApplication(xmlText: string, index: number): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    const appsEl = getChildByLocalName(root, 'Applications');
+    if (!appsEl) { return xmlText; }
+
+    const apps = getChildrenByLocalName(appsEl, 'Application');
+    if (index < 0 || index >= apps.length || apps.length <= 1) { return xmlText; }
+
+    removeElementClean(appsEl, apps[index]);
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+}
+
 export function addExtension(xmlText: string, appIndex: number, extensionXml: string): string {
     const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
     const root = doc.documentElement!;

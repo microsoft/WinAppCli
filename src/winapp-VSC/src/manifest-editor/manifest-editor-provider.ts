@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addExtension, removeExtension, updateExtensionField } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -149,6 +149,14 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
                     case 'removeTargetDeviceFamily':
                         newText = removeTargetDeviceFamily(text, message.index);
+                        break;
+
+                    case 'addApplication':
+                        newText = addApplication(text);
+                        break;
+
+                    case 'removeApplication':
+                        newText = removeApplication(text, message.index);
                         break;
 
                     case 'addExtension':
