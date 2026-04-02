@@ -62,6 +62,6 @@
     "certificate",
     "distribution"
   ],
-  "agents": "agents/",
-  "skills": "skills/winapp-cli/"
+  "agents": ".github/plugin/agents/",
+  "skills": ".github/plugin/skills/winapp-cli/"
 }
