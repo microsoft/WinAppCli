@@ -90,6 +90,7 @@ export type WebviewToExtensionMessage =
     | { type: 'browseImage'; section: string; field: string; index?: number }
     | { type: 'browseExe'; section: string; field: string; index?: number }
     | { type: 'updateAssets' }
+    | { type: 'openAsText' }
     | { type: 'ready' };
 
 /** Known capabilities organized by category for the checklist UI. */

@@ -9,7 +9,7 @@ import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addExtension, removeExtension, updateExtensionField } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
-import { getWebviewContent } from './webview-content';
+import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from '../winapp-cli-utils';
 
@@ -43,27 +43,64 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
         const nonce = crypto.randomBytes(16).toString('hex');
         const manifestDirUri = webviewPanel.webview.asWebviewUri(manifestDir).toString();
-        webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
 
         // Track whether we're currently applying an edit to avoid feedback loops
         let isApplyingEdit = false;
+        let showingErrorView = false;
+
+        /** Try to parse — if it fails, show error view; if it succeeds, show/update editor. */
+        const tryParseOrShowError = (text: string): boolean => {
+            try {
+                parseManifest(text);
+                return true;
+            } catch (e) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                if (!showingErrorView) {
+                    showingErrorView = true;
+                    webviewPanel.webview.html = getParseErrorContent(webviewPanel.webview, nonce, errMsg);
+                }
+                return false;
+            }
+        };
+
+        /** Load the full editor view. */
+        const showEditorView = () => {
+            showingErrorView = false;
+            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
+            // The editor will send 'ready' once loaded, which triggers updateWebview
+        };
 
         /** Send the current document state to the webview. */
         const updateWebview = () => {
             const text = document.getText();
+            if (!tryParseOrShowError(text)) { return; }
+            if (showingErrorView) { showEditorView(); return; }
             try {
                 const data = parseManifest(text);
                 const errors = validateManifest(data);
                 webviewPanel.webview.postMessage({ type: 'update', data, errors });
             } catch {
-                // If parsing fails, the XML is malformed — don't crash the editor
+                // Should not happen since tryParseOrShowError succeeded
             }
         };
+
+        // Initial load: check if XML is valid
+        if (tryParseOrShowError(document.getText())) {
+            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
+        }
 
         // Listen for document changes (e.g., from the text editor or external edits)
         const changeDocSub = vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString() && !isApplyingEdit) {
-                updateWebview();
+                if (showingErrorView) {
+                    // Check if the XML is now valid — if so, switch to editor
+                    const text = document.getText();
+                    if (tryParseOrShowError(text)) {
+                        showEditorView();
+                    }
+                } else {
+                    updateWebview();
+                }
             }
         });
 
@@ -80,6 +117,10 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                 switch (message.type) {
                     case 'ready':
                         updateWebview();
+                        return;
+
+                    case 'openAsText':
+                        await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
                         return;
 
                     case 'fieldChanged':

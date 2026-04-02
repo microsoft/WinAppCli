@@ -6,6 +6,84 @@
 import * as vscode from 'vscode';
 import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS } from './manifest-types';
 
+/** Generates an error view shown when the manifest XML cannot be parsed. */
+export function getParseErrorContent(webview: vscode.Webview, nonce: string, errorMessage: string): string {
+    return /*html*/`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AppxManifest Editor</title>
+    <style nonce="${nonce}">
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%;
+            font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+            font-size: var(--vscode-font-size, 13px);
+            color: var(--vscode-editor-foreground);
+            background: var(--vscode-editor-background);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .error-container {
+            max-width: 520px; text-align: center; padding: 40px;
+        }
+        .error-icon {
+            font-size: 48px; margin-bottom: 16px;
+            color: var(--vscode-errorForeground, #f44747);
+        }
+        .error-title {
+            font-size: 18px; font-weight: 600; margin-bottom: 12px;
+        }
+        .error-message {
+            font-size: 13px; color: var(--vscode-descriptionForeground);
+            margin-bottom: 20px; line-height: 1.5;
+        }
+        .error-detail {
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px; background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border, transparent);
+            border-radius: 4px; padding: 10px; text-align: left;
+            white-space: pre-wrap; word-break: break-word;
+            color: var(--vscode-errorForeground, #f44747);
+            margin-bottom: 20px;
+        }
+        .btn {
+            padding: 6px 16px; font-size: 13px; font-family: inherit;
+            cursor: pointer; border: none; border-radius: 2px;
+            color: var(--vscode-button-foreground);
+            background: var(--vscode-button-background);
+        }
+        .btn:hover { background: var(--vscode-button-hoverBackground); }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">⚠</div>
+        <div class="error-title">Unable to Open Manifest Editor</div>
+        <div class="error-message">
+            The appxmanifest file contains XML syntax errors that prevent the visual editor from loading.
+            Please open the file in the text editor to fix the errors, then reopen this editor.
+        </div>
+        <div class="error-detail">${errorMessage.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <button class="btn" id="open-as-text">Open in Text Editor</button>
+    </div>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('open-as-text').addEventListener('click', () => {
+            vscode.postMessage({ type: 'openAsText' });
+        });
+        // Listen for retry signal when document is fixed externally
+        window.addEventListener('message', event => {
+            if (event.data.type === 'retryParse') {
+                vscode.postMessage({ type: 'ready' });
+            }
+        });
+    </script>
+</body>
+</html>`;
+}
+
 export function getWebviewContent(webview: vscode.Webview, nonce: string, manifestDirUri: string): string {
     const archOptionItems = ARCHITECTURE_OPTIONS.map(a => `<div class="custom-select-option" data-value="${a}">${a}</div>`).join('');
 
