@@ -93,7 +93,7 @@ When prompted:
 - **Package name**: Press Enter to accept the default (rust-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
-- **Entry point**: Press Enter to accept the default (rust-app.exe)
+- **Description**: Press Enter to accept the default or enter a description
 - **Setup SDKs**: Select "Do not setup SDKs"
 
 This command will:
@@ -151,24 +151,30 @@ To allow users to run your app from the command line after installation (like `r
 
 Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
 
-```diff
+```xml
 <Package
   ...
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-+ xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" 
   IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
+  <!-- Add the "xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" namespace -->
 
   ...
   <Applications>
     <Application ...>
       ...
-+     <Extensions>
-+       <uap5:Extension Category="windows.appExecutionAlias">
-+         <uap5:AppExecutionAlias>
-+           <uap5:ExecutionAlias Alias="rust-app.exe" />
-+         </uap5:AppExecutionAlias>
-+       </uap5:Extension>
-+     </Extensions>
+
+      <!-- Add this Extensions element in your manifest 
+           along with the xmlns:uap5 namespace above -->
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="rust-app.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+
+      ...
     </Application>
   </Applications>
 </Package>
