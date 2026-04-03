@@ -1057,6 +1057,85 @@ public class MsixServiceTests
 
     #endregion
 
+    #region ExpandManifestReferencedFiles tests
+
+    private static readonly byte[] StubPngBytes = [0x89, 0x50];
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_IncludesUnplatedVariants()
+    {
+        // Arrange — create asset directory with base icon + unplated variants
+        var assetsDir = Directory.CreateDirectory(Path.Combine(_tempDir.FullName, "Assets"));
+        var assetFiles = new[]
+        {
+            "Square44x44Logo.png",
+            "Square44x44Logo.targetsize-16.png",
+            "Square44x44Logo.targetsize-16_altform-unplated.png",
+            "Square44x44Logo.targetsize-24.png",
+            "Square44x44Logo.targetsize-24_altform-unplated.png",
+            "Square44x44Logo.targetsize-48.png",
+            "Square44x44Logo.targetsize-48_altform-unplated.png",
+            "Square44x44Logo.scale-200.png",
+        };
+        foreach (var file in assetFiles)
+        {
+            File.WriteAllBytes(Path.Combine(assetsDir.FullName, file), StubPngBytes);
+        }
+
+        // Act — invoke private static ExpandManifestReferencedFiles via reflection
+        var method = typeof(MsixService).GetMethod("ExpandManifestReferencedFiles", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.IsNotNull(method, "Could not locate ExpandManifestReferencedFiles via reflection");
+
+        var result = method.Invoke(null, [_tempDir, new[] { @"Assets\Square44x44Logo.png" }.AsEnumerable(), null, null])
+            as List<(FileInfo SourceFile, string RelativePath)>;
+        Assert.IsNotNull(result);
+
+        var relativePaths = result.Select(r => r.RelativePath).ToList();
+
+        // Assert — all variants including unplated must be discovered
+        Assert.IsTrue(relativePaths.Any(p => p.Contains("altform-unplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-unplated variants for PRI generation");
+        Assert.AreEqual(assetFiles.Length, relativePaths.Count,
+            "Should expand to all MRT variants in the directory");
+    }
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_IncludesLightUnplatedVariants()
+    {
+        // Arrange — create assets with lightunplated variants
+        var assetsDir = Directory.CreateDirectory(Path.Combine(_tempDir.FullName, "Assets"));
+        var assetFiles = new[]
+        {
+            "AppList.png",
+            "AppList.targetsize-32.png",
+            "AppList.targetsize-32_altform-unplated.png",
+            "AppList.targetsize-32_altform-lightunplated.png",
+        };
+        foreach (var file in assetFiles)
+        {
+            File.WriteAllBytes(Path.Combine(assetsDir.FullName, file), StubPngBytes);
+        }
+
+        // Act
+        var method = typeof(MsixService).GetMethod("ExpandManifestReferencedFiles", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.IsNotNull(method);
+
+        var result = method.Invoke(null, [_tempDir, new[] { @"Assets\AppList.png" }.AsEnumerable(), null, null])
+            as List<(FileInfo SourceFile, string RelativePath)>;
+        Assert.IsNotNull(result);
+
+        var relativePaths = result.Select(r => r.RelativePath).ToList();
+
+        // Assert
+        Assert.IsTrue(relativePaths.Any(p => p.Contains("altform-unplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-unplated variants");
+        Assert.IsTrue(relativePaths.Any(p => p.Contains("altform-lightunplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-lightunplated variants");
+        Assert.AreEqual(assetFiles.Length, relativePaths.Count);
+    }
+
+    #endregion
+
     #region InsertPackageLevelExtensions tests
 
     [TestMethod]

@@ -2087,15 +2087,49 @@ internal partial class MsixService(
         {
             var entryPointDirInfo = new DirectoryInfo(entryPointDir);
             var originalManifestDir = originalManifestPath.DirectoryName;
+            var expandedFiles = GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
 
             if (!string.Equals(originalManifestDir, entryPointDirInfo.FullName, StringComparison.OrdinalIgnoreCase))
             {
-                var expandedFiles = GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
                 CopyAllAssets(expandedFiles, entryPointDirInfo, taskContext);
             }
             else
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
+            }
+
+            // Step 7: Generate resources.pri in the ExternalLocation (entry point directory)
+            // so Windows can resolve unplated asset variants for taskbar icons.
+            // Sparse packages look for resources.pri in the ExternalLocation, not alongside the manifest.
+            if (expandedFiles.Count > 0)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Generating PRI for asset resource resolution...");
+                var priResourceCandidates = expandedFiles.Select(file => file.RelativePath);
+                await CreatePriConfigAsync(
+                    entryPointDirInfo,
+                    taskContext,
+                    precomputedPriResourceCandidates: priResourceCandidates,
+                    cancellationToken: cancellationToken);
+                await GeneratePriFileAsync(
+                    entryPointDirInfo,
+                    taskContext,
+                    outputPath: new FileInfo(Path.Combine(entryPointDirInfo.FullName, "resources.pri")),
+                    cancellationToken: cancellationToken);
+
+                // Clean up intermediate PRI files from the entry point directory
+                var priConfigFile = Path.Combine(entryPointDirInfo.FullName, "priconfig.xml");
+                var priResfilesFile = Path.Combine(entryPointDirInfo.FullName, "pri.resfiles");
+                if (File.Exists(priConfigFile))
+                {
+                    File.Delete(priConfigFile);
+                }
+
+                if (File.Exists(priResfilesFile))
+                {
+                    File.Delete(priResfilesFile);
+                }
+
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Generated resources.pri in entry point directory");
             }
         }
 
