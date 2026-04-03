@@ -76,7 +76,13 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
                 }
                 catch (Exception error)
                 {
-                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.GetBaseException().Message}");
+                    var baseEx = error.GetBaseException();
+                    var message = string.IsNullOrWhiteSpace(baseEx.Message) ? error.Message : baseEx.Message;
+                    if (baseEx.HResult != 0)
+                    {
+                        message += $" (0x{baseEx.HResult:X8})";
+                    }
+                    return (1, $"{UiSymbols.Error} Failed to add package identity: {message}");
                 }
 
                 return (0, "Package identity created successfully.");

@@ -19,8 +19,9 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: metrics-baseline
-        key: build-metrics-baseline-no-exact-match
-        restore-keys: build-metrics-main-
+        key: build-metrics-baseline
+        restore-keys: |
+          build-metrics-main-
 
     # On main, save current metrics as the baseline for future PRs
     - name: Save metrics baseline
@@ -33,12 +34,27 @@ runs:
         Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
         Copy-Item "${{ inputs.artifacts-path }}/coverage-summary.json" "metrics-baseline/coverage.json" -ErrorAction SilentlyContinue
 
+    # GitHub Actions caches are immutable — delete the old entry so we can save an updated one
+    - name: Delete old metrics baseline cache
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        $result = gh cache delete "build-metrics-baseline" --repo $env:GITHUB_REPOSITORY 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "Old baseline cache deleted"
+        } else {
+          Write-Host "No existing baseline cache to delete (expected on first run)"
+        }
+        exit 0
+
     - name: Cache metrics baseline
       if: github.ref == 'refs/heads/main'
       uses: actions/cache/save@v4
       with:
         path: metrics-baseline
-        key: build-metrics-main-${{ github.sha }}
+        key: build-metrics-baseline
 
     # On PRs, compare against baseline and post a comment
     - name: Post PR metrics comment
