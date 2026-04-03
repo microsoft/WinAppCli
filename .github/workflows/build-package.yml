@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write  # Required for creating releases
   pull-requests: write  # Required for binary size report comments
+  actions: write  # Required for deleting old metrics baseline cache
 
 jobs:
   # Fast docs validation - runs in parallel with the main build to fail PRs early on doc drift
