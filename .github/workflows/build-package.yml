@@ -179,6 +179,11 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v5
+
+    - name: Enable Windows Developer Mode
+      run: |
+        # Registry key to enable Developer Mode
+        reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v "AllowDevelopmentWithoutDevLicense" /d 1 /f
     
     - name: Setup Node.js
       uses: actions/setup-node@v5
