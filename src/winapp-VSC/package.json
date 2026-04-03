@@ -1,0 +1,211 @@
+{
+  "name": "winapp",
+  "displayName": "WinApp",
+  "description": "WinApp extension for Visual Studio Code to assist in building, debugging, and packaging Windows applications using the WinAppCLI.",
+  "icon": "images/icon.png",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/WinAppCli.git"
+  },
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onDebug",
+    "onCommand:winapp.init",
+    "onCommand:winapp.restore",
+    "onCommand:winapp.update",
+    "onCommand:winapp.pack",
+    "onCommand:winapp.run",
+    "onCommand:winapp.createDebugIdentity",
+    "onCommand:winapp.manifestGenerate",
+    "onCommand:winapp.manifestUpdateAssets",
+    "onCommand:winapp.certGenerate",
+    "onCommand:winapp.certInstall",
+    "onCommand:winapp.sign",
+    "onCommand:winapp.tool",
+    "onCommand:winapp.getWinappPath"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "winapp.init",
+        "title": "WinApp: Initialize Project",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.restore",
+        "title": "WinApp: Restore Packages",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.update",
+        "title": "WinApp: Update Packages",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.pack",
+        "title": "WinApp: Create MSIX Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.run",
+        "title": "WinApp: Run Application",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.createDebugIdentity",
+        "title": "WinApp: Create Debug Identity",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestGenerate",
+        "title": "WinApp: Generate Manifest",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestUpdateAssets",
+        "title": "WinApp: Update Manifest Assets",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certGenerate",
+        "title": "WinApp: Generate Certificate",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certInstall",
+        "title": "WinApp: Install Certificate",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.sign",
+        "title": "WinApp: Sign Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.tool",
+        "title": "WinApp: Run SDK Tool",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.getWinappPath",
+        "title": "WinApp: Get WinApp Path",
+        "category": "WinApp"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "winapp",
+        "label": "WinApp",
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "debuggerType": {
+                "type": "string",
+                "description": "The underlying debugger to use (e.g., 'coreclr', 'cppvsdbg')",
+                "default": "coreclr"
+              },
+              "manifest": {
+                "type": "string",
+                "description": "Explicit path to AppxManifest.xml. When set, 'buildOutputManifest' is ignored. Use this when the manifest is at the workspace root or in a fixed location."
+              },
+              "inputFolder": {
+                "type": "string",
+                "description": "Directory containing the app binaries passed to 'winapp run'. Defaults to the workspace root. Set this when the manifest is not co-located with the build output (e.g. manifest at root, binaries in bin/Debug/)."
+              },
+              "workingDirectory": {
+                "type": "string",
+                "description": "Working directory for the application"
+              },
+              "buildOutputManifest": {
+                "type": "string",
+                "description": "Glob pattern to locate AppxManifest.xml in build output. Ignored when 'manifest' is set. Matches at any depth including the workspace root.",
+                "default": "**/AppxManifest.xml"
+              },
+              "args": {
+                "type": "string",
+                "description": "Command-line arguments to pass to the application"
+              },
+              "outputAppxDirectory": {
+                "type": "string",
+                "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the manifest's directory will be used."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "winapp",
+            "request": "launch",
+            "name": "WinApp: Launch and Attach"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "WinApp: Launch and Attach",
+            "description": "Launch a WinApp package and attach the debugger",
+            "body": {
+              "type": "winapp",
+              "request": "launch",
+              "name": "WinApp: Launch and Attach",
+              "debuggerType": "coreclr"
+            }
+          },
+          {
+            "label": "WinApp: Launch and Attach (manifest at root)",
+            "description": "Launch a WinApp package where AppxManifest.xml is at the workspace root and binaries are in a build output folder",
+            "body": {
+              "type": "winapp",
+              "request": "launch",
+              "name": "WinApp: Launch and Attach",
+              "debuggerType": "coreclr",
+              "manifest": "${workspaceFolder}/AppxManifest.xml",
+              "inputFolder": "${workspaceFolder}/bin/Debug"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "node esbuild.mjs --production",
+    "compile-tsc": "tsc -p ./",
+    "pretest": "npm run compile-tsc && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "clean": "node -e \"require('fs').rmSync('bin', {recursive: true, force: true}); require('fs').rmSync('out', {recursive: true, force: true}); require('fs').rmSync('dist', {recursive: true, force: true});\"",
+    "build-cli": "npm run build-cli-x64 && npm run build-cli-arm64",
+    "build-cli-x64": "dotnet publish ../winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-x64 --self-contained -o bin/win-x64",
+    "build-cli-arm64": "dotnet publish ../winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-arm64 --self-contained -o bin/win-arm64",
+    "build-copy-only": "npm run copy-cli-x64 && npm run copy-cli-arm64",
+    "copy-cli-x64": "node -e \"const fs = require('fs'); const src = '../winapp-CLI/WinApp.Cli/bin/Release/net10.0-windows/win-x64/publish'; const dest = 'bin/win-x64'; fs.mkdirSync(dest, {recursive: true}); fs.cpSync(src, dest, {recursive: true});\"",
+    "copy-cli-arm64": "node -e \"const fs = require('fs'); const src = '../winapp-CLI/WinApp.Cli/bin/Release/net10.0-windows/win-arm64/publish'; const dest = 'bin/win-arm64'; fs.mkdirSync(dest, {recursive: true}); fs.cpSync(src, dest, {recursive: true});\""
+  },
+  "dependencies": {
+    "glob": "^13.0.6"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.109.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.3",
+    "eslint": "^10.0.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1",
+    "diff": "^8.0.3"
+  }
+}
