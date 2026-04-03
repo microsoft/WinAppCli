@@ -35,6 +35,14 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken,
     ): Promise<void> {
+        // When opened from Source Control diff or other non-file contexts,
+        // fall back to the default text editor so the user sees a proper diff.
+        if (document.uri.scheme !== 'file') {
+            webviewPanel.webview.html = '';
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+            return;
+        }
+
         const manifestDir = vscode.Uri.file(path.dirname(document.uri.fsPath));
         webviewPanel.webview.options = {
             enableScripts: true,

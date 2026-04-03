@@ -133,6 +133,30 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             top: 0;
             z-index: 10;
         }
+        .tab-bar-spacer { flex: 1; }
+        .view-xml-btn {
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            font-size: var(--vscode-font-size, 13px);
+            font-family: inherit;
+            opacity: 0.7;
+            transition: opacity 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-right: 8px;
+        }
+        .view-xml-btn:hover { opacity: 1; }
+        .view-xml-btn:focus-visible {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+        .view-xml-icon {
+            font-size: 14px;
+        }
         .tab-btn {
             padding: 8px 16px;
             border: none;
@@ -178,6 +202,38 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
             margin-bottom: 36px;
+        }
+
+        /* ─── Info banner (toast-style, bottom-right) ─────── */
+        .info-banner {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            z-index: 100;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px 14px;
+            max-width: 340px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--vscode-editorInfo-foreground, var(--vscode-foreground));
+            background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+            border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent));
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .info-banner-icon {
+            flex-shrink: 0;
+            font-size: 14px;
+        }
+        .info-banner-link {
+            color: var(--vscode-textLink-foreground, #3794ff);
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .info-banner-link:hover {
+            color: var(--vscode-textLink-activeForeground, #3794ff);
         }
 
         /* ─── Utility classes (avoid inline styles blocked by CSP) ─── */
@@ -491,6 +547,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <button class="tab-btn" role="tab" data-tab="dependencies" aria-selected="false">Dependencies</button>
         <button class="tab-btn" role="tab" data-tab="applications" aria-selected="false">Applications</button>
         <button class="tab-btn" role="tab" data-tab="capabilities" aria-selected="false">Capabilities</button>
+        <div class="tab-bar-spacer"></div>
+        <button class="view-xml-btn" id="view-xml-btn" title="Open in text editor"><span class="view-xml-icon">{ }</span> View XML</button>
     </div>
 
     <!-- ───── Identity ───── -->
@@ -630,6 +688,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         </div>
     </div>
 
+    <div class="info-banner">
+        <span class="info-banner-icon">ℹ</span>
+        <span>This editor does not support all appxmanifest customizations. For advanced scenarios, <a class="info-banner-link" id="open-xml-link">open the XML source</a>.</span>
+    </div>
+
     <script nonce="${nonce}">
     (function() {
         const vscode = acquireVsCodeApi();
@@ -652,6 +715,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 const tab = btn.getAttribute('data-tab');
                 document.getElementById('tab-' + tab).classList.add('active');
             });
+        });
+
+        // ─── View XML / Open as text ────────────────────────
+        document.getElementById('view-xml-btn').addEventListener('click', () => {
+            vscode.postMessage({ type: 'openAsText' });
+        });
+        document.getElementById('open-xml-link').addEventListener('click', () => {
+            vscode.postMessage({ type: 'openAsText' });
         });
 
         // ─── Field change handler ───────────────────────────

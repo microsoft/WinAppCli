@@ -111,7 +111,7 @@
             "filenamePattern": "**/*.appxmanifest"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "debuggers": [
