@@ -1,7 +1,7 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.2.2
+version: 0.2.1
 ---
 ## When to use
 
@@ -23,8 +23,6 @@ npm install --save-dev @microsoft/winappcli
 ```
 
 You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
-
-> **Already have a `Package.appxmanifest`?** .NET projects that already have a packaging manifest (e.g., WinUI 3 apps or projects with an existing MSIX packaging setup) likely **don't need `winapp init`**. Ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>`). WinUI 3 apps created from Visual Studio templates are typically already fully configured — you can go straight to building and using `winapp run` or `winapp package`.
 
 ## Key concepts
 
@@ -94,31 +92,9 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
-
-# Launch and capture OutputDebugString messages and first-chance exceptions
-# Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
-winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
-
-#### Choosing between `run` and `create-debug-identity`
-
-| | `winapp run` | `create-debug-identity` |
-|---|---|---|
-| **Registers** | Full loose layout package (entire folder) | Sparse package (single exe) |
-| **App launch** | Winapp launches via AUMID or alias | You launch the exe yourself |
-| **Simulates MSIX** | Yes — closest to production | No — identity only |
-| **Files** | Copied to AppX layout dir | Exe stays in place |
-| **Best for** | Most frameworks (.NET, C++, Rust, Flutter, Tauri) | Electron, or F5 startup debugging |
-
-**Default to `winapp run`.** Use `create-debug-identity` when you need your IDE to launch and debug the exe directly (startup debugging), or when the exe is separate from your source (Electron).
-
-For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
-
-> **`--debug-output` caveat:** Captures `OutputDebugString` but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger.
-
-For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
 ## Recommended workflow
 
@@ -214,10 +190,8 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--args` | Command-line arguments to pass to the application | (none) |
-| `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
 | `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
-| `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
 | `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |

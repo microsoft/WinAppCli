@@ -223,19 +223,18 @@ try
         
         Write-Host "[COPY] Creating $Architecture package layout..." -ForegroundColor Blue
         
-        # Copy exe and native runtime dependencies (e.g., libSkiaSharp.dll), exclude PDBs
-        Write-Host "  - Copying binaries from $SourceBinPath..." -ForegroundColor Gray
+        # Copy only the exe from the source
+        Write-Host "  - Copying winapp.exe from $SourceBinPath..." -ForegroundColor Gray
         $SourceExe = Join-Path $SourceBinPath "winapp.exe"
+        $TargetExe = Join-Path $LayoutPath "winapp.exe"
         
         if (-not (Test-Path $SourceExe)) {
             Write-Error "winapp.exe not found at $SourceExe"
             return
         }
         
-        Get-ChildItem -Path $SourceBinPath -File | Where-Object { $_.Extension -ne '.pdb' } | ForEach-Object {
-            Copy-Item $_.FullName $LayoutPath -Force
-            Write-Host "  - Copied $($_.Name)" -ForegroundColor Gray
-        }
+        Copy-Item $SourceExe $TargetExe -Force
+        Write-Host "  - Copied winapp.exe" -ForegroundColor Gray
         
         # Copy Assets folder
         $TargetAssetsPath = Join-Path $LayoutPath "Assets"

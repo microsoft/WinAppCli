@@ -171,10 +171,7 @@ npx winapp --help
 - [`package`](./docs/usage.md#package) - Create MSIX packages from directories
 - [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
-- [`unregister`](./docs/usage.md#unregister) - Remove sideloaded dev packages registered by `run` or `create-debug-identity`
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
-
-See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp run` and `create-debug-identity`, IDE setup, and debugging scenarios.
 
 **Certificates & Signing:**
 
@@ -241,7 +238,7 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm, and NuGet, from the repo root
+# Build the CLI and package for npm, VS Code extension, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 

@@ -153,19 +153,24 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 ## 5. Debug with Identity
 
-To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp run`. This registers a loose layout package (just like a real MSIX install) and launches the app in one step.
+To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp create-debug-identity`. This applies a temporary identity to your executable using the manifest we just generated.
 
 1.  **Build the executable**:
     ```powershell
     cmake --build build --config Debug
     ```
 
-2.  **Run with identity**:
+2.  **Apply Debug Identity**:
+    Run the following command on your built executable:
     ```powershell
-    winapp run .\build\Debug --with-alias
+    winapp create-debug-identity .\build\Debug\cpp-app.exe
     ```
 
-The `--with-alias` flag launches the app via its execution alias so console output stays in the current terminal. This requires a `uap5:ExecutionAlias` in the manifest — you can add one with `winapp manifest add-alias`.
+3.  **Run the Executable**:
+    Run the executable directly:
+    ```powershell
+    .\build\Debug\cpp-app.exe
+    ```
 
 You should now see output similar to:
 ```
@@ -173,16 +178,23 @@ Package Family Name: cpp-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
 
-### Alternative: Sparse package identity
+### Automating Debug Identity (Optional)
 
-If you need sparse package behavior specifically (identity without copying files), you can use `create-debug-identity` instead:
+To streamline your development workflow, you can configure CMake to automatically apply debug identity after building in Debug configuration. Add this to your `CMakeLists.txt`:
 
-```powershell
-winapp create-debug-identity .\build\Debug\cpp-app.exe
-.\build\Debug\cpp-app.exe
+```cmake
+# Add a post-build command to apply debug identity in Debug builds
+add_custom_command(TARGET cpp-app POST_BUILD
+    COMMAND $<$<CONFIG:Debug>:winapp>
+            $<$<CONFIG:Debug>:create-debug-identity>
+            $<$<CONFIG:Debug>:$<TARGET_FILE:cpp-app>>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND_EXPAND_LISTS
+    COMMENT "Applying debug identity to executable..."
+)
 ```
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+With this configuration, simply running `cmake --build build --config Debug` will automatically apply the debug identity, and you can immediately run the executable with identity without the manual step.
 
 ## 6. Using Windows App SDK (Optional)
 
@@ -209,6 +221,15 @@ target_link_libraries(cpp-app PRIVATE WindowsApp.lib OneCoreUap.lib)
 # Add Windows App SDK include directory
 target_include_directories(cpp-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.winapp/include)
 
+# Add post-build command to apply debug identity in Debug builds
+add_custom_command(TARGET cpp-app POST_BUILD
+    COMMAND $<$<CONFIG:Debug>:winapp>
+            $<$<CONFIG:Debug>:create-debug-identity>
+            $<$<CONFIG:Debug>:$<TARGET_FILE:cpp-app>>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND_EXPAND_LISTS
+    COMMENT "Applying debug identity to executable..."
+)
 ```
 
 ### Update main.cpp
@@ -258,7 +279,7 @@ Rebuild the application with the Windows App SDK headers:
 
 ```powershell
 cmake --build build --config Debug
-winapp run .\build\Debug --with-alias
+.\build\Debug\cpp-app.exe
 ```
 
 You should now see output like:
@@ -369,6 +390,15 @@ target_link_libraries(cpp-app PRIVATE WindowsApp.lib OneCoreUap.lib)
 # Add Windows App SDK include directory
 target_include_directories(cpp-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.winapp/include)
 
+# Add a post-build command to apply debug identity in Debug builds
+add_custom_command(TARGET cpp-app POST_BUILD
+    COMMAND $<$<CONFIG:Debug>:winapp>
+            $<$<CONFIG:Debug>:create-debug-identity>
+            $<$<CONFIG:Debug>:$<TARGET_FILE:cpp-app>>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND_EXPAND_LISTS
+    COMMENT "Applying debug identity to executable..."
+)
 ```
 
 With this setup:

@@ -1,0 +1,23 @@
+<UserControl
+    x:Class="winapp_GUI.Controls.CertificatePickerControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:winapp_GUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    d:DesignHeight="60" d:DesignWidth="400">
+    <StackPanel Orientation="Vertical" Margin="0,16,0,16" HorizontalAlignment="Stretch">
+        <TextBlock x:Name="CertLabel" Text="Certificate File (.pfx, .cer, etc: optional - if no certificate provided one will be created by default)" Margin="0,0,0,4"/>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="CertPathBox" Grid.Column="0" PlaceholderText="Select certificate file..." IsReadOnly="True"/>
+            <Button x:Name="CertBrowseButton" Grid.Column="1" Content="Browse..." Margin="8,0,8,0"/>
+            <TextBox x:Name="CertPasswordBox" Grid.Column="2" PlaceholderText="password" Text="password" HorizontalAlignment="Stretch"/>
+        </Grid>
+    </StackPanel>
+</UserControl>
