@@ -28,6 +28,8 @@ internal partial class DotNetService : IDotNetService
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
+    internal const string WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE = "Microsoft.Windows.SDK.BuildTools.WinApp";
+
     [GeneratedRegex(@"^net(\d+\.\d+)-windows([\d.]+)$", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsTfmRegex();
 
@@ -42,6 +44,12 @@ internal partial class DotNetService : IDotNetService
 
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
+
+    [GeneratedRegex(@"<RuntimeIdentifier[\s>]", RegexOptions.IgnoreCase)]
+    private static partial Regex RuntimeIdentifierElementRegex();
+
+    [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex RuntimeIdentifiersElementRegex();
 
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
@@ -225,9 +233,109 @@ internal partial class DotNetService : IDotNetService
         File.WriteAllText(csprojPath.FullName, content);
     }
 
-    public async Task AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string version, CancellationToken cancellationToken = default)
+    public async Task<bool> EnsureRuntimeIdentifierAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
     {
-        var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\" --version \"{version}\"";
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+
+        // Don't modify if the project already defines RuntimeIdentifier (singular)
+        if (RuntimeIdentifierElementRegex().IsMatch(content))
+        {
+            return false;
+        }
+
+        // Insert a RuntimeIdentifier with a Condition so it only applies when not already set
+        // (e.g. via command-line -r or Directory.Build.props)
+        const string runtimeIdentifierElement =
+            "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
+
+        // Insert into the first PropertyGroup:
+        // 1. After <RuntimeIdentifiers> if present (keep RID properties together)
+        // 2. After <TargetFramework> if present
+        // 3. At start of first PropertyGroup as last resort
+        var ridsMatch = RuntimeIdentifiersElementRegex().Match(content);
+        if (ridsMatch.Success)
+        {
+            // Insert right after the </RuntimeIdentifiers> element
+            var insertPos = ridsMatch.Index + ridsMatch.Length;
+            content = content[..insertPos]
+                + Environment.NewLine + "    " + runtimeIdentifierElement
+                + content[insertPos..];
+        }
+        else
+        {
+            var tfmMatch = TargetFrameworkElementRegex().Match(content);
+            if (tfmMatch.Success)
+            {
+                // Insert after the TargetFramework line
+                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                content = content[..insertPos]
+                    + Environment.NewLine + "    " + runtimeIdentifierElement
+                    + content[insertPos..];
+            }
+            else
+            {
+                // No TargetFramework found; insert at start of first PropertyGroup
+                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+                if (propGroupIdx >= 0)
+                {
+                    var closeTag = content.IndexOf('>', propGroupIdx);
+                    if (closeTag >= 0)
+                    {
+                        var insertPos = closeTag + 1;
+                        content = content[..insertPos]
+                            + Environment.NewLine + "    " + runtimeIdentifierElement
+                            + content[insertPos..];
+                    }
+                }
+            }
+        }
+
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    [GeneratedRegex(@"<PublishProfile>([^<]*\$\(Platform\)[^<]*\.pubxml)</PublishProfile>", RegexOptions.Singleline)]
+    private static partial Regex PublishProfileElementRegex();
+
+    public async Task<bool> UpdatePublishProfileAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = PublishProfileElementRegex().Match(content);
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var profileValue = match.Groups[1].Value;
+        var replacement = $"<PublishProfile Condition=\"Exists('Properties\\PublishProfiles\\{profileValue}')\">{profileValue}</PublishProfile>";
+        content = content[..match.Index] + replacement + content[(match.Index + match.Length)..];
+
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    public async Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
+    {
+        var args = $"add \"{csprojPath.FullName}\" package \"{packageName}\"";
+        if (version != null)
+        {
+            args += $" --version \"{version}\"";
+        }
+        else
+        {
+            args += " --prerelease";
+        }
         var (exitCode, output, error) = await RunDotnetCommandAsync(csprojPath.Directory!, args, cancellationToken);
 
         if (exitCode != 0)
@@ -236,6 +344,18 @@ internal partial class DotNetService : IDotNetService
             throw new InvalidOperationException(
                 $"Failed to add package {packageName} {version} (exit code {exitCode}): {message}");
         }
+
+        // NOTE: This regex is tightly coupled to the current "dotnet add package" CLI output format.
+        // If the dotnet team changes that message, this match may fail and we will fall back to
+        // returning the requested version (if provided) or "latest" below.
+        var pattern = $@"PackageReference for package '{Regex.Escape(packageName)}' version '([\d\.\-a-zA-Z]+)' (?:added to|updated in) file";
+        var match = Regex.Match(output, pattern);
+        if (match.Success && match.Groups.Count > 1)
+        {
+            return match.Groups[1].Value;
+        }
+
+        return version ?? "latest";
     }
 
     /// <inheritdoc />
@@ -285,15 +405,29 @@ internal partial class DotNetService : IDotNetService
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }
 
+    public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
+    {
+        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
+        if (packageList?.Projects is null)
+        {
+            return false;
+        }
+
+        return packageList.Projects
+            .SelectMany(p => p.Frameworks ?? [])
+            .SelectMany(f => f.TopLevelPackages ?? [])
+            .Any(pkg => string.Equals(pkg.Id, packageName, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <inheritdoc />
-    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, CancellationToken cancellationToken = default)
+    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
     {
         if (!csprojFile.Exists)
         {
             return null;
         }
 
-        var args = $"list \"{csprojFile.FullName}\" package --include-transitive --format json";
+        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))

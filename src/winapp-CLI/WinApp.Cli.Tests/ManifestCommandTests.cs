@@ -476,15 +476,6 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.Contains("Executable=\"MyApp.bat\"", debugManifestContent, "Debug manifest should contain the resolved executable name");
     }
 
-    private void DefaultAnswers()
-    {
-        // Use default answers for prompts during generation (packageName, publisherName, version, description)
-        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-    }
-
     [TestMethod]
     public async Task ManifestGenerateCommandWithEntrypointShouldUseVersionInfoFromExecutable()
     {

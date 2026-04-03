@@ -25,11 +25,18 @@ internal interface IMsixService
         string? executable = null,
         CancellationToken cancellationToken = default);
 
-    public Task<MsixIdentityResult> AddMsixIdentityAsync(
+    public Task<MsixIdentityResult> AddSparseIdentityAsync(
         string? entryPointPath,
         FileInfo appxManifestPath,
         bool noInstall,
         bool keepIdentity,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default);
+
+    public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
+        FileInfo appxManifestPath,
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

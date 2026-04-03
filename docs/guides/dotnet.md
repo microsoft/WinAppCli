@@ -97,7 +97,7 @@ When prompted:
 
 This command will:
 - Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
-- Add `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` NuGet package references to your `.csproj`
+- Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
 - Create `appxmanifest.xml` and `Assets` folder for your app identity
 
 > **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
@@ -106,34 +106,51 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 ## 5. Debug with Identity
 
-To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp create-debug-identity`. This applies a temporary identity to your executable using the manifest we just generated.
+Since `winapp init` added the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package to your project, you can simply run:
 
-1.  **Build the executable**:
-    ```powershell
-    dotnet build -c Debug
-    ```
+```powershell
+dotnet run
+```
 
-2.  **Apply Debug Identity**:
-    Run the following command on your built executable:
-    ```powershell
-    winapp create-debug-identity .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
-    ```
+This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
-3.  **Run the Executable**:
-    Run the executable directly (do not use `dotnet run` as it might rebuild/overwrite the file):
-    ```powershell
-    .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
-    ```
+> **Console apps:** By default, AUMID activation opens a new window. For console applications that need stdin/stdout in the current terminal, add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to your `.csproj` and ensure your manifest has a `uap5:ExecutionAlias`. You can add one with `winapp manifest add-alias`.
 
-You should now see output similar to:
+You should see output similar to:
 ```
 Package Family Name: dotnet-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
 
-### Automating Debug Identity (Optional)
+### Alternative: Manual `winapp run`
 
-To streamline your development workflow, you can configure MSBuild to automatically apply debug identity after building in Debug configuration. Add this target to your `.csproj` file at the end, just before the closing `</Project>` tag:
+If you didn't use `winapp init` (or removed the NuGet package), you can build and run manually:
+
+```powershell
+dotnet build -c Debug
+winapp run .\bin\Debug\net10.0-windows10.0.26100.0
+```
+
+To add the NuGet package back: `dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease`
+
+> **Tip:** To disable the automatic `dotnet run` integration, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
+
+### Alternative: Sparse package identity
+
+If you need sparse package behavior specifically (identity without copying files), you can use `create-debug-identity` instead. This registers a sparse package pointing to your exe rather than creating a loose layout:
+
+```powershell
+winapp create-debug-identity .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
+```
+
+Then run the executable directly (do not use `dotnet run` as it might rebuild/overwrite the file):
+```powershell
+.\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
+```
+
+### Alternative: Manual MSBuild target
+
+If you prefer not to use the NuGet package, you can add a custom MSBuild target that runs `create-debug-identity` after Debug builds. Add this to your `.csproj` file at the end, just before the closing `</Project>` tag:
 
 ```xml
   <!-- Automatically apply debug identity after Debug builds -->
@@ -144,7 +161,9 @@ To streamline your development workflow, you can configure MSBuild to automatica
   </Target>
 ```
 
-With this configuration, simply running `dotnet build` or `dotnet run` will automatically apply the debug identity, and you can immediately run the executable with identity without the manual step.
+With this configuration, `dotnet build` applies the debug identity and you can run the executable directly. Note that `dotnet run` may rebuild and overwrite the identity, so run the exe manually after building.
+
+> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 6. Using Windows App SDK
 
@@ -186,12 +205,11 @@ class Program
 
 ### Build and Run
 
-Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-generate the debug identity, so `winapp` adds the runtime dependency to the WinAppSDK. If you updated the csproj to auto set debug identity, simply run `dotnet run`. Otherwise:
+Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-register with identity so `winapp` adds the runtime dependency. If you added the WinApp NuGet package (recommended), simply run `dotnet run`. Otherwise:
 
 ```powershell
 dotnet build -c Debug
-winapp create-debug-identity .\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
-.\bin\Debug\net10.0-windows10.0.26100.0\dotnet-app.exe
+winapp run .\bin\Debug\net10.0-windows10.0.26100.0
 ```
 
 You should now see output like:

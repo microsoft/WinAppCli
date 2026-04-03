@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft.Windows.SDK.BuildTools.WinApp.targets
+  
+  This file provides MSBuild targets that enable 'dotnet run' for packaged
+  applications.
+  
+  Key targets:
+  - _WinAppValidateRunSupport: Validates prerequisites for running packaged apps
+  - _WinAppBuildRunArgs: Builds the CLI command arguments (shared)
+  - RunPackagedApp: Runs the packaged application via the WinAppCLI
+  
+  Integration point:
+  - Hooks into the Run target to intercept 'dotnet run' for packaged apps
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!--
+    ============================================================================
+    Property refinement after package resolution
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <!-- 
+      Detect if this is a packaged app based on WindowsPackageType.
+      WindowsPackageType=None explicitly marks the project as unpackaged.
+      When WindowsPackageType is absent or any value other than 'None', the app is considered packaged.
+    -->
+    
+    <!--
+      Output directory for the loose-layout AppX package.
+      Defaults to AppX subfolder in the output directory.
+      This is set here (in targets) because $(OutputPath) is not available in props.
+    -->
+    <WinAppLooseLayoutPath Condition="'$(WinAppLooseLayoutPath)' == ''">$(OutputPath)AppX\</WinAppLooseLayoutPath>
+    
+    <!--
+      Path to the AppxManifest.xml file.
+      Auto-detected from output directory first, then project directory.
+      This is set here (in targets) because $(OutputPath) is not available in props.
+    -->
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+  </PropertyGroup>
+
+  <!--
+    Design-time build support:
+    When DesignTimeBuild is true, include all .cs files in the obj folder to enable features like IntelliSense and XAML designer.
+    This is necessary because the targets may generate source files in the obj directory that need to be included during design-time builds
+    Also, there is a bug in C# DevKit where generated files in obj are not included during design-time builds, so we need to explicitly include them here.
+    https://github.com/microsoft/vscode-dotnettools/issues/1018
+  -->
+  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
+    <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
+      <AutoGen>True</AutoGen>
+      <Visible>False</Visible>
+    </Compile>
+  </ItemGroup>
+
+  <!--
+    Temporary: Include this for non-WinUI projects as well, to ensure appxmanifest is included 
+    in the build output for the CLI to find to be able to run the app. We can remove this once we have a better solution for non-WinUI projects.
+  -->
+  <ItemGroup Condition="'$(UseWinUI)' != 'true'">
+    <Content Condition="Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')" Include="$(MSBuildProjectDirectory)\appxmanifest.xml">  
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    ============================================================================
+    _WinAppValidateRunSupport Target
+    
+    Validates that all prerequisites are met for running the packaged app.
+    ============================================================================
+  -->
+  <Target Name="_WinAppValidateRunSupport"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+    <Message Text="[WinAppRunSupport] Manifest: $(WinAppManifestPath)" Importance="normal" />
+    <Error Condition="!Exists('$(WinAppCliPath)')"
+           Text="[WinAppRunSupport] WinAppCLI tool not found at '$(WinAppCliPath)'. The NuGet package may be corrupted." />
+    
+    <!-- Validate manifest exists -->
+    <Error Condition="'$(WinAppManifestPath)' != '' And !Exists('$(WinAppManifestPath)')"
+           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure appxmanifest.xml exists in your project directory." />
+    
+    <Message Text="[WinAppRunSupport] Using CLI: $(WinAppCliPath)" Importance="normal" />
+    <Message Text="[WinAppRunSupport] Loose layout path: $(WinAppLooseLayoutPath)" Importance="normal" />
+  </Target>
+
+  <!--
+    ============================================================================
+    _WinAppBuildRunArgs Target
+    
+    Builds the CLI command arguments used by both RunPackagedApp and
+    _WinAppPrepareRunArguments.
+    ============================================================================
+  -->
+  <Target Name="_WinAppBuildRunArgs"
+          DependsOnTargets="_WinAppValidateRunSupport"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+    <PropertyGroup>
+      <!-- Remove trailing backslash from paths to avoid escaping the closing quote -->
+      <_WinAppManifestPathArg>$(WinAppManifestPath.TrimEnd('\'))</_WinAppManifestPathArg>
+      <_WinAppLooseLayoutPathArg>$(WinAppLooseLayoutPath.TrimEnd('\'))</_WinAppLooseLayoutPathArg>
+      <_WinAppInputFolderArg>$(OutputPath.TrimEnd('\'))</_WinAppInputFolderArg>
+      <!-- Build command with input-folder positional argument -->
+      <_WinAppRunArgs>run "$(_WinAppInputFolderArg)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
+      <_WinAppRunArgs>$(_WinAppRunArgs) --caller nuget-package</_WinAppRunArgs>
+    </PropertyGroup>
+  </Target>
+
+  <!--
+    ============================================================================
+    RunPackagedApp Target
+    
+    The main target that runs the packaged application.
+    This target:
+    1. Invokes the WinAppCLI 'run' command
+    2. The CLI handles debug identity registration and app launch
+    ============================================================================
+  -->
+  <Target Name="RunPackagedApp"
+          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+    
+    <Message Text="[WinAppRunSupport] Launching packaged application..." Importance="high" />
+    <Message Text="[WinAppRunSupport] Command: &quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)" Importance="normal" />
+    
+    <!-- Execute the CLI to run the packaged app -->
+    <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="false"
+          ConsoleToMSBuild="false">
+      <Output TaskParameter="ExitCode" PropertyName="_WinAppRunExitCode" />
+    </Exec>
+    
+    <Message Condition="'$(_WinAppRunExitCode)' == '0'" 
+             Text="[WinAppRunSupport] Application launched successfully" 
+             Importance="high" />
+    <Error Condition="'$(_WinAppRunExitCode)' != '0'"
+           Text="[WinAppRunSupport] Failed to launch application (exit code: $(_WinAppRunExitCode))" />
+  </Target>
+
+  <!--
+    ============================================================================
+    _WinAppCopyContentToLooseLayout Target
+    
+    Copies Content and None items to the loose-layout AppX directory.
+    
+    The MSIX packaging targets (Microsoft.Windows.SDK.BuildTools.MSIX) override
+    GetCopyToOutputDirectoryItemsOutputGroup to return ALL items from
+    @(AllItemsFullPathWithTargetPath) — including Content items without
+    CopyToOutputDirectory set. These items flow into @(PackagingOutputs) →
+    @(AppxPackagePayload) and ultimately into the .appxrecipe file, which
+    Visual Studio reads to deploy files from their source locations.
+    
+    Outside VS, the recipe mechanism doesn't apply. This target physically
+    copies those Content/None items to the AppX layout folder so the
+    packaged app can access them at runtime.
+    ============================================================================
+  -->
+  <Target Name="_WinAppCopyContentToLooseLayout"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+          DependsOnTargets="AssignTargetPaths">
+
+    <MakeDir Directories="$(WinAppLooseLayoutPath)" />
+
+    <!--
+      Copy Content items to the AppX loose layout. ContentWithTargetPath is
+      populated by AssignTargetPaths and includes ALL Content items regardless
+      of CopyToOutputDirectory. Items already in the output dir are harmlessly
+      skipped by SkipUnchangedFiles.
+    -->
+    <Copy SourceFiles="@(ContentWithTargetPath)"
+          DestinationFiles="@(ContentWithTargetPath->'$(WinAppLooseLayoutPath)%(TargetPath)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(ContentWithTargetPath)' != ''" />
+
+    <!--
+      Copy None items that have CopyToOutputDirectory set. These are typically
+      loose files (config, data) that should also appear in the package. None
+      items WITHOUT CopyToOutputDirectory are intentionally excluded — they are
+      not runtime-relevant.
+    -->
+    <Copy SourceFiles="@(_NoneWithTargetPath)"
+          DestinationFiles="@(_NoneWithTargetPath->'$(WinAppLooseLayoutPath)%(TargetPath)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_NoneWithTargetPath)' != '' And '%(_NoneWithTargetPath.CopyToOutputDirectory)' != ''" />
+
+    <Message Text="[WinAppRunSupport] Copied content items to loose layout: $(WinAppLooseLayoutPath)"
+             Importance="normal"
+             Condition="'@(ContentWithTargetPath)' != ''" />
+  </Target>
+
+  <!--
+    Override the ComputeRunArguments target from Microsoft.NET.Sdk.targets.
+    This is the official extensibility point for customizing 'dotnet run'.
+    For packaged apps, this sets RunCommand to use our CLI-based launcher.
+  -->
+  <Target Name="_WinAppPrepareRunArguments"
+          BeforeTargets="ComputeRunArguments"
+          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout">
+    
+    <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+      <RunCommand>$(WinAppCliPath)</RunCommand>
+      <RunArguments>$(_WinAppRunArgs)</RunArguments>
+      <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+    </PropertyGroup>
+    
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+             Text="[WinAppRunSupport] Intercepted 'dotnet run' for packaged app" Importance="high" />
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+             Text="[WinAppRunSupport] RunCommand: $(RunCommand)" Importance="normal" />
+    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+             Text="[WinAppRunSupport] RunArguments: $(RunArguments)" Importance="normal" />
+  </Target>
+
+  <!--
+    ============================================================================
+    Debugging Support
+    
+    Target to help with debugging and diagnostics.
+    ============================================================================
+  -->
+  <Target Name="WinAppRunSupportInfo">
+    <Message Text="=== WinApp Run Support Information ===" Importance="high" />
+    <Message Text="EnableWinAppRunSupport: $(EnableWinAppRunSupport)" Importance="high" />
+    <Message Text="WindowsPackageType: $(WindowsPackageType)" Importance="high" />
+    <Message Text="WinAppCliPath: $(WinAppCliPath)" Importance="high" />
+    <Message Text="WinAppCliArch: $(WinAppCliArch)" Importance="high" />
+    <Message Text="WinAppManifestPath: $(WinAppManifestPath)" Importance="high" />
+    <Message Text="WinAppLooseLayoutPath: $(WinAppLooseLayoutPath)" Importance="high" />
+    <Message Text="======================================" Importance="high" />
+  </Target>
+
+</Project>

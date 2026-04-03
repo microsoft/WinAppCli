@@ -13,7 +13,7 @@ namespace WinApp.Cli.Helpers;
 
 internal static class StoreHostBuilderExtensions
 {
-    public static IServiceCollection ConfigureServices(this IServiceCollection services, TextWriter consoleOut)
+    public static IServiceCollection ConfigureServices(this IServiceCollection services)
     {
         return services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(Directory.GetCurrentDirectory()))
@@ -28,16 +28,19 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IManifestService, ManifestService>()
             .AddSingleton<IImageAssetService, ImageAssetService>()
             .AddSingleton<IMsixService, MsixService>()
+            .AddSingleton<IPriService, PriService>()
             .AddSingleton<INugetService, NugetService>()
             .AddSingleton<IPackageInstallationService, PackageInstallationService>()
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
-            .AddSingleton<IPowerShellService, PowerShellService>()
             .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
             .AddSingleton<IWinmdService, WinmdService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
+            .AddSingleton<IAppLauncherService, AppLauncherService>()
+            .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
+            .AddSingleton<IDebugOutputService, DebugOutputService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
@@ -53,8 +56,11 @@ internal static class StoreHostBuilderExtensions
                 .ConfigureCommand<ManifestCommand>()
                 .UseCommandHandler<ManifestGenerateCommand, ManifestGenerateCommand.Handler>()
                 .UseCommandHandler<ManifestUpdateAssetsCommand, ManifestUpdateAssetsCommand.Handler>()
+                .UseCommandHandler<ManifestAddAliasCommand, ManifestAddAliasCommand.Handler>()
                 .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
+                .UseCommandHandler<RunCommand, RunCommand.Handler>()
+                .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()

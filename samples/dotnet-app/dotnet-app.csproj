@@ -6,23 +6,27 @@
     <RootNamespace>dotnet_app</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Launch via execution alias so console I/O stays in the current terminal -->
+    <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+    <!-- Uncomment to capture OutputDebugString messages and first-chance exceptions -->
+    <!-- <WinAppRunDebugOutput>true</WinAppRunDebugOutput> -->
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7175" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="*-*" PrivateAssets="all" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
   </ItemGroup>
 
-   <!-- Automatically apply debug identity after Debug builds -->
-  <Target Name="ApplyDebugIdentity" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
-    <Exec Command="winapp create-debug-identity &quot;$(TargetDir)$(TargetName).exe&quot;" WorkingDirectory="$(ProjectDir)" IgnoreExitCode="false" />
-  </Target>
-
-     <!-- Automatically package as MSIX after Release builds -->
-  <Target Name="PackageMsix" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <!-- Package and sign directly from build output -->
-    <Exec Command="winapp pack &quot;$(TargetDir.TrimEnd('\'))&quot; --manifest &quot;$(ProjectDir)appxmanifest.xml&quot; --cert &quot;$(ProjectDir)devcert.pfx&quot;" 
-          WorkingDirectory="$(ProjectDir)" 
+  <!-- Automatically package as MSIX after Publish -->
+  <Target Name="PackageMsix" AfterTargets="Publish">
+    <!-- Use cert only if devcert.pfx exists -->
+    <PropertyGroup>
+      <_CertArg Condition="Exists('$(ProjectDir)devcert.pfx')"> --cert "$(ProjectDir)devcert.pfx"</_CertArg>
+      <_CertArg Condition="!Exists('$(ProjectDir)devcert.pfx')"></_CertArg>
+    </PropertyGroup>
+    <Exec Command="&quot;$(WinAppCliPath)&quot; pack &quot;$(PublishDir.TrimEnd('\'))&quot; --manifest &quot;$(ProjectDir)appxmanifest.xml&quot;$(_CertArg)"
+          WorkingDirectory="$(ProjectDir)"
           IgnoreExitCode="false" />
   </Target>
 

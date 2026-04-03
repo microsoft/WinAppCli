@@ -212,3 +212,7 @@ devcert.pfx
 /src/winapp-GUI/winapp-GUI/BundleArtifacts
 /src/winapp-GUI/winapp-GUI/Properties/PublishProfiles
 /src/winapp-GUI/winapp-GUI/winapp-GUI.csproj
+/src/winapp-NuGet/tools
+
+# Do not ignore the targets and props files in the build folder, which are needed for consuming the NuGet package
+!/src/winapp-NuGet/build/

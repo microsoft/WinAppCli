@@ -97,6 +97,36 @@ steps:
                 "ToolVersion": "1.0"
             }
         ]
+  - task: EsrpCodeSigning@5
+    displayName: Code Sign ESRP - NuGet Packages
+    inputs:
+      ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
+      AppRegistrationClientId: ${{ parameters.signingIdentity.appId }}
+      AppRegistrationTenantId: ${{ parameters.signingIdentity.tenantId }}
+      AuthAKVName: ${{ parameters.signingIdentity.akvName }}
+      AuthCertName: ${{ parameters.signingIdentity.authCertName }}
+      AuthSignCertName: ${{ parameters.signingIdentity.signCertName }}
+      FolderPath: '$(System.DefaultWorkingDirectory)/artifacts/nuget/'
+      Pattern: '*.nupkg'
+      UseMinimatch: true
+      signConfigType: inlineSignParams
+      inlineOperation: |
+        [ 
+            {
+                "KeyCode": "CP-401405",
+                "OperationCode": "NuGetSign",
+                "Parameters": { },
+                "ToolName": "sign",
+                "ToolVersion": "1.0"
+            },
+            {
+                "KeyCode": "CP-401405",
+                "OperationCode": "NuGetVerify",
+                "Parameters": { },
+                "ToolName": "sign",
+                "ToolVersion": "1.0"
+            }
+        ]
 - task: CopyFiles@2
   displayName: Copy Artifacts - Test Results
   inputs:
@@ -141,3 +171,14 @@ steps:
   inputs:
     path: '$(Build.ArtifactStagingDirectory)/msix-packages'
     artifactName: msix-packages
+- task: CopyFiles@2
+  displayName: Copy Artifacts - NuGet packages
+  inputs:
+    sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/nuget/'
+    contents: '*.nupkg'
+    targetFolder: '$(Build.ArtifactStagingDirectory)/nuget-packages'
+- task: 1ES.PublishPipelineArtifact@1
+  displayName: Upload Artifact - NuGet packages
+  inputs:
+    path: '$(Build.ArtifactStagingDirectory)/nuget-packages'
+    artifactName: nuget-packages

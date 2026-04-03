@@ -79,7 +79,7 @@ jobs:
     # Upload all build artifacts
     - name: Upload test results
       if: ${{ !cancelled() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results
         path: artifacts/TestResults/
@@ -87,7 +87,7 @@ jobs:
     
     - name: Upload CLI binaries
       if: ${{ !cancelled() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: cli-binaries
         path: artifacts/cli/
@@ -95,7 +95,7 @@ jobs:
     
     - name: Upload npm package
       if: ${{ !cancelled() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: npm-package
         path: artifacts/*.tgz
@@ -103,10 +103,18 @@ jobs:
 
     - name: Upload MSIX packages
       if: ${{ !cancelled() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: msix-packages
         path: artifacts/msix-packages/
+        if-no-files-found: error
+
+    - name: Upload NuGet packages
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: nuget-packages
+        path: artifacts/nuget/
         if-no-files-found: error
 
     # --- Build quality metrics ---

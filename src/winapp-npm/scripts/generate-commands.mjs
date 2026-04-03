@@ -238,7 +238,7 @@ function generate(schema) {
   L('  return opts.cwd ? { cwd: opts.cwd } : {};');
   L('}');
   L();
-  L('async function run(args: string[], opts: CommonOptions): Promise<WinappResult> {');
+  L('async function execCommand(args: string[], opts: CommonOptions): Promise<WinappResult> {');
   L('  pushCommon(args, opts);');
   L('  const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(opts));');
   L('  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };');
@@ -343,7 +343,7 @@ function generate(schema) {
       }
     }
 
-    L('  return run(args, options);');
+    L('  return execCommand(args, options);');
     L('}');
   }
 
