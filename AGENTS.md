@@ -89,3 +89,31 @@ The following files are auto-generated from `cli-schema.json` via `scripts/gener
 **To edit skill content**, modify the hand-written templates in `docs/fragments/skills/winapp-cli/`. Each template file (e.g., `package.md`, `manifest.md`) contains the workflow docs, examples, and troubleshooting content. The auto-generation script appends command reference tables from the CLI schema. Running `scripts/build-cli.ps1` triggers regeneration automatically.
 
 Skill descriptions (used for Copilot skill matching) are defined in the `$SkillDescriptions` hashtable in `scripts/generate-llm-docs.ps1`.
+
+## C# service architecture guidelines
+
+### File size limits
+- **Target**: ≤500 lines per file
+- **Soft limit**: ~800 lines — if approaching this, look for extraction opportunities
+- **Hard limit**: Do not let any single file exceed ~1,000 lines. Split into partial classes or extract services.
+
+### Service patterns
+Use the appropriate pattern for new code:
+
+| Pattern | When to use | Example |
+|---------|------------|---------|
+| **Interface + DI service** | Stateful logic, needs dependencies | `IPriService` / `PriService` |
+| **Static helper** | Pure functions, no DI needed | `PeHelper`, `MrtAssetHelper` |
+| **Data document** | Wraps a file/data format with typed access | `AppxManifestDocument` |
+| **Partial class** | Splitting a large service with tight internal coupling | `MsixService.Runtime.cs` |
+
+### Separation of concerns
+- One responsibility per service/helper file
+- Extract shared logic into helpers rather than duplicating across services
+- If a method group only uses 1-2 of a service's 10+ dependencies, it's a candidate for extraction
+
+### XML handling
+- **Use `XDocument` / `XElement`** (System.Xml.Linq) for structured XML manipulation — never regex
+- Regex is acceptable ONLY for: pre-parse placeholder replacement (`$targetnametoken$`), raw text scanning before XML is valid
+- Use `AppxManifestDocument` for AppxManifest.xml operations — it provides typed access and namespace-aware queries
+- When adding new manifest manipulation, add methods to `AppxManifestDocument` rather than writing regex in consuming code

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "tauri:dev:withidentity": "cargo build --manifest-path src-tauri/Cargo.toml && winapp create-debug-identity src-tauri/target/debug/tauri-app.exe && .\\src-tauri\\target\\debug\\tauri-app.exe"
+    "tauri:dev:withidentity": "cargo build --manifest-path src-tauri/Cargo.toml && (if not exist dist mkdir dist) && copy /Y src-tauri\\target\\debug\\tauri-app.exe dist\\ >nul && winapp run .\\dist",
+    "pack:msix": "npm run tauri -- build && (if not exist dist mkdir dist) && copy /Y src-tauri\\target\\release\\tauri-app.exe dist\\ >nul && winapp pack .\\dist --cert .\\devcert.pfx"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

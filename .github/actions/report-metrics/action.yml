@@ -92,6 +92,7 @@ runs:
               'npm-package': 'npm-package',
               'msix-x64': 'msix-packages',
               'msix-arm64': 'msix-packages',
+              'nuget-package': 'nuget-packages',
             };
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             for (const [sizeKey, artifactName] of Object.entries(artifactNameMap)) {
@@ -153,6 +154,7 @@ runs:
             'npm-package': 'NPM Package',
             'msix-x64': 'MSIX (x64)',
             'msix-arm64': 'MSIX (ARM64)',
+            'nuget-package': 'NuGet Package',
           };
 
           let body = '## Build Metrics Report\n\n';

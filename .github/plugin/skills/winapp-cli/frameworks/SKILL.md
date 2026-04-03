@@ -51,12 +51,19 @@ Additional Electron guides:
 - The key prerequisite is `appxmanifest.xml`, not `winapp.yaml`
 - No native addon step needed — unlike Electron, .NET can call Windows APIs directly
 
+**If you already have a `Package.appxmanifest`** (e.g., WinUI 3 apps or projects with an existing packaging setup), you likely **don't need `winapp init`** — your project is already configured for packaged builds. Just make sure:
+- Your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package (WinUI 3 apps already have this)
+- The project properties are set up for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>` or equivalent)
+- WinUI 3 apps created from Visual Studio templates are typically already fully configured
+
 Quick start:
 ```powershell
 winapp init --use-defaults
-dotnet build
-winapp create-debug-identity ./bin/Debug/net10.0-windows/myapp.exe
+dotnet build <path-to-project.csproj> -c Debug -p:Platform=x64
+winapp run bin\x64\Debug\<tfm>\win-x64\
 ```
+
+Replace `<tfm>` with your target framework (e.g., `net10.0-windows10.0.26100.0`), and adjust `x64` to match your target architecture.
 
 ### C++ (CMake, MSBuild)
 C++ projects use winapp primarily for SDK projections (CppWinRT headers) and packaging:
@@ -79,6 +86,25 @@ C++ projects use winapp primarily for SDK projections (CppWinRT headers) and pac
 - Tauri has its own bundler for `.msi` installers
 - Use winapp specifically for **MSIX distribution** and package identity features
 - winapp adds capabilities beyond what Tauri's built-in bundler provides (identity, sparse packages, Windows API access)
+
+## Debugging by framework
+
+| Framework | Recommended command | Notes |
+|-----------|-------------------|-------|
+| **.NET** | `winapp run .\bin\x64\Debug\<tfm>\win-x64\` | Build with `dotnet build -c Debug -p:Platform=x64` first; GUI apps launch directly; console apps need `--with-alias` |
+| **C++** | `winapp run .\build\Debug --with-alias` | Console apps need `--with-alias` + `uap5:ExecutionAlias` in manifest |
+| **Rust** | `winapp run .\target\debug --with-alias` | Console apps need `--with-alias` + `uap5:ExecutionAlias` in manifest |
+| **Flutter** | `winapp run .\build\windows\x64\runner\Debug` | GUI app — plain `winapp run` works |
+| **Tauri** | `winapp run .\dist` | Stage exe to `dist/` first (avoids copying entire `target/` tree); GUI app |
+| **Electron** | `npx winapp node add-electron-debug-identity` | Uses Electron-specific identity registration; `winapp run` is **not** recommended for Electron |
+
+**Key rules:**
+- **GUI apps** (Flutter, Tauri, WPF): use `winapp run <build-output>` — launches via AUMID activation
+- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `appxmanifest.xml`
+- **Electron**: different mechanism — uses `npx winapp node add-electron-debug-identity` because `electron.exe` is in `node_modules/`, not your build output
+- **Startup debugging (any framework)**: use `winapp create-debug-identity <exe>` so your IDE can F5-launch the exe with identity from the first instruction
+
+For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
 ## Related skills
 - **Setup**: `winapp-setup` — initial project setup with `winapp init`

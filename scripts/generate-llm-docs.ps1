@@ -88,11 +88,11 @@ $SkillsDir = $SkillsPath
 # Skill → CLI command mapping for auto-generated options/arguments tables
 # Each skill maps to one or more CLI commands whose options/arguments should be included
 $SkillCommandMap = @{
-    "setup"        = @("init", "restore", "update")
+    "setup"        = @("init", "restore", "update", "run")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "cert info", "sign")
-    "manifest"     = @("manifest generate", "manifest update-assets")
+    "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot" = @("get-winapp-path", "tool", "store")
     "frameworks"   = @()       # No auto-generated command sections — links to guides
 }

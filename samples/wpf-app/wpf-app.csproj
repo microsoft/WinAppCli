@@ -12,18 +12,17 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7175" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="*-*" PrivateAssets="all" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260317003" />
   </ItemGroup>
 
-  <!-- Automatically apply debug identity after Debug builds -->
-  <Target Name="ApplyDebugIdentity" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
-    <Exec Command="winapp create-debug-identity &quot;$(TargetDir)$(TargetName).exe&quot;" WorkingDirectory="$(ProjectDir)" IgnoreExitCode="false" />
-  </Target>
-
-  <!-- Automatically package as MSIX after Release builds -->
-  <Target Name="PackageMsix" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <!-- Package and sign directly from build output -->
-    <Exec Command="winapp pack &quot;$(TargetDir.TrimEnd('\'))&quot; --cert &quot;$(ProjectDir)devcert.pfx&quot;" 
+  <!-- Automatically package as MSIX after dotnet publish -->
+  <Target Name="PackageMsix" AfterTargets="Publish">
+    <PropertyGroup>
+      <_WinAppPackArgs>pack &quot;$(PublishDir.TrimEnd('\'))&quot;</_WinAppPackArgs>
+      <_WinAppPackArgs Condition="Exists('$(ProjectDir)devcert.pfx')">$(_WinAppPackArgs) --cert &quot;$(ProjectDir)devcert.pfx&quot;</_WinAppPackArgs>
+    </PropertyGroup>
+    <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppPackArgs)" 
           WorkingDirectory="$(ProjectDir)" 
           IgnoreExitCode="false" />
   </Target>

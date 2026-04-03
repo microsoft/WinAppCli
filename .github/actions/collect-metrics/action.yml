@@ -24,12 +24,14 @@ runs:
         $npmPkg = Get-ChildItem "$artifacts/*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
         $msixX64 = Get-ChildItem "$artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
         $msixArm64 = Get-ChildItem "$artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $nugetPkg = Get-ChildItem "$artifacts/nuget/*.nupkg" -ErrorAction SilentlyContinue | Select-Object -First 1
 
         if ($x64Files) { $sizes["cli-win-x64"] = ($x64Files | Measure-Object -Property Length -Sum).Sum }
         if ($arm64Files) { $sizes["cli-win-arm64"] = ($arm64Files | Measure-Object -Property Length -Sum).Sum }
         if ($npmPkg) { $sizes["npm-package"] = $npmPkg.Length }
         if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
         if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
+        if ($nugetPkg) { $sizes["nuget-package"] = $nugetPkg.Length }
 
         $sizes | ConvertTo-Json | Set-Content "$artifacts/binary-sizes.json"
 

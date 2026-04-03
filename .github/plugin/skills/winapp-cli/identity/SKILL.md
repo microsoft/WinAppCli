@@ -6,9 +6,11 @@ version: 0.2.2
 ## When to use
 
 Use this skill when:
-- **Debugging Windows APIs** that require package identity (push notifications, background tasks, share target, startup tasks, etc.)
-- **Testing identity-dependent features** without creating and installing a full MSIX package
-- **Registering a sparse package** with Windows for development
+- **The exe is separate from your app code** — e.g., Electron apps where `electron.exe` is in `node_modules`, not your build output
+- **Testing sparse package behavior** specifically — `AllowExternalContent`, `TrustedLaunch`, etc.
+- **Registering identity without copying files** — `create-debug-identity` leaves the exe in place
+
+> **Prefer `winapp run` for most frameworks.** If your exe is inside your build output folder (.NET, C++, Rust, Flutter, Tauri), use `winapp run <build-output>` instead — it registers a full loose layout package and launches the app, simulating an MSIX install. Use `create-debug-identity` only when `winapp run` doesn't fit your scenario.
 
 ## Prerequisites
 
@@ -26,7 +28,7 @@ Windows package identity enables your app to use restricted APIs and OS integrat
 - **Windows AI APIs** (Phi Silica, OCR, etc.)
 - **File type associations** registered properly in Settings
 
-A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows, giving your exe identity without packaging it into an MSIX.
+A standard `.exe` (from `dotnet build`, `cmake`, etc.) does **not** have identity. `create-debug-identity` registers a *sparse package* with Windows — the exe stays in its original location and Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. This is different from `winapp run`, which copies files into a loose layout package.
 
 ## Usage
 
@@ -81,6 +83,53 @@ After running, launch your exe normally — Windows will recognize it as having 
 - If you have both a debug identity and an installed MSIX, they may conflict — use `--keep-identity` carefully
 - For Electron apps, use `npx winapp node add-electron-debug-identity` instead (handles Electron-specific paths)
 
+## Debugging: `winapp run` vs `create-debug-identity`
+
+| | `winapp run` | `create-debug-identity` |
+|---|---|---|
+| **What it registers** | Full loose layout package (entire folder) | Sparse package (single exe) |
+| **How the app launches** | Launched by winapp (AUMID activation or execution alias) | You launch the exe yourself (command line, IDE, etc.) |
+| **Simulates MSIX install** | Yes — closest to production behavior | No — sparse identity only |
+| **Files stay in place** | Copied to an AppX layout directory | Yes — exe stays at its original path |
+| **Debugger-friendly** | Attach to PID after launch, or use `--no-launch` then launch via alias | Launch directly from your IDE's debugger — the exe has identity regardless |
+| **Console app support** | `--with-alias` keeps stdin/stdout in terminal | Run exe directly in terminal |
+| **Best for** | Most frameworks (.NET, C++, Rust, Flutter, Tauri) | Electron, or when you need full IDE debugger control (F5 startup debugging) |
+
+### When to use which
+
+**Default to `winapp run`** for most development — it simulates a real MSIX install with full identity, capabilities, and file associations:
+
+```powershell
+winapp run .\build\output          # GUI apps
+winapp run .\build\output --with-alias   # console apps (preserves stdin/stdout)
+```
+
+**Use `create-debug-identity` when:**
+- **Debugging startup code** — your IDE launches + debugs the exe directly; identity is attached from the first instruction
+- **Exe is separate from build output** — e.g., Electron where `electron.exe` is in `node_modules/`
+- **Testing sparse package behavior** — `AllowExternalContent`, `TrustedLaunch`
+
+```powershell
+winapp create-debug-identity .\bin\Debug\myapp.exe
+# Now launch any way you like — F5, terminal, script — the exe has identity
+```
+
+### Common debugging scenarios
+
+| Scenario | Command | Notes |
+|----------|---------|-------|
+| **Just run with identity** | `winapp run .\build\Debug` | Simplest workflow; add `--with-alias` for console apps |
+| **Attach debugger to running app** | `winapp run .\build\Debug`, then attach to PID | Misses startup code |
+| **Register identity, launch via AUMID** | `winapp run .\build\Debug --no-launch` | Launch with `start shell:AppsFolder\<AUMID>` or the execution alias (not the exe directly) |
+| **F5 startup debugging** | `winapp create-debug-identity .\bin\myapp.exe` | IDE controls process from first instruction; best for debugging activation/startup code |
+| **Capture debug output** | `winapp run .\build\Debug --debug-output` | Captures `OutputDebugString`; **blocks other debuggers** (one debugger per process) |
+| **Run and auto-clean** | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
+| **Clean up stale registration** | `winapp unregister` | Removes dev packages for the current project (auto-detects from manifest) |
+
+> **Using Visual Studio with a packaging project?** VS already handles identity, AUMID activation, and debugger attachment from F5. These workflows are most useful for VS Code, terminal-based development, and frameworks VS doesn't natively package (Rust, Flutter, Tauri, Electron, C++).
+
+For full details including IDE setup examples, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
+
 ## Related skills
 - Need a manifest? See `winapp-manifest` to generate `appxmanifest.xml`
 - Need a certificate? See `winapp-signing` — a trusted cert is required for identity registration
@@ -91,7 +140,7 @@ After running, launch your exe normally — Windows will recognize it as having 
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "appxmanifest.xml not found" | No manifest in current directory | Run `winapp init` or `winapp manifest generate`, or pass `--manifest` |
-| "Failed to add package identity" | Previous registration stale or cert untrusted | `Get-AppxPackage *yourapp* \| Remove-AppxPackage`, then `winapp cert install ./devcert.pfx` (admin) |
+| "Failed to add package identity" | Previous registration stale or cert untrusted | Run `winapp unregister` to remove stale packages, then `winapp cert install ./devcert.pfx` (admin) |
 | "Access denied" | Cert not trusted or permission issue | Run `winapp cert install ./devcert.pfx` as admin |
 | APIs still fail after registration | App launched before registration completed | Close app, re-run `create-debug-identity`, then relaunch |
 

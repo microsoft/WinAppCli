@@ -46,7 +46,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         _testWinappDirectory = _tempDirectory.CreateSubdirectory(".winapp");
 
         var services = new ServiceCollection()
-            .ConfigureServices(ConsoleStdOut)
+            .ConfigureServices()
             .ConfigureCommands();
         services =
             ConfigureServices(services)
@@ -182,5 +182,16 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             file.CopyTo(destPath, overwrite: true);
         }
+    }
+
+    /// <summary>
+    /// Push default (Enter) answers for manifest prompts (packageName, publisherName, version, description)
+    /// </summary>
+    protected void DefaultAnswers()
+    {
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
     }
 }

@@ -207,16 +207,16 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 ## 5. Debug with Identity
 
-To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp create-debug-identity`. This applies a temporary identity to your executable using the manifest we just generated.
+To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp run`. This registers a loose layout package (just like a real MSIX install) and launches the app in one step.
 
-1. **Apply Debug Identity**:
+1. **Build the app**:
     ```powershell
-    winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe
+    flutter build windows
     ```
 
-2. **Run the executable**:
+2. **Run with identity**:
     ```powershell
-    .\build\windows\x64\runner\Release\flutter_app.exe
+    winapp run .\build\windows\x64\runner\Release
     ```
 
 You should now see the app with a green indicator showing:
@@ -225,7 +225,7 @@ Package Family Name: flutterapp.debug_xxxxxxxx
 ```
 This confirms your app is running with a valid package identity!
 
-> **Note**: After running `flutter clean` or rebuilding, you'll need to re-run `create-debug-identity` since the executable is replaced.
+> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 6. Using Windows App SDK (Optional)
 
@@ -359,8 +359,7 @@ Rebuild the application:
 
 ```powershell
 flutter build windows
-winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe
-.\build\windows\x64\runner\Release\flutter_app.exe
+winapp run .\build\windows\x64\runner\Release
 ```
 
 You should now see output like:
