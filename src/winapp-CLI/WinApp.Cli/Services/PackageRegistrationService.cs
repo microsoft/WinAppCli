@@ -61,6 +61,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
             var options = new RegisterPackageOptions
             {
                 ExternalLocationUri = externalUri,
+                DeveloperMode = true,
                 ForceUpdateFromAnyVersion = true,
             };
 
