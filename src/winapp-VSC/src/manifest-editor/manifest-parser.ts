@@ -55,7 +55,8 @@ export function parseManifest(xmlText: string): ManifestData {
 
 /**
  * Apply a field change to the XML text and return the updated XML string.
- * Uses xmldom to parse, modify, and re-serialize.
+ * Uses surgical string replacements to preserve original formatting.
+ * Falls back to DOM parse/serialize only when a new element must be created.
  */
 export function applyFieldChange(
     xmlText: string,
@@ -64,25 +65,20 @@ export function applyFieldChange(
     value: string,
     index?: number,
 ): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
+    const idx = index ?? 0;
 
     switch (section) {
         case 'identity':
-            applyIdentityChange(root, field, value);
-            break;
+            return applyIdentityChangeString(xmlText, field, value);
         case 'properties':
-            applyPropertiesChange(root, doc, field, value);
-            break;
+            return applyPropertiesChangeString(xmlText, field, value);
         case 'dependencies':
-            applyDependenciesChange(root, field, value, index ?? 0);
-            break;
+            return applyDependenciesChangeString(xmlText, field, value, idx);
         case 'applications':
-            applyApplicationChange(root, field, value, index ?? 0);
-            break;
+            return applyApplicationChangeString(xmlText, field, value, idx);
+        default:
+            return xmlText;
     }
-
-    return new XMLSerializer().serializeToString(doc);
 }
 
 /** Add a capability element to the XML. */
@@ -545,6 +541,173 @@ function parseCapabilities(root: Element): string[] {
 }
 
 // ─── Apply changes ──────────────────────────────────────────────────
+
+// ─── Surgical string-based field change helpers ─────────────────────
+// These replace only the specific attribute or element text in the XML
+// string, preserving all original whitespace and formatting.
+
+/** Escape special regex characters in a string. */
+function escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Replace an XML attribute value in-place. Returns the original string if not found. */
+function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string, newValue: string): string {
+    // Find the element in the XML
+    const elementMatch = elementPattern.exec(xml);
+    if (!elementMatch) { return xml; }
+
+    // Within the matched element, find and replace the attribute value
+    const elementStr = elementMatch[0];
+    const attrRegex = new RegExp(`(${escapeRegex(attrName)}\\s*=\\s*)(["'])([^"']*?)\\2`);
+    const attrMatch = attrRegex.exec(elementStr);
+    if (!attrMatch) { return xml; }
+
+    const newElementStr = elementStr.substring(0, attrMatch.index)
+        + attrMatch[1] + attrMatch[2] + newValue + attrMatch[2]
+        + elementStr.substring(attrMatch.index + attrMatch[0].length);
+
+    return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
+}
+
+/** Replace the text content of an XML element in-place. Returns the original string if not found. */
+function replaceElementText(xml: string, tagPattern: RegExp, newValue: string): string {
+    const match = tagPattern.exec(xml);
+    if (!match) { return xml; }
+
+    // match[0] is the full match including tags, match[1] is the opening tag, match[2] is the old text
+    return xml.substring(0, match.index) + match[1] + newValue + match[3] + xml.substring(match.index + match[0].length);
+}
+
+function applyIdentityChangeString(xml: string, field: string, value: string): string {
+    const attrMap: Record<string, string> = {
+        name: 'Name',
+        publisher: 'Publisher',
+        version: 'Version',
+        processorArchitecture: 'ProcessorArchitecture',
+    };
+    const attr = attrMap[field];
+    if (!attr) { return xml; }
+
+    return replaceAttribute(xml, /<Identity\b[^>]*>/s, attr, value);
+}
+
+function applyPropertiesChangeString(xml: string, field: string, value: string): string {
+    const tagMap: Record<string, string> = {
+        displayName: 'DisplayName',
+        publisherDisplayName: 'PublisherDisplayName',
+        description: 'Description',
+        logo: 'Logo',
+    };
+    const tag = tagMap[field];
+    if (!tag) { return xml; }
+
+    // Match <Tag>text</Tag> (with any namespace prefix)
+    const tagRegex = new RegExp(`(<${tag}>|<[a-zA-Z0-9]+:${tag}>)(.*?)(<\\/${tag}>|<\\/[a-zA-Z0-9]+:${tag}>)`, 's');
+    const result = replaceElementText(xml, tagRegex, value);
+
+    // If the element wasn't found and the value is non-empty, fall back to DOM
+    if (result === xml && value) {
+        const doc = new DOMParser().parseFromString(xml, 'application/xml');
+        const root = doc.documentElement!;
+        applyPropertiesChange(root, doc, field, value);
+        return new XMLSerializer().serializeToString(doc);
+    }
+
+    return result;
+}
+
+function applyDependenciesChangeString(xml: string, field: string, value: string, index: number): string {
+    if (field.startsWith('targetDeviceFamily.')) {
+        const subField = field.replace('targetDeviceFamily.', '');
+        const attrMap: Record<string, string> = {
+            name: 'Name',
+            minVersion: 'MinVersion',
+            maxVersionTested: 'MaxVersionTested',
+        };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+
+        // Find the Nth TargetDeviceFamily element
+        const regex = /<TargetDeviceFamily\b[^>]*>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+            }
+            count++;
+        }
+    } else if (field.startsWith('packageDependency.')) {
+        const subField = field.replace('packageDependency.', '');
+        const attrMap: Record<string, string> = {
+            name: 'Name',
+            minVersion: 'MinVersion',
+            publisher: 'Publisher',
+        };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+
+        const regex = /<PackageDependency\b[^>]*>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+            }
+            count++;
+        }
+    }
+    return xml;
+}
+
+function applyApplicationChangeString(xml: string, field: string, value: string, index: number): string {
+    // Top-level Application attributes
+    const appAttrMap: Record<string, string> = {
+        id: 'Id',
+        executable: 'Executable',
+        entryPoint: 'EntryPoint',
+    };
+    if (appAttrMap[field]) {
+        const regex = /<Application\b[^>]*>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
+            }
+            count++;
+        }
+        return xml;
+    }
+
+    // VisualElements attributes
+    if (field.startsWith('visualElements.')) {
+        const veField = field.replace('visualElements.', '');
+
+        if (veField === 'wide310x150Logo') {
+            // Attribute on DefaultTile
+            return replaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, 'Wide310x150Logo', value);
+        }
+
+        const attrMap: Record<string, string> = {
+            displayName: 'DisplayName',
+            description: 'Description',
+            backgroundColor: 'BackgroundColor',
+            square150x150Logo: 'Square150x150Logo',
+            square44x44Logo: 'Square44x44Logo',
+        };
+        const attr = attrMap[veField];
+        if (!attr) { return xml; }
+
+        // Find the Nth VisualElements within the Nth Application context
+        return replaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attr, value);
+    }
+
+    return xml;
+}
+
+// ─── DOM-based change helpers (used as fallback for element creation) ─
 
 function applyIdentityChange(root: Element, field: string, value: string): void {
     const el = getChildByLocalName(root, 'Identity');
