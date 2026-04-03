@@ -51,7 +51,13 @@ internal static class MouseInput
         {
             fixed (INPUT* pInputs = inputs)
             {
-                PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                if (sent == 0)
+                {
+                    throw new InvalidOperationException(
+                        "SendInput failed — the target window may be elevated (running as admin). " +
+                        "Try running this CLI as administrator.");
+                }
             }
         }
     }

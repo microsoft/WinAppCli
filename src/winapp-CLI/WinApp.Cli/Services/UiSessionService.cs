@@ -162,38 +162,49 @@ internal sealed class UiSessionService(
 
         // Try exact process name
         var byName = Process.GetProcessesByName(app);
-        if (byName.Length == 1)
+        try
         {
-            return byName[0];
-        }
-
-        if (byName.Length > 1)
-        {
-            var withWindow = byName
-                .Where(p =>
-                {
-                    try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
-                    catch { return false; }
-                })
-                .ToArray();
-
-            if (withWindow.Length == 1)
+            if (byName.Length == 1)
             {
-                return withWindow[0];
+                var result = byName[0];
+                byName = []; // prevent disposal of the returned process
+                return result;
             }
 
-            if (withWindow.Length > 1)
+            if (byName.Length > 1)
             {
-                var listing = string.Join("\n  ",
-                    withWindow.Select(p =>
+                var withWindow = byName
+                    .Where(p =>
                     {
-                        try { return $"PID {p.Id}: \"{p.MainWindowTitle}\""; }
-                        catch { return $"PID {p.Id}"; }
-                    }));
-                throw new InvalidOperationException(
-                    $"Multiple '{app}' windows found:\n  {listing}\n" +
-                    "Use --app with a PID or a more specific window title.");
+                        try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
+                        catch { return false; }
+                    })
+                    .ToArray();
+
+                if (withWindow.Length == 1)
+                {
+                    var result = withWindow[0];
+                    byName = byName.Where(p => p != result).ToArray(); // dispose all except the returned one
+                    return result;
+                }
+
+                if (withWindow.Length > 1)
+                {
+                    var listing = string.Join("\n  ",
+                        withWindow.Select(p =>
+                        {
+                            try { return $"PID {p.Id}: \"{p.MainWindowTitle}\""; }
+                            catch { return $"PID {p.Id}"; }
+                        }));
+                    throw new InvalidOperationException(
+                        $"Multiple '{app}' windows found:\n  {listing}\n" +
+                        "Use --app with a PID or a more specific window title.");
+                }
             }
+        }
+        finally
+        {
+            foreach (var p in byName) { p.Dispose(); }
         }
 
         // Try partial process name match (e.g., "imageresizer" matches "PowerToys.ImageResizer")
@@ -205,25 +216,36 @@ internal sealed class UiSessionService(
             })
             .ToArray();
 
-        if (partialMatches.Length == 1)
+        try
         {
-            return partialMatches[0];
-        }
-
-        if (partialMatches.Length > 1)
-        {
-            var withWindow = partialMatches
-                .Where(p =>
-                {
-                    try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
-                    catch { return false; }
-                })
-                .ToArray();
-
-            if (withWindow.Length == 1)
+            if (partialMatches.Length == 1)
             {
-                return withWindow[0];
+                var result = partialMatches[0];
+                partialMatches = []; // prevent disposal
+                return result;
             }
+
+            if (partialMatches.Length > 1)
+            {
+                var withWindow = partialMatches
+                    .Where(p =>
+                    {
+                        try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
+                        catch { return false; }
+                    })
+                    .ToArray();
+
+                if (withWindow.Length == 1)
+                {
+                    var result = withWindow[0];
+                    partialMatches = partialMatches.Where(p => p != result).ToArray();
+                    return result;
+                }
+            }
+        }
+        finally
+        {
+            foreach (var p in partialMatches) { p.Dispose(); }
         }
 
         return null;

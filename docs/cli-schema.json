@@ -3052,7 +3052,7 @@
               "description": "Timeout in milliseconds",
               "hidden": false,
               "aliases": [
-                "-w"
+                "-t"
               ],
               "valueType": "System.Int32",
               "hasDefaultValue": true,

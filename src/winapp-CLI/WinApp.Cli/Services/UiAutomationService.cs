@@ -13,15 +13,16 @@ namespace WinApp.Cli.Services;
 /// UIA backend using Windows UI Automation COM APIs via CsWin32.
 /// Provides cross-process element tree inspection and pattern-based interaction.
 /// </summary>
-internal sealed class UiAutomationService : IUiAutomationService
+internal sealed partial class UiAutomationService : IUiAutomationService
 {
     private readonly ILogger<UiAutomationService> _logger;
     private readonly IUIAutomation _automation;
-    private int _nextElementId;
+    private readonly ISelectorService _selectorService;
 
-    public UiAutomationService(ILogger<UiAutomationService> logger)
+    public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
     {
         _logger = logger;
+        _selectorService = selectorService;
         _automation = CUIAutomation8.CreateInstance<IUIAutomation>();
     }
 
@@ -79,7 +80,7 @@ internal sealed class UiAutomationService : IUiAutomationService
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
     {
         _logger.LogDebug("Inspecting process {Pid} at depth {Depth}", session.ProcessId, depth);
-        _nextElementId = 0;
+        var nextElementId = 0;
 
         var root = GetRootElement(session);
         if (root is null)
@@ -107,7 +108,7 @@ internal sealed class UiAutomationService : IUiAutomationService
             else
             {
                 // Try as a legacy selector
-                var selectorService = new SelectorService();
+                var selectorService = _selectorService;
                 var selector = selectorService.Parse(elementId);
                 var condition = BuildCondition(selector);
                 if (condition is not null)
@@ -123,7 +124,7 @@ internal sealed class UiAutomationService : IUiAutomationService
         }
 
         var elements = new List<UiElement>();
-        WalkTree(startElement, depth, 0, "", elements);
+        WalkTree(startElement, depth, 0, "", elements, ref nextElementId);
         var result = elements.ToArray();
         return Task.FromResult(result);
     }
@@ -131,7 +132,7 @@ internal sealed class UiAutomationService : IUiAutomationService
     public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct)
     {
         _logger.LogDebug("Inspecting ancestors of {ElementId}", elementId);
-        _nextElementId = 0;
+        var nextElementId = 0;
 
         var root = GetRootElement(session);
         if (root is null)
@@ -153,8 +154,7 @@ internal sealed class UiAutomationService : IUiAutomationService
         }
         else
         {
-            var selectorService = new SelectorService();
-            var selector = selectorService.Parse(elementId);
+            var selector = _selectorService.Parse(elementId);
             var condition = BuildCondition(selector);
             if (condition is not null)
             {
@@ -173,7 +173,7 @@ internal sealed class UiAutomationService : IUiAutomationService
         var current = target;
 
         // Add the target element itself first
-        ancestors.Add(ToUiElement(current, ""));
+        ancestors.Add(ToUiElement(current, "", ref nextElementId));
 
         while (true)
         {
@@ -208,7 +208,7 @@ internal sealed class UiAutomationService : IUiAutomationService
                 break;
             }
 
-            ancestors.Add(ToUiElement(parent, ""));
+            ancestors.Add(ToUiElement(parent, "", ref nextElementId));
             current = parent;
         }
 
@@ -221,7 +221,7 @@ internal sealed class UiAutomationService : IUiAutomationService
     public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct)
     {
         _logger.LogDebug("Searching in process {Pid}", session.ProcessId);
-        _nextElementId = 0;
+        var nextElementId = 0;
 
         var root = GetRootElement(session);
         if (root is null)
@@ -255,7 +255,7 @@ internal sealed class UiAutomationService : IUiAutomationService
         for (var i = 0; i < count; i++)
         {
             var el = found.GetElement(i);
-            results[i] = ToUiElement(el, "");
+            results[i] = ToUiElement(el, "", ref nextElementId);
 
             // For any non-invokable match, find the nearest invokable ancestor
             if (!IsInvokable(el))
@@ -263,7 +263,7 @@ internal sealed class UiAutomationService : IUiAutomationService
                 var ancestor = FindInvokableAncestor(el, root);
                 if (ancestor is not null)
                 {
-                    results[i].InvokableAncestor = ToUiElement(ancestor, "");
+                    results[i].InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
                 }
             }
         }
@@ -344,7 +344,8 @@ return Task.FromResult<UiElement?>(null);
         }
 
         var element = found.GetElement(0);
-        var result = ToUiElement(element, "");
+        var nextElementId = 0;
+        var result = ToUiElement(element, "", ref nextElementId);
 
         // Surface invokable ancestor for non-invokable elements
         if (!IsInvokable(element))
@@ -352,7 +353,7 @@ return Task.FromResult<UiElement?>(null);
             var ancestor = FindInvokableAncestor(element, root);
             if (ancestor is not null)
             {
-                result.InvokableAncestor = ToUiElement(ancestor, "");
+                result.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
             }
         }
 
@@ -465,241 +466,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult(props);
     }
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
-    {
-        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen})", session.ProcessId, captureScreen);
-
-        var root = GetRootElement(session);
-        if (root is null)
-        {
-            throw new InvalidOperationException($"No UIA window found for {session.ProcessName} (PID {session.ProcessId}).");
-        }
-
-        // Get the actual window title from UIA (not session cache, which may be stale)
-        var rootName = SafeGetBstr(() => root.get_CurrentName());
-        if (rootName is not null)
-        {
-            session.WindowTitle = rootName;
-        }
-
-        var hwnd = root.get_CurrentNativeWindowHandle();
-        if (hwnd.IsNull && session.WindowHandle != 0)
-        {
-            // UIA element may lack a native handle (e.g. Electron content pane),
-            // but the session already has a validated HWND from -w flag or window enumeration.
-            hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
-            _logger.LogDebug("UIA element has no native handle; using session HWND {Hwnd}", session.WindowHandle);
-        }
-        if (hwnd.IsNull)
-        {
-            throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
-        }
-
-        // Check if window is minimized
-        if (Windows.Win32.PInvoke.IsIconic(hwnd))
-        {
-            Windows.Win32.PInvoke.ShowWindow(hwnd, Windows.Win32.UI.WindowsAndMessaging.SHOW_WINDOW_CMD.SW_RESTORE);
-            Thread.Sleep(300);
-        }
-
-        // Get window dimensions
-        Windows.Win32.PInvoke.GetWindowRect(hwnd, out var rect);
-        var width = rect.right - rect.left;
-        var height = rect.bottom - rect.top;
-
-        if (width <= 0 || height <= 0)
-        {
-            throw new InvalidOperationException("Window has zero size. Is it minimized?");
-        }
-
-        byte[] pixelData;
-
-        if (captureScreen)
-        {
-            // Screen capture mode: BitBlt from screen DC — captures popups and overlays
-            // Bring window to foreground first to avoid capturing other windows
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            Thread.Sleep(100);
-
-            pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
-        }
-        else
-        {
-            // Window render mode: PrintWindow — works even when occluded
-            pixelData = CaptureFromWindow(hwnd, width, height);
-
-            // If capture is blank (all zeros), the window may not have rendered yet.
-            // Activate it and retry — common with Electron on first launch.
-            if (IsBlankCapture(pixelData))
-            {
-                _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
-                Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-                Thread.Sleep(200);
-                pixelData = CaptureFromWindow(hwnd, width, height);
-            }
-        }
-
-        // If a selector was provided, crop to the element's bounding rectangle
-        if (!string.IsNullOrEmpty(elementId))
-        {
-            var cropped = CropToElement(pixelData, width, height, elementId, session, root, rect.left, rect.top);
-            if (cropped is not null)
-            {
-                return Task.FromResult(cropped.Value);
-            }
-        }
-
-        return Task.FromResult((pixelData, width, height));
-    }
-
-    private static unsafe byte[] CaptureFromWindow(Windows.Win32.Foundation.HWND hwnd, int width, int height)
-    {
-        var hdcWindow = Windows.Win32.PInvoke.GetDC(hwnd);
-        var hdcMem = Windows.Win32.PInvoke.CreateCompatibleDC(hdcWindow);
-        var hBitmap = Windows.Win32.PInvoke.CreateCompatibleBitmap(hdcWindow, width, height);
-
-        var hOld = Windows.Win32.PInvoke.SelectObject(hdcMem, *(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
-
-        // PW_RENDERFULLCONTENT = 2
-        Windows.Win32.PInvoke.PrintWindow(hwnd, hdcMem, (Windows.Win32.Storage.Xps.PRINT_WINDOW_FLAGS)2);
-
-        Windows.Win32.PInvoke.SelectObject(hdcMem, hOld);
-
-        var pixelData = ExtractPixels(hdcWindow, hBitmap, width, height);
-
-        Windows.Win32.PInvoke.DeleteObject(*(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
-        Windows.Win32.PInvoke.DeleteDC(hdcMem);
-        Windows.Win32.PInvoke.ReleaseDC(hwnd, hdcWindow);
-
-        return pixelData;
-    }
-
-    private static unsafe byte[] CaptureFromScreen(int x, int y, int width, int height)
-    {
-        var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
-        var hdcMem = Windows.Win32.PInvoke.CreateCompatibleDC(hdcScreen);
-        var hBitmap = Windows.Win32.PInvoke.CreateCompatibleBitmap(hdcScreen, width, height);
-
-        var hOld = Windows.Win32.PInvoke.SelectObject(hdcMem, *(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
-
-        // BitBlt from screen at the window's position
-        Windows.Win32.PInvoke.BitBlt(hdcMem, 0, 0, width, height,
-            hdcScreen, x, y, Windows.Win32.Graphics.Gdi.ROP_CODE.SRCCOPY);
-
-        Windows.Win32.PInvoke.SelectObject(hdcMem, hOld);
-
-        var pixelData = ExtractPixels(hdcScreen, hBitmap, width, height);
-
-        Windows.Win32.PInvoke.DeleteObject(*(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
-        Windows.Win32.PInvoke.DeleteDC(hdcMem);
-        Windows.Win32.PInvoke.ReleaseDC(Windows.Win32.Foundation.HWND.Null, hdcScreen);
-
-        return pixelData;
-    }
-
-    private static unsafe byte[] ExtractPixels(Windows.Win32.Graphics.Gdi.HDC hdc, Windows.Win32.Graphics.Gdi.HBITMAP hBitmap, int width, int height)
-    {
-        var bmi = new Windows.Win32.Graphics.Gdi.BITMAPINFO
-        {
-            bmiHeader = new Windows.Win32.Graphics.Gdi.BITMAPINFOHEADER
-            {
-                biSize = (uint)sizeof(Windows.Win32.Graphics.Gdi.BITMAPINFOHEADER),
-                biWidth = width,
-                biHeight = -height, // top-down
-                biPlanes = 1,
-                biBitCount = 32,
-                biCompression = 0 // BI_RGB
-            }
-        };
-
-        var pixelData = new byte[width * height * 4];
-        fixed (byte* pPixels = pixelData)
-        {
-            Windows.Win32.PInvoke.GetDIBits(hdc, hBitmap, 0, (uint)height, pPixels, &bmi,
-                Windows.Win32.Graphics.Gdi.DIB_USAGE.DIB_RGB_COLORS);
-        }
-
-        return pixelData;
-    }
-
-    private static bool IsBlankCapture(byte[] pixels)
-    {
-        // Check if all pixels are zero (black/unrendered frame).
-        // Use int-sized chunks for speed on large buffers.
-        var span = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, long>(pixels.AsSpan());
-        foreach (var chunk in span)
-        {
-            if (chunk != 0)
-            {
-                return false;
-            }
-        }
-        // Check remaining bytes
-        for (var i = span.Length * sizeof(long); i < pixels.Length; i++)
-        {
-            if (pixels[i] != 0)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private (byte[] Pixels, int Width, int Height)? CropToElement(
-        byte[] fullPixels, int fullWidth, int fullHeight,
-        string selector, UiSessionInfo session, IUIAutomationElement root,
-        int windowLeft, int windowTop)
-    {
-        // Find the element — try slug first, then legacy selector
-        IUIAutomationElement? target = null;
-
-        var slugParsed = SlugGenerator.ParseSlug(selector);
-        if (slugParsed is not null)
-        {
-            var slugResult = FindElementBySlug(selector, root);
-            if (slugResult is not null)
-            {
-                target = ResolveComElement(session, slugResult);
-            }
-        }
-        else
-        {
-            var selectorService = new SelectorService();
-            var parsed = selectorService.Parse(selector);
-            var condition = BuildCondition(parsed);
-            if (condition is not null)
-            {
-                target = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
-            }
-        }
-
-        if (target is null)
-        {
-            return null;
-        }
-
-        var elRect = target.get_CurrentBoundingRectangle();
-        var cropX = Math.Max(0, elRect.left - windowLeft);
-        var cropY = Math.Max(0, elRect.top - windowTop);
-        var cropW = Math.Min(elRect.right - elRect.left, fullWidth - cropX);
-        var cropH = Math.Min(elRect.bottom - elRect.top, fullHeight - cropY);
-
-        if (cropW <= 0 || cropH <= 0)
-        {
-            return null;
-        }
-
-        var croppedPixels = new byte[cropW * cropH * 4];
-        for (var row = 0; row < cropH; row++)
-        {
-            var srcOffset = ((cropY + row) * fullWidth + cropX) * 4;
-            var dstOffset = row * cropW * 4;
-            Array.Copy(fullPixels, srcOffset, croppedPixels, dstOffset, cropW * 4);
-        }
-
-        return (croppedPixels, cropW, cropH);
-    }
-
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Invoking element {ElementId}", element.Id);
@@ -769,10 +535,14 @@ return Task.FromResult<UiElement?>(null);
             var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
             unsafe
             {
-                fixed (char* pText = text)
+                var bstrPtr = Marshal.StringToBSTR(text);
+                try
                 {
-                    var bstr = new Windows.Win32.Foundation.BSTR(pText);
-                    pattern.SetValue(bstr);
+                    pattern.SetValue(new Windows.Win32.Foundation.BSTR((char*)bstrPtr));
+                }
+                finally
+                {
+                    Marshal.FreeBSTR(bstrPtr);
                 }
             }
             return Task.CompletedTask;
@@ -862,7 +632,7 @@ return Task.FromResult<UiElement?>(null);
                         {
                             scrollPattern.SetScrollPercent(-1, // horizontal: no change
                                 Math.Max(0, Math.Min(100,
-                                    scrollPattern.get_CachedVerticalScrollPercent() +
+                                    scrollPattern.get_CurrentVerticalScrollPercent() +
                                     ((double)(elRect.top - parentRect.top) / (parentRect.bottom - parentRect.top) * 100))));
                         }
 
@@ -1032,34 +802,36 @@ return Task.FromResult<UiElement?>(null);
             return Task.FromResult<UiElement?>(null);
         }
 
-        _nextElementId = 0;
-        var result = ToUiElement(focused, "");
+        var nextElementId = 0;
+        var result = ToUiElement(focused, "", ref nextElementId);
         return Task.FromResult<UiElement?>(result);
     }
 
     /// <summary>
     /// Resolves a slug selector by walking the tree, regenerating slugs for each element,
     /// and matching + validating the RuntimeId hash.
+    /// Returns both the UiElement model and the live COM element.
     /// </summary>
-    private    UiElement? FindElementBySlug(string targetSlug, IUIAutomationElement root)
+    private (UiElement? Model, IUIAutomationElement? ComElement) FindElementBySlugWithCom(string targetSlug, IUIAutomationElement root)
     {
         var parsed = SlugGenerator.ParseSlug(targetSlug);
         if (parsed is null)
         {
-            return null;
+            return (null, null);
         }
 
         var (targetPrefix, targetNameSlug, targetHash) = parsed.Value;
-        _nextElementId = 0;
+        var nextElementId = 0;
+        const int maxRecursionDepth = 100;
 
         // DFS walk to find matching slug
         IUIAutomationElement? matchedCom = null;
         UiElement? matchedUi = null;
         bool hashMismatchFound = false;
 
-        void Walk(IUIAutomationElement element)
+        void Walk(IUIAutomationElement element, int depth)
         {
-            if (matchedCom is not null)
+            if (matchedCom is not null || depth > maxRecursionDepth)
             {
                 return;
             }
@@ -1084,7 +856,7 @@ return Task.FromResult<UiElement?>(null);
                         if (hash == targetHash)
                         {
                             matchedCom = element;
-                            matchedUi = ToUiElement(element, "");
+                            matchedUi = ToUiElement(element, "", ref nextElementId);
                             return;
                         }
                         else
@@ -1108,7 +880,7 @@ return Task.FromResult<UiElement?>(null);
                         if (hash == targetHash)
                         {
                             matchedCom = element;
-                            matchedUi = ToUiElement(element, "");
+                            matchedUi = ToUiElement(element, "", ref nextElementId);
                             return;
                         }
                     }
@@ -1121,13 +893,13 @@ return Task.FromResult<UiElement?>(null);
             var child = walker.GetFirstChildElement(element);
             while (child is not null && matchedCom is null)
             {
-                Walk(child);
+                Walk(child, depth + 1);
                 try { child = walker.GetNextSiblingElement(child); }
                 catch { break; }
             }
         }
 
-        Walk(root);
+        Walk(root, 0);
 
         if (matchedUi is not null)
         {
@@ -1137,10 +909,10 @@ return Task.FromResult<UiElement?>(null);
                 var ancestor = FindInvokableAncestor(matchedCom, root);
                 if (ancestor is not null)
                 {
-                    matchedUi.InvokableAncestor = ToUiElement(ancestor, "");
+                    matchedUi.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
                 }
             }
-            return matchedUi;
+            return (matchedUi, matchedCom);
         }
 
         if (hashMismatchFound)
@@ -1150,27 +922,43 @@ return Task.FromResult<UiElement?>(null);
                 "the UI may have changed. Re-run 'inspect' to get updated selectors.");
         }
 
-        return null;
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Convenience wrapper that returns only the UiElement model from slug resolution.
+    /// </summary>
+    private UiElement? FindElementBySlug(string targetSlug, IUIAutomationElement root)
+    {
+        return FindElementBySlugWithCom(targetSlug, root).Model;
     }
 
     // --- Private helpers ---
 
     /// <summary>
     /// Re-finds a live COM UIA element from our serialized UiElement model.
-    /// Uses AutomationId (most stable), then Name+Type, to locate the element.
+    /// Uses slug-based resolution first (most precise), then falls back to
+    /// AutomationId or Name+Type property matching.
     /// </summary>
     private IUIAutomationElement? ResolveComElement(UiSessionInfo session, UiElement element)
     {
         var root = GetRootElement(session);
         if (root is null)
-
         {
-
             return null;
-
         }
 
-        // Try AutomationId first (most stable)
+        // Try slug-based resolution first (most precise — uses RuntimeId hash)
+        if (element.Selector is not null)
+        {
+            var (_, comElement) = FindElementBySlugWithCom(element.Selector, root);
+            if (comElement is not null)
+            {
+                return comElement;
+            }
+        }
+
+        // Fall back to AutomationId (stable but not unique across duplicates)
         if (element.AutomationId is not null)
         {
             var condition = _automation.CreatePropertyCondition(
@@ -1178,15 +966,12 @@ return Task.FromResult<UiElement?>(null);
                 ComVariant.Create(element.AutomationId));
             var found = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
             if (found is not null)
-
             {
-
                 return found;
-
             }
         }
 
-        // Try Name + ControlType
+        // Fall back to Name + ControlType
         if (element.Name is not null)
         {
             var typeId = MapControlType(element.Type);
@@ -1209,11 +994,8 @@ return Task.FromResult<UiElement?>(null);
 
             var found = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
             if (found is not null)
-
             {
-
                 return found;
-
             }
         }
 
@@ -1468,9 +1250,9 @@ return Task.FromResult<UiElement?>(null);
         return null;
     }
 
-    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results)
+    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results, ref int nextElementId)
     {
-        var uiElement = ToUiElement(element, path);
+        var uiElement = ToUiElement(element, path, ref nextElementId);
         uiElement.Depth = currentDepth;
         results.Add(uiElement);
 
@@ -1492,7 +1274,7 @@ return Task.FromResult<UiElement?>(null);
         while (child is not null)
         {
             var childPath = string.IsNullOrEmpty(path) ? $"/{childIndex}" : $"{path}/{childIndex}";
-            WalkTree(child, maxDepth, currentDepth + 1, childPath, results);
+            WalkTree(child, maxDepth, currentDepth + 1, childPath, results, ref nextElementId);
 
             IUIAutomationElement? next;
             try
@@ -1508,9 +1290,9 @@ child = next;
         }
 }
 
-    private UiElement ToUiElement(IUIAutomationElement element, string path)
+    private static UiElement ToUiElement(IUIAutomationElement element, string path, ref int nextElementId)
     {
-        var id = $"e{_nextElementId++}";
+        var id = $"e{nextElementId++}";
         var rect = element.get_CurrentBoundingRectangle();
         var type = GetControlTypeName(element.get_CurrentControlType());
         var name = SafeGetBstr(() => element.get_CurrentName());
