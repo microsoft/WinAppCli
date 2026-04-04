@@ -187,6 +187,9 @@ internal partial class RunCommand : Command, IShortDescription
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
                     resolvedOutputDir = outputAppXDirectory;
 
+                    // Validate that the output path is usable (check long path support if needed)
+                    LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
+
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
