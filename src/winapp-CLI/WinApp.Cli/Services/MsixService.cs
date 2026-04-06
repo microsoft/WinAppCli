@@ -286,6 +286,16 @@ internal partial class MsixService(
             }
         }
 
+        // Check for an AppX subdirectory, which is a build artifact that should not be
+        // included in the package. Exclude it from staging and warn the user.
+        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+        if (appxDir.Exists)
+        {
+            excludedDirectories.Add("AppX");
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
+        }
+
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
         // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
@@ -640,9 +650,10 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Recursively copies all files and subdirectories from source to destination.
+    /// Recursively copies all files and subdirectories from source to destination,
+    /// skipping any top-level directories whose names appear in <paramref name="excludedDirectories"/>.
     /// </summary>
-    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo destination)
+    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo destination, HashSet<string>? excludedDirectories = null)
     {
         destination.Create();
 
@@ -653,6 +664,11 @@ internal partial class MsixService(
 
         foreach (var subDir in source.EnumerateDirectories())
         {
+            if (excludedDirectories != null && excludedDirectories.Contains(subDir.Name))
+            {
+                continue;
+            }
+
             var destSubDir = new DirectoryInfo(Path.Combine(destination.FullName, subDir.Name));
             CopyDirectoryRecursive(subDir, destSubDir);
         }

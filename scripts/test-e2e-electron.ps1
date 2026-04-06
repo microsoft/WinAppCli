@@ -371,7 +371,7 @@ try {
 
     Write-TestStep "Adding Electron debug identity..." 11
 
-    $addIdentityCommand = "npx winapp node add-electron-debug-identity --no-install"
+    $addIdentityCommand = "npx winapp node add-electron-debug-identity"
     Assert-Command $addIdentityCommand "Failed to add Electron debug identity"
 
     # ========================================================================
