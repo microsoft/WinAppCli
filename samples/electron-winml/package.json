@@ -35,6 +35,6 @@
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron/fuses": "^1.8.0",
     "@microsoft/winappcli": "^0.1.8",
-    "electron": "39.8.4"
+    "electron": "39.8.5"
   }
 }
