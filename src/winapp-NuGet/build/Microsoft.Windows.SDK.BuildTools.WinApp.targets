@@ -113,8 +113,6 @@
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
-      <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
-      <_WinAppRunArgs>$(_WinAppRunArgs) --caller nuget-package</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 
@@ -139,7 +137,8 @@
     <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           IgnoreExitCode="false"
-          ConsoleToMSBuild="false">
+          ConsoleToMSBuild="false"
+          EnvironmentVariables="WINAPP_CLI_CALLER=nuget-package">
       <Output TaskParameter="ExitCode" PropertyName="_WinAppRunExitCode" />
     </Exec>
     
@@ -211,8 +210,8 @@
           DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout">
     
     <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
-      <RunCommand>$(WinAppCliPath)</RunCommand>
-      <RunArguments>$(_WinAppRunArgs)</RunArguments>
+      <RunCommand>cmd</RunCommand>
+      <RunArguments>/c "set WINAPP_CLI_CALLER=nuget-package &amp;&amp; &quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"</RunArguments>
       <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
     </PropertyGroup>
     

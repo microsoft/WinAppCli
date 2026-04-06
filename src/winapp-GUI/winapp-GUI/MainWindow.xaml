@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="winapp_GUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:winapp_GUI"
+    xmlns:controls="using:winapp_GUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="Windows Identity App">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <StackPanel Spacing="16" Margin="24" VerticalAlignment="Top">
+            <!-- Header -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8">
+                <TextBlock FontSize="24" Text="Windows Identity App" VerticalAlignment="Center"/>
+                <Button Width="28" Height="28" Padding="0" Margin="8,0,0,0"
+                        Background="Transparent" BorderThickness="0"
+                        VerticalAlignment="Center"
+                        ToolTipService.ToolTip="This app takes an .exe and adds app identity to it via sparse packaging! If you drop in an MSIX, it will locally self-sign and register. If you select a folder and package the app in it, an MSIX will be created, signed and registered. You can also specifiy a cert or optional parameters.">
+                    <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="18" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Button>
+            </StackPanel>
+
+            <!-- Pivot Control for App Type -->
+            <Pivot x:Name="AppTypePivot" Margin="0,0,0,8" SelectionChanged="AppTypePivot_SelectionChanged">
+                <!-- .NET PivotItem -->
+                <PivotItem Header=".NET">
+                    <StackPanel>
+                        <!-- Drop Zone for .NET -->
+                        <Border x:Name="DotNetDropZone"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,24,0,0"
+                                BorderThickness="2"
+                                BorderBrush="#FF0078D7"
+                                CornerRadius="8"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                Padding="12"
+                                AllowDrop="True"
+                                DragOver="DotNetDropZone_DragOver"
+                                Drop="DotNetDropZone_Drop">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                                <Image Source="Assets/Upload.png"
+                                       Width="64"
+                                       Height="64"
+                                       Stretch="Uniform"
+                                       Margin="0,0,0,8"/>
+                                <TextBlock Text="Drag and drop your .exe or a folder here" TextAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- File name and cancel icon-->
+                        <controls:FileNamePanelControl x:Name="DotNetFileNamePanel" Visibility="Collapsed" />
+
+                        <!-- Optional Parameters Expander -->
+                        <Expander x:Name="OptionalParametersExpander" Margin="0,4,0,0" HorizontalAlignment="Stretch">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                                    <TextBlock Text="Optional Parameters" VerticalAlignment="Center" />
+                                    <Button x:Name="DotNetClearOptionalButton"
+                                        Content="Clear"
+                                        Click="DotNetClearOptionalButton_Click"
+                                        Margin="8,0,0,0"
+                                        Padding="8,4"
+                                        HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel x:Name="OptionalParametersPanel" HorizontalAlignment="Stretch">
+                                <TextBox x:Name="PublisherNameBox"
+                                         Header="Publisher Name (optional)"
+                                         PlaceholderText="Enter publisher name"
+                                         Margin="0,8,0,0"
+                                         HorizontalAlignment="Stretch"/>
+                                <TextBox x:Name="AppNameBox"
+                                         Header="App Name (optional)"
+                                         PlaceholderText="Enter app name"
+                                         Margin="0,8,0,0"
+                                         HorizontalAlignment="Stretch"/>
+                                <!-- Certificate Picker (replaced with UserControl) -->
+                                <controls:CertificatePickerControl x:Name="DotNetCertPicker" Visibility="Collapsed" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Add Identity Button -->
+                        <Button x:Name="AddIdentityButton"
+                                Content="Add Identity"
+                                Click="AddIdentityButton_ClickAsync"
+                                Margin="0,16,0,16"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource AccentButtonStyle}"
+                                FontSize="18"
+                                Padding="12,6"/>
+
+                        <!-- Package App Button -->
+                        <Button x:Name="PackageAppButton"
+                                Content="Package app"
+                                Click="PackageAppButton_ClickAsync"
+                                Margin="0,0,0,16"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource AccentButtonStyle}"
+                                FontSize="18"
+                                Padding="12,6"/>
+
+                        <!-- Progress panel -->
+                        <controls:ProgressPanelControl x:Name="DotNetProgressPanel" />
+                    </StackPanel>
+                </PivotItem>
+                
+                <!-- Python PivotItem -->
+                <PivotItem Header="Python">
+                    <StackPanel>
+                        <!-- Drop Zone for Python -->
+                        <Border x:Name="PythonDropZone"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,24,0,0"
+                                BorderThickness="2"
+                                BorderBrush="#FF0078D7"
+                                CornerRadius="8"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                Padding="12"
+                                AllowDrop="True"
+                                DragOver="PythonDropZone_DragOver"
+                                Drop="PythonDropZone_Drop">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                                <Image Source="Assets/Upload.png"
+                                       Width="64"
+                                       Height="64"
+                                       Stretch="Uniform"
+                                       Margin="0,0,0,8"/>
+                                <TextBlock Text="Drag and drop your .py file or a folder here" TextAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- File name and cancel icon (Python) -->
+                        <controls:FileNamePanelControl x:Name="PythonFileNamePanel" Visibility="Collapsed" />
+
+                        <!-- Optional Parameters Expander (Python) with Clear button in header -->
+                        <Expander x:Name="PythonOptionalParametersExpander" Margin="0,4,0,0" HorizontalAlignment="Stretch">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                                    <TextBlock Text="Optional Parameters" VerticalAlignment="Center" />
+                                    <Button x:Name="PythonClearOptionalButton"
+                                            Content="Clear"
+                                            Click="PythonClearOptionalButton_Click"
+                                            Margin="8,0,0,0"
+                                            Padding="8,4" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel x:Name="PythonOptionalParametersPanel" HorizontalAlignment="Stretch">
+                                <TextBox x:Name="PythonPublisherNameBox"
+                                         Header="Publisher Name (optional)"
+                                         PlaceholderText="Enter publisher name"
+                                         Margin="0,8,0,0"
+                                         HorizontalAlignment="Stretch"/>
+                                <TextBox x:Name="PythonAppNameBox"
+                                         Header="App Name (optional)"
+                                         PlaceholderText="Enter app name"
+                                         Margin="0,8,0,0"
+                                         HorizontalAlignment="Stretch"/>
+                                <!-- Certificate Picker (replaced with UserControl) -->
+                                <controls:CertificatePickerControl x:Name="PythonCertPicker" Visibility="Collapsed" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Add Identity Button (Python) -->
+                        <Button x:Name="PythonAddIdentityButton"
+                                Content="Add Identity"
+                                Click="AddIdentityButton_ClickAsync"
+                                Margin="0,16,0,16"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource AccentButtonStyle}"
+                                FontSize="18"
+                                Padding="12,6"/>
+
+                        <!-- Package App Button (Python) -->
+                        <Button x:Name="PythonPackageAppButton"
+                                Content="Package app"
+                                Click="PackageAppButton_ClickAsync"
+                                Margin="0,0,0,16"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource AccentButtonStyle}"
+                                FontSize="18"
+                                Padding="12,6"/>
+
+                        <!-- Progress panel (Python) -->
+                        <controls:ProgressPanelControl x:Name="PythonProgressPanel" />
+                    </StackPanel>
+                </PivotItem>
+                
+                <!-- MSIX PivotItem -->
+                <PivotItem Header="MSIX">
+                    <StackPanel>
+                        <!-- Drop Zone for MSIX -->
+                        <Border x:Name="MsixDropZone"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,24,0,0"
+                                BorderThickness="2"
+                                BorderBrush="#FF0078D7"
+                                CornerRadius="8"
+                                Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                                Padding="12"
+                                AllowDrop="True"
+                                DragOver="MsixDropZone_DragOver"
+                                Drop="MsixDropZone_Drop">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                                <Image Source="Assets/Upload.png"
+                                       Width="64"
+                                       Height="64"
+                                       Stretch="Uniform"
+                                       Margin="0,0,0,8"/>
+                                <TextBlock Text="Drag and drop your .msix file here" TextAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- File name and cancel icon for MSIX (replaced with UserControl) -->
+                        <controls:FileNamePanelControl x:Name="MsixFileNamePanel" Visibility="Collapsed" />
+
+                        <!-- Optional Parameters Expander (Python) with Clear button in header -->
+                        <Expander x:Name="MSIXOptionalParametersExpander" Margin="0,4,0,0" HorizontalAlignment="Stretch">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                                    <TextBlock Text="Optional Parameters" VerticalAlignment="Center" />
+                                    <Button x:Name="MSIXClearOptionalButton"
+                                        Content="Clear"
+                                        Click="MSIXClearOptionalButton_Click"
+                                        Margin="8,0,0,0"
+                                        Padding="8,4" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel x:Name="MSIXOptionalParametersPanel" HorizontalAlignment="Stretch">
+                                <controls:CertificatePickerControl x:Name="MsixCertPicker" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Register and Install Button -->
+                        <Button x:Name="RegisterInstallButton"
+                                Content="Register and Install"
+                                Click="RegisterInstallButton_ClickAsync"
+                                Margin="0,8,0,16"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource AccentButtonStyle}"
+                                FontSize="18"
+                                Padding="12,6"
+                                IsEnabled="False"/>
+
+                        <!-- Progress panel (MSIX) (replaced with UserControl) -->
+                        <controls:ProgressPanelControl x:Name="MsixProgressPanel" />
+                    </StackPanel>
+                </PivotItem>
+            </Pivot>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

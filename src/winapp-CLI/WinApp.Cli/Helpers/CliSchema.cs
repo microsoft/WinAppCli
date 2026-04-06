@@ -143,11 +143,11 @@ internal static class CliSchema
             return null;
         }
         var dict = new Dictionary<string, OptionDetails>();
-        foreach (var option in options.Where(o => !o.Hidden).OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var option in options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
         {
             dict[option.Name] = CreateOptionDetails(option);
         }
-        return dict.Count > 0 ? dict : null;
+        return dict;
     }
 
     private static Dictionary<string, CommandDetails>? CreateSubcommandsDictionary(IList<Command> subcommands)

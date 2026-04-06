@@ -18,15 +18,6 @@ internal interface IAppLauncherService
     uint LaunchByAumid(string aumid, string? arguments = null);
 
     /// <summary>
-    /// Terminates all processes belonging to a packaged application using
-    /// <c>IPackageDebugSettings.TerminateAllProcesses</c>. Falls back to killing a
-    /// single process by PID when the package-level termination fails.
-    /// </summary>
-    /// <param name="packageFullName">The full name of the package whose processes should be terminated, or <c>null</c> to skip package-level termination.</param>
-    /// <param name="processId">Fallback process ID to kill if package-level termination fails or <paramref name="packageFullName"/> is <c>null</c>.</param>
-    void TerminatePackageProcesses(string? packageFullName, uint processId);
-
-    /// <summary>
     /// Computes the package family name from a package name and publisher distinguished name.
     /// The result follows the Windows format: <c>{packageName}_{publisherId}</c>, where the
     /// publisher ID is a 13-character Crockford Base32 encoding derived from the publisher's SHA256 hash.
@@ -35,12 +26,4 @@ internal interface IAppLauncherService
     /// <param name="publisher">The publisher distinguished name (e.g. <c>CN=MyCompany</c>).</param>
     /// <returns>The computed package family name.</returns>
     string ComputePackageFamilyName(string packageName, string publisher);
-
-    /// <summary>
-    /// Resolves the package full name from a package family name by querying
-    /// the system's package inventory.
-    /// </summary>
-    /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
-    /// <returns>The package full name, or <c>null</c> if the package is not installed.</returns>
-    string? GetPackageFullName(string packageFamilyName);
 }

@@ -54,17 +54,10 @@ Future<String?> getWindowsAppRuntimeVersion() async {
 }
 
 /// Shows a Windows App SDK toast notification via a native method channel.
-Future<String?> showNotification() async {
-  if (!Platform.isWindows) return null;
-  try {
-    const channel = MethodChannel('com.example/winapp_sdk');
-    await channel.invokeMethod('showNotification');
-    return null;
-  } on PlatformException catch (e) {
-    return '${e.code}: ${e.message}';
-  } catch (e) {
-    return e.toString();
-  }
+Future<void> showNotification() async {
+  if (!Platform.isWindows) return;
+  const channel = MethodChannel('com.example/winapp_sdk');
+  await channel.invokeMethod('showNotification');
 }
 
 void main() {
@@ -178,17 +171,7 @@ class _MyHomePageState extends State<MyHomePage> {
             const SizedBox(height: 24),
             if (_packageFamilyName != null)
               ElevatedButton.icon(
-                onPressed: () async {
-                  final error = await showNotification();
-                  if (error != null && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Notification error: $error'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
+                onPressed: showNotification,
                 icon: const Icon(Icons.notifications),
                 label: const Text('Show Notification'),
               )

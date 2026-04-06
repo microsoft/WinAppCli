@@ -1,6 +1,6 @@
 ---
 name: winapp
-description: Expert in Windows app development, packaging, distribution, and platform integration for non-WinUI frameworks. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, distributing apps through the Microsoft Store, adding execution aliases or file type associations, or adding MSIX packaging to build scripts or CI/CD pipelines. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
+description: Expert in Windows app development, packaging, and distribution. Activate for ANY task involving packaging apps for Windows, creating Windows installers (MSIX), code signing Windows apps, Windows SDK setup, Windows App SDK, Windows API access (push notifications, background tasks, share target, startup tasks), creating or editing appxmanifest.xml, generating certificates for Windows apps, distributing apps through the Microsoft Store, adding execution aliases or file type associations, or adding MSIX packaging to build scripts or CI/CD pipelines. Covers all app frameworks including Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Uses the winapp CLI tool.
 infer: true
 ---
 
@@ -118,8 +118,6 @@ Does the project already have an appxmanifest.xml?
 - `--manifest <path>` — path to `appxmanifest.xml` (default: auto-detect)
 - `--args <string>` — command-line arguments to pass to the app
 - `--no-launch` — register the package without launching
-- `--with-alias` — launch via execution alias (console apps run in current terminal)
-- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching)
 - `--output-appx-directory <path>` — custom output directory for loose layout
 **Requires:** Built app output directory + `appxmanifest.xml`
 
@@ -158,9 +156,9 @@ Does the project already have an appxmanifest.xml?
 - `--logo-path` — source image for asset generation
 - `--if-exists error|skip|overwrite`
 
-### `winapp manifest update-assets <image-path> [--light-image <path>]`
-**Purpose:** Regenerate all required icon sizes, scale variants, and app.ico from a single source image (PNG, SVG, ICO, etc.).
-**When to use:** When updating your app icon. Source image should be at least 400×400 pixels. SVG recommended for best quality. Use `--light-image` for light theme variants.
+### `winapp manifest update-assets <image-path>`
+**Purpose:** Regenerate all required icon sizes from a single source image.
+**When to use:** When updating your app icon. Source image should be at least 400×400 pixels.
 
 ### `winapp tool <toolname> [args...]` (alias: `winapp run-buildtool`)
 **Purpose:** Run Windows SDK tools directly (makeappx, signtool, makepri, etc.).
@@ -186,13 +184,12 @@ Does the project already have an appxmanifest.xml?
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`
 - Use `winapp node create-addon` to create native C#/C++ addons for Windows APIs
 - Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
-- **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
 
 ### .NET (WPF, WinForms, Console)
-- **Setup:** `winapp init --use-defaults` — but if you already have a `Package.appxmanifest` (e.g., WinUI 3 apps), you likely **don't need `winapp init`**. Just ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds.
-- **Run with identity:** Build with `dotnet build <project.csproj> -c Debug -p:Platform=x64`, then `winapp run bin\x64\Debug\<tfm>\win-x64\`. Replace `<tfm>` with your target framework (e.g., `net10.0-windows10.0.26100.0`) and adjust architecture as needed.
-- **Package:** `dotnet build -c Release -p:Platform=x64`, then `winapp package bin\x64\Release\<tfm>\win-x64\ --cert devcert.pfx`
+- **Setup:** `winapp init --use-defaults`
+- **Run with identity:** `winapp init` auto-adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, so just `dotnet run` registers a loose layout package and launches with identity. Without the NuGet package, use `dotnet build` then `winapp run ./bin/Debug`.
+- **Package:** `dotnet build -c Release`, then `winapp package bin\Release\net10.0-windows --cert devcert.pfx`
 - No native addons needed — .NET has direct Windows API access via `Microsoft.Windows.SDK.NET.Ref`
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md
 
@@ -274,7 +271,6 @@ When the user encounters an error, check these common causes:
 | "Package installation failed" | Stale registration or untrusted cert | Run `Get-AppxPackage <name> \| Remove-AppxPackage`, ensure cert is trusted |
 | "Certificate not trusted" | Dev cert not installed | Run `winapp cert install ./devcert.pfx` as admin |
 | "Build tools not found" | First run, tools not downloaded | winapp auto-downloads tools; ensure internet access |
-| Windows APIs fail at runtime | Debug identity not registered | Register debug identity after build and before launching: `winapp create-debug-identity <exe>` (or `npx winapp node add-electron-debug-identity` for Electron) — this is **mandatory** for any app using identity-requiring APIs |
 
 ## Key files and concepts
 

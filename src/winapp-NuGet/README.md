@@ -43,30 +43,6 @@ When you run `dotnet run`, this package:
 - .NET 8.0 or later
 - Windows App SDK 1.4 or later
 
-## Configuration
-
-Set these MSBuild properties in your `.csproj` to customize behavior:
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
-| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
-| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation. Useful for console apps that need terminal I/O. |
-| `WinAppRunNoLaunch` | `false` | Only register identity without launching the app |
-| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
-
-Example:
-
-```xml
-<PropertyGroup>
-  <!-- Launch via execution alias so console I/O stays in the current terminal -->
-  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
-
-  <!-- Capture OutputDebugString messages and first-chance exceptions -->
-  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
-</PropertyGroup>
-```
-
 ## Troubleshooting
 
 ### Application fails to launch
