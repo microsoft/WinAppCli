@@ -638,26 +638,70 @@ internal partial class MsixService
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
             }
 
-            // Step 6: Generate resources.pri in the ExternalLocation (entry point directory)
-            // so Windows can resolve unplated asset variants for taskbar icons.
+            // Generate resources.pri in a temporary staging directory, then copy only the
+            // final resources.pri into the ExternalLocation (entry point directory). This avoids
+            // leaving intermediate files such as priconfig.xml and pri.resfiles alongside app output.
             // Sparse packages look for resources.pri in the ExternalLocation, not alongside the manifest.
             if (expandedFiles.Count > 0)
             {
+                string? priStagingDir = null;
+
                 try
                 {
                     taskContext.AddDebugMessage($"{UiSymbols.Note} Generating PRI for asset resource resolution...");
-                    var priResourceCandidates = expandedFiles.Select(file => file.RelativePath);
+                    var priResourceCandidates = expandedFiles.Select(file => file.RelativePath).ToArray();
+
+                    priStagingDir = Path.Combine(
+                        Path.GetTempPath(),
+                        "WinAppCli-Pri-" + Guid.NewGuid().ToString("N"));
+
+                    var priStagingDirInfo = Directory.CreateDirectory(priStagingDir);
+                    MrtAssetHelper.CopyAllAssets(expandedFiles, priStagingDirInfo, taskContext);
+
                     await priService.CreatePriConfigAsync(
-                        entryPointDirInfo,
+                        priStagingDirInfo,
                         taskContext,
                         precomputedPriResourceCandidates: priResourceCandidates,
                         cancellationToken: cancellationToken);
-                    await priService.GeneratePriFileAsync(entryPointDirInfo, taskContext, cancellationToken: cancellationToken);
+                    await priService.GeneratePriFileAsync(priStagingDirInfo, taskContext, cancellationToken: cancellationToken);
+
+                    var stagedPriPath = Path.Combine(priStagingDirInfo.FullName, "resources.pri");
+                    var targetPriPath = Path.Combine(entryPointDirInfo.FullName, "resources.pri");
+
+                    if (!File.Exists(stagedPriPath))
+                    {
+                        throw new FileNotFoundException("Generated resources.pri was not found in the staging directory.", stagedPriPath);
+                    }
+
+                    if (File.Exists(targetPriPath))
+                    {
+                        File.Delete(targetPriPath);
+                    }
+
+                    File.Copy(stagedPriPath, targetPriPath);
                     taskContext.AddDebugMessage($"{UiSymbols.Check} Generated resources.pri in entry point directory");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                }
+                finally
+                {
+                    if (!string.IsNullOrWhiteSpace(priStagingDir) && Directory.Exists(priStagingDir))
+                    {
+                        try
+                        {
+                            Directory.Delete(priStagingDir, recursive: true);
+                        }
+                        catch (Exception cleanupEx)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to clean up PRI staging directory '{priStagingDir}': {cleanupEx.Message}");
+                        }
+                    }
                 }
             }
         }
