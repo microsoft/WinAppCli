@@ -13,7 +13,7 @@ namespace WinApp.Cli.Tests;
 internal class FakeMsixService : IMsixService
 {
     public MsixIdentityResult FakeIdentityResult { get; set; } = new("TestPackage", "CN=TestPublisher", "TestApp");
-    public List<string> AddLooseLayoutCalls { get; } = [];
+    public List<(string ManifestPath, bool Clean)> AddLooseLayoutCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
 
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
@@ -24,7 +24,7 @@ internal class FakeMsixService : IMsixService
         bool clean = false,
         CancellationToken cancellationToken = default)
     {
-        AddLooseLayoutCalls.Add(appxManifestPath.FullName);
+        AddLooseLayoutCalls.Add((appxManifestPath.FullName, clean));
         if (ExceptionToThrow != null)
         {
             throw ExceptionToThrow;
