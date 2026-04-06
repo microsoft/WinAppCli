@@ -638,7 +638,7 @@ internal partial class MsixService
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
             }
 
-            // Step 7: Generate resources.pri in the ExternalLocation (entry point directory)
+            // Step 6: Generate resources.pri in the ExternalLocation (entry point directory)
             // so Windows can resolve unplated asset variants for taskbar icons.
             // Sparse packages look for resources.pri in the ExternalLocation, not alongside the manifest.
             if (expandedFiles.Count > 0)
