@@ -26,6 +26,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> WithAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
+    public static Option<bool> CleanOption { get; }
 
     static RunCommand()
     {
@@ -71,6 +72,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Unregister the development package after the application exits. Only removes packages registered in development mode."
         };
+
+        CleanOption = new Option<bool>("--clean")
+        {
+            Description = "Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -83,6 +89,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
+        Options.Add(CleanOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -106,6 +113,7 @@ internal partial class RunCommand : Command, IShortDescription
             var withAlias = parseResult.GetValue(WithAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
+            var clean = parseResult.GetValue(CleanOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -194,6 +202,7 @@ internal partial class RunCommand : Command, IShortDescription
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        clean,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -354,7 +363,7 @@ internal partial class RunCommand : Command, IShortDescription
                         continue;
                     }
 
-                    await packageRegistrationService.UnregisterAsync(pkg.Name, cancellationToken);
+                    await packageRegistrationService.UnregisterAsync(pkg.Name, preserveAppData: false, cancellationToken);
                     logger.LogDebug("Unregistered package {FullName} on exit.", pkg.FullName);
                 }
             }

@@ -328,6 +328,13 @@ winapp run <input-folder> [options]
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
+- `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
+
+**Application data persistence:**
+
+By default, `winapp run` preserves your application's data (`LocalState`, `RoamingState`, `Settings`, etc.) when re-deploying. If your app writes data to `ApplicationData.Current.LocalFolder` or `Environment.GetFolderPath(SpecialFolder.LocalApplicationData)` within the package context, that data will survive across `winapp run` invocations.
+
+Use `--clean` when you need a fresh start (e.g., to reset corrupted state or test first-run behavior).
 
 **What it does:**
 
@@ -363,6 +370,9 @@ winapp run ./bin/Debug --with-alias --debug-output
 
 # Run and automatically clean up registration on exit
 winapp run ./bin/Debug --with-alias --unregister-on-exit
+
+# Wipe application data (LocalState, settings) and start fresh
+winapp run ./bin/Debug --clean
 ```
 
 **MSBuild properties (NuGet package):**

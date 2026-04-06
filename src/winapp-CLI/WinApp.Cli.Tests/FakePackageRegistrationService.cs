@@ -48,7 +48,7 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
-    public Task<bool> UnregisterAsync(string packageName, CancellationToken cancellationToken = default)
+    public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         UnregisterCalls.Add(packageName);
         return Task.FromResult(FakeUnregisterResult);
