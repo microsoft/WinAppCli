@@ -7,6 +7,46 @@ import { glob } from 'glob';
 const WINAPP_DEBUG_TYPE = 'winapp';
 
 /**
+ * Maps debugger types to the VS Code extensions that provide them.
+ */
+const DEBUGGER_EXTENSION_MAP: Record<string, { id: string; name: string }> = {
+	'coreclr': { id: 'ms-dotnettools.csharp', name: 'C# (ms-dotnettools.csharp)' },
+	'cppvsdbg': { id: 'ms-vscode.cpptools', name: 'C/C++ (ms-vscode.cpptools)' },
+};
+
+/**
+ * Check that the VS Code extension required for the given debugger type is installed.
+ * If it is not installed, show a clear error message with an option to install it.
+ * Returns true if the extension is present (or the debugger type has no known requirement),
+ * false if the extension is missing.
+ */
+async function ensureDebuggerExtensionInstalled(debuggerType: string): Promise<boolean> {
+	const requirement = DEBUGGER_EXTENSION_MAP[debuggerType];
+	if (!requirement) {
+		return true;
+	}
+
+	if (vscode.extensions.getExtension(requirement.id)) {
+		return true;
+	}
+
+	const install = await vscode.window.showErrorMessage(
+		`The "${debuggerType}" debugger requires the ${requirement.name} VS Code extension. ` +
+		`Please install it and reload VS Code, then retry.`,
+		'Install Extension'
+	);
+
+	if (install === 'Install Extension') {
+		await vscode.commands.executeCommand('workbench.extensions.installExtension', requirement.id);
+		vscode.window.showInformationMessage(
+			`Installing ${requirement.name}. Please reload VS Code once the installation completes, then retry the debug session.`
+		);
+	}
+
+	return false;
+}
+
+/**
  * Execute a winapp CLI command and show output in the terminal
  */
 async function runWinappCommand(extensionPath: string, command: string, cwd: string, showTerminal: boolean = true): Promise<string> {
@@ -165,6 +205,12 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 
 			// Determine the debugger type based on config or default to coreclr
 			const debuggerType = config.debuggerType || 'coreclr';
+
+			// Verify the required VS Code extension for this debugger type is installed
+			// before starting the app, so we don't launch the process only to fail on attach.
+			if (!await ensureDebuggerExtensionInstalled(debuggerType)) {
+				return new vscode.DebugAdapterInlineImplementation(new NoOpDebugAdapter());
+			}
 
 			let args = config.args || '';
 			if (debuggerType === 'node') {
