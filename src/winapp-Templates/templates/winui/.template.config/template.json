@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Microsoft",
+  "classifications": [
+    "Desktop",
+    "Windows",
+    "WinUI"
+  ],
+  "identity": "Microsoft.WindowsAppSDK.WinUIApp",
+  "name": "WinUI 3 Desktop App",
+  "description": "A WinUI 3 desktop application with 'dotnet run' support for packaged apps.",
+  "shortName": "winui",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "WinUIApp1",
+  "preferNameDirectory": true,
+  "defaultName": "WinUIApp1",
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net10.0-windows10.0.26100.0",
+          "description": "Target .NET 10 with Windows 10 26100 SDK"
+        },
+        {
+          "choice": "net9.0-windows10.0.22621.0",
+          "description": "Target .NET 9 with Windows 10 22621 SDK"
+        },
+        {
+          "choice": "net8.0-windows10.0.19041.0",
+          "description": "Target .NET 8 with Windows 10 19041 SDK"
+        }
+      ],
+      "defaultValue": "net10.0-windows10.0.26100.0",
+      "replaces": "TEMPLATE_TFM"
+    },
+    "WindowsAppSdkVersion": {
+      "type": "parameter",
+      "description": "The version of Windows App SDK to use.",
+      "datatype": "string",
+      "defaultValue": "1.8.260101001",
+      "replaces": "WINAPPSDKVERSION"
+    },
+    "BuildToolsVersion": {
+      "type": "parameter",
+      "description": "The version of Windows SDK Build Tools to use.",
+      "datatype": "string",
+      "defaultValue": "10.0.26100.7463",
+      "replaces": "BUILDTOOLSVERSION"
+    },
+    "ExtrasVersion": {
+      "type": "parameter",
+      "description": "The version of the BuildTools.Extras package to use.",
+      "datatype": "string",
+      "defaultValue": "0.1.11-prerelease.28",
+      "replaces": "EXTRASVERSION"
+    },
+    "packageGuid": {
+      "type": "generated",
+      "generator": "guid",
+      "replaces": "PACKAGE_GUID",
+      "parameters": {
+        "format": "D"
+      }
+    },
+    "skipRestore": {
+      "type": "parameter",
+      "datatype": "bool",
+      "description": "If specified, skips the automatic restore of the project on create.",
+      "defaultValue": "false"
+    }
+  },
+  "primaryOutputs": [
+    {
+      "path": "WinUIApp1.csproj"
+    }
+  ],
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "exclude": [
+            "bin/**",
+            "obj/**",
+            ".vs/**",
+            "*.user"
+          ]
+        }
+      ]
+    }
+  ],
+  "postActions": [
+    {
+      "condition": "(!skipRestore)",
+      "description": "Restore NuGet packages required by this project.",
+      "manualInstructions": [
+        {
+          "text": "Run 'dotnet restore'"
+        }
+      ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

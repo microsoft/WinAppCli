@@ -204,7 +204,7 @@ winapp pack ./dist --executable MyApp.exe
 
 Create app identity for debugging using [sparse packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps). The exe stays in its original location — Windows associates identity with it via `Add-AppxPackage -ExternalLocation`.
 
-> **When to use this vs `winapp run`:** Use `create-debug-identity` when the exe is **separate from your app code** (e.g., Electron apps where `electron.exe` is in `node_modules`), or when specifically testing sparse package behavior. For most frameworks where the exe is in your build output folder, use [`winapp run`](#run) instead — it registers a full loose layout package and launches the app. See the [Debugging Guide](debugging.md) for a full comparison.
+> **When to use this vs `winapp run`:** Use `create-debug-identity` when the exe is **separate from your app code** (e.g., Electron apps where `electron.exe` is in `node_modules`), or when specifically testing sparse package behavior. For most frameworks where the exe is in your build output folder, use [`winapp run`](#run) instead — it registers a full loose layout package and launches the app.
 
 ```bash
 winapp create-debug-identity [entrypoint] [options]
@@ -307,9 +307,9 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 
 ### run
 
-Create a loose layout package from a build output folder, register it with Windows, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
+Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
-> **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
+> **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install.
 
 ```bash
 winapp run <input-folder> [options]
@@ -325,9 +325,7 @@ winapp run <input-folder> [options]
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
-- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
-- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
-- `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
+- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`.
 
 **What it does:**
 
@@ -354,74 +352,6 @@ winapp run ./bin/Debug --no-launch
 
 # Launch via execution alias (console apps run in current terminal)
 winapp run ./bin/Debug --with-alias
-
-# Launch and capture OutputDebugString messages and first-chance exceptions
-winapp run ./bin/Debug --debug-output
-
-# Combine with execution alias to debug console apps inline
-winapp run ./bin/Debug --with-alias --debug-output
-
-# Run and automatically clean up registration on exit
-winapp run ./bin/Debug --with-alias --unregister-on-exit
-```
-
-**MSBuild properties (NuGet package):**
-
-When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
-| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
-| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
-| `WinAppRunNoLaunch` | `false` | Only register identity without launching |
-| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
-
-```xml
-<PropertyGroup>
-  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
-  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
-</PropertyGroup>
-```
-
----
-
-### unregister
-
-Unregister a sideloaded development package. Only removes packages that were registered in development mode (e.g., via `winapp run` or `create-debug-identity`). Store-installed or MSIX-installed packages are never removed.
-
-```bash
-winapp unregister [options]
-```
-
-**Options:**
-
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from current directory)
-- `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
-- `--json` - Format output as JSON
-
-**What it does:**
-
-- Reads the package name from the manifest
-- Searches for both `{name}` and `{name}.debug` packages (the debug variant is created by `create-debug-identity`)
-- Verifies each package was registered in development mode (`IsDevelopmentMode == true`)
-- Verifies the package's install location is under the current directory tree (unless `--force`)
-- Unregisters matching packages
-
-**Examples:**
-
-```bash
-# Unregister from current directory (auto-detects manifest)
-winapp unregister
-
-# Unregister with explicit manifest
-winapp unregister --manifest ./appxmanifest.xml
-
-# Force unregister even if registered from a different project tree
-winapp unregister --force
-
-# JSON output for scripting
-winapp unregister --json
 ```
 
 ---

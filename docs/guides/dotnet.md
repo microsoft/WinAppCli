@@ -163,8 +163,6 @@ If you prefer not to use the NuGet package, you can add a custom MSBuild target 
 
 With this configuration, `dotnet build` applies the debug identity and you can run the executable directly. Note that `dotnet run` may rebuild and overwrite the identity, so run the exe manually after building.
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
-
 ## 6. Using Windows App SDK
 
 If you ran `winapp init` (Step 4), `Microsoft.WindowsAppSDK` was already added as a NuGet package reference to your `.csproj`. If you skipped SDK setup during init, or need to add it manually, run:

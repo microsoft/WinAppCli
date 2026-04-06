@@ -160,7 +160,7 @@ internal partial class ManifestService(
             }
             if (manifestPath.Exists)
             {
-                await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken: cancellationToken);
+                await UpdateManifestAssetsAsync(manifestPath, logoPath, taskContext, cancellationToken);
             }
         }
 
@@ -491,6 +491,9 @@ internal partial class ManifestService(
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
 
+    private static readonly XNamespace AppxDefaultNs = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+    private static readonly XNamespace Uap5Ns = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+
     [GeneratedRegex(@"^(\s*)<([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*""[^""]*"")+)\s*(\/?>)\s*$")]
     private static partial Regex TagPattern();
 
@@ -518,7 +521,7 @@ internal partial class ManifestService(
         }
 
         // Find the target Application element
-        var applications = root.Descendants(AppxManifestDocument.DefaultNs + "Application").ToList();
+        var applications = root.Descendants(AppxDefaultNs + "Application").ToList();
         if (applications.Count == 0)
         {
             return new AddExecutionAliasResult(AddExecutionAliasStatus.NoApplicationElement);
@@ -561,13 +564,13 @@ internal partial class ManifestService(
         }
 
         // Check if the target Application already has any execution alias
-        var targetExtensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
+        var targetExtensions = targetApp.Element(AppxDefaultNs + "Extensions");
         if (targetExtensions != null)
         {
             var existingAliasElements = targetExtensions
-                .Elements(AppxManifestDocument.Uap5Ns + "Extension")
+                .Elements(Uap5Ns + "Extension")
                 .Where(e => string.Equals(e.Attribute("Category")?.Value, "windows.appExecutionAlias", StringComparison.OrdinalIgnoreCase))
-                .Descendants(AppxManifestDocument.Uap5Ns + "ExecutionAlias")
+                .Descendants(Uap5Ns + "ExecutionAlias")
                 .Select(e => e.Attribute("Alias")?.Value)
                 .Where(v => v != null)
                 .ToList();
@@ -589,7 +592,7 @@ internal partial class ManifestService(
         // Ensure uap5 namespace is declared on the Package element
         if (root.GetNamespaceOfPrefix("uap5") == null)
         {
-            root.Add(new XAttribute(XNamespace.Xmlns + "uap5", AppxManifestDocument.Uap5Ns));
+            root.Add(new XAttribute(XNamespace.Xmlns + "uap5", Uap5Ns));
         }
 
         // Ensure uap5 is in IgnorableNamespaces
@@ -604,19 +607,19 @@ internal partial class ManifestService(
         }
 
         // Build the ExecutionAlias element
-        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias",
+        var aliasElement = new XElement(Uap5Ns + "ExecutionAlias",
             new XAttribute("Alias", aliasName));
 
         // Find or create the Extensions > uap5:Extension > uap5:AppExecutionAlias hierarchy
-        var extensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
+        var extensions = targetApp.Element(AppxDefaultNs + "Extensions");
         if (extensions == null)
         {
-            extensions = new XElement(AppxManifestDocument.DefaultNs + "Extensions");
+            extensions = new XElement(AppxDefaultNs + "Extensions");
             targetApp.Add(extensions);
         }
 
         // Look for an existing uap5:Extension with Category="windows.appExecutionAlias"
-        var aliasExtension = extensions.Elements(AppxManifestDocument.Uap5Ns + "Extension")
+        var aliasExtension = extensions.Elements(Uap5Ns + "Extension")
             .FirstOrDefault(e => string.Equals(
                 e.Attribute("Category")?.Value,
                 "windows.appExecutionAlias",
@@ -625,23 +628,23 @@ internal partial class ManifestService(
         if (aliasExtension != null)
         {
             // Add to existing AppExecutionAlias block
-            var appExecAlias = aliasExtension.Element(AppxManifestDocument.Uap5Ns + "AppExecutionAlias");
+            var appExecAlias = aliasExtension.Element(Uap5Ns + "AppExecutionAlias");
             if (appExecAlias != null)
             {
                 appExecAlias.Add(aliasElement);
             }
             else
             {
-                var newAppExecAlias = new XElement(AppxManifestDocument.Uap5Ns + "AppExecutionAlias", aliasElement);
+                var newAppExecAlias = new XElement(Uap5Ns + "AppExecutionAlias", aliasElement);
                 aliasExtension.Add(newAppExecAlias);
             }
         }
         else
         {
             // Create new Extension block
-            var newExtension = new XElement(AppxManifestDocument.Uap5Ns + "Extension",
+            var newExtension = new XElement(Uap5Ns + "Extension",
                 new XAttribute("Category", "windows.appExecutionAlias"),
-                new XElement(AppxManifestDocument.Uap5Ns + "AppExecutionAlias", aliasElement));
+                new XElement(Uap5Ns + "AppExecutionAlias", aliasElement));
             extensions.Add(newExtension);
         }
 
@@ -726,66 +729,5 @@ internal partial class ManifestService(
         }
 
         return result.ToString();
-    }
-
-    /// <summary>
-    /// Determines the output path for the generated ICO file.
-    /// If the assets directory already contains an .ico file, reuses its name so that
-    /// project-template icons (e.g. AppIcon.ico) are replaced rather than duplicated.
-    /// When multiple .ico files exist, a name-based heuristic picks the most likely app icon.
-    /// Falls back to "app.ico" when no existing .ico file is found.
-    /// </summary>
-    internal static string DetermineIcoOutputPath(DirectoryInfo assetsDir, TaskContext taskContext)
-    {
-        if (!assetsDir.Exists)
-        {
-            return Path.Combine(assetsDir.FullName, "app.ico");
-        }
-
-        var existingIcoFiles = assetsDir.GetFiles("*.ico");
-
-        if (existingIcoFiles.Length == 0)
-        {
-            return Path.Combine(assetsDir.FullName, "app.ico");
-        }
-
-        if (existingIcoFiles.Length == 1)
-        {
-            taskContext.AddDebugMessage($"Found existing ICO file: {existingIcoFiles[0].Name}, will replace it");
-            return existingIcoFiles[0].FullName;
-        }
-
-        // Multiple .ico files — pick the best candidate by name heuristic
-        var preferredNames = new[] { "appicon", "app", "icon" };
-        foreach (var preferred in preferredNames)
-        {
-            var match = existingIcoFiles.FirstOrDefault(f =>
-                Path.GetFileNameWithoutExtension(f.Name)
-                    .Contains(preferred, StringComparison.OrdinalIgnoreCase));
-            if (match != null)
-            {
-                taskContext.AddDebugMessage($"Found multiple ICO files, replacing best match: {match.Name}");
-                return match.FullName;
-            }
-        }
-
-        // No name heuristic matched — existing ICO files are likely unrelated,
-        // so create app.ico rather than overwriting an unknown file.
-        taskContext.AddDebugMessage($"Found {existingIcoFiles.Length} ICO files but none matched app icon heuristics, creating app.ico");
-        return Path.Combine(assetsDir.FullName, "app.ico");
-    }
-
-    /// <summary>
-    /// Returns the relative path of the asset whose parent directory appears most often,
-    /// so the ICO file lands in the majority directory even for non-standard manifests.
-    /// </summary>
-    private static string GetMostCommonAssetDirectory(IReadOnlyList<ManifestAssetReference> assetReferences)
-    {
-        return assetReferences
-            .GroupBy(r => Path.GetDirectoryName(r.RelativePath) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(g => g.Count())
-            .First()
-            .First()
-            .RelativePath;
     }
 }

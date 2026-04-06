@@ -48,4 +48,8 @@ internal interface IManifestService
     public Task<AddExecutionAliasResult> AddExecutionAliasAsync(
         AddExecutionAliasOptions options,
         CancellationToken cancellationToken = default);
+
+    public Task<AddExecutionAliasResult> AddExecutionAliasAsync(
+        AddExecutionAliasOptions options,
+        CancellationToken cancellationToken = default);
 }

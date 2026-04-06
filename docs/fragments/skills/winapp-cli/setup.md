@@ -89,31 +89,9 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
-
-# Launch and capture OutputDebugString messages and first-chance exceptions
-# Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
-winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
-
-#### Choosing between `run` and `create-debug-identity`
-
-| | `winapp run` | `create-debug-identity` |
-|---|---|---|
-| **Registers** | Full loose layout package (entire folder) | Sparse package (single exe) |
-| **App launch** | Winapp launches via AUMID or alias | You launch the exe yourself |
-| **Simulates MSIX** | Yes — closest to production | No — identity only |
-| **Files** | Copied to AppX layout dir | Exe stays in place |
-| **Best for** | Most frameworks (.NET, C++, Rust, Flutter, Tauri) | Electron, or F5 startup debugging |
-
-**Default to `winapp run`.** Use `create-debug-identity` when you need your IDE to launch and debug the exe directly (startup debugging), or when the exe is separate from your source (Electron).
-
-For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
-
-> **`--debug-output` caveat:** Captures `OutputDebugString` but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger.
-
-For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
 ## Recommended workflow
 

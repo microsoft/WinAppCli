@@ -93,7 +93,6 @@ When prompted:
 - **Package name**: Press Enter to accept the default (rust-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
-- **Description**: Press Enter to accept the default or enter a description
 - **Setup SDKs**: Select "Do not setup SDKs"
 
 This command will:
@@ -157,8 +156,6 @@ Package Family Name: rust-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
-
 ## 6. Package with MSIX
 
 Once you're ready to distribute your app, you can package it as an MSIX using the same manifest.
@@ -167,7 +164,7 @@ Once you're ready to distribute your app, you can package it as an MSIX using th
 First, build your application in release mode for optimal performance:
 
 ```powershell
-cargo build --release
+winapp manifest add-alias
 ```
 
 Then, create a directory to hold your package files and copy your release executable.

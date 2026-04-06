@@ -39,8 +39,6 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
             .AddSingleton<IAppLauncherService, AppLauncherService>()
-            .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
-            .AddSingleton<IDebugOutputService, DebugOutputService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
@@ -60,7 +58,6 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
                 .UseCommandHandler<RunCommand, RunCommand.Handler>()
-                .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()

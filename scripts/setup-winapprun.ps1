@@ -1,11 +1,12 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Set up the winapp run command for selfhosting.
+    Set up the winapp run command and VS Code extension for selfhosting.
 .DESCRIPTION
     This script installs (or upgrades) the following from the local artifacts folder:
       1. winapp MSIX package (architecture-matched) + its signing certificate
-      2. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.WinApp
+      2. winapp VS Code extension (.vsix)
+      3. Registers a local NuGet feed for Microsoft.Windows.SDK.BuildTools.WinApp
 
     Re-running with newer files will upgrade everything in place.
 .PARAMETER Elevated
@@ -202,7 +203,31 @@ try {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. Local NuGet feed for BuildTools.MSIX.Extras
+# 2. VS Code extension (.vsix)
+# ═══════════════════════════════════════════════════════════════════════════════
+Write-Step "Installing VS Code extension"
+
+$vsix = Get-ChildItem -Path $ScriptDir -Filter "*.vsix" | Select-Object -First 1
+if (-not $vsix) {
+    Write-Skip "No .vsix file found in $ScriptDir -- skipping"
+} else {
+    Write-Detail "VSIX : $($vsix.Name)"
+
+    $codeCli = Get-Command code -ErrorAction SilentlyContinue
+    if (-not $codeCli) {
+        Write-Skip "'code' not found on PATH -- install the VSIX manually in VS Code"
+    } else {
+        try {
+            & code --install-extension $vsix.FullName --force 2>&1 | Out-Null
+            Write-Ok "VS Code extension installed / upgraded"
+        } catch {
+            Write-Err "Failed to install VSIX: $_"
+        }
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. Local NuGet feed for BuildTools.MSIX.Extras
 # ═══════════════════════════════════════════════════════════════════════════════
 Write-Step "Setting up local NuGet feed for BuildTools.MSIX.Extras"
 
@@ -257,6 +282,7 @@ Write-Host "  All done!" -ForegroundColor Green
 Write-Host "=======================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  winapp CLI  : winapp --version" -ForegroundColor Gray
+Write-Host "  VS Code ext : Extensions sidebar -> search 'winapp'" -ForegroundColor Gray
 Write-Host "  NuGet feed  : dotnet nuget list source" -ForegroundColor Gray
 Write-Host ""
 

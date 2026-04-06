@@ -62,6 +62,23 @@ src/
 │       ├── win-x64/
 │       └── win-arm64/
 │
+├── winapp-Templates/                       # Templates NuGet package
+│   ├── Microsoft.WindowsAppSDK.Templates.csproj
+│   ├── README.md
+│   └── templates/
+│       └── winui/                          # WinUI app template
+│           ├── .template.config/
+│           │   └── template.json
+│           ├── WinUIApp1.csproj
+│           ├── App.xaml
+│           ├── App.xaml.cs
+│           ├── MainWindow.xaml
+│           ├── MainWindow.xaml.cs
+│           ├── app.manifest
+│           ├── Package.appxmanifest
+│           ├── Properties/
+│           └── Assets/
+│
 samples/
 └── winui-app/                              # Sample WinUI app for testing
 ```
@@ -79,7 +96,6 @@ samples/
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID. Keeps console I/O in the current terminal. Requires `uap5:ExecutionAlias` in the manifest. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
-| `WinAppRunDebugOutput` | `false` | Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time, so Visual Studio or VS Code cannot debug simultaneously. Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 
 ### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
 
@@ -114,9 +130,29 @@ The main build script now includes NuGet packaging:
 ```powershell
 .\scripts\build-cli.ps1                        # Full build including NuGet
 .\scripts\build-cli.ps1 -SkipNuGet             # Skip NuGet packages
+.\scripts\build-cli.ps1 -SkipVsc              # Skip VS Code extension
 ```
 
 ## Usage
+
+### Installing the Template
+
+```bash
+# From local build
+dotnet nuget add source "path/to/artifacts/nuget" --name WinAppLocal
+dotnet new install Microsoft.WindowsAppSDK.Templates::1.0.0-test --nuget-source WinAppLocal
+
+# From NuGet.org (when published)
+dotnet new install Microsoft.WindowsAppSDK.Templates
+```
+
+### Creating and Running a WinUI App
+
+```bash
+dotnet new winui -n MyApp
+cd MyApp
+dotnet run
+```
 
 ### Customization
 
@@ -152,13 +188,6 @@ Register identity without launching:
 ```xml
 <PropertyGroup>
   <WinAppRunNoLaunch>true</WinAppRunNoLaunch>
-</PropertyGroup>
-```
-
-Capture OutputDebugString messages and first-chance exceptions:
-```xml
-<PropertyGroup>
-  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
 </PropertyGroup>
 ```
 
