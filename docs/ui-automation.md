@@ -79,6 +79,13 @@ name/AutomationId:
 Legacy selector prefixes such as `#Submit`, `$SearchBox`, and index suffixes like `[1]`
 are not parsed specially by the current UIA selector implementation. Use semantic slugs
 from `inspect`/`search` output for precise targeting, or use plain text/type selectors.
+
+> **Tip — use AutomationId for stable targeting:** Set `AutomationProperties.AutomationId` on
+> important controls in your XAML. AutomationIds survive layout changes, name localization, and
+> control tree restructuring — making them the most reliable way to target elements across sessions.
+> Slugs incorporate AutomationId when available (e.g., `txt-searchbox-e5f6` where `searchbox` comes
+> from `AutomationProperties.AutomationId="searchBox"`).
+
 ### Semantic slugs in output
 
 The `inspect` and `search` commands output **semantic slugs** (e.g., `btn-minimize-d1a0`, `itm-samples-3f2c`, `btn-close-d1a2`). Format: `prefix-normalizedname-hash` where:
@@ -237,9 +244,10 @@ winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
 ### set-value
-Set text on an editable element.
+Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
 ```bash
-winapp ui set-value txt-textbox-a4b1 --text "Hello world" -a notepad
+winapp ui set-value txt-textbox-a4b1 "Hello world" -a notepad
+winapp ui set-value sld-volume-b2c3 75 -a myapp
 ```
 
 ### focus
@@ -346,7 +354,7 @@ winapp ui search '#Image' -a myapp; winapp ui invoke itm-image-a2b3 -a myapp
 
 ### Screenshot with popup overlays
 ```powershell
-winapp ui set-value txt-searchbox-e5f6 --text "query" -a myapp; winapp ui screenshot -a myapp --capture-screen
+winapp ui set-value txt-searchbox-e5f6 "query" -a myapp; winapp ui screenshot -a myapp --capture-screen
 ```
 
 ### Navigate, wait, and verify (single chain)
@@ -365,7 +373,7 @@ File open/save dialogs are standard Windows dialogs with UIA support:
 # Trigger the dialog, find it, type the path, confirm
 winapp ui invoke btn-openfilebtn-a2b3 -a myapp
 winapp ui list-windows -a myapp                                      # find dialog HWND
-winapp ui set-value txt-1148-c4d5 --text "C:\path\to\file.png" -w <dialog-hwnd>
+winapp ui set-value txt-1148-c4d5 "C:\path\to\file.png" -w <dialog-hwnd>
 winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 ```
 Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs for a specific dialog.

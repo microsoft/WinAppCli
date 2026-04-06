@@ -2773,12 +2773,23 @@
           }
         },
         "set-value": {
-          "description": "Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.",
+          "description": "Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>",
           "hidden": false,
           "arguments": {
             "selector": {
               "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
               "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "value": {
+              "description": "Value to set (text for TextBox/ComboBox, number for Slider)",
+              "order": 1,
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -2828,18 +2839,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--text": {
-              "description": "Text value to set or type",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

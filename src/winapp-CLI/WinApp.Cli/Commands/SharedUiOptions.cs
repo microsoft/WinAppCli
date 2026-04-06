@@ -18,7 +18,7 @@ internal static class SharedUiOptions
     public static Option<string?> OutputOption { get; }
     public static Option<int> TimeoutOption { get; }
     public static Option<string?> PropertyOption { get; }
-    public static Option<string?> TextOption { get; }
+    public static Argument<string?> ValueArgument { get; }
     public static Option<bool> CaptureScreenOption { get; }
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
@@ -70,9 +70,10 @@ internal static class SharedUiOptions
             Description = "Property name to read or filter on"
         };
 
-        TextOption = new Option<string?>("--text")
+        ValueArgument = new Argument<string?>("value")
         {
-            Description = "Text value to set or type"
+            Description = "Value to set (text for TextBox/ComboBox, number for Slider)",
+            Arity = ArgumentArity.ZeroOrOne
         };
 
         CaptureScreenOption = new Option<bool>("--capture-screen")

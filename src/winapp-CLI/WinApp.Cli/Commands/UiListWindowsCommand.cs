@@ -118,8 +118,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
-                logger.LogError("{Message}", ex.Message);
+                UiErrors.GenericError(logger, ex);
                 return 1;
             }
         }

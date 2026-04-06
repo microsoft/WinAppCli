@@ -647,7 +647,7 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 
 ### `uiSetValue()`
 
-Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.
+Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
 
 ```typescript
 function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
@@ -658,9 +658,9 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `value` | `string \| undefined` | No | Value to set (text for TextBox/ComboBox, number for Slider) |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `text` | `string \| undefined` | No | Text value to set or type |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -1405,9 +1405,9 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `value` | `string \| undefined` | No | Value to set (text for TextBox/ComboBox, number for Slider) |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `text` | `string \| undefined` | No | Text value to set or type |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

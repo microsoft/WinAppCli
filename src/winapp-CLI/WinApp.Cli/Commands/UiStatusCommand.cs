@@ -38,7 +38,7 @@ internal class UiStatusCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                logger.LogError("{Symbol} Specify --app (name/title/PID) or --window (HWND).", UiSymbols.Error);
+                UiErrors.MissingApp(logger);
                 return 1;
             }
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -75,8 +75,7 @@ internal class UiStatusCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
-                logger.LogError("{Message}", ex.Message);
+                UiErrors.GenericError(logger, ex);
                 return 1;
             }
         }

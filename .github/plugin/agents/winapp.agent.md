@@ -54,7 +54,7 @@ Want to inspect or interact with a running app's UI?
 ├─ Click/activate an element → winapp ui invoke <selector> -a <appname>
 ├─ Take a screenshot → winapp ui screenshot -a <appname>
 ├─ Read element properties → winapp ui get-property <selector> -a <appname>
-├─ Set text on an element → winapp ui set-value <selector> --text "value" -a <appname>
+├─ Set a value on an element → winapp ui set-value <selector> "value" -a <appname>
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
 └─ List app windows → winapp ui list-windows -a <appname>
 ```
@@ -206,7 +206,7 @@ Want to inspect or interact with a running app's UI?
 - `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
 - `ui screenshot -a <app> [--output file.png] [--json] [--capture-screen]` — capture window as PNG. Use `--capture-screen` for popup overlays.
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
-- `ui set-value <selector> --text "value" -a <app>` — set text or slider value
+- `ui set-value <selector> "value" -a <app>` — set text or slider value
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)

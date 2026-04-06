@@ -24,7 +24,7 @@ winapp ui inspect -a myapp --interactive; winapp ui screenshot -a myapp
 winapp ui invoke btn-settings-a1b2 -a myapp; winapp ui wait-for pn-settingspage-c3d4 -a myapp --timeout 3000; winapp ui screenshot -a myapp
 
 # Fill a form and submit
-winapp ui set-value txt-searchbox-e5f6 --text "hello" -a myapp; winapp ui invoke btn-submit-7a90 -a myapp; winapp ui screenshot -a myapp
+winapp ui set-value txt-searchbox-e5f6 "hello" -a myapp; winapp ui invoke btn-submit-7a90 -a myapp; winapp ui screenshot -a myapp
 ```
 
 ### Find visible text and click it
@@ -59,6 +59,7 @@ winapp ui invoke Submit -a myapp
 - **Semantic slugs**: `inspect` and `search` output shell-safe slugs like `btn-minimize-d1a0`, `itm-samples-3f2c`. Format: `prefix-name-hash`. No special characters — works unquoted in any shell.
 - **Plain text search**: `search` and `invoke` accept plain text — `search Minimize` finds elements with "Minimize" in their Name or AutomationId (substring, case-insensitive). No special syntax needed.
 - **Two ways to target**: Use **slugs** from inspect/search output (exact, hash-validated) or **plain text** (fuzzy, may need disambiguation).
+- **AutomationId for stability**: When building apps, set `AutomationProperties.AutomationId` on important controls. AutomationIds survive layout changes, name localization, and tree restructuring — making them the most reliable selectors. Slugs incorporate AutomationId when available.
 - **`--interactive` flag**: Filters to invokable elements only with auto-depth 8 — the fastest way to see what you can click
 - **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its slug
 - **`;` chaining**: Chain commands with `;` to run multiple operations in one call, reducing agent round-trips
@@ -159,7 +160,7 @@ winapp ui list-windows -a myapp
 # → Shows the main window + the dialog HWND
 
 # 3. Target the dialog, type the file path, and confirm
-winapp ui set-value txt-1148-c4d5 --text "C:\path\to\file.png" -w <dialog-hwnd>
+winapp ui set-value txt-1148-c4d5 "C:\path\to\file.png" -w <dialog-hwnd>
 winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 ```
 Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
@@ -295,13 +296,14 @@ Activate an element by slug or text search. Tries InvokePattern, TogglePattern, 
 
 ### `winapp ui set-value`
 
-Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.
+Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `<value>` | No | Value to set (text for TextBox/ComboBox, number for Slider) |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -309,7 +311,6 @@ Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and 
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--text` | Text value to set or type | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui focus`

@@ -870,25 +870,25 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
 export interface UiSetValueOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
+  /** Value to set (text for TextBox/ComboBox, number for Slider) */
+  value?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Text value to set or type */
-  text?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Set text on an element using UIA ValuePattern. Works for TextBox, ComboBox, and other editable controls.
+ * Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
  */
 export async function uiSetValue(options: UiSetValueOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'set-value'];
   if (options.selector) args.push(options.selector);
+  if (options.value) args.push(options.value);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
-  if (options.text) args.push('--text', options.text);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

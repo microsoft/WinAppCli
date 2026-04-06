@@ -140,7 +140,7 @@ public class UiCommandTests : BaseCommandTests
         _fakeUia.FindSingleResult = new UiElement { Id = "e1", Type = "Edit", Name = "TestEdit" };
 
         var command = GetRequiredService<UiSetValueCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e1", "--text", "Hello", "-a", "TestApp"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e1", "Hello", "-a", "TestApp"]);
         Assert.AreEqual(0, exitCode);
     }
 
