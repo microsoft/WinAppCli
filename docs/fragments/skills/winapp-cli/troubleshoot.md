@@ -60,22 +60,6 @@ Does the project have an appxmanifest.xml?
 - Projects with NuGet package references (e.g., `.csproj` referencing `Microsoft.Windows.SDK.BuildTools`) can use winapp commands without `winapp.yaml`
 - For Electron projects, use the npm package (`npm install --save-dev @microsoft/winappcli`) which includes Node.js-specific commands under `npx winapp node`
 
-## Debugging approach quick reference
-
-| Goal | Command | Key detail |
-|------|---------|------------|
-| Run with identity (most common) | `winapp run .\build\Debug` | Registers loose layout + launches; add `--with-alias` for console apps |
-| Attach debugger to running app | `winapp run .\build\Debug` → attach to PID | Misses startup code |
-| Register identity, launch manually | `winapp run .\build\Debug --no-launch` | Launch via `start shell:AppsFolder\<AUMID>` or execution alias — **not** the exe directly |
-| F5 startup debugging (IDE launches exe) | `winapp create-debug-identity .\bin\myapp.exe` | Exe has identity regardless of how it's launched; best for debugging activation/startup code |
-| Capture OutputDebugString | `winapp run .\build\Debug --debug-output` | **Blocks other debuggers** — use `--no-launch` if you need VS Code/WinDbg |
-| Run and auto-clean | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
-| Clean up stale registration | `winapp unregister` | Removes dev-mode packages for the current project |
-
-> **Visual Studio users:** If you have a packaging project, VS already handles identity and debugging from F5 — you likely don't need winapp for debugging. These workflows are for VS Code, terminal, and frameworks VS doesn't natively package.
-
-For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
-
 ## Prerequisites & state matrix
 
 | Command | Requires | Creates/Modifies |

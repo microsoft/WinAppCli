@@ -4,10 +4,10 @@
 using Microsoft.Extensions.Logging;
 using System.IO.Compression;
 using System.Security;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
-using System.Xml.Linq;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -20,17 +20,232 @@ internal partial class MsixService(
     IWinappDirectoryService winappDirectoryService,
     IConfigService configService,
     IBuildToolsService buildToolsService,
+    IPowerShellService powerShellService,
     ICertificateService certificateService,
     IWorkspaceSetupService workspaceSetupService,
     IDevModeService devModeService,
     INugetService nugetService,
     IWinmdService winmdService,
-    IPriService priService,
-    IPackageRegistrationService packageRegistrationService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider,
     IDotNetService dotNetService) : IMsixService
 {
+    [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+\.\d+.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex WindowsAppRuntimeMsixRegex();
+    [GeneratedRegex(@"<Identity[^>]*>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex IdentityElementRegex();
+    [GeneratedRegex(@"Name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageNameRegex();
+    [GeneratedRegex(@"Publisher\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackagePublisherRegex();
+    [GeneratedRegex(@"<Application[^>]*\sId\s*=\s*[""']([^""']*)[""'][^>]*>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxApplicationIdRegex();
+    [GeneratedRegex(@"<Identity[^>]*Name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityNameRegex();
+    [GeneratedRegex(@"<Identity[^>]*Publisher\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityPublisherRegex();
+    [GeneratedRegex(@"<Identity[^>]*Version\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityVersionRegex();
+    [GeneratedRegex(@"<Application[^>]*Executable\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageApplicationExecutableRegex();
+    [GeneratedRegex(@"(<Identity[^>]*Name\s*=\s*)[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityNameAssignmentRegex();
+    [GeneratedRegex(@"(<Application[^>]*\sId\s*=\s*)[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxApplicationIdAssignmentRegex();
+    [GeneratedRegex(@"(<Application[^>]*Executable\s*=\s*)[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageApplicationExecutableAssignmentRegex();
+    [GeneratedRegex(@"(<Package[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageElementOpenTagRegex();
+    [GeneratedRegex(@"(<Package[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageOpenTagRegex();
+    [GeneratedRegex(@"(\s*</Properties>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackagePropertiesCloseTagRegex();
+    [GeneratedRegex(@"(<Application[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxApplicationOpenTagRegex();
+    [GeneratedRegex(@"\s*EntryPoint\s*=\s*[""'][^""']*[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageEntryPointRegex();
+    [GeneratedRegex(@"(<uap:VisualElements\b[^>]*?)(\s*/?>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageVisualElementsOpenTagRegex();
+    [GeneratedRegex(@"(\s*<rescap:Capability Name=""runFullTrust"" />)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageRunFullTrustCapabilityRegex();
+    [GeneratedRegex(@"(\s*<Applications>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageApplicationsTagRegex();
+    [GeneratedRegex(@"(\s*</Dependencies>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageDependenciesCloseTagRegex();
+    [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AssemblyIdentityNameRegex();
+
+    // DLL dedup regexes — extract registered file/path names for HashSet-based dedup
+    [GeneratedRegex(@"<asmv3:file\s+name='([^']+)'", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex SxsFileNameRegex();
+    [GeneratedRegex(@"<Path>([^<]+)</Path>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxManifestPathElementRegex();
+
+    [GeneratedRegex(@"<Identity[^>]*ProcessorArchitecture\s*=", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityArchitectureCheckRegex();
+    [GeneratedRegex(@"<Identity[^>]*ProcessorArchitecture\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex AppxPackageIdentityArchitectureValueRegex();
+
+    // Matches the entire <Resources>...</Resources> block containing x-generate
+    [GeneratedRegex(@"<Resources>\s*<Resource\s+Language\s*=\s*[""']x-generate[""']\s*/>\s*</Resources>", RegexOptions.IgnoreCase | RegexOptions.Singleline, "en-US")]
+    private static partial Regex ResourceLanguageXGenerateBlockRegex();
+
+    // Extracts language tag from PRI dump qualifier strings like 'Language-en-US'
+    [GeneratedRegex(@"qualifiers=""[^""]*Language-([a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex PriDumpLanguageQualifierRegex();
+
+    // build:Metadata regexes
+    [GeneratedRegex(@"(<Package\b[^>]*)(>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataPackageOpenTagRegex();
+    [GeneratedRegex(@"IgnorableNamespaces\s*=\s*""[^""]*\bbuild\b", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataIgnorableNamespacesCheckRegex();
+    [GeneratedRegex(@"(IgnorableNamespaces\s*=\s*""[^""]*)("")", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataIgnorableNamespacesAssignRegex();
+    [GeneratedRegex(@"<build:Item\s[^>]*Name\s*=\s*""Microsoft\.WinAppCli""", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataWinAppCliItemCheckRegex();
+    [GeneratedRegex(@"<build:Item\s[^>]*Name\s*=\s*""Microsoft\.WinAppCli""[^/]*/\s*>", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataWinAppCliItemReplaceRegex();
+    [GeneratedRegex(@"([ \t]*)(</build:Metadata>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataCloseTagRegex();
+    [GeneratedRegex(@"([ \t]*)(</Package>)", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex BuildMetadataPackageCloseTagRegex();
+
+    // Language (en, en-US, pt-BR, zh-Hans, etc.) – bare token
+    [GeneratedRegex(@"^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex LanguageQualifierRegex();
+
+    [GeneratedRegex(@"^scale-(\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    // scale-100, scale-200, etc.
+    private static partial Regex ScaleQualifierRegex();
+
+    // theme-dark, theme-light
+    [GeneratedRegex(@"^theme-(light|dark)$", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex ThemeQualifierRegex();
+
+    // contrast-standard, contrast-high
+    [GeneratedRegex(@"^contrast-(standard|high)$", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex ContrastQualifierRegex();
+
+    // dxfeaturelevel-9 / 10 / 11
+    [GeneratedRegex(@"^dxfeaturelevel-(9|10|11)$", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex DxFeatureLevelQualifierRegex();
+
+    // device-family-desktop / xbox / team / iot / mobile
+    [GeneratedRegex(@"^device-family-(desktop|mobile|team|xbox|iot)$", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex DeviceFamilyQualifierRegex();
+
+    // homeregion-US, homeregion-JP, ...
+    [GeneratedRegex(@"^homeregion-[A-Za-z]{2}$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex HomeRegionQualifierRegex();
+
+    // configuration-debug, configuration-retail, etc.
+    [GeneratedRegex(@"^configuration-[A-Za-z0-9]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex ConfigurationQualifierRegex();
+
+    // targetsize-16, targetsize-24, targetsize-256, ...
+    [GeneratedRegex(@"^targetsize-(\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex TargetSizeQualifierRegex();
+
+    // altform-unplated, altform-lightunplated, etc.
+    [GeneratedRegex(@"^altform-[A-Za-z0-9]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
+    private static partial Regex AltFormQualifierRegex();
+
+    /// <summary>
+    /// Sets up Windows App SDK for self-contained deployment by extracting MSIX content
+    /// and preparing the necessary files for embedding in applications.
+    /// </summary>
+    public async Task SetupSelfContainedAsync(DirectoryInfo winappDir, string architecture, TaskContext taskContext, DotNetPackageListJson? dotNetPackageList = null, CancellationToken cancellationToken = default)
+    {
+        await taskContext.AddSubTaskAsync("Setting up Self Contained", async (taskContext, cancellationToken) =>
+        {
+            // Look for the Runtime package which contains the MSIX files
+            var selfContainedDir = winappDir.CreateSubdirectory("self-contained");
+            var archSelfContainedDir = selfContainedDir.CreateSubdirectory(architecture);
+
+            var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken) ?? throw new DirectoryNotFoundException("Windows App SDK Runtime MSIX directory not found. Ensure Windows App SDK is installed.");
+
+            // Look for the MSIX file in the tools/MSIX folder
+            var msixToolsDir = new DirectoryInfo(Path.Combine(msixDir.FullName, $"win10-{architecture}"));
+            if (!msixToolsDir.Exists)
+            {
+                throw new DirectoryNotFoundException($"MSIX tools directory not found: {msixToolsDir}");
+            }
+
+            // Try to use inventory first for accurate file selection
+            FileInfo? msixPath = null;
+            try
+            {
+                var packageEntries = await WorkspaceSetupService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
+                if (packageEntries != null)
+                {
+                    // Look for the base Windows App Runtime package (not Framework, DDLM, or Singleton packages)
+                    var mainRuntimeEntry = packageEntries.FirstOrDefault(entry =>
+                        entry.PackageIdentity.StartsWith("Microsoft.WindowsAppRuntime.") &&
+                        !entry.PackageIdentity.Contains("Framework") &&
+                        !entry.FileName.Contains("DDLM", StringComparison.OrdinalIgnoreCase) &&
+                        !entry.FileName.Contains("Singleton", StringComparison.OrdinalIgnoreCase));
+
+                    if (mainRuntimeEntry != null)
+                    {
+                        msixPath = new FileInfo(Path.Combine(msixToolsDir.FullName, mainRuntimeEntry.FileName));
+                        taskContext.AddDebugMessage($"{UiSymbols.Package} Found main runtime package from inventory: {mainRuntimeEntry.FileName}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} Could not parse inventory, falling back to file search: {ex.Message}");
+            }
+
+            // Fallback: search for files directly with pattern matching
+            if (msixPath == null || !msixPath.Exists)
+            {
+                var msixFiles = msixToolsDir.GetFiles("Microsoft.WindowsAppRuntime.*.msix");
+                if (msixFiles.Length == 0)
+                {
+                    throw new FileNotFoundException($"No MSIX files found in {msixToolsDir}");
+                }
+
+                // Look for the base runtime package (format: Microsoft.WindowsAppRuntime.{version}.msix)
+                // Exclude files with additional suffixes like DDLM, Singleton, Framework, etc.
+                msixPath = msixFiles.FirstOrDefault(f =>
+                {
+                    var fileName = f.Name;
+                    return !fileName.Contains("DDLM", StringComparison.OrdinalIgnoreCase) &&
+                           !fileName.Contains("Singleton", StringComparison.OrdinalIgnoreCase) &&
+                           !fileName.Contains("Framework", StringComparison.OrdinalIgnoreCase) &&
+                           WindowsAppRuntimeMsixRegex().IsMatch(fileName);
+                }) ?? msixFiles[0];
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Extracting MSIX: {msixPath.FullName}");
+
+            // Extract MSIX content
+            var extractedDir = new DirectoryInfo(Path.Combine(archSelfContainedDir.FullName, "extracted"));
+            if (extractedDir.Exists)
+            {
+                extractedDir.Delete(recursive: true);
+            }
+            extractedDir.Refresh();
+            extractedDir.Create();
+
+            using (var archive = await ZipFile.OpenReadAsync(msixPath.FullName, cancellationToken))
+            {
+                await archive.ExtractToDirectoryAsync(extractedDir.FullName, cancellationToken);
+            }
+
+            // Copy relevant files to deployment directory
+            var deploymentDir = archSelfContainedDir.CreateSubdirectory("deployment");
+
+            // Copy DLLs, WinMD files, and other runtime assets
+            await CopyRuntimeFilesAsync(extractedDir, deploymentDir, taskContext, cancellationToken);
+
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Self-contained files prepared in: {archSelfContainedDir.FullName}");
+
+            return 0;
+        }, cancellationToken);
+    }
+
     /// <summary>
     /// Parses an AppX manifest file and extracts the package identity information
     /// </summary>
@@ -60,19 +275,35 @@ internal partial class MsixService(
     /// <exception cref="InvalidOperationException">Thrown when the manifest is invalid or missing required elements</exception>
     public static MsixIdentityResult ParseAppxManifestAsync(string appxManifestContent)
     {
-        var doc = AppxManifestDocument.Parse(appxManifestContent);
+        // Extract Package Identity information
+        var identityMatch = IdentityElementRegex().Match(appxManifestContent);
+        if (!identityMatch.Success)
+        {
+            throw new InvalidOperationException("No Identity element found in AppX manifest");
+        }
 
-        var identity = doc.GetIdentityElement()
-            ?? throw new InvalidOperationException("No Identity element found in AppX manifest");
+        var identityElement = identityMatch.Value;
 
-        var packageName = identity.Attribute("Name")?.Value
-            ?? throw new InvalidOperationException("AppX manifest Identity element missing required Name or Publisher attributes");
+        // Extract attributes from Identity element
+        var nameMatch = AppxPackageNameRegex().Match(identityElement);
+        var publisherMatch = AppxPackagePublisherRegex().Match(identityElement);
 
-        var publisher = identity.Attribute("Publisher")?.Value
-            ?? throw new InvalidOperationException("AppX manifest Identity element missing required Name or Publisher attributes");
+        if (!nameMatch.Success || !publisherMatch.Success)
+        {
+            throw new InvalidOperationException("AppX manifest Identity element missing required Name or Publisher attributes");
+        }
 
-        var applicationId = doc.ApplicationId
-            ?? throw new InvalidOperationException("No Application element with Id attribute found in AppX manifest");
+        var packageName = nameMatch.Groups[1].Value;
+        var publisher = publisherMatch.Groups[1].Value;
+
+        // Extract Application ID from Applications/Application element
+        var applicationMatch = AppxApplicationIdRegex().Match(appxManifestContent);
+        if (!applicationMatch.Success)
+        {
+            throw new InvalidOperationException("No Application element with Id attribute found in AppX manifest");
+        }
+
+        var applicationId = applicationMatch.Groups[1].Value;
 
         return new MsixIdentityResult(packageName, publisher, applicationId);
     }
@@ -393,33 +624,367 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
     }
 
     /// <summary>
-    /// Extracts execution alias names from an AppX manifest content.
-    /// Looks for uap5:ExecutionAlias or desktop:ExecutionAlias elements.
+    /// Embeds a manifest file into the Win32 manifest of an executable using mt.exe for proper merging.
     /// </summary>
-    /// <param name="manifestContent">The content of the appxmanifest.xml file</param>
-    /// <returns>List of alias names (e.g. "myapp.exe")</returns>
-    public static List<string> ExtractExecutionAliases(string manifestContent)
+    /// <param name="exePath">Path to the executable to modify</param>
+    /// <param name="manifestPath">Path to the manifest file to embed</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    private async Task EmbedManifestFileToExeAsync(
+        FileInfo exePath,
+        FileInfo manifestPath,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
     {
-        var doc = AppxManifestDocument.Parse(manifestContent);
-        var aliases = new List<string>();
-        var root = doc.Document.Root;
-        if (root == null)
+        // Validate inputs
+        if (!exePath.Exists)
         {
-            return aliases;
+            throw new FileNotFoundException($"Executable not found at: {exePath}");
         }
 
-        foreach (var element in root.Descendants()
-            .Where(e => e.Name.LocalName == "ExecutionAlias"
-                && (e.Name.Namespace == AppxManifestDocument.Uap5Ns || e.Name.Namespace == AppxManifestDocument.DesktopNs)))
+        if (!manifestPath.Exists)
         {
-            var alias = element.Attribute("Alias")?.Value;
-            if (alias != null)
+            throw new FileNotFoundException($"Manifest file not found at: {manifestPath}");
+        }
+
+        taskContext.AddDebugMessage($"Processing executable: {exePath}");
+        taskContext.AddDebugMessage($"Embedding manifest: {manifestPath}");
+
+        var exeDir = exePath.DirectoryName!;
+        var tempManifestPath = new FileInfo(Path.Combine(exeDir, "temp_extracted.manifest"));
+        var mergedManifestPath = new FileInfo(Path.Combine(exeDir, "merged.manifest"));
+
+        try
+        {
+            bool hasExistingManifest = await TryExtractManifestFromExeAsync(exePath, tempManifestPath, taskContext, cancellationToken);
+
+            if (hasExistingManifest)
             {
-                aliases.Add(alias);
+                taskContext.AddDebugMessage("Merging with existing manifest using mt.exe...");
+
+                // Use mt.exe to merge existing manifest with new manifest
+                await RunMtToolAsync($@"-manifest ""{tempManifestPath}"" ""{manifestPath}"" -out:""{mergedManifestPath}""", true, taskContext, cancellationToken);
+            }
+            else
+            {
+                taskContext.AddDebugMessage("No existing manifest, using new manifest as-is");
+
+                // No existing manifest, use the new manifest directly
+                manifestPath.CopyTo(mergedManifestPath.FullName);
+            }
+
+            taskContext.AddDebugMessage("Embedding merged manifest into executable...");
+
+            // Update the executable with merged manifest
+            await RunMtToolAsync($@"-manifest ""{mergedManifestPath}"" -outputresource:""{exePath}"";#1", true, taskContext, cancellationToken);
+
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Successfully embedded manifest into: {exePath}");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to embed manifest into executable: {ex.Message}", ex);
+        }
+        finally
+        {
+            // Clean up temporary files
+            TryDeleteFile(tempManifestPath);
+            TryDeleteFile(mergedManifestPath);
+        }
+    }
+
+    private async Task<bool> TryExtractManifestFromExeAsync(FileInfo exePath, FileInfo tempManifestPath, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        taskContext.AddDebugMessage("Extracting current manifest from executable...");
+
+        // Extract current manifest from the executable
+        bool hasExistingManifest = false;
+        try
+        {
+            await RunMtToolAsync($@"-inputresource:""{exePath}"";#1 -out:""{tempManifestPath}""", false, taskContext, cancellationToken);
+            tempManifestPath.Refresh();
+            hasExistingManifest = tempManifestPath.Exists;
+        }
+        catch
+        {
+            taskContext.AddDebugMessage("No existing manifest found in executable");
+        }
+
+        return hasExistingManifest;
+    }
+
+    /// <summary>
+    /// Creates a PRI configuration file for the given package directory
+    /// </summary>
+    /// <param name="packageDir">Path to the package directory</param>
+    /// <param name="taskContext">Task context for logging and progress reporting</param>
+    /// <param name="language">Default language qualifier (default: 'en-US')</param>
+    /// <param name="platformVersion">Platform version (default: '10.0.0')</param>
+    /// <param name="precomputedPriResourceCandidates">Pre-computed list of manifest-referenced resource file paths (relative to the package directory) to include in the PRI. Must be provided by the caller via <see cref="GetExpandedManifestReferencedFilesAsync"/>.</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Path to the created configuration file</returns>
+    public async Task<FileInfo> CreatePriConfigAsync(
+        DirectoryInfo packageDir,
+        TaskContext taskContext,
+        string language = "en-US",
+        string platformVersion = "10.0.0",
+        IEnumerable<string> precomputedPriResourceCandidates = null!,
+        CancellationToken cancellationToken = default)
+    {
+        if (!packageDir.Exists)
+        {
+            throw new DirectoryNotFoundException($"Package directory not found: {packageDir}");
+        }
+
+        ArgumentNullException.ThrowIfNull(precomputedPriResourceCandidates);
+
+        var resfilesPath = Path.Combine(packageDir.FullName, "pri.resfiles");
+        var priResourceCandidates = precomputedPriResourceCandidates.ToList();
+
+        priResourceCandidates = [.. priResourceCandidates
+            .Where(path => PriIncludedExtensions.Contains(Path.GetExtension(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+
+        taskContext.AddDebugMessage($"PRI resource candidates discovered: {priResourceCandidates.Count}");
+
+        using (var writer = new StreamWriter(resfilesPath))
+        {
+            foreach (var priFile in priResourceCandidates)
+            {
+                await writer.WriteLineAsync(priFile);
             }
         }
 
-        return aliases;
+        var configPath = new FileInfo(Path.Combine(packageDir.FullName, "priconfig.xml"));
+        var arguments = $@"createconfig /cf ""{configPath}"" /dq lang-{language}_scale-200 /pv {platformVersion} /o";
+
+        taskContext.AddDebugMessage("Creating PRI configuration file...");
+
+        try
+        {
+            await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
+
+            taskContext.AddDebugMessage($"PRI configuration created: {configPath}");
+
+            var xmlDoc = new XmlDocument();
+            xmlDoc.Load(configPath.FullName);
+            var resourcesNode = xmlDoc.SelectSingleNode("/resources");
+            if (resourcesNode != null)
+            {
+                var indexNode = resourcesNode.SelectSingleNode("index");
+                if (indexNode != null)
+                {
+                    if (indexNode.Attributes?["startIndexAt"]?.Value != null)
+                    {
+                        // set to relative path
+                        indexNode.Attributes["startIndexAt"]!.Value = ".\\pri.resfiles";
+                    }
+
+                    var resfilesIndexerNode = xmlDoc.CreateElement("indexer-config");
+                    var typeAttr = xmlDoc.CreateAttribute("type");
+                    typeAttr.Value = "resfiles";
+                    resfilesIndexerNode.Attributes.Append(typeAttr);
+
+                    var delimiterAttr = xmlDoc.CreateAttribute("qualifierDelimiter");
+                    delimiterAttr.Value = ".";
+                    resfilesIndexerNode.Attributes.Append(delimiterAttr);
+
+                    indexNode.AppendChild(resfilesIndexerNode);
+
+                    // Ensure folder-based indexer is configured to parse qualifiers from
+                    // both folder names and file names (e.g. targetsize-48_altform-unplated).
+                    var folderIndexerNode = indexNode
+                        .SelectNodes("indexer-config")
+                        ?.OfType<XmlNode>()
+                        .FirstOrDefault(node =>
+                            node.Attributes?["type"]?.Value?.Equals("folder", StringComparison.OrdinalIgnoreCase) == true);
+
+                    if (folderIndexerNode?.Attributes != null)
+                    {
+                        var folderAttributes = folderIndexerNode.Attributes;
+
+                        var folderNameAsQualifierAttr = folderAttributes["foldernameAsQualifier"];
+                        if (folderNameAsQualifierAttr == null)
+                        {
+                            folderNameAsQualifierAttr = xmlDoc.CreateAttribute("foldernameAsQualifier");
+                            folderAttributes.Append(folderNameAsQualifierAttr);
+                        }
+                        folderNameAsQualifierAttr.Value = "true";
+
+                        var fileNameAsQualifierAttr = folderAttributes["filenameAsQualifier"];
+                        if (fileNameAsQualifierAttr == null)
+                        {
+                            fileNameAsQualifierAttr = xmlDoc.CreateAttribute("filenameAsQualifier");
+                            folderAttributes.Append(fileNameAsQualifierAttr);
+                        }
+                        fileNameAsQualifierAttr.Value = "true";
+                    }
+
+                    xmlDoc.Save(configPath.FullName);
+                }
+            }
+
+            return configPath;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to create PRI configuration: {ex.Message}", ex);
+        }
+    }
+
+    private static readonly HashSet<string> PriIncludedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".svg"
+    };
+
+    private static List<(FileInfo SourceFile, string RelativePath)> ExpandManifestReferencedFiles(
+        DirectoryInfo manifestDir,
+        IEnumerable<string> referencedFiles,
+        TaskContext? taskContext,
+        Func<FileInfo, bool>? includeFile = null)
+    {
+        var expandedFilesByRelativePath = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var relativeFilePath in referencedFiles)
+        {
+            var logicalSourceFile = new FileInfo(Path.Combine(manifestDir.FullName, relativeFilePath));
+            var sourceDir = logicalSourceFile.Directory;
+
+            if (sourceDir is null || !sourceDir.Exists)
+            {
+                taskContext?.AddDebugMessage($"{UiSymbols.Warning} Source directory not found for referenced file: {relativeFilePath}");
+                continue;
+            }
+
+            var logicalBaseName = Path.GetFileNameWithoutExtension(logicalSourceFile.Name);
+            var variantBaseName = GetMrtVariantBaseName(logicalBaseName);
+            var extension = logicalSourceFile.Extension;
+
+            var searchPattern = variantBaseName + "*" + extension;
+            var candidates = sourceDir.EnumerateFiles(searchPattern);
+            var anyIncludedForLogical = false;
+
+            foreach (var candidateFile in candidates)
+            {
+                if (includeFile != null && !includeFile(candidateFile))
+                {
+                    continue;
+                }
+
+                var candidateNameWithoutExtension = Path.GetFileNameWithoutExtension(candidateFile.Name);
+                if (!IsMrtVariantName(variantBaseName, candidateNameWithoutExtension))
+                {
+                    continue;
+                }
+
+                var relativeDir = Path.GetDirectoryName(relativeFilePath);
+                var candidateRelativePath = string.IsNullOrEmpty(relativeDir)
+                    ? candidateFile.Name
+                    : Path.Combine(relativeDir, candidateFile.Name);
+
+                expandedFilesByRelativePath[candidateRelativePath] = candidateFile;
+                anyIncludedForLogical = true;
+            }
+
+            if (!anyIncludedForLogical && logicalSourceFile.Exists && (includeFile == null || includeFile(logicalSourceFile)))
+            {
+                expandedFilesByRelativePath[relativeFilePath] = logicalSourceFile;
+            }
+            else if (!anyIncludedForLogical && !logicalSourceFile.Exists)
+            {
+                taskContext?.AddDebugMessage($"{UiSymbols.Warning} Referenced file not found (no MRT variants): {logicalSourceFile}");
+            }
+        }
+
+        return [.. expandedFilesByRelativePath
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => (pair.Value, pair.Key))];
+    }
+
+    private static List<(FileInfo SourceFile, string RelativePath)> GetExpandedManifestReferencedFiles(
+        FileInfo manifestPath,
+        TaskContext taskContext)
+    {
+        var manifestDir = manifestPath.Directory;
+        if (manifestDir == null)
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest directory not found for: {manifestPath}");
+            return [];
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Reading manifest: {manifestPath}");
+
+        var assetReferences = ManifestService.ExtractAssetReferencesFromManifest(manifestPath, taskContext);
+        var referencedFiles = assetReferences.Select(a => a.RelativePath);
+        return ExpandManifestReferencedFiles(manifestDir, referencedFiles, taskContext);
+    }
+
+    /// <summary>
+    /// Generates a PRI file from the configuration
+    /// </summary>
+    /// <param name="packageDir">Path to the package directory</param>
+    /// <param name="configPath">Path to PRI config file (default: packageDir/priconfig.xml)</param>
+    /// <param name="outputPath">Output path for PRI file (default: packageDir/resources.pri)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of resource files that were processed</returns>
+    public async Task<List<FileInfo>> GeneratePriFileAsync(DirectoryInfo packageDir, TaskContext taskContext, FileInfo? configPath = null, FileInfo? outputPath = null, CancellationToken cancellationToken = default)
+    {
+        if (!packageDir.Exists)
+        {
+            throw new DirectoryNotFoundException($"Package directory not found: {packageDir}");
+        }
+
+        var priConfigPath = configPath ?? new FileInfo(Path.Combine(packageDir.FullName, "priconfig.xml"));
+        var priOutputPath = outputPath ?? new FileInfo(Path.Combine(packageDir.FullName, "resources.pri"));
+
+        if (!priConfigPath.Exists)
+        {
+            throw new FileNotFoundException($"PRI configuration file not found: {priConfigPath}");
+        }
+
+        var arguments = $@"new /pr ""{Path.TrimEndingDirectorySeparator(packageDir.FullName)}"" /cf ""{priConfigPath.FullName}"" /of ""{priOutputPath.FullName}"" /o";
+
+        taskContext.AddDebugMessage("Generating PRI file...");
+
+        try
+        {
+            var (stdout, stderr) = await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
+
+            // Parse the output to extract resource files
+            var resourceFiles = new List<FileInfo>();
+            var lines = stdout.Replace("\0", "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
+            {
+                // Look for lines that match the pattern "Resource File: *"
+                const string resourceFileStr = "Resource File: ";
+                if (line.StartsWith(resourceFileStr, StringComparison.OrdinalIgnoreCase))
+                {
+                    var fileName = line[resourceFileStr.Length..].Trim();
+                    if (!string.IsNullOrEmpty(fileName))
+                    {
+                        resourceFiles.Add(new FileInfo(Path.Combine(packageDir.FullName, fileName)));
+                    }
+                }
+            }
+
+            taskContext.AddDebugMessage($"PRI file generated: {priOutputPath}");
+            if (resourceFiles.Count > 0)
+            {
+                taskContext.AddDebugMessage($"Processed {resourceFiles.Count} resource files");
+            }
+
+            return resourceFiles;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to generate PRI file: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -445,11 +1010,11 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
             replacements[PlaceholderHelper.TargetNameToken] = nameWithoutExtension;
 
             // Also replace the Executable attribute value if it contains a placeholder
-            var doc = AppxManifestDocument.Parse(manifestContent);
-            if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
+            var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
+            if (execMatch.Success && PlaceholderHelper.ContainsPlaceholders(execMatch.Groups[1].Value))
             {
-                doc.ApplicationExecutable = executable;
-                manifestContent = doc.ToXml();
+                manifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
+                    manifestContent, $"${{1}}\"{executable}\"");
             }
 
             taskContext.AddDebugMessage($"{UiSymbols.Note} Using specified executable: {executable}");
@@ -457,8 +1022,8 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         else
         {
             // Check if the Executable attribute in the manifest has a placeholder
-            var doc = AppxManifestDocument.Parse(manifestContent);
-            if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
+            var execMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
+            if (execMatch.Success && PlaceholderHelper.ContainsPlaceholders(execMatch.Groups[1].Value))
             {
                 // Try to auto-infer by finding .exe files in the input folder root
                 var exeFiles = inputFolder.Exists
@@ -473,8 +1038,8 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
                     var nameWithoutExtension = Path.GetFileNameWithoutExtension(inferredExe);
                     replacements[PlaceholderHelper.TargetNameToken] = nameWithoutExtension;
 
-                    doc.ApplicationExecutable = inferredExe;
-                    manifestContent = doc.ToXml();
+                    manifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
+                        manifestContent, $"${{1}}\"{inferredExe}\"");
 
                     taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-inferred executable: {inferredExe}");
                 }
@@ -521,7 +1086,7 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         var priFile = new FileInfo(Path.Combine(inputFolder.FullName, "resources.pri"));
         if (priFile.Exists)
         {
-            languages = await priService.ExtractLanguagesFromPriAsync(priFile, taskContext, cancellationToken);
+            languages = await ExtractLanguagesFromPriAsync(priFile, taskContext, cancellationToken);
         }
 
         if (languages.Count == 0)
@@ -542,20 +1107,67 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
     /// </summary>
     internal static bool ContainsXGenerateLanguage(string manifestContent)
     {
-        var doc = AppxManifestDocument.Parse(manifestContent);
-        return doc.GetResourceLanguages()
-            .Any(lang => string.Equals(lang, "x-generate", StringComparison.OrdinalIgnoreCase));
+        return ResourceLanguageXGenerateBlockRegex().IsMatch(manifestContent);
     }
 
     /// <summary>
-    /// Replaces <c>&lt;Resource Language="x-generate"/&gt;</c> with concrete
-    /// <c>&lt;Resource Language="..."/&gt;</c> entries for each specified language.
+    /// Replaces the <c>&lt;Resources&gt;&lt;Resource Language="x-generate"/&gt;&lt;/Resources&gt;</c>
+    /// block with concrete <c>&lt;Resource Language="..."/&gt;</c> entries for each specified language.
     /// </summary>
     internal static string ReplaceXGenerateLanguage(string manifestContent, IList<string> languages)
     {
-        var doc = AppxManifestDocument.Parse(manifestContent);
-        doc.SetResourceLanguages(languages);
-        return doc.ToXml();
+        var indent = "    ";
+        var resourceEntries = string.Join(Environment.NewLine, languages.Select(lang => $"{indent}{indent}<Resource Language=\"{lang}\"/>"));
+        var replacement = $"{indent}<Resources>{Environment.NewLine}{resourceEntries}{Environment.NewLine}{indent}</Resources>";
+
+        return ResourceLanguageXGenerateBlockRegex().Replace(manifestContent, replacement);
+    }
+
+    /// <summary>
+    /// Extracts language qualifiers from a PRI file using <c>makepri dump</c>.
+    /// Returns a distinct, sorted list of BCP-47 language tags found in the PRI resource map.
+    /// </summary>
+    private async Task<List<string>> ExtractLanguagesFromPriAsync(
+        FileInfo priFile,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dumpOutputFile = Path.Combine(Path.GetTempPath(), $"winapp-pri-dump-{Guid.NewGuid():N}.xml");
+            var arguments = $@"dump /if ""{priFile.FullName}"" /of ""{dumpOutputFile}"" /o";
+
+            await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
+
+            if (!File.Exists(dumpOutputFile))
+            {
+                return [];
+            }
+
+            try
+            {
+                var dumpContent = await File.ReadAllTextAsync(dumpOutputFile, cancellationToken);
+
+                // Extract language qualifiers from Candidate elements:
+                // <Candidate qualifiers="Language-en-US" ...> or multi-qualifier like "Language-en-US, Scale-200"
+                var languages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Match match in PriDumpLanguageQualifierRegex().Matches(dumpContent))
+                {
+                    languages.Add(match.Groups[1].Value);
+                }
+
+                return languages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            finally
+            {
+                File.Delete(dumpOutputFile);
+            }
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to extract languages from PRI: {ex.Message}");
+            return [];
+        }
     }
 
     /// <summary>
@@ -650,42 +1262,72 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
-        // Determine executable path for ProcessorArchitecture auto-detection
-        string? resolvedExePath = null;
-        {
-            var tempDoc = AppxManifestDocument.Parse(manifestContent);
-            var appExe = tempDoc.ApplicationExecutable;
-            if (appExe != null)
-            {
-                resolvedExePath = Path.Combine(inputFolder.FullName, appExe);
-            }
-        }
-
-        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
-
-        // Parse the manifest to extract identity, executable, and architecture info
-        var manifestDoc = AppxManifestDocument.Parse(manifestContent);
+        manifestContent = await UpdateAppxManifestContentAsync(manifestContent, null, null, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
 
         try
         {
             if (string.IsNullOrWhiteSpace(finalPackageName))
             {
-                finalPackageName = manifestDoc.IdentityName ?? "Package";
+                var nameMatch = AppxPackageIdentityNameRegex().Match(manifestContent);
+                finalPackageName = nameMatch.Success ? nameMatch.Groups[1].Value : "Package";
             }
 
             if (string.IsNullOrWhiteSpace(extractedPublisher))
             {
-                extractedPublisher = manifestDoc.IdentityPublisher;
+                var publisherMatch = AppxPackageIdentityPublisherRegex().Match(manifestContent);
+                extractedPublisher = publisherMatch.Success ? publisherMatch.Groups[1].Value : null;
             }
 
             if (string.IsNullOrWhiteSpace(extractedVersion))
             {
-                extractedVersion = manifestDoc.IdentityVersion;
+                var versionMatch = AppxPackageIdentityVersionRegex().Match(manifestContent);
+                extractedVersion = versionMatch.Success ? versionMatch.Groups[1].Value : null;
             }
         }
         catch
         {
             finalPackageName ??= "Package";
+        }
+
+        var executableMatch = AppxPackageApplicationExecutableRegex().Match(manifestContent);
+
+        // If manifest Identity lacks ProcessorArchitecture, detect it from the executable PE header.
+        // If it already has one, warn when it doesn't match the actual executable.
+        string? packageArch = null;
+        if (executableMatch.Success)
+        {
+            var exePath = Path.Combine(inputFolder.FullName, executableMatch.Groups[1].Value);
+            var detectedArch = DetectPeArchitecture(exePath);
+
+            var existingArchMatch = AppxPackageIdentityArchitectureValueRegex().Match(manifestContent);
+            if (!existingArchMatch.Success)
+            {
+                if (detectedArch != null)
+                {
+                    manifestContent = IdentityElementRegex().Replace(manifestContent, m =>
+                    {
+                        var tag = m.Value;
+                        // Handle both self-closing (<Identity ... />) and open (<Identity ... >) tags
+                        var insertPos = tag.EndsWith("/>") ? tag.Length - 2 : tag.Length - 1;
+                        return tag.Insert(insertPos, $@" ProcessorArchitecture=""{detectedArch}""");
+                    });
+                    taskContext.AddDebugMessage($"{UiSymbols.Note} Auto-detected ProcessorArchitecture: {detectedArch}");
+                    packageArch = detectedArch;
+                }
+            }
+            else
+            {
+                packageArch = existingArchMatch.Groups[1].Value;
+                if (detectedArch != null)
+                {
+                    var manifestArch = existingArchMatch.Groups[1].Value;
+                    if (!string.Equals(manifestArch, detectedArch, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(manifestArch, "neutral", StringComparison.OrdinalIgnoreCase))
+                    {
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Manifest ProcessorArchitecture is '{manifestArch}' but the executable is {detectedArch}. This will likely cause runtime failures.");
+                    }
+                }
+            }
         }
 
         // Clean the resolved package name to ensure it meets MSIX schema requirements
@@ -736,40 +1378,16 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
 
         try
         {
-            // Check if the manifest was generated by MSBuild and a .build.appxrecipe is available.
-            // When present, the recipe lists exactly which files belong in the package and their
-            // correct PackagePaths, producing a cleaner MSIX without build artifacts.
-            var isMSBuildGenerated = manifestDoc.Document.Root?
-                .Element(AppxManifestDocument.BuildNs + "Metadata")?
-                .Elements(AppxManifestDocument.BuildNs + "Item")
-                .Any(e => string.Equals(e.Attribute("Name")?.Value, "makepri.exe", StringComparison.OrdinalIgnoreCase)) == true;
-
-            FileInfo? recipeFile = null;
-            if (isMSBuildGenerated)
-            {
-                recipeFile = inputFolder.EnumerateFiles("*.build.appxrecipe", SearchOption.TopDirectoryOnly).FirstOrDefault();
-            }
-
-            if (recipeFile != null)
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Note} MSBuild-generated manifest detected");
-                taskContext.AddDebugMessage($"{UiSymbols.Files} Using appxrecipe for staging: {recipeFile.Name}");
-                await CopyFilesFromRecipeAsync(recipeFile, stagingDir, taskContext, cancellationToken);
-            }
-            else
-            {
-                // No recipe available — copy the entire input folder to staging
-                CopyDirectoryRecursive(inputFolder, stagingDir);
-                taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
-            }
+            // Copy input folder contents to staging directory
+            CopyDirectoryRecursive(inputFolder, stagingDir);
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
 
             // Write the updated manifest into the staging directory
             var updatedManifestPath = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
             await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
 
             // Resolve executable path relative to the staging directory
-            var applicationExecutable = manifestDoc.ApplicationExecutable;
-            FileInfo? executablePath = applicationExecutable != null ? new FileInfo(Path.Combine(stagingDir.FullName, applicationExecutable)) : null;
+            FileInfo? executablePath = executableMatch.Success ? new FileInfo(Path.Combine(stagingDir.FullName, executableMatch.Groups[1].Value)) : null;
 
             // Pre-compute expanded manifest resources from the original manifest
             var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
@@ -778,8 +1396,8 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
             // If manifest is outside input folder, copy its referenced assets into the staging directory
             if (manifestIsOutsideInputFolder)
             {
-                var externalAssets = MrtAssetHelper.GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
-                MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
+                var externalAssets = GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
+                CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
@@ -794,14 +1412,14 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
                 // Expand manifest-referenced files from the staging manifest so that
                 // assets from both the input folder and external manifest are discovered.
                 var stagingManifest = new FileInfo(Path.Combine(stagingDir.FullName, "appxmanifest.xml"));
-                var priExpandedFiles = MrtAssetHelper.GetExpandedManifestReferencedFiles(stagingManifest, taskContext);
+                var priExpandedFiles = GetExpandedManifestReferencedFiles(stagingManifest, taskContext);
                 var priResourceCandidates = priExpandedFiles.Select(file => file.RelativePath);
-                await priService.CreatePriConfigAsync(
+                await CreatePriConfigAsync(
                     stagingDir,
                     taskContext,
                     precomputedPriResourceCandidates: priResourceCandidates,
                     cancellationToken: cancellationToken);
-                var resourceFiles = await priService.GeneratePriFileAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
+                var resourceFiles = await GeneratePriFileAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
                 if (resourceFiles.Count > 0 && logger.IsEnabled(LogLevel.Debug))
                 {
                     taskContext.AddDebugMessage($"Resource files included in PRI:");
@@ -869,6 +1487,136 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         }
 
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
+    }
+
+    private async Task EmbedActivationManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        // Use applicationLocation for DLL content (where runtime files were copied by PrepareRuntimeForPackagingAsync)
+        var exeDir = exePath.Directory!;
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Generating activation manifest from: {windowsAppSDKAppXManifestPath}");
+        taskContext.AddDebugMessage($"{UiSymbols.Package} Using DLL content from: {winAppSDKDeploymentDir}");
+
+        // Create a temporary manifest file
+        var tempManifestPath = new FileInfo(Path.Combine(exeDir.FullName, "WindowsAppSDK_temp.manifest"));
+
+        try
+        {
+            // Build the entire manifest in memory, then write to disk once
+            var sb = new StringBuilder();
+            sb.AppendLine("<?xml version='1.0' encoding='utf-8' standalone='yes'?>");
+            sb.AppendLine("<assembly manifestVersion='1.0'");
+            sb.AppendLine("    xmlns:asmv3='urn:schemas-microsoft-com:asm.v3'");
+            sb.AppendLine("    xmlns:winrtv1='urn:schemas-microsoft-com:winrt.v1'");
+            sb.AppendLine("    xmlns='urn:schemas-microsoft-com:asm.v1'>");
+
+            // Collect all AppX manifests (main package + component fragments) and their DLLs
+            (var packageDependencies, _) = await GetWinAppSDKPackageDependenciesAsync(dotNetPackageList, taskContext, cancellationToken);
+            if (packageDependencies == null || packageDependencies.Count == 0)
+            {
+                throw new InvalidOperationException("No Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
+            }
+
+            var architecture = WorkspaceSetupService.GetSystemArchitecture();
+            IEnumerable<FileInfo> appxFragments = GetComponents(packageDependencies);
+
+            // Combine all manifests: main AppxManifest.xml (Package root) + fragments (Fragment root)
+            var allManifests = new List<FileInfo> { windowsAppSDKAppXManifestPath };
+            allManifests.AddRange(appxFragments);
+
+            // Combine all DLL file names from deployment dir and fragment native dirs
+            var allDllFiles = new List<string>(winAppSDKDeploymentDir.EnumerateFiles("*.dll").Select(di => di.Name));
+            allDllFiles.AddRange(appxFragments
+                .Select(fragment => Path.Combine(fragment.DirectoryName!, $"win-{architecture}\\native"))
+                .Where(Directory.Exists)
+                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.dll"))
+                .Select(Path.GetFileName)!);
+
+            // Single pass: process all AppX manifests (auto-detects Package vs Fragment root)
+            AppendAppManifestFromAppx(
+                sb,
+                redirectDlls: false,
+                inDllFiles: allDllFiles,
+                inAppxManifests: allManifests);
+
+            // Phase 3: Discover and register third-party WinRT components (e.g., Win2D, WebView2)
+            // These packages ship .winmd files + native DLLs but no package.appxfragment
+            await AppendThirdPartyWinRTManifestEntriesAsync(
+                sb, architecture, dotNetPackageList, taskContext, cancellationToken);
+
+            sb.AppendLine("</assembly>");
+
+            // Single write to disk
+            await File.WriteAllTextAsync(
+                tempManifestPath.FullName,
+                sb.ToString(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken);
+
+            // Use mt.exe to merge manifests
+            await EmbedManifestFileToExeAsync(exePath, tempManifestPath, taskContext, cancellationToken);
+        }
+        finally
+        {
+            TryDeleteFile(tempManifestPath);
+        }
+    }
+
+    private IEnumerable<FileInfo> GetComponents(Dictionary<string, string> packageDependencies)
+    {
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+
+        // Find appx fragments in the NuGet global cache (lowercase-id/version/ layout)
+        var appxFragments = packageDependencies
+            .Select(package => new FileInfo(Path.Combine(nugetCacheDir.FullName, package.Key.ToLowerInvariant(), package.Value, "runtimes-framework", "package.appxfragment")))
+            .Where(f => f.Exists);
+        return appxFragments;
+    }
+
+    /// <summary>
+    /// Collects all user NuGet packages from winapp.yaml or .csproj.
+    /// Returns the full package dictionary (name → version) for WinRT component scanning.
+    /// </summary>
+    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Path 1: Try winapp.yaml
+        if (configService.Exists())
+        {
+            var config = configService.Load();
+            foreach (var pkg in config.Packages)
+            {
+                packages.TryAdd(pkg.Name, pkg.Version);
+            }
+        }
+        else
+        {
+            // Path 2: Try .csproj via `dotnet list package --format json` (cached)
+            try
+            {
+                var allPackages = dotNetPackageList?.Projects?
+                    .SelectMany(p => p.Frameworks ?? [])
+                    .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+
+                if (allPackages != null)
+                {
+                    foreach (var pkg in allPackages)
+                    {
+                        if (!string.IsNullOrEmpty(pkg.Id) && !string.IsNullOrEmpty(pkg.ResolvedVersion))
+                        {
+                            packages.TryAdd(pkg.Id, pkg.ResolvedVersion);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not retrieve package list from .csproj: {ex.Message}");
+            }
+        }
+
+        return packages;
     }
 
     private async Task<DotNetPackageListJson?> FetchDotNetPackageListAsync(CancellationToken cancellationToken)
@@ -1273,6 +2021,12 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         await buildToolsService.RunBuildToolAsync(new MakeAppxTool(), makeappxArguments, taskContext, cancellationToken: cancellationToken);
     }
 
+    private async Task RunMtToolAsync(string arguments, bool printErrors, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        // Use BuildToolsService to run mt.exe
+        await buildToolsService.RunBuildToolAsync(new GenericTool("mt.exe"), arguments, taskContext, printErrors, cancellationToken: cancellationToken);
+    }
+
     private static void TryDeleteFile(FileInfo path)
     {
         try
@@ -1351,94 +2105,286 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         return null;
     }
 
+        /// <summary>
+    /// Detects the architecture of a PE file and returns an MSIX-style architecture string:
+    /// "x86", "x64", "arm", "arm64", or "neutral".
+    ///
+    /// Rules:
+    /// - Native PE images are classified from the COFF Machine field.
+    /// - Managed .NET IL-only images are classified using COR flags:
+    ///     * I386 + ILOnly + Requires32Bit => x86
+    ///     * I386 + ILOnly + !Requires32Bit => neutral
+    /// - Mixed-mode / native-hosted managed images fall back to the native Machine field.
+    ///
+    /// Returns null if the file is not a valid PE image or uses an unsupported architecture.
+    /// </summary>
+    internal static string? DetectPeArchitecture(string filePath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(filePath);
+            using var peReader = new PEReader(stream);
+
+            var headers = peReader.PEHeaders;
+            var coff = headers.CoffHeader;
+            var cor = headers.CorHeader;
+
+            ushort machine = (ushort)coff.Machine;
+
+            // Native or mixed-mode case: use the PE machine directly.
+            if (cor is null)
+            {
+                return MapNativeMachine(machine);
+            }
+
+            CorFlags flags = cor.Flags;
+            bool isIlOnly = (flags & CorFlags.ILOnly) != 0;
+            bool requires32Bit = (flags & CorFlags.Requires32Bit) != 0;
+
+            // Managed IL-only assemblies need special handling.
+            // In particular, IL-only I386 without Requires32Bit is effectively AnyCPU/neutral.
+            if (isIlOnly)
+            {
+                return machine switch
+                {
+                    0x014C => requires32Bit ? "x86" : "neutral", // I386
+                    0x8664 => "x64",   // unusual for pure IL-only, but valid to preserve
+                    0x01C0 => "arm",   // ARM
+                    0x01C4 => "arm",   // ARMNT
+                    0xAA64 => "arm64", // ARM64
+                    _ => null
+                };
+            }
+
+            // Mixed-mode / native-entry managed image: machine matters.
+            return MapNativeMachine(machine);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? MapNativeMachine(ushort machine) => machine switch
+    {
+        0x014C => "x86",    // IMAGE_FILE_MACHINE_I386
+        0x8664 => "x64",    // IMAGE_FILE_MACHINE_AMD64
+        0xAA64 => "arm64",  // IMAGE_FILE_MACHINE_ARM64
+        0x01C4 => "arm",    // IMAGE_FILE_MACHINE_ARMNT
+        0x01C0 => "arm",    // IMAGE_FILE_MACHINE_ARM
+        _ => null
+    };
+
+    /// <param name="originalManifestPath">Path to the original appxmanifest.xml</param>
+    /// <param name="entryPointPath">Path to the entryPoint/executable that the manifest should reference</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Tuple containing the debug manifest path and modified identity info</returns>
+    public async Task<(FileInfo debugManifestPath, MsixIdentityResult debugIdentity)> GenerateSparsePackageStructureAsync(
+        FileInfo originalManifestPath,
+        string entryPointPath,
+        bool keepIdentity,
+        DotNetPackageListJson? dotNetPackageList,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
+    {
+        var winappDir = winappDirectoryService.GetLocalWinappDirectory();
+        var debugDir = new DirectoryInfo(Path.Combine(winappDir.FullName, "debug"));
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Creating sparse package structure in: {debugDir.FullName}");
+
+        // Step 1: Create debug directory, removing existing one if present
+        if (debugDir.Exists)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Trash} Removing existing debug directory...");
+            debugDir.Delete(recursive: true);
+        }
+
+        debugDir.Create();
+        taskContext.AddDebugMessage($"{UiSymbols.Folder} Created debug directory");
+
+        // Step 2: Parse original manifest to get identity and assets
+        var originalManifestContent = await File.ReadAllTextAsync(originalManifestPath.FullName, Encoding.UTF8, cancellationToken);
+
+        // Resolve placeholders in memory (never write back to the original manifest)
+        if (PlaceholderHelper.ContainsPlaceholders(originalManifestContent))
+        {
+            var nameWithoutExtension = Path.GetFileNameWithoutExtension(entryPointPath);
+            var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [PlaceholderHelper.TargetNameToken] = nameWithoutExtension
+            };
+
+            // Also replace the Executable attribute if it has a placeholder
+            var executableAttrMatch = AppxPackageApplicationExecutableRegex().Match(originalManifestContent);
+            if (executableAttrMatch.Success && PlaceholderHelper.ContainsPlaceholders(executableAttrMatch.Groups[1].Value))
+            {
+                var exeName = Path.GetFileName(entryPointPath);
+                originalManifestContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(
+                    originalManifestContent, $"${{1}}\"{exeName}\"");
+            }
+
+            originalManifestContent = PlaceholderHelper.ReplacePlaceholders(originalManifestContent, replacements);
+            PlaceholderHelper.ThrowIfUnresolvedPlaceholders(originalManifestContent);
+
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Resolved manifest placeholders for debug identity");
+        }
+
+        var originalIdentity = ParseAppxManifestAsync(originalManifestContent);
+
+        // Step 3: Create debug identity (optionally with ".debug" suffix)
+        var debugIdentity = keepIdentity ? originalIdentity : CreateDebugIdentity(originalIdentity);
+
+        // Step 4: Modify manifest for sparse packaging and debug identity
+        var debugManifestContent = await UpdateAppxManifestContentAsync(
+            originalManifestContent,
+            debugIdentity,
+            entryPointPath,
+            sparse: true,
+            selfContained: false,
+            dotNetPackageList,
+            taskContext,
+            cancellationToken);
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Modified manifest for sparse packaging and debug identity");
+
+        // Step 5: Write debug manifest
+        var debugManifestPath = new FileInfo(Path.Combine(debugDir.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(debugManifestPath.FullName, debugManifestContent, Encoding.UTF8, cancellationToken);
+
+        taskContext.AddDebugMessage($"{UiSymbols.Files} Created debug manifest: {debugManifestPath.FullName}");
+
+        // Step 6: Copy all assets
+        var entryPointDir = Path.GetDirectoryName(entryPointPath);
+        if (!string.IsNullOrEmpty(entryPointDir))
+        {
+            var entryPointDirInfo = new DirectoryInfo(entryPointDir);
+            var originalManifestDir = originalManifestPath.DirectoryName;
+
+            if (!string.Equals(originalManifestDir, entryPointDirInfo.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                var expandedFiles = GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
+                CopyAllAssets(expandedFiles, entryPointDirInfo, taskContext);
+            }
+            else
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
+            }
+        }
+
+        return (debugManifestPath, debugIdentity);
+    }
+
+    /// <summary>
+    /// Creates a debug version of the identity by appending ".debug" to package name and application ID
+    /// </summary>
+    private static MsixIdentityResult CreateDebugIdentity(MsixIdentityResult originalIdentity)
+    {
+        var debugPackageName = originalIdentity.PackageName.EndsWith(".debug")
+            ? originalIdentity.PackageName
+            : $"{originalIdentity.PackageName}.debug";
+
+        var debugApplicationId = originalIdentity.ApplicationId.EndsWith(".debug")
+            ? originalIdentity.ApplicationId
+            : $"{originalIdentity.ApplicationId}.debug";
+
+        return new MsixIdentityResult(debugPackageName, originalIdentity.Publisher, debugApplicationId);
+    }
+
     /// <summary>
     /// Updates the manifest identity, application ID, and executable path for sparse packaging
     /// </summary>
-    private async Task<(string Content, string? DetectedArchitecture)> UpdateAppxManifestContentAsync(
+    private async Task<string> UpdateAppxManifestContentAsync(
         string originalAppxManifestContent,
         MsixIdentityResult? identity,
         string? entryPointPath,
-        string? exePath,
         bool sparse,
         bool selfContained,
         DotNetPackageListJson? dotNetPackageList,
         TaskContext taskContext,
         CancellationToken cancellationToken)
     {
-        var doc = AppxManifestDocument.Parse(originalAppxManifestContent);
+        var modifiedContent = originalAppxManifestContent;
 
         if (identity != null)
         {
-            doc.IdentityName = identity.PackageName;
-            doc.ApplicationId = identity.ApplicationId;
+            // Replace package identity attributes
+            modifiedContent = AppxPackageIdentityNameAssignmentRegex().Replace(modifiedContent, $@"$1""{identity.PackageName}""");
+
+            // Replace application ID
+            modifiedContent = AppxApplicationIdAssignmentRegex().Replace(modifiedContent, $@"$1""{identity.ApplicationId}""");
         }
 
         if (entryPointPath != null)
         {
+            // Replace executable path with relative path from package root
             var entryPointDir = Path.GetDirectoryName(entryPointPath);
             var workingDir = string.IsNullOrEmpty(entryPointDir) ? currentDirectoryProvider.GetCurrentDirectory() : entryPointDir;
             string relativeExecutablePath;
 
             try
             {
+                // Calculate relative path from the working directory (package root) to the executable
                 relativeExecutablePath = Path.GetRelativePath(workingDir, entryPointPath);
+
+                // Ensure we use forward slashes for consistency in manifest
                 relativeExecutablePath = relativeExecutablePath.Replace('\\', '/');
             }
             catch
             {
+                // Fallback to just the filename if relative path calculation fails
                 relativeExecutablePath = Path.GetFileName(entryPointPath);
             }
 
-            doc.ApplicationExecutable = relativeExecutablePath;
+            modifiedContent = AppxPackageApplicationExecutableAssignmentRegex().Replace(modifiedContent, $@"$1""{relativeExecutablePath}""");
         }
 
         bool isExe = Path.HasExtension(entryPointPath) && string.Equals(Path.GetExtension(entryPointPath), ".exe", StringComparison.OrdinalIgnoreCase);
 
+        // Only apply sparse packaging modifications if sparse is true
         if (sparse)
         {
             // Add required namespaces for sparse packaging
-            doc.EnsureNamespace("uap10", AppxManifestDocument.Uap10Ns);
-            doc.EnsureNamespace("desktop6", AppxManifestDocument.Desktop6Ns);
+            if (!modifiedContent.Contains("xmlns:uap10"))
+            {
+                modifiedContent = AppxPackageElementOpenTagRegex().Replace(modifiedContent, @"$1 xmlns:uap10=""http://schemas.microsoft.com/appx/manifest/uap/windows10/10""$2");
+            }
+
+            if (!modifiedContent.Contains("xmlns:desktop6"))
+            {
+                modifiedContent = AppxPackageOpenTagRegex().Replace(modifiedContent, @"$1 xmlns:desktop6=""http://schemas.microsoft.com/appx/manifest/desktop/windows10/6""$2");
+            }
 
             // Add sparse package properties
-            var properties = doc.Document.Root?.Element(AppxManifestDocument.DefaultNs + "Properties");
-            if (properties != null && properties.Element(AppxManifestDocument.Uap10Ns + "AllowExternalContent") == null)
+            if (!modifiedContent.Contains("<uap10:AllowExternalContent>"))
             {
-                properties.Add(new XElement(AppxManifestDocument.Uap10Ns + "AllowExternalContent", "true"));
-                properties.Add(new XElement(AppxManifestDocument.Desktop6Ns + "RegistryWriteVirtualization", "disabled"));
+                modifiedContent = AppxPackagePropertiesCloseTagRegex().Replace(modifiedContent, @"    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+$1");
             }
 
             // Ensure Application has sparse packaging attributes
-            var app = doc.GetFirstApplicationElement();
-            if (app != null && isExe && app.Attribute(AppxManifestDocument.Uap10Ns + "TrustLevel") == null)
+            if (!modifiedContent.Contains("uap10:TrustLevel") && isExe)
             {
-                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "TrustLevel", "mediumIL");
-                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "packagedClassicApp");
+                modifiedContent = AppxApplicationOpenTagRegex().Replace(modifiedContent, @"$1 uap10:TrustLevel=""mediumIL"" uap10:RuntimeBehavior=""packagedClassicApp""$2");
             }
 
             // Remove EntryPoint if present (not needed for sparse packages)
-            doc.ApplicationEntryPoint = null;
+            modifiedContent = AppxPackageEntryPointRegex().Replace(modifiedContent, "");
 
             // Add AppListEntry="none" to VisualElements if not present
-            var ve = doc.GetVisualElements();
-            if (ve != null && ve.Attribute("AppListEntry") == null)
+            if (!modifiedContent.Contains("AppListEntry"))
             {
-                ve.SetAttributeValue("AppListEntry", "none");
+                modifiedContent = AppxPackageVisualElementsOpenTagRegex().Replace(modifiedContent, @"$1 AppListEntry=""none""$2");
             }
 
             // Add sparse-specific capabilities if not present
-            var capsElement = doc.GetCapabilitiesElement();
-            bool hasUnvirtualizedResources = capsElement?.Elements()
-                .Any(e => string.Equals(e.Attribute("Name")?.Value, "unvirtualizedResources", StringComparison.OrdinalIgnoreCase)) == true;
-            if (!hasUnvirtualizedResources)
+            if (!modifiedContent.Contains("unvirtualizedResources"))
             {
-                doc.EnsureCapability("unvirtualizedResources", AppxManifestDocument.RescapNs);
-                doc.EnsureCapability("allowElevation", AppxManifestDocument.RescapNs);
+                modifiedContent = AppxPackageRunFullTrustCapabilityRegex().Replace(modifiedContent, @"$1
+    <rescap:Capability Name=""unvirtualizedResources""/>
+    <rescap:Capability Name=""allowElevation"" />");
             }
         }
-
-        // Convert to string for remaining string-based operations
-        var modifiedContent = doc.ToXml();
 
         // Update or insert Windows App SDK dependency (skip for self-contained packages)
         if (!selfContained && (entryPointPath == null || isExe))
@@ -1457,15 +2403,7 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
         // Stamp build metadata with CLI version
         modifiedContent = AddBuildMetadata(modifiedContent);
 
-        // Auto-detect ProcessorArchitecture from the executable PE header if not already set.
-        // Without this, ARM64 Windows resolves framework dependencies to ARM64 DLLs even for x64 apps.
-        string? detectedArch = null;
-        if (exePath != null)
-        {
-            (modifiedContent, detectedArch) = AutoDetectProcessorArchitecture(modifiedContent, exePath, taskContext);
-        }
-
-        return (modifiedContent, detectedArch);
+        return modifiedContent;
     }
 
     /// <summary>
@@ -1476,11 +2414,29 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
     {
         var version = VersionHelper.GetVersionString();
 
-        var doc = AppxManifestDocument.Parse(manifestContent);
+        // Add xmlns:build namespace to <Package> if not present
+        if (!manifestContent.Contains("xmlns:build"))
+        {
+            manifestContent = BuildMetadataPackageOpenTagRegex().Replace(manifestContent,
+                @"$1 xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""$2");
+        }
 
-        doc.EnsureNamespace("build", AppxManifestDocument.BuildNs);
-        doc.AddIgnorableNamespace("build");
-        doc.SetBuildMetadata("Microsoft.WinAppCli", version);
+        // Add 'build' to IgnorableNamespaces if not already listed
+        if (!BuildMetadataIgnorableNamespacesCheckRegex().IsMatch(manifestContent))
+        {
+            if (manifestContent.Contains("IgnorableNamespaces"))
+            {
+                // Append 'build' to the existing IgnorableNamespaces value
+                manifestContent = BuildMetadataIgnorableNamespacesAssignRegex().Replace(manifestContent,
+                    @"$1 build""");
+            }
+            else
+            {
+                // No IgnorableNamespaces attribute exists — add one to <Package>
+                manifestContent = BuildMetadataPackageOpenTagRegex().Replace(manifestContent,
+                    @"$1 IgnorableNamespaces=""build""$2");
+            }
+        }
 
         var buildItemEntry = $@"<build:Item Name=""Microsoft.WinAppCli"" Version=""{version}"" />";
 

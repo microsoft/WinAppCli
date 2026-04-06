@@ -152,21 +152,21 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 ## 4. Debug with Identity
 
-To debug with identity, we need to build the Rust backend and run it with `winapp run`. Since `npm run tauri dev` manages the process lifecycle, it's harder to inject the identity there. Instead, we'll create a custom script.
+To debug with identity, we need to build the Rust backend, apply the debug identity to the executable, and then run it directly. Since `npm run tauri dev` manages the process lifecycle, it's harder to inject the identity there. Instead, we'll create a custom script.
 
 1.  **Add Script**: Open `package.json` and add a new script `tauri:dev:withidentity`:
 
     ```json
     "scripts": {
       "tauri": "tauri",
-      "tauri:dev:withidentity": "cargo build --manifest-path src-tauri/Cargo.toml && (if not exist dist mkdir dist) && copy /Y src-tauri\\target\\debug\\tauri-app.exe dist\\ >nul && winapp run .\\dist"
+      "tauri:dev:withidentity": "cargo build --manifest-path src-tauri/Cargo.toml && winapp create-debug-identity src-tauri/target/debug/tauri-app.exe && .\\src-tauri\\target\\debug\\tauri-app.exe"
     }
     ```
 
     **What this script does:**
     *   `cargo build ...`: Recompiles the Rust backend.
-    *   `copy ... dist\\`: Stages just the exe into a `dist` folder (the `target\debug` folder is very large and contains intermediate build artifacts that aren't part of your app).
-    *   `winapp run .\\dist`: Registers a loose layout package (just like a real MSIX install) and launches the app.
+    *   `winapp create-debug-identity ...`: Applies the temporary identity from your `appxmanifest.xml` to the built executable.
+    *   `...tauri-app.exe`: Runs the executable directly.
 
 2.  **Run the Script**:
 
@@ -176,26 +176,24 @@ To debug with identity, we need to build the Rust backend and run it with `winap
 
 You should now see the app open and display a "Package family name", confirming it is running with identity! You can now start using and debugging APIs that require package identity, such as Notifications or the new AI APIs like Phi Silica. 
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
-
 ## 5. Package with MSIX
 
 Once you're ready to distribute your app, you can package it as an MSIX which will provide the package identity to your application.
 
-First, add a `pack:msix` script to your `package.json`:
+### Build Release
+Build your application in release mode:
 
-```json
-"scripts": {
-  "tauri": "tauri",
-  "tauri:dev:withidentity": "...",
-  "pack:msix": "npm run tauri -- build && (if not exist dist mkdir dist) && copy /Y src-tauri\\target\\release\\tauri-app.exe dist\\ >nul && winapp pack .\\dist --cert .\\devcert.pfx"
-}
+```powershell
+npm run tauri build
 ```
 
-**What this script does:**
-*   `npm run tauri -- build`: Builds the Rust backend in release mode.
-*   `copy ... dist\\`: Stages just the exe into a `dist` folder (the `target\release` folder is very large and contains intermediate build artifacts that aren't part of your app).
-*   `winapp pack .\\dist --cert .\\devcert.pfx`: Packages and signs the app as MSIX.
+### Prepare Package Directory
+Create a directory to hold your package files and copy your release executable.
+
+```powershell
+mkdir dist
+copy .\src-tauri\target\release\tauri-app.exe .\dist\
+```
 
 ### Generate a Development Certificate
 
@@ -205,10 +203,13 @@ Before packaging, you need a development certificate for signing. Generate one i
 winapp cert generate --if-exists skip
 ```
 
-### Build, Stage, and Pack
+### Sign and Pack
+
+Now you can package and sign:
 
 ```powershell
-npm run pack:msix
+# package and sign the app with the generated certificate
+winapp pack .\dist --cert .\devcert.pfx 
 ```
 
 > Note: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.

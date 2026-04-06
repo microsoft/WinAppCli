@@ -42,11 +42,6 @@ internal interface IManifestService
         FileInfo manifestPath,
         FileInfo imagePath,
         TaskContext taskContext,
-        FileInfo? lightImagePath = null,
-        CancellationToken cancellationToken = default);
-
-    public Task<AddExecutionAliasResult> AddExecutionAliasAsync(
-        AddExecutionAliasOptions options,
         CancellationToken cancellationToken = default);
 
     public Task<AddExecutionAliasResult> AddExecutionAliasAsync(

@@ -244,48 +244,32 @@ internal partial class ManifestService(
         FileInfo manifestPath,
         FileInfo imagePath,
         TaskContext taskContext,
-        FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default)
     {
         taskContext.AddStatusMessage($"{UiSymbols.Info} Updating assets for manifest: {manifestPath.FullName}");
 
+        // Determine the manifest directory
         var manifestDir = manifestPath.Directory;
         if (manifestDir == null)
         {
             throw new InvalidOperationException("Could not determine manifest directory");
         }
 
+        // Extract asset references from the manifest
         var assetReferences = ExtractAssetReferencesFromManifest(manifestPath, taskContext);
-        DirectoryInfo assetsDir;
 
         if (assetReferences.Count > 0)
         {
-            await imageAssetService.GenerateAssetsFromManifestAsync(imagePath, manifestDir, assetReferences, taskContext, lightImagePath, cancellationToken);
-
-            // Place app.ico alongside the app icon asset (44x44), falling back to
-            // the most common asset directory so we don't depend on parse order.
-            var appIconRef = assetReferences.FirstOrDefault(r => r.BaseWidth == 44 && r.BaseHeight == 44);
-            var relativeAssetsDirectory = Path.GetDirectoryName(
-                appIconRef?.RelativePath ?? GetMostCommonAssetDirectory(assetReferences));
-            var assetsDirectoryPath = string.IsNullOrWhiteSpace(relativeAssetsDirectory)
-                ? manifestDir.FullName
-                : Path.Combine(manifestDir.FullName, relativeAssetsDirectory);
-            assetsDir = new DirectoryInfo(assetsDirectoryPath);
+            // Generate assets based on manifest references
+            await imageAssetService.GenerateAssetsFromManifestAsync(imagePath, manifestDir, assetReferences, taskContext, cancellationToken);
         }
         else
         {
+            // Fallback to default behavior if no asset references found
             taskContext.AddStatusMessage($"{UiSymbols.Warning} No asset references found in manifest, generating default assets");
-            assetsDir = manifestDir.CreateSubdirectory("Assets");
-            await imageAssetService.GenerateAssetsAsync(imagePath, assetsDir, taskContext, lightImagePath, cancellationToken);
+            var assetsDir = manifestDir.CreateSubdirectory("Assets");
+            await imageAssetService.GenerateAssetsAsync(imagePath, assetsDir, taskContext, cancellationToken);
         }
-
-        if (!assetsDir.Exists)
-        {
-            assetsDir.Create();
-        }
-
-        var icoPath = DetermineIcoOutputPath(assetsDir, taskContext);
-        await imageAssetService.GenerateIcoAsync(imagePath, icoPath, taskContext, cancellationToken);
     }
 
     /// <summary>
@@ -309,19 +293,13 @@ internal partial class ManifestService(
             // Known asset types and their base dimensions
             var assetTypeDimensions = new Dictionary<string, (int Width, int Height)>(StringComparer.OrdinalIgnoreCase)
             {
-                // Square logos (old naming)
+                // Square logos
                 { "Square44x44Logo", (44, 44) },
                 { "Square71x71Logo", (71, 71) },
                 { "Square150x150Logo", (150, 150) },
                 { "Square310x310Logo", (310, 310) },
-                // Wide logos (old naming)
+                // Wide logos
                 { "Wide310x150Logo", (310, 150) },
-                // New naming convention
-                { "AppList", (44, 44) },
-                { "SmallTile", (71, 71) },
-                { "MedTile", (150, 150) },
-                { "WideTile", (310, 150) },
-                { "LargeTile", (310, 310) },
                 // Store logo (typically 50x50)
                 { "Logo", (50, 50) },
                 { "StoreLogo", (50, 50) },

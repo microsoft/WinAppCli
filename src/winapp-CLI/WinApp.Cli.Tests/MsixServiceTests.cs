@@ -740,7 +740,7 @@ public class MsixServiceTests
     public void DetectPeArchitecture_ReturnsNull_ForNonExistentFile()
     {
         // Act
-        var result = PeHelper.DetectPeArchitecture(Path.Combine(_tempDir.FullName, "nonexistent.exe"));
+        var result = MsixService.DetectPeArchitecture(Path.Combine(_tempDir.FullName, "nonexistent.exe"));
 
         // Assert
         Assert.IsNull(result);
@@ -754,7 +754,7 @@ public class MsixServiceTests
         File.WriteAllText(path, "This is not a PE file");
 
         // Act
-        var result = PeHelper.DetectPeArchitecture(path);
+        var result = MsixService.DetectPeArchitecture(path);
 
         // Assert
         Assert.IsNull(result);
@@ -768,7 +768,7 @@ public class MsixServiceTests
         File.WriteAllBytes(path, [0x4D, 0x5A]); // Just MZ header, nothing else
 
         // Act
-        var result = PeHelper.DetectPeArchitecture(path);
+        var result = MsixService.DetectPeArchitecture(path);
 
         // Assert
         Assert.IsNull(result);
@@ -786,7 +786,7 @@ public class MsixServiceTests
         File.WriteAllBytes(path, pe);
 
         // Act
-        var result = PeHelper.DetectPeArchitecture(path);
+        var result = MsixService.DetectPeArchitecture(path);
 
         // Assert
         Assert.AreEqual(expected, result);
@@ -801,7 +801,7 @@ public class MsixServiceTests
         File.WriteAllBytes(path, pe);
 
         // Act
-        var result = PeHelper.DetectPeArchitecture(path);
+        var result = MsixService.DetectPeArchitecture(path);
 
         // Assert
         Assert.IsNull(result);
@@ -845,161 +845,14 @@ public class MsixServiceTests
 
     #endregion
 
-    #region AutoDetectProcessorArchitecture Tests
-
-    private const string ManifestWithoutArch = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
-            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
-        </Package>
-        """;
-
-    private const string ManifestWithX86Arch = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
-            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" ProcessorArchitecture="x86" />
-        </Package>
-        """;
-
-    private const string ManifestWithNeutralArch = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
-            <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" ProcessorArchitecture="neutral" />
-        </Package>
-        """;
-
-    private static TaskContext CreateTestTaskContext()
-    {
-        var task = new GroupableTask("test", null);
-        var console = new Spectre.Console.Testing.TestConsole();
-        var logger = NullLogger<MsixService>.Instance;
-        var renderLock = new Lock();
-        return new TaskContext(task, null, console, logger, renderLock);
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_SetsArch_WhenMissingFromManifest()
-    {
-        // Arrange — x64 PE, manifest without ProcessorArchitecture
-        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
-        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
-
-        // Assert
-        Assert.AreEqual("x64", arch);
-        StringAssert.Contains(content, "ProcessorArchitecture=\"x64\"");
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_SetsArm64_WhenMissingFromManifest()
-    {
-        // Arrange — arm64 PE, manifest without ProcessorArchitecture
-        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
-        File.WriteAllBytes(exePath, BuildMinimalNativePe(0xAA64)); // arm64
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
-
-        // Assert
-        Assert.AreEqual("arm64", arch);
-        StringAssert.Contains(content, "ProcessorArchitecture=\"arm64\"");
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenMatchesExe()
-    {
-        // Arrange — x86 PE, manifest already has x86
-        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
-        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x014C)); // x86
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
-
-        // Assert — manifest unchanged, architecture returned
-        Assert.AreEqual("x86", arch);
-        Assert.AreEqual(ManifestWithX86Arch, content, "Manifest should not be modified when arch matches");
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenMismatch()
-    {
-        // Arrange — x64 PE, manifest says x86 → should warn but keep existing
-        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
-        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
-
-        // Assert — returns existing arch, does not modify manifest
-        Assert.AreEqual("x86", arch);
-        Assert.AreEqual(ManifestWithX86Arch, content, "Manifest should not be modified on mismatch");
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_SkipsWarning_WhenNeutral()
-    {
-        // Arrange — x64 PE, manifest says "neutral" → should not warn
-        var exePath = Path.Combine(_tempDir.FullName, "test.exe");
-        File.WriteAllBytes(exePath, BuildMinimalNativePe(0x8664)); // x64
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithNeutralArch, exePath, taskContext);
-
-        // Assert — returns "neutral", no modification
-        Assert.AreEqual("neutral", arch);
-        Assert.AreEqual(ManifestWithNeutralArch, content);
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenExeNotFound()
-    {
-        // Arrange — non-existent exe path, manifest has no arch
-        var exePath = Path.Combine(_tempDir.FullName, "nonexistent.exe");
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithoutArch, exePath, taskContext);
-
-        // Assert — returns null arch (can't detect), manifest unchanged
-        Assert.IsNull(arch);
-        Assert.AreEqual(ManifestWithoutArch, content);
-    }
-
-    [TestMethod]
-    public void AutoDetectProcessorArchitecture_ReturnsExistingArch_WhenExeIsNotPe()
-    {
-        // Arrange — non-PE file, manifest already has arch
-        var exePath = Path.Combine(_tempDir.FullName, "notape.exe");
-        File.WriteAllText(exePath, "not a PE file");
-        var taskContext = CreateTestTaskContext();
-
-        // Act
-        var (content, arch) = MsixService.AutoDetectProcessorArchitecture(ManifestWithX86Arch, exePath, taskContext);
-
-        // Assert — returns existing manifest arch when PE detection fails
-        Assert.AreEqual("x86", arch);
-        Assert.AreEqual(ManifestWithX86Arch, content);
-    }
-
-    #endregion
-
     #region ContainsXGenerateLanguage / ReplaceXGenerateLanguage Tests
 
     [TestMethod]
     public void ContainsXGenerateLanguage_ReturnsTrueForXGenerateManifest()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
-  <Resources>
+        var manifest = @"<Resources>
     <Resource Language=""x-generate""/>
-  </Resources>
-</Package>";
+  </Resources>";
 
         Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
     }
@@ -1007,11 +860,9 @@ public class MsixServiceTests
     [TestMethod]
     public void ContainsXGenerateLanguage_ReturnsFalseForConcreteLanguage()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
-  <Resources>
+        var manifest = @"<Resources>
     <Resource Language=""en-US""/>
-  </Resources>
-</Package>";
+  </Resources>";
 
         Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
     }
@@ -1019,7 +870,7 @@ public class MsixServiceTests
     [TestMethod]
     public void ContainsXGenerateLanguage_ReturnsFalseForNoResources()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""><Identity Name=""Test""/></Package>";
+        var manifest = @"<Package><Identity Name=""Test""/></Package>";
 
         Assert.IsFalse(MsixService.ContainsXGenerateLanguage(manifest));
     }
@@ -1027,32 +878,28 @@ public class MsixServiceTests
     [TestMethod]
     public void ReplaceXGenerateLanguage_ReplacesSingleLanguage()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
-  <Resources>
+        var manifest = @"  <Resources>
     <Resource Language=""x-generate""/>
-  </Resources>
-</Package>";
+  </Resources>";
 
         var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
 
-        Assert.Contains(@"Language=""en-US""", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
         Assert.DoesNotContain("x-generate", result);
     }
 
     [TestMethod]
     public void ReplaceXGenerateLanguage_ReplacesMultipleLanguages()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
-  <Resources>
+        var manifest = @"  <Resources>
     <Resource Language=""x-generate""/>
-  </Resources>
-</Package>";
+  </Resources>";
 
         var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US", "fr-FR", "de-DE"]);
 
-        Assert.Contains(@"Language=""en-US""", result);
-        Assert.Contains(@"Language=""fr-FR""", result);
-        Assert.Contains(@"Language=""de-DE""", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
+        Assert.Contains(@"<Resource Language=""fr-FR""/>", result);
+        Assert.Contains(@"<Resource Language=""de-DE""/>", result);
         Assert.DoesNotContain("x-generate", result);
     }
 
@@ -1060,7 +907,7 @@ public class MsixServiceTests
     public void ReplaceXGenerateLanguage_PreservesRestOfManifest()
     {
         var manifest = @"<?xml version=""1.0"" encoding=""utf-8""?>
-<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+<Package>
   <Identity Name=""TestApp"" Version=""1.0.0.0""/>
   <Resources>
     <Resource Language=""x-generate""/>
@@ -1071,30 +918,29 @@ public class MsixServiceTests
         var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
 
         Assert.Contains(@"<Identity Name=""TestApp""", result);
-        Assert.Contains("Applications", result);
-        Assert.Contains(@"Language=""en-US""", result);
+        Assert.Contains("<Applications/>", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
         Assert.DoesNotContain("x-generate", result);
     }
 
     [TestMethod]
     public void ReplaceXGenerateLanguage_HandlesVariousWhitespace()
     {
-        var manifest = "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\">\n<Resources>\n<Resource Language=\"x-generate\" />\n</Resources>\n</Package>";
+        // x-generate with different whitespace patterns
+        var manifest = "<Resources>\n<Resource Language=\"x-generate\" />\n</Resources>";
 
         var result = MsixService.ReplaceXGenerateLanguage(manifest, ["en-US"]);
 
-        Assert.Contains(@"Language=""en-US""", result);
+        Assert.Contains(@"<Resource Language=""en-US""/>", result);
         Assert.DoesNotContain("x-generate", result);
     }
 
     [TestMethod]
     public void ContainsXGenerateLanguage_HandlesSingleQuotes()
     {
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
-  <Resources>
+        var manifest = @"<Resources>
     <Resource Language='x-generate'/>
-  </Resources>
-</Package>";
+  </Resources>";
 
         Assert.IsTrue(MsixService.ContainsXGenerateLanguage(manifest));
     }
@@ -1191,139 +1037,20 @@ public class MsixServiceTests
         Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");
 
         // selfContained=true and executable=.dll avoid dependency mutation paths, keeping this test focused
-        // exePath=null skips ProcessorArchitecture detection
         var resultTask = updateMethod.Invoke(service,
         [
             manifest,
             null,
             "TestApp.dll",
-            null,
             true,
             true,
             null,
             null!,
             CancellationToken.None
-        ]) as dynamic;
+        ]) as Task<string>;
 
-        Assert.IsNotNull(resultTask, "Reflection call did not return a Task");
-        var result = await resultTask;
-        // Named tuple members aren't available via reflection; use Item1 (Content)
-        return result.Item1;
-    }
-
-    #endregion
-
-    #region ExtractExecutionAliases tests
-
-    [TestMethod]
-    public void ExtractExecutionAliases_WithUap5Alias_ReturnsAlias()
-    {
-        // Arrange
-        var manifest = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-                     xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5">
-              <Applications>
-                <Application Id="App">
-                  <Extensions>
-                    <uap5:Extension Category="windows.appExecutionAlias">
-                      <uap5:AppExecutionAlias>
-                        <uap5:ExecutionAlias Alias="myapp.exe" />
-                      </uap5:AppExecutionAlias>
-                    </uap5:Extension>
-                  </Extensions>
-                </Application>
-              </Applications>
-            </Package>
-            """;
-
-        // Act
-        var aliases = MsixService.ExtractExecutionAliases(manifest);
-
-        // Assert
-        Assert.AreEqual(1, aliases.Count);
-        Assert.AreEqual("myapp.exe", aliases[0]);
-    }
-
-    [TestMethod]
-    public void ExtractExecutionAliases_WithDesktopAlias_ReturnsAlias()
-    {
-        // Arrange
-        var manifest = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-                     xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
-              <Applications>
-                <Application Id="App">
-                  <Extensions>
-                    <desktop:Extension Category="windows.appExecutionAlias">
-                      <desktop:ExecutionAlias Alias="desktopapp.exe" />
-                    </desktop:Extension>
-                  </Extensions>
-                </Application>
-              </Applications>
-            </Package>
-            """;
-
-        // Act
-        var aliases = MsixService.ExtractExecutionAliases(manifest);
-
-        // Assert
-        Assert.AreEqual(1, aliases.Count);
-        Assert.AreEqual("desktopapp.exe", aliases[0]);
-    }
-
-    [TestMethod]
-    public void ExtractExecutionAliases_WithMultipleAliases_ReturnsAll()
-    {
-        // Arrange
-        var manifest = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-                     xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5">
-              <Applications>
-                <Application Id="App">
-                  <Extensions>
-                    <uap5:Extension Category="windows.appExecutionAlias">
-                      <uap5:AppExecutionAlias>
-                        <uap5:ExecutionAlias Alias="app1.exe" />
-                        <uap5:ExecutionAlias Alias="app2.exe" />
-                      </uap5:AppExecutionAlias>
-                    </uap5:Extension>
-                  </Extensions>
-                </Application>
-              </Applications>
-            </Package>
-            """;
-
-        // Act
-        var aliases = MsixService.ExtractExecutionAliases(manifest);
-
-        // Assert
-        Assert.AreEqual(2, aliases.Count);
-        Assert.AreEqual("app1.exe", aliases[0]);
-        Assert.AreEqual("app2.exe", aliases[1]);
-    }
-
-    [TestMethod]
-    public void ExtractExecutionAliases_NoAliases_ReturnsEmptyList()
-    {
-        // Arrange
-        var manifest = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
-              <Applications>
-                <Application Id="App" Executable="app.exe">
-                </Application>
-              </Applications>
-            </Package>
-            """;
-
-        // Act
-        var aliases = MsixService.ExtractExecutionAliases(manifest);
-
-        // Assert
-        Assert.AreEqual(0, aliases.Count);
+        Assert.IsNotNull(resultTask, "Reflection call did not return Task<string>");
+        return await resultTask;
     }
 
     #endregion
@@ -1449,11 +1176,11 @@ public class MsixServiceTests
     public void InsertPackageLevelExtensions_WithExistingPackageLevelExtensions_InsertsBeforeClose()
     {
         // Arrange — manifest has both Application-level and Package-level <Extensions>
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+        var manifest = @"<Package>
   <Applications>
     <Application Id=""App"" Executable=""app.exe"">
       <Extensions>
-        <Extension Category=""windows.appExecutionAlias"" />
+        <uap5:Extension Category=""windows.appExecutionAlias"" />
       </Extensions>
     </Application>
   </Applications>
@@ -1461,7 +1188,7 @@ public class MsixServiceTests
     <Extension Category=""windows.activatableClass.proxyStub"" />
   </Extensions>
 </Package>";
-        var newEntry = @"<Extension xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"" Category=""windows.activatableClass.inProcessServer"" />";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
 
         // Act
         var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
@@ -1479,16 +1206,16 @@ public class MsixServiceTests
     public void InsertPackageLevelExtensions_WithOnlyApplicationLevelExtensions_CreatesNewPackageLevelBlock()
     {
         // Arrange — manifest has ONLY Application-level <Extensions> (the regression scenario)
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+        var manifest = @"<Package>
   <Applications>
     <Application Id=""App"" Executable=""app.exe"">
       <Extensions>
-        <Extension Category=""windows.appExecutionAlias"" />
+        <uap5:Extension Category=""windows.appExecutionAlias"" />
       </Extensions>
     </Application>
   </Applications>
 </Package>";
-        var newEntry = @"<Extension xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"" Category=""windows.activatableClass.inProcessServer"" />";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
 
         // Act
         var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
@@ -1503,7 +1230,7 @@ public class MsixServiceTests
             "InProcessServer must be outside <Applications> (Package-level), not inside Application-level Extensions");
 
         // Should have two separate <Extensions> blocks
-        Assert.AreEqual(2, CountOccurrences(result, "<Extensions"),
+        Assert.AreEqual(2, CountOccurrences(result, "<Extensions>"),
             "Should have Application-level + new Package-level <Extensions> blocks");
     }
 
@@ -1511,12 +1238,12 @@ public class MsixServiceTests
     public void InsertPackageLevelExtensions_WithNoExtensions_CreatesNewPackageLevelBlock()
     {
         // Arrange — manifest has no <Extensions> at all
-        var manifest = @"<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+        var manifest = @"<Package>
   <Applications>
     <Application Id=""App"" Executable=""app.exe"" />
   </Applications>
 </Package>";
-        var newEntry = @"<Extension xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"" Category=""windows.activatableClass.inProcessServer"" />";
+        var newEntry = "    <Extension Category=\"windows.activatableClass.inProcessServer\" />\n";
 
         // Act
         var result = MsixService.InsertPackageLevelExtensions(manifest, newEntry);
@@ -1524,7 +1251,7 @@ public class MsixServiceTests
         // Assert
         Assert.IsTrue(result.Contains("inProcessServer"), "Should contain the new entry");
         var packageCloseIndex = result.IndexOf("</Package>", StringComparison.Ordinal);
-        var extensionsIndex = result.IndexOf("<Extensions", StringComparison.Ordinal);
+        var extensionsIndex = result.IndexOf("<Extensions>", StringComparison.Ordinal);
         Assert.IsTrue(extensionsIndex > result.IndexOf("</Applications>", StringComparison.Ordinal),
             "New <Extensions> block should be after </Applications>");
         Assert.IsTrue(extensionsIndex < packageCloseIndex,

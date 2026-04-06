@@ -173,8 +173,6 @@ npx winapp --help
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
-See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp run` and `create-debug-identity`, IDE setup, and debugging scenarios.
-
 **Certificates & Signing:**
 
 - [`cert`](./docs/usage.md#cert) - Generate and install development certificates

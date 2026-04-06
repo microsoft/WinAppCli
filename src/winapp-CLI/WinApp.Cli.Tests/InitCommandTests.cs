@@ -15,7 +15,8 @@ public class InitCommandTests : BaseCommandTests
 {
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
-        return services;
+        return services
+            .AddSingleton<IPowerShellService, FakePowerShellService>();
     }
 
     [TestMethod]
