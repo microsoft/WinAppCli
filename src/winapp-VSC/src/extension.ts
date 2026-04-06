@@ -196,11 +196,11 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 			// The run command requires an input-folder positional argument;
 			// use the directory containing the discovered manifest.
 			const inputFolder = config.inputFolder || path.dirname(manifest);
-			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run', `"${inputFolder}"`];
-			cmdParts.push('--manifest', `"${manifest}"`);
+			const cliPath = getWinappCliPath(this.extensionPath);
+			const spawnArgs = ['run', inputFolder, '--manifest', manifest];
 
 			if (config.outputAppxDirectory) {
-				cmdParts.push('--output-appx-directory', `"${config.outputAppxDirectory}"`);
+				spawnArgs.push('--output-appx-directory', config.outputAppxDirectory);
 			}
 
 			// Determine the debugger type based on config or default to coreclr
@@ -218,11 +218,10 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 			}
 
 			if (args.trim()) {
-				cmdParts.push('--args', `"${args.trim()}"`);
+				spawnArgs.push('--args', args.trim());
 			}
 
-			cmdParts.push('--json');
-			const command = cmdParts.join(' ');
+			spawnArgs.push('--json');
 
 			// Spawn winapp run --json. The process stays alive while the app runs,
 			// so we stream stdout to parse the JSON with the PID before waiting for exit.
@@ -239,10 +238,10 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 				}
 
 				return new Promise<{ processId: number; runProcess: ReturnType<typeof spawn> }>((resolve, reject) => {
-					const child = spawn(command, {
+					const child = spawn(cliPath, spawnArgs, {
 						cwd,
 						env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE },
-						shell: true
+						shell: false
 					});
 
 					let stdout = '';
