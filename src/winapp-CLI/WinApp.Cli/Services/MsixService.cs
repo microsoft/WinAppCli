@@ -1214,16 +1214,6 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
             }
         }
 
-        // Check for an AppX subdirectory, which is a build artifact that should not be
-        // included in the package. Exclude it from staging and warn the user.
-        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
-        if (appxDir.Exists)
-        {
-            excludedDirectories.Add("AppX");
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
-        }
-
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
         // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
@@ -2054,10 +2044,9 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
     }
 
     /// <summary>
-    /// Recursively copies all files and subdirectories from source to destination,
-    /// skipping any top-level directories whose names appear in <paramref name="excludedDirectories"/>.
+    /// Recursively copies all files and subdirectories from source to destination.
     /// </summary>
-    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo destination, HashSet<string>? excludedDirectories = null)
+    private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo destination)
     {
         destination.Create();
 
@@ -2068,11 +2057,6 @@ private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityRes
 
         foreach (var subDir in source.EnumerateDirectories())
         {
-            if (excludedDirectories != null && excludedDirectories.Contains(subDir.Name))
-            {
-                continue;
-            }
-
             var destSubDir = new DirectoryInfo(Path.Combine(destination.FullName, subDir.Name));
             CopyDirectoryRecursive(subDir, destSubDir);
         }
