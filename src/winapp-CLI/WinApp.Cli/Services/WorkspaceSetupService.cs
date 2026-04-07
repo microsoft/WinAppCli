@@ -36,7 +36,7 @@ internal class WorkspaceSetupService(
     IBuildToolsService buildToolsService,
     ICppWinrtService cppWinrtService,
     IPackageLayoutService packageLayoutService,
-    IPowerShellService powerShellService,
+    IPackageRegistrationService packageRegistrationService,
     INugetService nugetService,
     IManifestService manifestService,
     IDevModeService devModeService,
@@ -1070,6 +1070,38 @@ internal class WorkspaceSetupService(
     }
 
     /// <summary>
+    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
+    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
+    /// the real identity directly from the package to ensure correct installation checks.
+    /// </summary>
+    private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
+    {
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(msixFilePath);
+            var manifestEntry = zip.GetEntry("AppxManifest.xml");
+            if (manifestEntry == null)
+            {
+                return (null, null);
+            }
+
+            using var stream = manifestEntry.Open();
+            var doc = System.Xml.Linq.XDocument.Load(stream);
+            var identityElement = doc.Root?.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "Identity");
+
+            var name = identityElement?.Attribute("Name")?.Value;
+            var version = identityElement?.Attribute("Version")?.Value;
+            return (name, version);
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not read identity from {Path.GetFileName(msixFilePath)}: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    /// <summary>
     /// Installs Windows App SDK runtime MSIX packages for the current system architecture
     /// </summary>
     /// <param name="msixDir">Directory containing the MSIX packages</param>
@@ -1087,8 +1119,8 @@ internal class WorkspaceSetupService(
 
         var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
 
-        // Build package data for PowerShell script
-        var packageData = new List<string>();
+        // Build list of packages to evaluate
+        var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();
         foreach (var entry in packageEntries)
         {
             var msixFilePath = Path.Combine(msixArchDir, entry.FileName);
@@ -1098,117 +1130,57 @@ internal class WorkspaceSetupService(
                 continue;
             }
 
-            // Parse the PackageIdentity (format: Name_Version_Architecture_PublisherId)
-            var identityParts = entry.PackageIdentity.Split('_');
-            var packageName = identityParts[0];
-            var newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
+            // Read the actual package identity from the MSIX's AppxManifest.xml.
+            // The inventory file's PackageIdentity can differ from the real installed name.
+            var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
+            if (packageName == null)
+            {
+                // Fallback: parse from inventory identity string
+                var identityParts = entry.PackageIdentity.Split('_');
+                packageName = identityParts[0];
+                newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
+            }
 
-            packageData.Add($"@{{Path='{msixFilePath}';Identity='{entry.PackageIdentity}';Name='{packageName}';Version='{newVersionString}';FileName='{entry.FileName}'}}");
+            packagesToCheck.Add((msixFilePath, packageName, newVersionString ?? "", entry.FileName));
         }
 
-        if (packageData.Count == 0)
+        if (packagesToCheck.Count == 0)
         {
             return (0, 0);
         }
 
-        // Create compact PowerShell script with reusable function
-        var script = $@"
-function Test-PackageNeedsInstall($pkg) {{
-    $exactMatch = Get-AppxPackage | Where-Object {{ $_.PackageFullName -eq $pkg.Identity }}
-    if ($exactMatch) {{ return $false }}
-    
-    $existing = Get-AppxPackage -Name $pkg.Name -ErrorAction SilentlyContinue
-    if (-not $existing) {{ return $true }}
-    
-    $shouldUpgrade = $false
-    foreach ($p in $existing) {{ if ([version]$pkg.Version -gt [version]$p.Version) {{ $shouldUpgrade = $true; break }} }}
-    return $shouldUpgrade
-}}
-
-$packages = @({string.Join(",", packageData)})
-$toInstall = @()
-
-foreach ($pkg in $packages) {{
-    if (Test-PackageNeedsInstall $pkg) {{
-        $toInstall += $pkg.Path
-        Write-Output ""INSTALL|$($pkg.FileName)|Will install""
-    }} else {{
-        Write-Output ""SKIP|$($pkg.FileName)|Already installed or newer version exists""
-    }}
-}}
-
-if ($toInstall.Count -gt 0) {{
-    Write-Output ""INSTALLING|$($toInstall.Count) packages will be installed""
-    foreach ($path in $toInstall) {{
-        try {{
-            Add-AppxPackage -Path $path -ForceApplicationShutdown -ErrorAction Stop
-            Write-Output ""SUCCESS|$(Split-Path $path -Leaf)|Installation successful""
-        }} catch {{
-            Write-Output ""ERROR|$(Split-Path $path -Leaf)|$($_.Exception.Message)""
-        }}
-    }}
-}} else {{
-    Write-Output ""COMPLETE|No packages need to be installed""
-}}";
-
-        taskContext.AddDebugMessage($"{UiSymbols.Info} Checking and installing {packageEntries.Count} MSIX packages");
-
-        // Execute the batch script
-        var (exitCode, output, _) = await powerShellService.RunCommandAsync(script, taskContext, cancellationToken: cancellationToken);
-
-        // Parse the output to provide user feedback
-        var outputLines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .Where(line => !string.IsNullOrEmpty(line));
+        taskContext.AddDebugMessage($"{UiSymbols.Info} Checking and installing {packagesToCheck.Count} MSIX packages");
 
         var installedCount = 0;
         var errorCount = 0;
 
-        foreach (var line in outputLines)
+        foreach (var (filePath, packageName, newVersion, fileName) in packagesToCheck)
         {
-            var parts = line.Split('|', 3);
-            if (parts.Length < 2)
+            // Check if already installed with same or newer version
+            var installedVersion = packageRegistrationService.GetInstalledVersion(packageName);
+            if (installedVersion != null)
             {
-                continue;
+                if (Version.TryParse(installedVersion, out var existing) &&
+                    Version.TryParse(newVersion, out var incoming) &&
+                    existing >= incoming)
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Already installed or newer version exists");
+                    continue;
+                }
             }
 
-            var action = parts[0];
-            var fileName = parts[1];
-            var message = parts.Length > 2 ? parts[2] : "";
+            taskContext.AddDebugMessage($"{UiSymbols.Info} {fileName}: Will install");
 
-            switch (action)
+            try
             {
-                case "SKIP":
-                    taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: {message}");
-                    break;
-
-                case "INSTALL":
-                    taskContext.AddDebugMessage($"{UiSymbols.Info} {fileName}: {message}");
-                    break;
-
-                case "INSTALLING":
-                    if (!string.IsNullOrWhiteSpace(message))
-                    {
-                        taskContext.AddDebugMessage($"{UiSymbols.Info} {message}");
-                    }
-                    break;
-
-                case "SUCCESS":
-                    installedCount++;
-                    taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: {message}");
-                    break;
-
-                case "ERROR":
-                    errorCount++;
-                    taskContext.AddDebugMessage($"{UiSymbols.Note} {fileName}: {message}");
-                    break;
-
-                case "COMPLETE":
-                    if (!string.IsNullOrWhiteSpace(message))
-                    {
-                        taskContext.AddDebugMessage($"{UiSymbols.Check} {message}");
-                    }
-                    break;
+                await packageRegistrationService.InstallPackageAsync(filePath, cancellationToken);
+                installedCount++;
+                taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Installation successful");
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                taskContext.AddDebugMessage($"{UiSymbols.Note} {fileName}: {ex.Message}");
             }
         }
 

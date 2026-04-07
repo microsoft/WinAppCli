@@ -8,15 +8,22 @@ For a complete step-by-step guide, see the [C++ Getting Started Guide](../../doc
 
 - Basic C++ console application built with CMake
 - Using Windows App Model APIs to retrieve package identity
-- Configuring CMake to automatically apply debug identity after building in Debug configuration
+- Using `winapp run` to run the app packaged (registers a loose layout package, just like a real MSIX install)
 - MSIX packaging with app manifest and assets
 
 ## Prerequisites
 
 - Visual Studio Native Desktop workload or Visual Studio with C++ development tools
 - CMake 3.20 or later
+- WinApp CLI installed
 
 ## Building and Running
+
+### Restore dependencies
+
+```powershell
+winapp restore
+```
 
 ### Build the Application
 
@@ -25,13 +32,20 @@ cmake -B build
 cmake --build build --config Debug
 ```
 
-### Run
-
-The CMakeLists.txt is configured to automatically apply debug identity when building in Debug configuration. Simply build and run:
+### Run without Identity
 
 ```powershell
-cmake --build build --config Debug
 .\build\Debug\cpp-app.exe
 ```
+*Output should be: "Not packaged"*
 
-Output: `Package Family Name: cpp-app_12345abcde`
+### Run with Identity (Debug)
+
+```powershell
+winapp run .\build\Debug --with-alias
+```
+This registers a loose layout package (just like a real MSIX install), then launches the app via its execution alias so console output stays in the current terminal.
+
+*Output should show the Package Family Name.*
+
+> **Note:** The `--with-alias` flag requires a `uap5:ExecutionAlias` in the manifest. This sample's `appxmanifest.xml` already includes one. You can add one to an appxmanifest.xml with `winapp manifest add-alias`.

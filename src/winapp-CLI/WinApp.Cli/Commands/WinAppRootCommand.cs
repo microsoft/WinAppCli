@@ -36,6 +36,13 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Action = new PrintCliSchemaAction()
     };
 
+    internal static readonly Option<string?> CallerOption = new("--caller")
+    {
+        Description = "Identifies the caller (e.g., nuget-package, npm). Used for telemetry.",
+        Recursive = true,
+        Hidden = true
+    };
+
     private class PrintCliSchemaAction : SynchronousCommandLineAction
     {
         public override bool Terminating => true;
@@ -55,6 +62,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         UpdateCommand updateCommand,
         CreateDebugIdentityCommand createDebugIdentityCommand,
         RunCommand runCommand,
+        UnregisterCommand unregisterCommand,
         GetWinappPathCommand getWinappPathCommand,
         CertCommand certCommand,
         SignCommand signCommand,
@@ -70,6 +78,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(updateCommand);
         Subcommands.Add(createDebugIdentityCommand);
         Subcommands.Add(runCommand);
+        Subcommands.Add(unregisterCommand);
         Subcommands.Add(getWinappPathCommand);
         Subcommands.Add(certCommand);
         Subcommands.Add(signCommand);
@@ -78,13 +87,14 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(createExternalCatalogCommand);
 
         Options.Add(CliSchemaOption);
+        Options.Add(CallerOption);
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand)])
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)])
         );
     }
 }

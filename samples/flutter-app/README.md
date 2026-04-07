@@ -38,11 +38,8 @@ winapp cert generate --if-exists skip
 # Build the app
 flutter build windows
 
-# Apply debug identity
-winapp create-debug-identity .\build\windows\x64\runner\Release\flutter_app.exe
-
-# Run the app
-.\build\windows\x64\runner\Release\flutter_app.exe
+# Run with identity
+winapp run .\build\windows\x64\runner\Release
 ```
 
 The Flutter window will display:
