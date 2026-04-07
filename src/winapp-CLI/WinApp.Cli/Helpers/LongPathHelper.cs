@@ -55,9 +55,10 @@ internal static class LongPathHelper
     }
 
     /// <summary>
-    /// Returns the path with the <c>\\?\</c> extended-length prefix if the path exceeds MAX_PATH
-    /// and does not already have it. This prefix bypasses the MAX_PATH limit for Win32 file I/O APIs.
-    /// Does not apply to UNC paths (<c>\\server\share</c>).
+    /// Returns the path with an extended-length prefix if the path exceeds MAX_PATH
+    /// and does not already have one. This bypasses the MAX_PATH limit for Win32 file I/O APIs.
+    /// For local paths, the prefix is <c>\\?\</c>. For UNC paths (<c>\\server\share</c>),
+    /// the method uses the <c>\\?\UNC\</c> prefix instead.
     /// </summary>
     internal static string EnsureExtendedLengthPrefix(string path)
     {
