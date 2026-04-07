@@ -102,6 +102,10 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
+# Read text content (works for RichEditBox, TextBox, labels)
+winapp ui get-text doc-texteditor-53ad -a notepad
+winapp ui get-text SearchBox -a myapp
+
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
 winapp ui get-property txt-textbox-a4b1 -a myapp --property Value
@@ -211,7 +215,7 @@ View the UI element tree with semantic slugs, element types, names, and bounds.
 |--------|-------------|---------|
 | `--ancestors` | Walk up the tree from the specified element to the root | (none) |
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--depth` | Tree inspection depth | `3` |
+| `--depth` | Tree inspection depth | `5` |
 | `--hide-disabled` | Hide disabled elements from output | (none) |
 | `--hide-offscreen` | Hide offscreen elements from output | (none) |
 | `--interactive` | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. | (none) |
@@ -256,9 +260,27 @@ Read UIA property values from an element. Specify --property for a single proper
 | `--property` | Property name to read or filter on | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
+### `winapp ui get-text`
+
+Read text content from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox), then Name (labels). Usage: winapp ui get-text <selector> -a <app>
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
 ### `winapp ui screenshot`
 
-Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
+Capture the target window or element as a PNG image. When multiple windows exist (e.g., dialogs), captures each to a separate file. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -292,6 +314,26 @@ Activate an element by slug or text search. Tries InvokePattern, TogglePattern, 
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui click`
+
+Click an element by slug or text search using mouse simulation. Works on elements that don't support InvokePattern (e.g., column headers, list items). Use --double for double-click, --right for right-click.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--double` | Perform a double-click instead of a single click | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--right` | Perform a right-click instead of a left click | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui set-value`

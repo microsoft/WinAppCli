@@ -97,6 +97,10 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
+# Read text content (works for RichEditBox, TextBox, labels)
+winapp ui get-text doc-texteditor-53ad -a notepad
+winapp ui get-text SearchBox -a myapp
+
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
 winapp ui get-property txt-textbox-a4b1 -a myapp --property Value

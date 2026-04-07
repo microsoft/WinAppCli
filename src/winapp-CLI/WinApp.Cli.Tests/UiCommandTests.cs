@@ -163,6 +163,25 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task GetText_ReturnsText()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e1", Type = "Document", Name = "Text editor", Selector = "doc-texteditor-53ad" };
+
+        var command = GetRequiredService<UiGetTextCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["doc-texteditor-53ad", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"text\":");
+    }
+
+    [TestMethod]
+    public async Task GetText_WithoutSelector_ReturnsError()
+    {
+        var command = GetRequiredService<UiGetTextCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
     public async Task WaitFor_ExistingElement_ReturnsSuccess()
     {
         _fakeUia.SearchResult = [new UiElement { Id = "e0", Type = "Button", Name = "Submit" }];

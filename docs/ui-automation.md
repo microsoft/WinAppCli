@@ -221,14 +221,21 @@ winapp ui get-property cmb-combobox-d5e6 -p ExpandCollapseState -a myapp  # expa
 ```
 
 ### screenshot
-Capture a window or element as PNG.
+Capture a window or element as PNG. When multiple windows exist (e.g., app + open dialog), captures each to a separate file.
 ```bash
 winapp ui screenshot -a notepad                     # saves screenshot.png in cwd
 winapp ui screenshot -a notepad --output my.png     # custom filename
 winapp ui screenshot -a notepad --json              # returns file path as JSON
-winapp ui screenshot -w 131906                      # target specific HWND
+winapp ui screenshot -w 131906                      # target specific HWND (+ its dialogs)
 winapp ui screenshot txt-searchbox-e5f6 -a myapp          # crop to element bounds
 winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays)
+```
+
+When dialogs or popups are open, each window is captured separately:
+```
+⚠  2 windows detected. Capturing each separately.
+  ✓ screenshot.png — HWND 133306: "*hello - Notepad" (window, 1476x1167)
+  ✓ screenshot.3213334-dialog.png — HWND 3213334: "Open" (dialog, 1248x834, owner: HWND 133306)
 ```
 
 Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays.
@@ -258,6 +265,14 @@ Set a value on an editable element (text for TextBox/ComboBox, number for Slider
 ```bash
 winapp ui set-value txt-textbox-a4b1 "Hello world" -a notepad
 winapp ui set-value sld-volume-b2c3 75 -a myapp
+```
+
+### get-text
+Read text content from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox), then Name (labels).
+```bash
+winapp ui get-text doc-texteditor-53ad -a notepad          # read full document text
+winapp ui get-text SearchBox -a myapp                      # read TextBox content
+winapp ui get-text lbl-title-a1b2 -a myapp --json          # JSON: { "elementId": "...", "text": "..." }
 ```
 
 ### focus
