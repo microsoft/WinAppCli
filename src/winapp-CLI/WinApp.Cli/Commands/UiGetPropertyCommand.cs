@@ -72,7 +72,7 @@ internal class UiGetPropertyCommand : Command, IShortDescription
 
                 if (json)
                 {
-                    var result = new UiPropertyResult { ElementId = element.Id, Properties = props };
+                    var result = new UiPropertyResult { ElementId = element.Selector ?? element.Id, Properties = props };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiPropertyResult));
                 }
@@ -85,7 +85,7 @@ internal class UiGetPropertyCommand : Command, IShortDescription
                     }
                 }
 
-                logger.LogInformation("{ElementId}: {Count} properties", element.Id, props.Count);
+                logger.LogInformation("{ElementId}: {Count} properties", element.Selector ?? element.Id, props.Count);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

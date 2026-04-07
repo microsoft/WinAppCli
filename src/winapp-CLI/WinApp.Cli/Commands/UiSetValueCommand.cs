@@ -71,7 +71,7 @@ internal class UiSetValueCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.SetValueAsync(session, element, value, cancellationToken);
-                logger.LogInformation("Set value on {ElementId}", element.Id);
+                logger.LogInformation("Set value on {ElementId}", element.Selector ?? element.Id);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
