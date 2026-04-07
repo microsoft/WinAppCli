@@ -45,7 +45,7 @@ internal static class SharedUiOptions
         DepthOption = new Option<int>("--depth", "-d")
         {
             Description = "Tree inspection depth",
-            DefaultValueFactory = _ => 3
+            DefaultValueFactory = _ => 5
         };
 
         MaxResultsOption = new Option<int>("--max")

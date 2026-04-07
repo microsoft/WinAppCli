@@ -67,7 +67,7 @@ internal class UiInspectCommand : Command, IShortDescription
             var hideOffscreen = parseResult.GetValue(SharedUiOptions.HideOffscreenOption);
 
             // --interactive bumps default depth to 8 (sparse tree after filtering)
-            if (interactive && depth == 3)
+            if (interactive && depth == 5)
             {
                 depth = 8;
             }
