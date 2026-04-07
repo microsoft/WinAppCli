@@ -466,17 +466,24 @@ internal partial class DotNetService : IDotNetService
 
         if (match.Success)
         {
-            if (string.Equals(match.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase))
+            var existingValue = match.Groups[1].Value.Trim();
+
+            if (string.Equals(existingValue, "true", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
-            // Update existing element from false to true
-            content = content[..match.Index]
-                + "<EnableMsixTooling>true</EnableMsixTooling>"
-                + content[(match.Index + match.Length)..];
-            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-            return true;
+            if (string.Equals(existingValue, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                // Update existing element from false to true
+                content = content[..match.Index]
+                    + "<EnableMsixTooling>true</EnableMsixTooling>"
+                    + content[(match.Index + match.Length)..];
+                await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+                return true;
+            }
+
+            return false;
         }
 
         // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
