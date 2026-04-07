@@ -55,24 +55,43 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-
-                // Check for additional windows (dialogs, popups) when targeting by app (not direct HWND)
-                if (window is null && selector is null)
+                // Screenshot handles multi-window discovery itself (avoids duplicate warning from session resolution)
+                if (selector is null)
                 {
-                    var allWindows = uiAutomation.FindWindowsByPid(session.ProcessId);
-                    // Also find cross-process owned windows (e.g., file picker dialogs)
-                    var ownedWindows = FindOwnedWindows(allWindows);
-                    allWindows.AddRange(ownedWindows);
-
-                    if (allWindows.Count > 1)
+                    var allWindows = DiscoverAllWindows(app, window);
+                    if (allWindows is not null && allWindows.Count > 1)
                     {
+                        // Resolve session using the largest window's HWND (suppresses session multi-window warning)
+                        var main = allWindows.OrderByDescending(w =>
+                        {
+                            var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                            return (long)info.Width * info.Height;
+                        }).First();
+                        var session = await sessionService.ResolveSessionAsync(null, main.Hwnd, cancellationToken);
                         return await CaptureMultipleWindows(allWindows, session, output, json, captureScreen, cancellationToken);
                     }
                 }
 
-                // Single window capture (original behavior)
-                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(session, selector, captureScreen, cancellationToken);
+                // Single window capture (or element crop)
+                var singleSession = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+
+                // Even for single-window session, check for owned dialogs
+                if (selector is null)
+                {
+                    var sessionHwnd = (nint)singleSession.WindowHandle;
+                    var ownedWindows = FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
+                    if (ownedWindows.Count > 0)
+                    {
+                        var allWindows = new List<(nint Hwnd, int Pid, string Title)>
+                        {
+                            (sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")
+                        };
+                        allWindows.AddRange(ownedWindows);
+                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, cancellationToken);
+                    }
+                }
+
+                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, cancellationToken);
                 var pngBytes = EncodePng(pixels, w, h);
 
                 var filePath = output ?? "screenshot.png";
@@ -87,15 +106,15 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         FilePath = absolutePath,
                         Width = w,
                         Height = h,
-                        ProcessId = session.ProcessId,
-                        WindowTitle = session.WindowTitle
+                        ProcessId = singleSession.ProcessId,
+                        WindowTitle = singleSession.WindowTitle
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
                     return 0;
                 }
 
-                logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", session.WindowTitle, session.ProcessId, absolutePath, w, h, pngBytes.Length / 1024);
+                logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", singleSession.WindowTitle, singleSession.ProcessId, absolutePath, w, h, pngBytes.Length / 1024);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
@@ -125,9 +144,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
             var dir = Path.GetDirectoryName(basePath) ?? ".";
 
             var results = new List<UiScreenshotResult>();
-            var dialogCount = 0;
 
-            // Sort: main window first (largest), then dialogs
+            // Sort: main window first (largest), then others
             var sorted = windows.OrderByDescending(w =>
             {
                 var info = UiSessionService.GetWindowInfo(w.Hwnd);
@@ -142,17 +160,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 var info = UiSessionService.GetWindowInfo(w.Hwnd);
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
 
-                // Determine file path
-                string filePath;
-                if (i == 0)
-                {
-                    filePath = basePath;
-                }
-                else
-                {
-                    dialogCount++;
-                    filePath = Path.Combine(dir, $"{nameWithoutExt}-{info.Label}-{dialogCount}{ext}");
-                }
+                // File naming: screenshot.png for first, screenshot.HWND-type.png for others
+                var filePath = i == 0
+                    ? basePath
+                    : Path.Combine(dir, $"{nameWithoutExt}.{w.Hwnd}-{info.Label}{ext}");
 
                 try
                 {
@@ -197,6 +208,77 @@ internal class UiScreenshotCommand : Command, IShortDescription
         }
 
         /// <summary>Find windows from other processes that are owned by any of the given windows.</summary>
+        /// <summary>
+        /// Discover all windows for the target app, including cross-process owned windows.
+        /// Returns null if we can't determine the app's windows (e.g., no --app provided).
+        /// </summary>
+        private List<(nint Hwnd, int Pid, string Title)>? DiscoverAllWindows(string? app, long? window)
+        {
+            List<(nint Hwnd, int Pid, string Title)> appWindows;
+
+            if (window is not null and > 0)
+            {
+                // Direct HWND — only find windows owned by THIS window (not all process windows)
+                var hwndVal = (nint)window.Value;
+                uint pid = 0;
+                unsafe
+                {
+                    Windows.Win32.PInvoke.GetWindowThreadProcessId(
+                        new Windows.Win32.Foundation.HWND(hwndVal), &pid);
+                }
+                if (pid == 0) { return null; }
+
+                // Get title for this window
+                var titleChars = new char[512];
+                string title;
+                unsafe
+                {
+                    fixed (char* buffer = titleChars)
+                    {
+                        var len = Windows.Win32.PInvoke.GetWindowText(
+                            new Windows.Win32.Foundation.HWND(hwndVal), buffer, 512);
+                        title = len > 0 ? new string(buffer, 0, len) : "";
+                    }
+                }
+
+                appWindows = [(hwndVal, (int)pid, title)];
+            }
+            else if (!string.IsNullOrWhiteSpace(app))
+            {
+                // Find by app name — get all windows for matching processes
+                if (int.TryParse(app, out var pid))
+                {
+                    appWindows = uiAutomation.FindWindowsByPid(pid);
+                }
+                else
+                {
+                    var processes = System.Diagnostics.Process.GetProcessesByName(app);
+                    if (processes.Length == 0)
+                    {
+                        // Try partial match
+                        processes = System.Diagnostics.Process.GetProcesses()
+                            .Where(p => { try { return p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase); } catch { return false; } })
+                            .ToArray();
+                    }
+                    appWindows = [];
+                    foreach (var p in processes)
+                    {
+                        appWindows.AddRange(uiAutomation.FindWindowsByPid(p.Id));
+                    }
+                }
+            }
+            else
+            {
+                return null;
+            }
+
+            // Also find cross-process owned windows
+            var ownedWindows = FindOwnedWindows(appWindows);
+            appWindows.AddRange(ownedWindows);
+
+            return appWindows.Count > 1 ? appWindows : null;
+        }
+
         private static List<(nint Hwnd, int Pid, string Title)> FindOwnedWindows(List<(nint Hwnd, int Pid, string Title)> appWindows)
         {
             var appHwnds = new HashSet<nint>(appWindows.Select(w => w.Hwnd));

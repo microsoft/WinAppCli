@@ -64,7 +64,7 @@ internal class UiFocusCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.FocusAsync(session, element, cancellationToken);
-                logger.LogInformation("Focused {ElementId}", element.Id);
+                logger.LogInformation("Focused {ElementId}", element.Selector ?? element.Id);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
