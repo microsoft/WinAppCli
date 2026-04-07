@@ -77,7 +77,7 @@ public class UnregisterCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(_fakePackageRegistrationService.FindDevPackagesCalls.Contains("TestPackage"));
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Contains("TestPackage"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "TestPackage"));
     }
 
     [TestMethod]
@@ -158,7 +158,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Contains("TestPackage"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "TestPackage"));
     }
 
     [TestMethod]

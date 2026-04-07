@@ -88,8 +88,8 @@ internal partial class MsixService
             var entryPointDir = Path.GetDirectoryName(entryPointPath);
             var externalLocation = new DirectoryInfo(string.IsNullOrEmpty(entryPointDir) ? currentDirectoryProvider.GetCurrentDirectory() : entryPointDir);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken: cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterSparsePackageAsync(debugManifestPath, externalLocation, taskContext, cancellationToken);
@@ -98,7 +98,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -146,8 +146,12 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Install the Windows App Runtime framework packages if not already present
+            var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
+
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register from the AppX layout directory
             var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
@@ -252,8 +256,8 @@ internal partial class MsixService
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -621,21 +625,88 @@ internal partial class MsixService
 
         taskContext.AddDebugMessage($"{UiSymbols.Files} Created debug manifest: {debugManifestPath.FullName}");
 
-        // Step 6: Copy all assets
+        // Step 6: Copy all assets and generate resources.pri
         var entryPointDir = Path.GetDirectoryName(entryPointPath);
         if (!string.IsNullOrEmpty(entryPointDir))
         {
             var entryPointDirInfo = new DirectoryInfo(entryPointDir);
             var originalManifestDir = originalManifestPath.DirectoryName;
+            var expandedFiles = MrtAssetHelper.GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
 
             if (!string.Equals(originalManifestDir, entryPointDirInfo.FullName, StringComparison.OrdinalIgnoreCase))
             {
-                var expandedFiles = MrtAssetHelper.GetExpandedManifestReferencedFiles(originalManifestPath, taskContext);
                 MrtAssetHelper.CopyAllAssets(expandedFiles, entryPointDirInfo, taskContext);
             }
             else
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} Manifest directory and target directory are the same, skipping assets copy");
+            }
+
+            // Generate resources.pri in a temporary staging directory, then copy only the
+            // final resources.pri into the ExternalLocation (entry point directory). This avoids
+            // leaving intermediate files such as priconfig.xml and pri.resfiles alongside app output.
+            // Sparse packages look for resources.pri in the ExternalLocation, not alongside the manifest.
+            if (expandedFiles.Count > 0)
+            {
+                string? priStagingDir = null;
+
+                try
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Note} Generating PRI for asset resource resolution...");
+                    var priResourceCandidates = expandedFiles.Select(file => file.RelativePath).ToArray();
+
+                    priStagingDir = Path.Combine(
+                        Path.GetTempPath(),
+                        "WinAppCli-Pri-" + Guid.NewGuid().ToString("N"));
+
+                    var priStagingDirInfo = Directory.CreateDirectory(priStagingDir);
+                    MrtAssetHelper.CopyAllAssets(expandedFiles, priStagingDirInfo, taskContext);
+
+                    await priService.CreatePriConfigAsync(
+                        priStagingDirInfo,
+                        taskContext,
+                        precomputedPriResourceCandidates: priResourceCandidates,
+                        cancellationToken: cancellationToken);
+                    await priService.GeneratePriFileAsync(priStagingDirInfo, taskContext, cancellationToken: cancellationToken);
+
+                    var stagedPriPath = Path.Combine(priStagingDirInfo.FullName, "resources.pri");
+                    var targetPriPath = Path.Combine(entryPointDirInfo.FullName, "resources.pri");
+
+                    if (!File.Exists(stagedPriPath))
+                    {
+                        throw new FileNotFoundException("Generated resources.pri was not found in the staging directory.", stagedPriPath);
+                    }
+
+                    if (File.Exists(targetPriPath))
+                    {
+                        File.Delete(targetPriPath);
+                    }
+
+                    File.Copy(stagedPriPath, targetPriPath);
+                    taskContext.AddDebugMessage($"{UiSymbols.Check} Generated resources.pri in entry point directory");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                }
+                finally
+                {
+                    if (!string.IsNullOrWhiteSpace(priStagingDir) && Directory.Exists(priStagingDir))
+                    {
+                        try
+                        {
+                            Directory.Delete(priStagingDir, recursive: true);
+                        }
+                        catch (Exception cleanupEx)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to clean up PRI staging directory '{priStagingDir}': {cleanupEx.Message}");
+                        }
+                    }
+                }
             }
         }
 
@@ -700,19 +771,21 @@ internal partial class MsixService
     /// Checks if a package with the given name exists and unregisters it if found
     /// </summary>
     /// <param name="packageName">The name of the package to check and unregister</param>
+    /// <param name="taskContext">Task context for debug output</param>
+    /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
         try
         {
-            var removed = await packageRegistrationService.UnregisterAsync(packageName, cancellationToken);
+            var removed = await packageRegistrationService.UnregisterAsync(packageName, preserveAppData, cancellationToken);
 
             if (removed)
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully");
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully{(preserveAppData ? " (app data preserved)" : "")}");
             }
             else
             {
