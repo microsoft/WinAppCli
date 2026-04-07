@@ -30,9 +30,13 @@ internal interface IPackageRegistrationService
     /// Unregisters an installed package by name. Returns true if a package was found and removed.
     /// </summary>
     /// <param name="packageName">The package identity name (e.g. <c>MyCompany.MyApp</c>).</param>
+    /// <param name="preserveAppData">
+    /// When true, preserves the package's application data (LocalState, RoamingState, Settings, etc.)
+    /// during removal. Only supported for packages registered in development mode.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if a package was unregistered, false if no matching package was found.</returns>
-    Task<bool> UnregisterAsync(string packageName, CancellationToken cancellationToken = default);
+    Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Installs an MSIX/APPX package file, optionally forcing application shutdown.
