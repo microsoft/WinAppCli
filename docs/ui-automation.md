@@ -372,3 +372,86 @@ Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs for a 
 
 ### Why `;` for chaining (not `&&`)
 PowerShell's `&&` operator can freeze when a native CLI writes to stderr or uses ANSI escape sequences. Use `;` instead — it runs each command unconditionally and avoids this deadlock. This is also better for agent workflows: you usually want the screenshot to run even if the invoke had a non-zero exit.
+
+## CI Testing Patterns
+
+Use `winapp ui` commands in CI pipelines (GitHub Actions, Azure DevOps) for smoke tests
+and UI validation. `wait-for` with `--property` and `--value` acts as an assertion —
+it returns exit code 1 on timeout, failing the CI step automatically.
+
+### Launch and test in GitHub Actions
+```yaml
+steps:
+  - name: Build
+    run: dotnet build MyApp.csproj -c Debug -p:Platform=x64
+
+  - name: Launch and test
+    run: |
+      $result = winapp run .\bin\x64\Debug\net8.0-windows10.0.26100.0\win-x64 --detach --json | ConvertFrom-Json
+      $appPid = $result.ProcessId
+
+      # Wait for window to initialize
+      winapp ui wait-for "Main Window" -a $appPid --timeout 30000
+
+      # Run tests — each wait-for exits non-zero on failure
+      winapp ui invoke "Login" -a $appPid
+      winapp ui wait-for "Dashboard" -a $appPid --timeout 10000
+      winapp ui screenshot -a $appPid -o dashboard.png
+```
+
+### Assert element state with `wait-for`
+`wait-for --property --value` polls until a property matches the expected value.
+Returns exit code 0 on match, exit code 1 on timeout — making it a CI-friendly assertion.
+
+```bash
+# Assert: button click updated the counter
+winapp ui invoke "Counter Button" -a $pid
+winapp ui wait-for "Counter Display" -a $pid --property Name --value "Count: 1" -t 5000
+
+# Assert: text input was accepted
+winapp ui set-value "Search Box" -a $pid --text "hello world"
+winapp ui wait-for "Search Box" -a $pid --property Value --value "hello world" -t 3000
+
+# Assert: checkbox was toggled
+winapp ui invoke "Dark Mode" -a $pid
+winapp ui wait-for "Dark Mode" -a $pid --property ToggleState --value "On" -t 3000
+
+# Assert: navigation happened (new page appeared)
+winapp ui invoke "Settings" -a $pid
+winapp ui wait-for "Settings Page" -a $pid -t 10000
+
+# Assert: dialog was dismissed (element disappeared)
+winapp ui invoke "Close" -a $pid
+winapp ui wait-for "Dialog Title" -a $pid --gone -t 5000
+```
+
+### Assert with JSON output
+Use `--json` with PowerShell or jq for more complex assertions:
+```powershell
+# Assert: search found exactly one match
+$result = winapp ui search "Submit" -a $pid --json | ConvertFrom-Json
+if ($result.matchCount -ne 1) { throw "Expected 1 Submit button, found $($result.matchCount)" }
+
+# Assert: element has expected properties
+$tree = winapp ui inspect "Counter Display" -a $pid --json | ConvertFrom-Json
+if ($tree.elements[0].name -ne "Count: 3") { throw "Counter value wrong: $($tree.elements[0].name)" }
+```
+
+### Full smoke test example
+```powershell
+# Launch
+$app = winapp run .\build-output --detach --json | ConvertFrom-Json
+
+# Verify app loaded
+winapp ui wait-for "Main Page" -a $app.ProcessId -t 30000
+
+# Interact and assert
+winapp ui invoke "Add Item" -a $app.ProcessId
+winapp ui set-value "Item Name" -a $app.ProcessId --text "Test Item"
+winapp ui invoke "Save" -a $app.ProcessId
+winapp ui wait-for "Test Item" -a $app.ProcessId -t 5000              # assert item appeared in list
+winapp ui wait-for "Save" -a $app.ProcessId --gone -t 3000            # assert save dialog closed
+
+# Visual verification
+winapp ui screenshot -a $app.ProcessId -o smoke-test.png
+```
