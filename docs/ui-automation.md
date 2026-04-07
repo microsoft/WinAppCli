@@ -83,15 +83,18 @@ Format: `prefix-name-hash`. The hash validates element identity but may go stale
 
 ### Inspect output format
 
-The `inspect` command shows a 2-line header followed by the element tree:
+The `inspect` command shows the element tree with colored output (selector in cyan, name in green, metadata in gray):
 ```
-# [selector] Type "Name" value="..." [state] (x,y WxH)
-# Selectors: AutomationId (stable) or slug (generated, may go stale). Use selector with other ui commands.
-[MinimizeButton] Button "Minimize" (100,20 30x30)
-[SearchBox] Edit "Search" value="" (200,50 300x30)
-  [btn-close-a2b3] Button "Close" (100,20 30x30)
-  [lbl-c8a3] Text "Welcome" (50,100 200x20)
+TabView Tab (0,-1 1200x48)
+  TabListView List (4,-1 1100x48)
+    tab-newtab-5f5b TabItem "New Tab" (14,-1 200x48)
+  NewTabButton SplitButton "New Tab" [collapsed] (1104,5 96x36)
+Found 10 elements (depth 3). Use the first word as selector, e.g.: winapp ui invoke TabView -a terminal
 ```
+
+The **first word** on each line is the selector — use it with other `ui` commands.
+When an element has a unique AutomationId, it's used directly (e.g., `TabView`, `NewTabButton`).
+When no unique AutomationId exists, a generated slug is used (e.g., `tab-newtab-5f5b`).
 
 ### Semantic slugs
 

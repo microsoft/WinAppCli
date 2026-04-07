@@ -108,26 +108,34 @@ internal class UiInspectCommand : Command, IShortDescription
                 }
                 else
                 {
-                    ansiConsole.WriteLine("# [selector] Type \"Name\" value=\"...\" [state] (x,y WxH)");
-                    ansiConsole.WriteLine("# Selectors: AutomationId (stable) or slug (generated, may go stale). Use selector with other ui commands.");
                     foreach (var el in elements)
                     {
                         var indent = new string(' ', el.Depth * 2);
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
-                        var name = displayName is not null && displayName != elSelector ? $" \"{displayName}\"" : "";
-                        var value = el.Value is not null && el.Value != el.Name ? $" value=\"{el.Value}\"" : "";
-                        var toggle = el.ToggleState is not null ? $" [{el.ToggleState}]" : "";
-                        var expand = el.ExpandState is not null ? $" [{el.ExpandState}]" : "";
-                        var scroll = el.ScrollDir is not null ? $" [scroll:{el.ScrollDir}]" : "";
-                        var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
-                        var disabled = el.IsEnabled ? "" : " [disabled]";
-                        var offscreen = el.IsOffscreen ? " [offscreen]" : "";
-                        ansiConsole.WriteLine($"{indent}[{elSelector}] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
+                        var name = displayName is not null && displayName != elSelector
+                            ? $" [green]\"{EscapeMarkup(displayName)}\"[/]" : "";
+                        var value = el.Value is not null && el.Value != el.Name
+                            ? $" [yellow]value=\"{EscapeMarkup(el.Value)}\"[/]" : "";
+                        var toggle = el.ToggleState is not null ? $" [grey]\\[{el.ToggleState}][/]" : "";
+                        var expand = el.ExpandState is not null ? $" [grey]\\[{el.ExpandState}][/]" : "";
+                        var scroll = el.ScrollDir is not null ? $" [grey]\\[scroll:{el.ScrollDir}][/]" : "";
+                        var bounds = el.Width > 0 ? $" [grey]({el.X},{el.Y} {el.Width}x{el.Height})[/]" : "";
+                        var disabled = el.IsEnabled ? "" : " [grey]\\[disabled][/]";
+                        var offscreen = el.IsOffscreen ? " [grey]\\[offscreen][/]" : "";
+                        ansiConsole.MarkupLine($"{indent}[bold cyan]{EscapeMarkup(elSelector)}[/] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
                     }
+
+                    // Footer with example using first interactive element or first element
+                    var example = elements.FirstOrDefault(IsInteractiveType) ?? elements.FirstOrDefault();
+                    var exampleSelector = example?.Selector ?? example?.Id;
+                    var exampleHint = exampleSelector is not null
+                        ? $" Use the [bold cyan]first word[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
+                        : "";
+                    ansiConsole.MarkupLine($"[grey]Found {elements.Length} elements (depth {depth}).{exampleHint}[/]");
                 }
 
-                logger.LogInformation("Found {Count} elements (depth {Depth})", elements.Length, depth);
+                logger.LogDebug("Inspect returned {Count} elements at depth {Depth}", elements.Length, depth);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
@@ -142,6 +150,9 @@ internal class UiInspectCommand : Command, IShortDescription
                 return 1;
             }
         }
+
+        private static string EscapeMarkup(string text) => text.Replace("[", "[[").Replace("]", "]]");
+
         private static readonly HashSet<string> InteractiveTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "Button", "CheckBox", "ComboBox", "Edit", "TextBox", "Hyperlink",
