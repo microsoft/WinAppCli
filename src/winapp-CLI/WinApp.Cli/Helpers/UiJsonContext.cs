@@ -20,6 +20,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiInvokeResult))]
 [JsonSerializable(typeof(UiClickResult))]
 [JsonSerializable(typeof(UiScreenshotResult))]
+[JsonSerializable(typeof(UiScreenshotResult[]))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(WindowInfo))]
 [JsonSerializable(typeof(WindowInfo[]))]
