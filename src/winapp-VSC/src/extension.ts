@@ -170,7 +170,7 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 					cwd: folder.uri.fsPath,
 					absolute: true,
 					nocase: true,
-					ignore: ['**/node_modules/**', '**/.git/**', '**/AppX/**']
+					ignore: ['**/node_modules/**', '**/.git/**', '**/AppX/**', '**/.winapp/**']
 				});
 
 				// Collect unique parent directories that contain .exe files
