@@ -51,6 +51,15 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifiersElementRegex();
 
+    [GeneratedRegex(@"<EnableMsixTooling>(.*?)</EnableMsixTooling>", RegexOptions.Singleline)]
+    private static partial Regex EnableMsixToolingElementRegex();
+
+    [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
+    private static partial Regex WindowsPackageTypeNoneElementRegex();
+
+    [GeneratedRegex(@"[ \t]*<!--[^>]*-->\s*\r?\n?(?=\s*<PackageReference)", RegexOptions.Singleline)]
+    private static partial Regex CommentBeforePackageReferenceRegex();
+
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
         if (!directory.Exists)
@@ -443,6 +452,151 @@ internal partial class DotNetService : IDotNetService
         {
             return null;
         }
+    }
+
+    public async Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = EnableMsixToolingElementRegex().Match(content);
+
+        if (match.Success)
+        {
+            if (string.Equals(match.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Update existing element from false to true
+            content = content[..match.Index]
+                + "<EnableMsixTooling>true</EnableMsixTooling>"
+                + content[(match.Index + match.Length)..];
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+            return true;
+        }
+
+        // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
+        const string element =
+            "<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
+            + "\n    <EnableMsixTooling>true</EnableMsixTooling>";
+
+        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
+        if (ridMatch.Success)
+        {
+            // Find end of the RuntimeIdentifier line
+            var lineEnd = content.IndexOf('\n', ridMatch.Index);
+            if (lineEnd >= 0)
+            {
+                var insertPos = lineEnd + 1;
+                content = content[..insertPos]
+                    + "    " + element + Environment.NewLine
+                    + content[insertPos..];
+            }
+        }
+        else
+        {
+            var tfmMatch = TargetFrameworkElementRegex().Match(content);
+            if (tfmMatch.Success)
+            {
+                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                content = content[..insertPos]
+                    + Environment.NewLine + "    " + element
+                    + content[insertPos..];
+            }
+            else
+            {
+                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+                if (propGroupIdx >= 0)
+                {
+                    var closeTag = content.IndexOf('>', propGroupIdx);
+                    if (closeTag >= 0)
+                    {
+                        var insertPos = closeTag + 1;
+                        content = content[..insertPos]
+                            + Environment.NewLine + "    " + element
+                            + content[insertPos..];
+                    }
+                }
+            }
+        }
+
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = WindowsPackageTypeNoneElementRegex().Match(content);
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        content = content[..match.Index] + content[(match.Index + match.Length)..];
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists || packageComments.Count == 0)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var modified = false;
+
+        foreach (var (packageName, comment) in packageComments)
+        {
+            // Find <PackageReference Include="packageName" and check if there's already a comment above it
+            var pattern = $@"<PackageReference\s+Include=""{Regex.Escape(packageName)}""";
+            var pkgMatch = Regex.Match(content, pattern, RegexOptions.IgnoreCase);
+            if (!pkgMatch.Success)
+            {
+                continue;
+            }
+
+            // Check if there's already an XML comment on the line(s) immediately before
+            var beforePkg = content[..pkgMatch.Index];
+            var lastNewline = beforePkg.LastIndexOf('\n');
+            var linePrefix = lastNewline >= 0 ? beforePkg[(lastNewline + 1)..] : beforePkg;
+
+            // If the content before on this line is just whitespace, check the previous line for a comment
+            if (string.IsNullOrWhiteSpace(linePrefix))
+            {
+                var prevContent = lastNewline >= 0 ? beforePkg[..lastNewline].TrimEnd('\r') : "";
+                if (prevContent.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
+                {
+                    continue; // Already has a comment
+                }
+            }
+
+            // Detect indentation from the PackageReference line
+            var indent = linePrefix;
+            var commentLine = $"{indent}<!-- {comment} -->" + Environment.NewLine;
+            var insertPos = lastNewline >= 0 ? lastNewline + 1 : pkgMatch.Index;
+            content = content[..insertPos] + commentLine + content[insertPos..];
+            modified = true;
+        }
+
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        }
+
+        return modified;
     }
 }
 
