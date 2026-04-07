@@ -146,6 +146,10 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
+            // Install the Windows App Runtime framework packages if not already present
+            var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
+
             // Unregister any existing package first
             await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
 

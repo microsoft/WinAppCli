@@ -597,4 +597,155 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    #region --detach option tests
+
+    [TestMethod]
+    public void ParseOptions_Detach_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.DetachOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_DetachNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.DetachOption));
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndNoLaunch_ReturnsError()
+    {
+        // Arrange - --detach and --no-launch are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --no-launch are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndDebugOutput_ReturnsError()
+    {
+        // Arrange - --detach and --debug-output are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--debug-output"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --debug-output are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndWithAlias_ReturnsError()
+    {
+        // Arrange - --detach and --with-alias are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--with-alias"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --with-alias are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndUnregisterOnExit_ReturnsError()
+    {
+        // Arrange - --detach and --unregister-on-exit are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--unregister-on-exit"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --unregister-on-exit are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_Detach_LaunchesByAumidAndReturnsImmediately()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched via AUMID");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachWithJson_OutputsJsonWithProcessId()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--json"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+
+        var json = ParseJsonOutput();
+        Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, json.GetProperty("ProcessId").GetUInt32(),
+            "ProcessId should be present in detach mode");
+        Assert.IsFalse(json.TryGetProperty("Error", out _), "Error should not be present on success");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachWithoutJson_DoesNotOutputJson()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("\"AUMID\""), "JSON fields should not appear without --json flag");
+        Assert.IsFalse(output.Contains("\"ProcessId\""), "JSON fields should not appear without --json flag");
+    }
+
+    #endregion
 }

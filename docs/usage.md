@@ -328,6 +328,7 @@ winapp run <input-folder> [options]
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
+- `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 
 **What it does:**
 
@@ -363,6 +364,12 @@ winapp run ./bin/Debug --with-alias --debug-output
 
 # Run and automatically clean up registration on exit
 winapp run ./bin/Debug --with-alias --unregister-on-exit
+
+# Launch and detach immediately (useful for CI/automation)
+winapp run ./bin/Debug --detach
+
+# Detach with JSON output (returns PID for scripting)
+winapp run ./bin/Debug --detach --json
 ```
 
 **MSBuild properties (NuGet package):**
