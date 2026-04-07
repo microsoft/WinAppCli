@@ -162,7 +162,7 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 
 		try {
 			// Search for AppxManifest.xml in build output using glob (bypasses .gitignore)
-			const searchPattern = config.buildOutputManifest || '**/*/AppxManifest.xml';
+			const searchPattern = config.buildOutputManifest || '**/AppxManifest.xml';
 			const allMatches = await glob(searchPattern, {
 				cwd: folder.uri.fsPath,
 				absolute: true,
@@ -192,10 +192,31 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 				manifest = picked.fsPath;
 			}
 
-			// Build the command with mapped arguments
-			// The run command requires an input-folder positional argument;
-			// use the directory containing the discovered manifest.
-			const inputFolder = config.inputFolder || path.dirname(manifest);
+			// Build the command with mapped arguments.
+			// The run command requires an input-folder positional argument.
+			// If not explicitly configured, try to derive it from the manifest location.
+			// When the manifest lives at the workspace root it is most likely a source
+			// manifest (not inside a build-output directory), so prompt the user.
+			let inputFolder: string | undefined = config.inputFolder;
+			if (!inputFolder) {
+				const manifestDir = path.dirname(manifest);
+				if (manifestDir === folder.uri.fsPath) {
+					// Manifest is at workspace root — ask the user for the build output folder
+					const picked = await vscode.window.showOpenDialog({
+						canSelectFiles: false,
+						canSelectFolders: true,
+						canSelectMany: false,
+						defaultUri: folder.uri,
+						title: 'Select the build output folder containing your app binaries'
+					});
+					if (!picked || picked.length === 0) {
+						throw new Error('No build output folder selected, cancelling debug session. You can set "inputFolder" in launch.json to skip this prompt.');
+					}
+					inputFolder = picked[0].fsPath;
+				} else {
+					inputFolder = manifestDir;
+				}
+			}
 			const cliPath = getWinappCliPath(this.extensionPath);
 			const spawnArgs = ['run', inputFolder, '--manifest', manifest];
 

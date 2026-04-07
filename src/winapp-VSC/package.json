@@ -118,7 +118,11 @@
               "buildOutputManifest": {
                 "type": "string",
                 "description": "Glob pattern to locate AppxManifest.xml in build output (used when 'manifest' is not set)",
-                "default": "**/*/AppxManifest.xml"
+                "default": "**/AppxManifest.xml"
+              },
+              "inputFolder": {
+                "type": "string",
+                "description": "Path to the build output folder containing your app binaries. If not set, derived from the manifest location (or prompted when the manifest is at the workspace root)."
               },
               "args": {
                 "type": "string",
@@ -136,7 +140,7 @@
             "type": "winapp",
             "request": "launch",
             "name": "WinApp: Launch and Attach",
-            "buildOutputManifest": "**/*/AppxManifest.xml"
+            "buildOutputManifest": "**/AppxManifest.xml"
           }
         ],
         "configurationSnippets": [
@@ -148,7 +152,7 @@
               "request": "launch",
               "name": "WinApp: Launch and Attach",
               "debuggerType": "coreclr",
-              "buildOutputManifest": "**/*/AppxManifest.xml"
+              "buildOutputManifest": "**/AppxManifest.xml"
             }
           }
         ]
