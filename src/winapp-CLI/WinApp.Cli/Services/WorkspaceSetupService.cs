@@ -211,13 +211,16 @@ internal class WorkspaceSetupService(
         var installWinAppPackage = false;
         if (isDotNetProject && csprojFile != null)
         {
-var hasWinAppPackage = await dotNetService.HasPackageReferenceAsync(
+            var hasWinAppPackage = await dotNetService.HasPackageReferenceAsync(
                 csprojFile,
-                DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE,
+                cancellationToken);
+
             if (hasWinAppPackage)
             {
                 logger.LogDebug("{UISymbol} {Package} already referenced by project; skipping install prompt",
                     UiSymbols.Skip, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                installWinAppPackage = true;
             }
             else
             {

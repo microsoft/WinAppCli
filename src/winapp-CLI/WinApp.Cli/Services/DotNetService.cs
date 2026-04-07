@@ -484,6 +484,7 @@ internal partial class DotNetService : IDotNetService
             "<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
             + "\n    <EnableMsixTooling>true</EnableMsixTooling>";
 
+        var modified = false;
         var ridMatch = RuntimeIdentifierElementRegex().Match(content);
         if (ridMatch.Success)
         {
@@ -495,6 +496,7 @@ internal partial class DotNetService : IDotNetService
                 content = content[..insertPos]
                     + "    " + element + Environment.NewLine
                     + content[insertPos..];
+                modified = true;
             }
         }
         else
@@ -506,6 +508,7 @@ internal partial class DotNetService : IDotNetService
                 content = content[..insertPos]
                     + Environment.NewLine + "    " + element
                     + content[insertPos..];
+                modified = true;
             }
             else
             {
@@ -519,13 +522,18 @@ internal partial class DotNetService : IDotNetService
                         content = content[..insertPos]
                             + Environment.NewLine + "    " + element
                             + content[insertPos..];
+                        modified = true;
                     }
                 }
             }
         }
 
-        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-        return true;
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        }
+
+        return modified;
     }
 
     public async Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
