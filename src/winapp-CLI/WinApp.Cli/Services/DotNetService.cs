@@ -57,9 +57,6 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsPackageTypeNoneElementRegex();
 
-    [GeneratedRegex(@"[ \t]*<!--[^>]*-->\s*\r?\n?(?=\s*<PackageReference)", RegexOptions.Singleline)]
-    private static partial Regex CommentBeforePackageReferenceRegex();
-
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
         if (!directory.Exists)
