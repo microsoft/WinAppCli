@@ -151,7 +151,17 @@ internal class UiInspectCommand : Command, IShortDescription
             }
         }
 
-        private static string EscapeMarkup(string text) => Markup.Escape(text);
+        private static string EscapeMarkup(string text) => Markup.Escape(SanitizeForDisplay(text));
+
+        /// <summary>Replace control characters (newlines, tabs, carriage returns) with visual representations for single-line display.</summary>
+        private static string SanitizeForDisplay(string text)
+        {
+            if (text.AsSpan().IndexOfAny('\r', '\n', '\t') < 0)
+            {
+                return text;
+            }
+            return text.Replace("\r\n", "↵").Replace("\r", "↵").Replace("\n", "↵").Replace("\t", "→");
+        }
 
         private static readonly HashSet<string> InteractiveTypes = new(StringComparer.OrdinalIgnoreCase)
         {
