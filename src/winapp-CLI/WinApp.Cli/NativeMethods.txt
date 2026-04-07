@@ -81,3 +81,5 @@ SetForegroundWindow
 SetCursorPos
 SendInput
 GetSystemMetrics
+GetWindow
+GetClassName

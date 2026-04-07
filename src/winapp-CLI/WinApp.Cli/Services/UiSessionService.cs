@@ -2,12 +2,17 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
 internal sealed class UiSessionService(
-    IUiAutomationService uiAutomation) : IUiSessionService
+    IUiAutomationService uiAutomation,
+    Spectre.Console.IAnsiConsole ansiConsole,
+    ILogger<UiSessionService> logger) : IUiSessionService
 {
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
@@ -36,11 +41,7 @@ internal sealed class UiSessionService(
             }
             if (windows.Count > 1)
             {
-                var listing = string.Join("\n  ",
-                    windows.Select(w => $"HWND {w.Hwnd}: \"{w.Title}\" ({GetProcessNameSafe(w.Pid)}, PID {w.Pid})"));
-                throw new InvalidOperationException(
-                    $"Multiple windows match '{app}':\n  {listing}\n" +
-                    "Use -w <HWND> to target a specific window.");
+                return Task.FromResult(AutoSelectWindow(windows, app));
             }
             // Single match
             var match = windows[0];
@@ -51,11 +52,7 @@ internal sealed class UiSessionService(
         var processWindows = uiAutomation.FindWindowsByPid(process.Id);
         if (processWindows.Count > 1)
         {
-            var listing = string.Join("\n  ",
-                processWindows.Select(w => $"HWND {w.Hwnd}: \"{w.Title}\" ({process.ProcessName}, PID {process.Id})"));
-            throw new InvalidOperationException(
-                $"'{app}' has multiple windows:\n  {listing}\n" +
-                "Use -w <HWND> to target a specific window.");
+            return Task.FromResult(AutoSelectWindow(processWindows, app));
         }
 
         if (processWindows.Count == 1)
@@ -69,6 +66,145 @@ internal sealed class UiSessionService(
             ProcessName = process.ProcessName,
             WindowTitle = GetMainWindowTitle(process)
         });
+    }
+
+    /// <summary>
+    /// Auto-selects the best window from multiple candidates and warns about the others.
+    /// Heuristic: prefer foreground window → prefer largest window.
+    /// </summary>
+    private UiSessionInfo AutoSelectWindow(List<(nint Hwnd, int Pid, string Title)> windows, string app)
+    {
+        logger.LogDebug("Auto-selecting from {Count} windows for '{App}'", windows.Count, app);
+        var foregroundHwnd = Windows.Win32.PInvoke.GetForegroundWindow();
+        var foreground = windows.FirstOrDefault(w => w.Hwnd == (nint)foregroundHwnd);
+        var selected = foreground != default ? foreground : PickLargestWindow(windows);
+
+        // Build colored warning with metadata for each window
+        var reason = foreground != default ? "Auto-selected the foreground window" : "Auto-selected the largest window";
+        ansiConsole.MarkupLine($"[yellow]⚠  Multiple windows for '{app.Replace("[", "[[").Replace("]", "]]")}'. {reason}.[/]");
+
+        foreach (var w in windows)
+        {
+            var info = GetWindowInfo(w.Hwnd);
+            var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title.Replace("[", "[[").Replace("]", "]]");
+            var fg = w.Hwnd == (nint)foregroundHwnd ? ", [green]foreground[/]" : "";
+            var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
+
+            if (w.Hwnd == selected.Hwnd)
+            {
+                ansiConsole.MarkupLine($"  [bold]→ HWND [cyan]{w.Hwnd}[/] (selected): \"{title}\"[/] [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]][/]");
+            }
+            else
+            {
+                ansiConsole.MarkupLine($"    HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]][/]");
+            }
+        }
+
+        ansiConsole.MarkupLine($"  [grey]Use -w <HWND> to target a specific window.[/]");
+        ansiConsole.WriteLine();
+
+        return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
+    }
+
+    /// <summary>Pick the window with the largest area.</summary>
+    private static (nint Hwnd, int Pid, string Title) PickLargestWindow(List<(nint Hwnd, int Pid, string Title)> windows)
+    {
+        var best = windows[0];
+        long bestArea = 0;
+
+        foreach (var w in windows)
+        {
+            var info = GetWindowInfo(w.Hwnd);
+            var area = (long)info.Width * info.Height;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                best = w;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Get metadata for a window: class name, label, size, owner.</summary>
+    internal static WindowMetadata GetWindowInfo(nint hwnd)
+    {
+        var className = GetWindowClassName(hwnd);
+        var label = ClassifyWindow(className);
+        var (width, height) = GetWindowSize(hwnd);
+        var ownerHwnd = GetWindowOwner(hwnd);
+
+        return new WindowMetadata
+        {
+            ClassName = className ?? "Unknown",
+            Label = label,
+            Width = width,
+            Height = height,
+            OwnerHwnd = ownerHwnd
+        };
+    }
+
+    private static string? GetWindowClassName(nint hwnd)
+    {
+        try
+        {
+            var buffer = new char[256];
+            int len;
+            unsafe
+            {
+                fixed (char* pClass = buffer)
+                {
+                    len = Windows.Win32.PInvoke.GetClassName(
+                        new Windows.Win32.Foundation.HWND(hwnd), pClass, 256);
+                }
+            }
+            return len > 0 ? new string(buffer, 0, len) : null;
+        }
+        catch { return null; }
+    }
+
+    private static string ClassifyWindow(string? className)
+    {
+        if (className is null) { return "window"; }
+        if (className.Contains("Popup", StringComparison.OrdinalIgnoreCase)) { return "popup"; }
+        if (className == "#32770") { return "dialog"; }
+        return "window";
+    }
+
+    private static (int Width, int Height) GetWindowSize(nint hwnd)
+    {
+        try
+        {
+            Windows.Win32.Foundation.RECT rect;
+            unsafe
+            {
+                Windows.Win32.PInvoke.GetWindowRect(
+                    new Windows.Win32.Foundation.HWND(hwnd), &rect);
+            }
+            return (rect.right - rect.left, rect.bottom - rect.top);
+        }
+        catch { return (0, 0); }
+    }
+
+    private static nint GetWindowOwner(nint hwnd)
+    {
+        try
+        {
+            var owner = Windows.Win32.PInvoke.GetWindow(
+                new Windows.Win32.Foundation.HWND(hwnd),
+                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
+            return (nint)owner;
+        }
+        catch { return 0; }
+    }
+
+    internal record WindowMetadata
+    {
+        public string ClassName { get; init; } = "Unknown";
+        public string Label { get; init; } = "window";
+        public int Width { get; init; }
+        public int Height { get; init; }
+        public nint OwnerHwnd { get; init; }
     }
 
     private static UiSessionInfo ResolveByHwnd(long hwnd)
