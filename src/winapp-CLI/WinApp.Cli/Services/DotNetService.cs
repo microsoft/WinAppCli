@@ -51,7 +51,7 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifiersElementRegex();
 
-    [GeneratedRegex(@"<EnableMsixTooling>(.*?)</EnableMsixTooling>", RegexOptions.Singleline)]
+    [GeneratedRegex(@"<EnableMsixTooling>(.*?)</EnableMsixTooling>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex EnableMsixToolingElementRegex();
 
     [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
