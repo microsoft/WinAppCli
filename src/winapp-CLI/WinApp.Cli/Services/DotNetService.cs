@@ -480,9 +480,9 @@ internal partial class DotNetService : IDotNetService
         }
 
         // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
-        const string element =
+        var element =
             "<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
-            + "\n    <EnableMsixTooling>true</EnableMsixTooling>";
+            + Environment.NewLine + "    <EnableMsixTooling>true</EnableMsixTooling>";
 
         var modified = false;
         var ridMatch = RuntimeIdentifierElementRegex().Match(content);
