@@ -162,7 +162,8 @@ npx winapp --help
 
 **Setup Commands:**
 
-- [`init`](./docs/usage.md#init) - Initialize project with Windows SDK and App SDK
+- [`new`](./docs/usage.md#new) - Create a new WinUI 3 project or add items from templates
+- [`init`](./docs/usage.md#init) - Initialize existing project with Windows SDK and App SDK
 - [`restore`](./docs/usage.md#restore) - Restore packages and dependencies
 - [`update`](./docs/usage.md#update) - Update packages and dependencies to latest versions
 
