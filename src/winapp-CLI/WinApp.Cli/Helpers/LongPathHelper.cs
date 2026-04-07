@@ -111,6 +111,30 @@ internal static class LongPathHelper
     }
 
     /// <summary>
+    /// Converts the directory portion of a long path to its short (8.3) form, and throws an
+    /// <see cref="InvalidOperationException"/> if the path still exceeds MAX_PATH after shortening.
+    /// This can happen when 8.3 name generation is disabled on the volume or the path does not
+    /// yet exist on disk, causing <c>GetShortPathName</c> to return the original long path.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the path exceeds MAX_PATH and cannot be shortened to a usable length.
+    /// </exception>
+    internal static string GetShortPathOrThrow(string path)
+    {
+        var shortPath = GetShortPath(path);
+        if (shortPath.Length >= MaxPath)
+        {
+            throw new InvalidOperationException(
+                $"The path is too long for the Windows deployment API (limit: {MaxPath} characters) " +
+                "and could not be converted to a short (8.3) path. " +
+                "This may occur when 8.3 name generation is disabled on the volume or the path does not yet exist. " +
+                "To fix this, use a shorter directory path.");
+        }
+
+        return shortPath;
+    }
+
+    /// <summary>
     /// Converts an entire path (including filename) to its short (8.3) form.
     /// </summary>
     private static string GetShortPathRaw(string path)

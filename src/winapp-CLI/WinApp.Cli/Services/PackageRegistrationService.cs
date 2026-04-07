@@ -26,8 +26,8 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         LongPathHelper.ValidatePathLength(fullPath);
 
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
-        // Convert to 8.3 short path as a workaround.
-        var manifestUri = new Uri(LongPathHelper.GetShortPath(fullPath));
+        // Convert to 8.3 short path as a workaround; throw if shortening fails.
+        var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
         var pm = new PackageManager();
 
         try
@@ -64,9 +64,9 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         LongPathHelper.ValidatePathLength(fullExternalPath);
 
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
-        // Convert to 8.3 short paths as a workaround.
-        var manifestUri = new Uri(LongPathHelper.GetShortPath(fullManifestPath));
-        var shortExternalPath = LongPathHelper.GetShortPath(fullExternalPath + Path.DirectorySeparatorChar);
+        // Convert to 8.3 short paths as a workaround; throw if shortening fails.
+        var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullManifestPath));
+        var shortExternalPath = LongPathHelper.GetShortPathOrThrow(fullExternalPath + Path.DirectorySeparatorChar);
         if (!Path.EndsInDirectorySeparator(shortExternalPath))
         {
             shortExternalPath += Path.DirectorySeparatorChar;
@@ -146,8 +146,8 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         LongPathHelper.ValidatePathLength(fullPath);
 
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
-        // Convert to 8.3 short path as a workaround.
-        var packageUri = new Uri(LongPathHelper.GetShortPath(fullPath));
+        // Convert to 8.3 short path as a workaround; throw if shortening fails.
+        var packageUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
         var pm = new PackageManager();
 
         var result = await pm.AddPackageAsync(
