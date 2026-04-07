@@ -214,6 +214,9 @@ Write-TestHeader "Phase 2: Launch App"
 Write-Host "Using winapp: $WinAppPath"
 Write-Host "Build output: $buildOutput"
 
+# Trigger first-run notice (creates marker file) before any JSON-parsed command
+& $WinAppPath --version 2>$null | Out-Null
+
 $launchJson = & $WinAppPath run $buildOutput --detach --json 2>$null
 $launchResult = $launchJson | ConvertFrom-Json
 $appPid = $launchResult.ProcessId
