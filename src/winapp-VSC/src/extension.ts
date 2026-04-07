@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { glob } from 'glob';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
@@ -160,20 +162,44 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 
 		try {
 			// The run command requires an input-folder positional argument.
-			// If not set in launch.json, prompt the user to select it.
+			// If not set in launch.json, search for folders containing .exe
+			// files and let the user pick one.
 			let inputFolder: string | undefined = config.inputFolder;
 			if (!inputFolder) {
-				const picked = await vscode.window.showOpenDialog({
-					canSelectFiles: false,
-					canSelectFolders: true,
-					canSelectMany: false,
-					defaultUri: folder.uri,
-					title: 'Select the build output folder containing your app binaries'
+				const exeMatches = await glob('**/*.exe', {
+					cwd: folder.uri.fsPath,
+					absolute: true,
+					nocase: true,
+					ignore: ['**/node_modules/**', '**/.git/**', '**/AppX/**']
 				});
-				if (!picked || picked.length === 0) {
-					throw new Error('No build output folder selected, cancelling debug session. Set "inputFolder" in launch.json to skip this prompt.');
+
+				// Collect unique parent directories that contain .exe files
+				const dirSet = new Set<string>();
+				for (const exe of exeMatches) {
+					dirSet.add(path.dirname(exe));
 				}
-				inputFolder = picked[0].fsPath;
+
+				if (dirSet.size === 0) {
+					throw new Error('No folders containing .exe files found in the workspace. Build your project first, or set "inputFolder" in launch.json.');
+				}
+
+				const dirs = [...dirSet].sort();
+				if (dirs.length === 1) {
+					inputFolder = dirs[0];
+				} else {
+					const items = dirs.map(d => ({
+						label: path.relative(folder.uri.fsPath, d),
+						description: d,
+						fsPath: d
+					}));
+					const picked = await vscode.window.showQuickPick(items, {
+						placeHolder: 'Select the build output folder containing your app'
+					});
+					if (!picked) {
+						throw new Error('No build output folder selected, cancelling debug session.');
+					}
+					inputFolder = picked.fsPath;
+				}
 			}
 
 			const cliPath = getWinappCliPath(this.extensionPath);
