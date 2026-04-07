@@ -138,8 +138,7 @@
           {
             "type": "winapp",
             "request": "launch",
-            "name": "WinApp: Launch and Attach",
-            "inputFolder": "^\"\\${workspaceFolder}/bin/Debug/<your-build-output-folder>\""
+            "name": "WinApp: Launch and Attach"
           }
         ],
         "configurationSnippets": [
@@ -151,7 +150,7 @@
               "request": "launch",
               "name": "WinApp: Launch and Attach",
               "debuggerType": "coreclr",
-              "inputFolder": "^\"\\${workspaceFolder}/bin/Debug/<your-build-output-folder>\""
+              "inputFolder": "^\"\\${workspaceFolder}\\\\bin\\\\Debug\""
             }
           }
         ]
