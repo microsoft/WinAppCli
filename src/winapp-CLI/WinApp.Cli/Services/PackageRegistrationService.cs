@@ -66,7 +66,13 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
         // Convert to 8.3 short paths as a workaround.
         var manifestUri = new Uri(LongPathHelper.GetShortPath(fullManifestPath));
-        var externalUri = new Uri(LongPathHelper.GetShortPath(fullExternalPath + Path.DirectorySeparatorChar));
+        var shortExternalPath = LongPathHelper.GetShortPath(fullExternalPath + Path.DirectorySeparatorChar);
+        if (!Path.EndsInDirectorySeparator(shortExternalPath))
+        {
+            shortExternalPath += Path.DirectorySeparatorChar;
+        }
+
+        var externalUri = new Uri(shortExternalPath);
         var pm = new PackageManager();
 
         try
