@@ -366,6 +366,70 @@ public class MrtAssetHelperTests
 
     #endregion
 
+    #region ExpandManifestReferencedFiles — unplated variants
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_IncludesUnplatedVariants()
+    {
+        // Arrange — create asset directory with base icon + unplated variants
+        var assetsDir = Directory.CreateDirectory(Path.Combine(_tempDir.FullName, "Assets"));
+        var assetFiles = new[]
+        {
+            "Square44x44Logo.png",
+            "Square44x44Logo.targetsize-16.png",
+            "Square44x44Logo.targetsize-16_altform-unplated.png",
+            "Square44x44Logo.targetsize-24.png",
+            "Square44x44Logo.targetsize-24_altform-unplated.png",
+            "Square44x44Logo.targetsize-48.png",
+            "Square44x44Logo.targetsize-48_altform-unplated.png",
+            "Square44x44Logo.scale-200.png",
+        };
+        foreach (var file in assetFiles)
+        {
+            File.WriteAllBytes(Path.Combine(assetsDir.FullName, file), [0]);
+        }
+
+        var result = MrtAssetHelper.ExpandManifestReferencedFiles(
+            _tempDir,
+            [@"Assets\Square44x44Logo.png"],
+            taskContext: null);
+
+        // Assert — all variants including unplated must be discovered for PRI generation
+        Assert.AreEqual(assetFiles.Length, result.Count, "Should expand to all MRT variants in the directory");
+        Assert.IsTrue(result.Any(f => f.RelativePath.Contains("altform-unplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-unplated variants for taskbar icon resolution");
+    }
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_IncludesLightUnplatedVariants()
+    {
+        var assetsDir = Directory.CreateDirectory(Path.Combine(_tempDir.FullName, "Assets"));
+        var assetFiles = new[]
+        {
+            "AppList.png",
+            "AppList.targetsize-32.png",
+            "AppList.targetsize-32_altform-unplated.png",
+            "AppList.targetsize-32_altform-lightunplated.png",
+        };
+        foreach (var file in assetFiles)
+        {
+            File.WriteAllBytes(Path.Combine(assetsDir.FullName, file), [0]);
+        }
+
+        var result = MrtAssetHelper.ExpandManifestReferencedFiles(
+            _tempDir,
+            [@"Assets\AppList.png"],
+            taskContext: null);
+
+        Assert.AreEqual(assetFiles.Length, result.Count);
+        Assert.IsTrue(result.Any(f => f.RelativePath.Contains("altform-unplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-unplated variants");
+        Assert.IsTrue(result.Any(f => f.RelativePath.Contains("altform-lightunplated", StringComparison.OrdinalIgnoreCase)),
+            "Should discover altform-lightunplated variants");
+    }
+
+    #endregion
+
     #region PriIncludedExtensions
 
     [TestMethod]
