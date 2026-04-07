@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
-import { glob } from 'glob';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
@@ -161,64 +159,31 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 		}
 
 		try {
-			// Search for AppxManifest.xml in build output using glob (bypasses .gitignore)
-			const searchPattern = config.buildOutputManifest || '**/AppxManifest.xml';
-			const allMatches = await glob(searchPattern, {
-				cwd: folder.uri.fsPath,
-				absolute: true,
-				nocase: true
-			});
-
-			// Filter out manifests inside AppX folders (created by winapp run)
-			const matches = allMatches.filter(m => !m.split(path.sep).includes('AppX'));
-
-			let manifest: string;
-			if (matches.length === 0) {
-				throw new Error(`No manifest found matching "${searchPattern}". Build your project first or update "buildOutputManifest" in launch.json.`);
-			} else if (matches.length === 1) {
-				manifest = matches[0];
-			} else {
-				// Multiple manifests found — let the user pick
-				const items = matches.map(m => ({
-					label: path.relative(folder.uri.fsPath, m),
-					fsPath: m
-				}));
-				const picked = await vscode.window.showQuickPick(items, {
-					placeHolder: 'Multiple AppxManifest.xml files found — select one'
-				});
-				if (!picked) {
-					throw new Error('No manifest selected, cancelling debug session.');
-				}
-				manifest = picked.fsPath;
-			}
-
-			// Build the command with mapped arguments.
 			// The run command requires an input-folder positional argument.
-			// If not explicitly configured, try to derive it from the manifest location.
-			// When the manifest lives at the workspace root it is most likely a source
-			// manifest (not inside a build-output directory), so prompt the user.
+			// If not set in launch.json, prompt the user to select it.
 			let inputFolder: string | undefined = config.inputFolder;
 			if (!inputFolder) {
-				const manifestDir = path.dirname(manifest);
-				if (manifestDir === folder.uri.fsPath) {
-					// Manifest is at workspace root — ask the user for the build output folder
-					const picked = await vscode.window.showOpenDialog({
-						canSelectFiles: false,
-						canSelectFolders: true,
-						canSelectMany: false,
-						defaultUri: folder.uri,
-						title: 'Select the build output folder containing your app binaries'
-					});
-					if (!picked || picked.length === 0) {
-						throw new Error('No build output folder selected, cancelling debug session. You can set "inputFolder" in launch.json to skip this prompt.');
-					}
-					inputFolder = picked[0].fsPath;
-				} else {
-					inputFolder = manifestDir;
+				const picked = await vscode.window.showOpenDialog({
+					canSelectFiles: false,
+					canSelectFolders: true,
+					canSelectMany: false,
+					defaultUri: folder.uri,
+					title: 'Select the build output folder containing your app binaries'
+				});
+				if (!picked || picked.length === 0) {
+					throw new Error('No build output folder selected, cancelling debug session. Set "inputFolder" in launch.json to skip this prompt.');
 				}
+				inputFolder = picked[0].fsPath;
 			}
+
 			const cliPath = getWinappCliPath(this.extensionPath);
-			const spawnArgs = ['run', inputFolder, '--manifest', manifest];
+			const spawnArgs = ['run', inputFolder];
+
+			// Optional explicit manifest path; when omitted the CLI
+			// auto-detects from the input folder or current directory.
+			if (config.manifest) {
+				spawnArgs.push('--manifest', config.manifest);
+			}
 
 			if (config.outputAppxDirectory) {
 				spawnArgs.push('--output-appx-directory', config.outputAppxDirectory);
