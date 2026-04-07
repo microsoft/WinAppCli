@@ -214,7 +214,9 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--args` | Command-line arguments to pass to the application | (none) |
+| `--clean` | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. | (none) |
 | `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
+| `--detach` | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |

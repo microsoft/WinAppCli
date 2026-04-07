@@ -38,5 +38,6 @@ internal interface IMsixService
         DirectoryInfo inputDirectory,
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
+        bool clean = false,
         CancellationToken cancellationToken = default);
 }
