@@ -2904,12 +2904,13 @@ $1");
     {
         taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering sparse package with external location...");
 
-        // Use -Path and -ExternalLocation for sparse package registration (do NOT use -Register,
-        // which is for loose-layout/development packages and causes the deployment stack to look for
-        // referenced files relative to the manifest directory instead of the external location).
+        // Use -Register with -ExternalLocation for sparse package registration.
+        // -Register takes the manifest path and tells the deployment stack to register from
+        // a loose manifest rather than installing a full .msix package (which is what -Path does).
+        // -ExternalLocation tells it where the actual app binaries live.
         var escapedManifestPath = manifestPath.FullName.Replace("'", "''");
         var escapedExternalLocation = externalLocation.FullName.Replace("'", "''");
-        var registerCommand = $"Add-AppxPackage -Path '{escapedManifestPath}' -ExternalLocation '{escapedExternalLocation}' -ForceUpdateFromAnyVersion";
+        var registerCommand = $"Add-AppxPackage -Register '{escapedManifestPath}' -ExternalLocation '{escapedExternalLocation}' -ForceUpdateFromAnyVersion";
 
         try
         {
