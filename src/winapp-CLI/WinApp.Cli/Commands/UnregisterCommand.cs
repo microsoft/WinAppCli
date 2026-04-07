@@ -121,8 +121,8 @@ internal class UnregisterCommand : Command, IShortDescription
                         }
                     }
 
-                    // Unregister
-                    await packageRegistrationService.UnregisterAsync(name, cancellationToken);
+                    // Explicit unregister command — remove package and its data
+                    await packageRegistrationService.UnregisterAsync(name, preserveAppData: false, cancellationToken);
 
                     if (!isJson)
                     {
