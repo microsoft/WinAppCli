@@ -60,6 +60,13 @@ internal class PowerShellService : IPowerShellService
         // When elevated, UseShellExecute=true which doesn't support environment variables
         if (!elevated)
         {
+            // Always clear PSModulePath first to prevent PowerShell Core module conflicts when calling Windows PowerShell
+            // This fixes the issue where calling powershell.exe from PowerShell Core (e.g. VS Code terminal)
+            // causes module loading errors. Without clearing, the inherited PSModulePath may point to
+            // PowerShell Core module directories that are incompatible with Windows PowerShell 5.1.
+            // Clearing first ensures caller-supplied environmentVariables can explicitly override PSModulePath if needed.
+            psi.Environment["PSModulePath"] = "";
+
             if (environmentVariables is not null)
             {
                 foreach (var kvp in environmentVariables)
@@ -67,12 +74,6 @@ internal class PowerShellService : IPowerShellService
                     psi.Environment[kvp.Key] = kvp.Value;
                 }
             }
-
-            // Always clear PSModulePath to prevent PowerShell Core module conflicts when calling Windows PowerShell
-            // This fixes the issue where calling powershell.exe from PowerShell Core (e.g. VS Code terminal)
-            // causes module loading errors. Without clearing, the inherited PSModulePath may point to
-            // PowerShell Core module directories that are incompatible with Windows PowerShell 5.1.
-            psi.Environment["PSModulePath"] = "";
         }
 
         if (elevated)
