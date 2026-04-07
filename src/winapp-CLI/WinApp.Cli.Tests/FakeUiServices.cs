@@ -58,6 +58,9 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
         => Task.FromResult<UiElement?>(new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" });
+
+    public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+        => Task.FromResult<string?>("fake text content");
 }
 
 /// <summary>

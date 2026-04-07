@@ -606,6 +606,51 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
+    public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+    {
+        _logger.LogDebug("Getting text from element {ElementId}", element.Id);
+
+        var comElement = ResolveComElement(session, element);
+        if (comElement is null)
+        {
+            throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
+        }
+
+        // 1. Try TextPattern (RichEditBox, Document controls — full text with formatting support)
+        try
+        {
+            var pattern = (IUIAutomationTextPattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_TextPatternId);
+            var range = pattern.get_DocumentRange();
+            var text = range.GetText(-1);
+            if (text.Length > 0)
+            {
+                return Task.FromResult<string?>(text.ToString());
+            }
+        }
+        catch { }
+
+        // 2. Try ValuePattern (TextBox, ComboBox — simple text)
+        try
+        {
+            var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
+            var bstr = pattern.get_CurrentValue();
+            var text = bstr.ToString();
+            if (!string.IsNullOrEmpty(text))
+            {
+                return Task.FromResult<string?>(text);
+            }
+        }
+        catch { }
+
+        // 3. Fall back to element Name (static text, labels)
+        if (!string.IsNullOrEmpty(element.Name))
+        {
+            return Task.FromResult<string?>(element.Name);
+        }
+
+        return Task.FromResult<string?>(null);
+    }
+
     public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Scrolling element {ElementId} into view", element.Id);

@@ -83,3 +83,5 @@ SendInput
 GetSystemMetrics
 GetWindow
 GetClassName
+IUIAutomationTextPattern
+IUIAutomationTextRange

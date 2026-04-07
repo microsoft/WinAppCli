@@ -34,4 +34,5 @@ internal interface IUiAutomationService
     Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct);
     Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct);
+    Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
 }
