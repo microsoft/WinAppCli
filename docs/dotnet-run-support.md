@@ -154,6 +154,7 @@ cd MyApp
 dotnet run
 ```
 
+
 ### Customization
 
 Disable run support for a project:
@@ -188,6 +189,14 @@ Register identity without launching:
 ```xml
 <PropertyGroup>
   <WinAppRunNoLaunch>true</WinAppRunNoLaunch>
+</PropertyGroup>
+```
+
+
+Capture OutputDebugString messages and first-chance exceptions:
+```xml
+<PropertyGroup>
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
 </PropertyGroup>
 ```
 

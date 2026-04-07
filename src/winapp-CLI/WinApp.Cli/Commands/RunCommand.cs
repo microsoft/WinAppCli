@@ -218,6 +218,22 @@ internal partial class RunCommand : Command, IShortDescription
                 PrintJson(aumid, processId, errorMessage: null);
             }
 
+            // --debug-output: run the debug event loop instead of plain WaitForExit.
+            // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
+            if (debugOutput)
+            {
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                }
+                if (unregisterOnExit && packageName != null)
+                {
+                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                }
+                return exitCode;
+            }
+
             // Wait for the launched process to exit before returning.
             // The process may have already exited by the time we get here (common for
             // fast-starting apps), in which case GetProcessById throws ArgumentException.

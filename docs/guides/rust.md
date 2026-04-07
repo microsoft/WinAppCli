@@ -164,10 +164,15 @@ Once you're ready to distribute your app, you can package it as an MSIX using th
 First, build your application in release mode for optimal performance:
 
 ```powershell
+winapp manifest add-alias
+```
+
+
+```powershell
 cargo build --release
 ```
 
-Then, create a directory to hold your package files and copy your release executable.
+Then, create a directoryto hold your package files and copy your release executable.
 
 ```powershell
 mkdir dist

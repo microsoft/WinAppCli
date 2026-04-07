@@ -119,7 +119,7 @@
                 "type": "string",
                 "description": "Directory containing the app binaries passed to 'winapp run'. Defaults to the workspace root. Set this when the manifest is not co-located with the build output (e.g. manifest at root, binaries in bin/Debug/)."
               },
-              "workingDirectory": {
+              "workingDirectory":{
                 "type": "string",
                 "description": "Working directory for the application"
               },
