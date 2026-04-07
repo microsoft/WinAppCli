@@ -69,11 +69,10 @@ internal class PowerShellService : IPowerShellService
             }
 
             // Always clear PSModulePath to prevent PowerShell Core module conflicts when calling Windows PowerShell
-            // This fixes the issue where calling powershell.exe from PowerShell Core causes module loading errors
-            if (!psi.Environment.ContainsKey("PSModulePath"))
-            {
-                psi.Environment["PSModulePath"] = "";
-            }
+            // This fixes the issue where calling powershell.exe from PowerShell Core (e.g. VS Code terminal)
+            // causes module loading errors. Without clearing, the inherited PSModulePath may point to
+            // PowerShell Core module directories that are incompatible with Windows PowerShell 5.1.
+            psi.Environment["PSModulePath"] = "";
         }
 
         if (elevated)

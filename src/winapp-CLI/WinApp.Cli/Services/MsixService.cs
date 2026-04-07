@@ -2864,7 +2864,8 @@ $1");
         try
         {
             // First check if package exists
-            var checkCommand = $"Get-AppxPackage -Name '{packageName}'";
+            var escapedPackageName = packageName.Replace("'", "''");
+            var checkCommand = $"Get-AppxPackage -Name '{escapedPackageName}'";
             var (_, checkResult, _) = await powerShellService.RunCommandAsync(checkCommand, taskContext, cancellationToken: cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(checkResult))
@@ -2872,7 +2873,7 @@ $1");
                 // Package exists, remove it
                 taskContext.AddDebugMessage($"{UiSymbols.Package} Found existing package '{packageName}', removing it...");
 
-                var unregisterCommand = $"Get-AppxPackage -Name '{packageName}' | Remove-AppxPackage";
+                var unregisterCommand = $"Get-AppxPackage -Name '{escapedPackageName}' | Remove-AppxPackage";
                 await powerShellService.RunCommandAsync(unregisterCommand, taskContext, cancellationToken: cancellationToken);
 
                 taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully");
@@ -2903,7 +2904,12 @@ $1");
     {
         taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering sparse package with external location...");
 
-        var registerCommand = $"Add-AppxPackage -Path '{manifestPath.FullName}' -ExternalLocation '{externalLocation.FullName}' -Register -ForceUpdateFromAnyVersion";
+        // Use -Path and -ExternalLocation for sparse package registration (do NOT use -Register,
+        // which is for loose-layout/development packages and causes the deployment stack to look for
+        // referenced files relative to the manifest directory instead of the external location).
+        var escapedManifestPath = manifestPath.FullName.Replace("'", "''");
+        var escapedExternalLocation = externalLocation.FullName.Replace("'", "''");
+        var registerCommand = $"Add-AppxPackage -Path '{escapedManifestPath}' -ExternalLocation '{escapedExternalLocation}' -ForceUpdateFromAnyVersion";
 
         try
         {
@@ -2931,7 +2937,8 @@ $1");
     {
         taskContext.AddDebugMessage($"{UiSymbols.Clipboard} Registering loose layout package...");
 
-        var registerCommand = $"Add-AppxPackage -Register '{manifestPath.FullName}'";
+        var escapedManifestPath = manifestPath.FullName.Replace("'", "''");
+        var registerCommand = $"Add-AppxPackage -Register '{escapedManifestPath}'";
 
         try
         {
