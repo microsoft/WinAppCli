@@ -211,15 +211,25 @@ internal class WorkspaceSetupService(
         var installWinAppPackage = false;
         if (isDotNetProject && csprojFile != null)
         {
-            installWinAppPackage = await ShowConfirmationPromptAsync(
-                ansiConsole,
-                $"Install {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
-                cancellationToken);
-
-            if (!installWinAppPackage)
+var hasWinAppPackage = await dotNetService.HasPackageReferenceAsync(
+                csprojFile,
+                DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+            if (hasWinAppPackage)
             {
-                logger.LogWarning("{UISymbol} Skipped {Package} — packaged app support via 'dotnet run' will not be available",
-                    UiSymbols.Warning, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                logger.LogDebug("{UISymbol} {Package} already referenced by project; skipping install prompt",
+                    UiSymbols.Skip, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+            }
+            else
+            {
+                installWinAppPackage = await ShowConfirmationPromptAsync(
+                    ansiConsole,
+                    $"Install {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
+                    cancellationToken);
+                if (!installWinAppPackage)
+                {
+                    logger.LogWarning("{UISymbol} Skipped {Package} — packaged app support via 'dotnet run' will not be available",
+                        UiSymbols.Warning, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                }
             }
         }
 
