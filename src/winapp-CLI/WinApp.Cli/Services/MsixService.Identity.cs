@@ -88,8 +88,8 @@ internal partial class MsixService
             var entryPointDir = Path.GetDirectoryName(entryPointPath);
             var externalLocation = new DirectoryInfo(string.IsNullOrEmpty(entryPointDir) ? currentDirectoryProvider.GetCurrentDirectory() : entryPointDir);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken: cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterSparsePackageAsync(debugManifestPath, externalLocation, taskContext, cancellationToken);
@@ -98,7 +98,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -146,8 +146,8 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register from the AppX layout directory
             var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
@@ -252,8 +252,8 @@ internal partial class MsixService
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -767,19 +767,21 @@ internal partial class MsixService
     /// Checks if a package with the given name exists and unregisters it if found
     /// </summary>
     /// <param name="packageName">The name of the package to check and unregister</param>
+    /// <param name="taskContext">Task context for debug output</param>
+    /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
         try
         {
-            var removed = await packageRegistrationService.UnregisterAsync(packageName, cancellationToken);
+            var removed = await packageRegistrationService.UnregisterAsync(packageName, preserveAppData, cancellationToken);
 
             if (removed)
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully");
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully{(preserveAppData ? " (app data preserved)" : "")}");
             }
             else
             {

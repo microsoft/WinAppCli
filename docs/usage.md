@@ -325,7 +325,16 @@ winapp run <input-folder> [options]
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
-- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`.
+- `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
+- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
+- `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
+- `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
+
+**Application data persistence:**
+
+By default, `winapp run` preserves your application's data (`LocalState`, `RoamingState`, `Settings`, etc.) when re-deploying. If your app writes data to `ApplicationData.Current.LocalFolder` or `Environment.GetFolderPath(SpecialFolder.LocalApplicationData)` within the package context, that data will survive across `winapp run` invocations.
+
+Use `--clean` when you need a fresh start (e.g., to reset corrupted state or test first-run behavior).
 
 **What it does:**
 
@@ -352,6 +361,77 @@ winapp run ./bin/Debug --no-launch
 
 # Launch via execution alias (console apps run in current terminal)
 winapp run ./bin/Debug --with-alias
+
+# Launch and capture OutputDebugString messages and first-chance exceptions
+winapp run ./bin/Debug --debug-output
+
+# Combine with execution alias to debug console apps inline
+winapp run ./bin/Debug --with-alias --debug-output
+
+# Run and automatically clean up registration on exit
+winapp run ./bin/Debug --with-alias --unregister-on-exit
+
+# Wipe application data (LocalState, settings) and start fresh
+winapp run ./bin/Debug --clean
+```
+
+**MSBuild properties (NuGet package):**
+
+When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
+| `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
+| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
+| `WinAppRunNoLaunch` | `false` | Only register identity without launching |
+| `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
+
+```xml
+<PropertyGroup>
+  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
+</PropertyGroup>
+```
+
+---
+
+### unregister
+
+Unregister a sideloaded development package. Only removes packages that were registered in development mode (e.g., via `winapp run` or `create-debug-identity`). Store-installed or MSIX-installed packages are never removed.
+
+```bash
+winapp unregister [options]
+```
+
+**Options:**
+
+- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from current directory)
+- `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
+- `--json` - Format output as JSON
+
+**What it does:**
+
+- Reads the package name from the manifest
+- Searches for both `{name}` and `{name}.debug` packages (the debug variant is created by `create-debug-identity`)
+- Verifies each package was registered in development mode (`IsDevelopmentMode == true`)
+- Verifies the package's install location is under the current directory tree (unless `--force`)
+- Unregisters matching packages
+
+**Examples:**
+
+```bash
+# Unregister from current directory (auto-detects manifest)
+winapp unregister
+
+# Unregister with explicit manifest
+winapp unregister --manifest ./appxmanifest.xml
+
+# Force unregister even if registered from a different project tree
+winapp unregister --force
+
+# JSON output for scripting
+winapp unregister --json
 ```
 
 ---

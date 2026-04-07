@@ -149,6 +149,34 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
 
+    [TestMethod]
+    public void ParseOptions_Clean_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--clean"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.CleanOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_CleanNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.CleanOption));
+    }
+
     #endregion
 
     #region Handler tests
@@ -166,7 +194,40 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsFalse(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "Default run should preserve app data (clean=false)");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "Application should NOT be launched with --no-launch");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithClean_PassesCleanThroughToMsixService()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch", "--clean"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsTrue(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "--clean should be passed through to MSIX service");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithoutClean_DefaultsToPreservingAppData()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsFalse(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "Without --clean, app data should be preserved");
     }
 
     [TestMethod]
@@ -199,7 +260,7 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
-        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0], subFolder.FullName,
+        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0].ManifestPath, subFolder.FullName,
             "Manifest should be resolved from the input folder");
     }
 
@@ -217,7 +278,7 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
-        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0], manifest.FullName,
+        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0].ManifestPath, manifest.FullName,
             "Explicit --manifest should take priority");
     }
 

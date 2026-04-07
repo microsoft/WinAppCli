@@ -301,6 +301,33 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 
 ---
 
+### `run()`
+
+Creates packaged layout, registers the Application, and launches the packaged application.
+
+```typescript
+function run(options: RunOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `inputFolder` | `string` | Yes | Input folder containing the app to run |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
+| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |
+| `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
+| `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. |
+| `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
+| `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `sign()`
 
 Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.
@@ -822,6 +849,24 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
 | `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `RunOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `inputFolder` | `string` | Yes | Input folder containing the app to run |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
+| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |
+| `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
+| `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. |
+| `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
+| `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
