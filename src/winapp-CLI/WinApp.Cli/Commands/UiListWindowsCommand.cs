@@ -110,7 +110,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 foreach (var w in windows)
                 {
                     var procName = GetProcessNameSafe(w.Pid);
-                    var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title.Replace("[", "[[").Replace("]", "]]");
+                    var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
                     var fg = w.Hwnd == foregroundHwnd ? ", [green]foreground[/]" : "";
                     var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";

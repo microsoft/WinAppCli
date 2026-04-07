@@ -81,12 +81,12 @@ internal sealed class UiSessionService(
 
         // Build colored warning with metadata for each window
         var reason = foreground != default ? "Auto-selected the foreground window" : "Auto-selected the largest window";
-        ansiConsole.MarkupLine($"[yellow]⚠  Multiple windows for '{app.Replace("[", "[[").Replace("]", "]]")}'. {reason}.[/]");
+        ansiConsole.MarkupLine($"[yellow]⚠  Multiple windows for '{Markup.Escape(app)}'. {reason}.[/]");
 
         foreach (var w in windows)
         {
             var info = GetWindowInfo(w.Hwnd);
-            var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title.Replace("[", "[[").Replace("]", "]]");
+            var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
             var fg = w.Hwnd == (nint)foregroundHwnd ? ", [green]foreground[/]" : "";
             var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
 

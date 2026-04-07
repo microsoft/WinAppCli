@@ -120,6 +120,6 @@ internal class UiSearchCommand : Command, IShortDescription
             }
         }
 
-        private static string EscapeMarkup(string text) => text.Replace("[", "[[").Replace("]", "]]");
+        private static string EscapeMarkup(string text) => Markup.Escape(text);
     }
 }

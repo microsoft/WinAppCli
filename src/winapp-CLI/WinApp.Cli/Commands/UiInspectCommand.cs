@@ -151,7 +151,7 @@ internal class UiInspectCommand : Command, IShortDescription
             }
         }
 
-        private static string EscapeMarkup(string text) => text.Replace("[", "[[").Replace("]", "]]");
+        private static string EscapeMarkup(string text) => Markup.Escape(text);
 
         private static readonly HashSet<string> InteractiveTypes = new(StringComparer.OrdinalIgnoreCase)
         {
