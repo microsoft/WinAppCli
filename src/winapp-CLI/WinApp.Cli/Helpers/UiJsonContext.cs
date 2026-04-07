@@ -17,6 +17,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiInspectResult))]
 [JsonSerializable(typeof(UiSearchResult))]
 [JsonSerializable(typeof(UiPropertyResult))]
+[JsonSerializable(typeof(Dictionary<string, string?>))]
 [JsonSerializable(typeof(UiInvokeResult))]
 [JsonSerializable(typeof(UiClickResult))]
 [JsonSerializable(typeof(UiScreenshotResult))]
@@ -57,7 +58,7 @@ internal sealed class UiSearchResult
 internal sealed class UiPropertyResult
 {
     public string ElementId { get; set; } = "";
-    public Dictionary<string, object?> Properties { get; set; } = [];
+    public Dictionary<string, string?> Properties { get; set; } = [];
 }
 
 internal sealed class UiInvokeResult
