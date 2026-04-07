@@ -62,10 +62,10 @@ internal class UiGetFocusedCommand : Command, IShortDescription
                 {
                     var sel = element.Selector ?? element.Id;
                     var displayName = element.Name ?? element.AutomationId;
-                    var name = displayName is not null ? $" \"{displayName}\"" : "";
+                    var name = displayName is not null && displayName != sel ? $" \"{displayName}\"" : "";
                     var value = element.Value is not null && element.Value != element.Name ? $" value=\"{element.Value}\"" : "";
                     var bounds = element.Width > 0 ? $" ({element.X},{element.Y} {element.Width}x{element.Height})" : "";
-                    ansiConsole.WriteLine($"{sel} {element.Type}{name}{value}{bounds}");
+                    ansiConsole.WriteLine($"[{sel}] {element.Type}{name}{value}{bounds}");
                 }
 
                 logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");

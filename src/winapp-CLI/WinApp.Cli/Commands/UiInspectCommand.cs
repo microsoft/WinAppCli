@@ -108,12 +108,14 @@ internal class UiInspectCommand : Command, IShortDescription
                 }
                 else
                 {
+                    ansiConsole.WriteLine("# [selector] Type \"Name\" value=\"...\" [state] (x,y WxH)");
+                    ansiConsole.WriteLine("# Selectors: AutomationId (stable) or slug (generated, may go stale). Use selector with other ui commands.");
                     foreach (var el in elements)
                     {
                         var indent = new string(' ', el.Depth * 2);
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
-                        var name = displayName is not null ? $" \"{displayName}\"" : "";
+                        var name = displayName is not null && displayName != elSelector ? $" \"{displayName}\"" : "";
                         var value = el.Value is not null && el.Value != el.Name ? $" value=\"{el.Value}\"" : "";
                         var toggle = el.ToggleState is not null ? $" [{el.ToggleState}]" : "";
                         var expand = el.ExpandState is not null ? $" [{el.ExpandState}]" : "";
@@ -121,7 +123,7 @@ internal class UiInspectCommand : Command, IShortDescription
                         var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
                         var disabled = el.IsEnabled ? "" : " [disabled]";
                         var offscreen = el.IsOffscreen ? " [offscreen]" : "";
-                        ansiConsole.WriteLine($"{indent}{elSelector} {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
+                        ansiConsole.WriteLine($"{indent}[{elSelector}] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
                     }
                 }
 

@@ -51,12 +51,12 @@ winapp ui invoke Submit -a myapp
 ```
 
 ## Key concepts
-- **Semantic slugs**: `inspect` and `search` output shell-safe slugs like `btn-minimize-d1a0`, `itm-samples-3f2c`. Format: `prefix-name-hash`. No special characters — works unquoted in any shell.
+- **Selector brackets**: `inspect` and `search` output shows selectors in `[brackets]` — use the bracketed value with other `ui` commands. Selectors are either AutomationId (stable, developer-set) or generated slug (e.g., `btn-name-hash`).
+- **AutomationId selectors**: When an element has a unique AutomationId, it becomes the selector directly (e.g., `[MinimizeButton]`). These survive layout changes and localization — preferred for stable targeting.
+- **Slug selectors**: When no unique AutomationId exists, a generated slug is used (e.g., `[btn-close-a2b3]`). Format: `prefix-name-hash`. May go stale after UI changes.
 - **Plain text search**: `search` and `invoke` accept plain text — `search Minimize` finds elements with "Minimize" in their Name or AutomationId (substring, case-insensitive). No special syntax needed.
-- **Two ways to target**: Use **slugs** from inspect/search output (exact, hash-validated) or **plain text** (fuzzy, may need disambiguation).
-- **AutomationId for stability**: When building apps, set `AutomationProperties.AutomationId` on important controls. AutomationIds survive layout changes, name localization, and tree restructuring — making them the most reliable selectors. Slugs incorporate AutomationId when available.
 - **`--interactive` flag**: Filters to invokable elements only with auto-depth 8 — the fastest way to see what you can click
-- **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its slug
+- **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its selector
 - **`;` chaining**: Chain commands with `;` to run multiple operations in one call, reducing agent round-trips
 - **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting
 - **Element markers**: `[on]`/`[off]` for toggles, `[collapsed]`/`[expanded]`, `[scroll:v]`/`[scroll:h]`/`[scroll:vh]` for scrollable containers, `[offscreen]`, `[disabled]`, `value="..."` for editable elements

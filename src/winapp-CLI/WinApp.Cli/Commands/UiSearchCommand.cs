@@ -84,19 +84,19 @@ internal class UiSearchCommand : Command, IShortDescription
                     {
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
-                        var name = displayName is not null ? $" \"{displayName}\"" : "";
+                        var name = displayName is not null && displayName != elSelector ? $" \"{displayName}\"" : "";
                         var value = el.Value is not null && el.Value != el.Name ? $" value=\"{el.Value}\"" : "";
                         var toggle = el.ToggleState is not null ? $" [{el.ToggleState}]" : "";
                         var expand = el.ExpandState is not null ? $" [{el.ExpandState}]" : "";
                         var scroll = el.ScrollDir is not null ? $" [scroll:{el.ScrollDir}]" : "";
                         var bounds = el.Width > 0 ? $" ({el.X},{el.Y} {el.Width}x{el.Height})" : "";
-                        ansiConsole.WriteLine($"  {elSelector} {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}");
+                        ansiConsole.WriteLine($"  [{elSelector}] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}");
 
                         if (el.InvokableAncestor is { } ancestor)
                         {
                             var ancestorSel = ancestor.Selector ?? ancestor.Id;
                             var aName = ancestor.Name is not null ? $" \"{ancestor.Name}\"" : "";
-                            ansiConsole.WriteLine($"        ^ invoke via: {ancestorSel}{aName}");
+                            ansiConsole.WriteLine($"        ^ invoke via: [{ancestorSel}]{aName}");
                         }
                     }
                 }

@@ -65,30 +65,37 @@ Use `-a` for discovery, `-w` for stable targeting. When `-a` matches multiple wi
 
 ## Selectors
 
-Target elements by semantic slug, control type, or plain-text matching against element
-name/AutomationId:
+Target elements using the selector shown in `[brackets]` in inspect/search output.
+There are three types of selectors:
 
 | Selector | Meaning | Example |
 |---|---|---|
-| `btn-minimize-d1a0` | Semantic slug from inspect output (preferred, exact element identity) | `winapp ui invoke btn-minimize-d1a0 -a myapp` |
-| `Button` | Type=Button | `winapp ui search Button -a myapp` |
-| `Submit` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui invoke Submit -a myapp` |
-| `SearchBox` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui search SearchBox -a myapp` |
-| `hello` | Plain-text match against Name/AutomationId (case-insensitive substring) | `winapp ui search "hello" -a myapp` |
+| `MinimizeButton` | AutomationId (shown when unique — stable, preferred) | `winapp ui invoke MinimizeButton -a myapp` |
+| `btn-close-d1a0` | Semantic slug (shown when no unique AutomationId) | `winapp ui invoke btn-close-d1a0 -a myapp` |
+| `Submit` | Plain-text search against Name/AutomationId (case-insensitive substring) | `winapp ui invoke Submit -a myapp` |
 
-Legacy selector prefixes such as `#Submit`, `$SearchBox`, and index suffixes like `[1]`
-are not parsed specially by the current UIA selector implementation. Use semantic slugs
-from `inspect`/`search` output for precise targeting, or use plain text/type selectors.
+**AutomationId selectors** are developer-set identifiers (`AutomationProperties.AutomationId` in XAML).
+When an AutomationId is unique across the entire UI tree, `inspect` and `search` show it directly
+as the selector — these survive layout changes, localization, and tree restructuring.
 
-> **Tip — use AutomationId for stable targeting:** Set `AutomationProperties.AutomationId` on
-> important controls in your XAML. AutomationIds survive layout changes, name localization, and
-> control tree restructuring — making them the most reliable way to target elements across sessions.
-> Slugs incorporate AutomationId when available (e.g., `txt-searchbox-e5f6` where `searchbox` comes
-> from `AutomationProperties.AutomationId="searchBox"`).
+**Slug selectors** (e.g., `btn-close-d1a0`) are generated when no unique AutomationId exists.
+Format: `prefix-name-hash`. The hash validates element identity but may go stale after UI changes.
 
-### Semantic slugs in output
+### Inspect output format
 
-The `inspect` and `search` commands output **semantic slugs** (e.g., `btn-minimize-d1a0`, `itm-samples-3f2c`, `btn-close-d1a2`). Format: `prefix-normalizedname-hash` where:
+The `inspect` command shows a 2-line header followed by the element tree:
+```
+# [selector] Type "Name" value="..." [state] (x,y WxH)
+# Selectors: AutomationId (stable) or slug (generated, may go stale). Use selector with other ui commands.
+[MinimizeButton] Button "Minimize" (100,20 30x30)
+[SearchBox] Edit "Search" value="" (200,50 300x30)
+  [btn-close-a2b3] Button "Close" (100,20 30x30)
+  [lbl-c8a3] Text "Welcome" (50,100 200x20)
+```
+
+### Semantic slugs
+
+Slugs use the format: `prefix-normalizedname-hash` where:
 - **prefix** — 3-letter type abbreviation (btn, txt, chk, cmb, itm, tab, img, lbl, pn, win, grp, lnk, mnu, etc.)
 - **normalizedname** — lowercase alphanumeric from AutomationId (preferred) or Name, max 15 chars
 - **hash** — 4-char hex hash of the element's RuntimeId (validates element identity)

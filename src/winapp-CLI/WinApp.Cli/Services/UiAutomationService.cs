@@ -125,6 +125,10 @@ internal sealed partial class UiAutomationService : IUiAutomationService
 
         var elements = new List<UiElement>();
         WalkTree(startElement, depth, 0, "", elements, ref nextElementId);
+
+        // Promote unique AutomationIds to selectors (more stable than slugs)
+        PromoteUniqueAutomationIds(root, elements);
+
         var result = elements.ToArray();
         return Task.FromResult(result);
     }
@@ -214,6 +218,10 @@ internal sealed partial class UiAutomationService : IUiAutomationService
 
         // Reverse so root is first, target is last
         ancestors.Reverse();
+
+        // Promote unique AutomationIds to selectors (more stable than slugs)
+        PromoteUniqueAutomationIds(root, ancestors);
+
         var result = ancestors.ToArray();
         return Task.FromResult(result);
     }
@@ -268,6 +276,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             }
         }
 
+        // Promote unique AutomationIds to selectors (more stable than slugs)
+        PromoteUniqueAutomationIds(root, results);
+
         return Task.FromResult(results);
     }
 
@@ -285,6 +296,20 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         if (selector.IsSlug)
         {
             return Task.FromResult(FindElementBySlug(selector.Slug!, root));
+        }
+
+        // Try exact AutomationId match first (fast, unambiguous — used when inspect promoted a unique AutomationId)
+        if (selector.Query is not null)
+        {
+            var exactAidCondition = _automation.CreatePropertyCondition(
+                UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                ComVariant.Create(selector.Query));
+            var exactMatch = root.FindFirst(TreeScope.TreeScope_Descendants, exactAidCondition);
+            if (exactMatch is not null)
+            {
+                var nextId = 0;
+                return Task.FromResult<UiElement?>(ToUiElement(exactMatch, "", ref nextId));
+            }
         }
 
         var condition = BuildCondition(selector);
@@ -1389,6 +1414,70 @@ child = next;
             ScrollDir = scrollDir,
             Selector = selector,
         };
+    }
+
+    /// <summary>
+    /// Promotes unique AutomationIds to selectors. When an element's AutomationId is unique
+    /// across the full UIA tree, use it directly as the selector instead of a generated slug.
+    /// AutomationIds are developer-set, stable across layout changes, and more readable.
+    /// </summary>
+    private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements)
+    {
+        // Collect AutomationIds from the inspected elements that could be promoted
+        var candidateAids = new HashSet<string>();
+        foreach (var el in elements)
+        {
+            if (el.AutomationId is not null)
+            {
+                candidateAids.Add(el.AutomationId);
+            }
+        }
+
+        if (candidateAids.Count == 0)
+        {
+            return;
+        }
+
+        // Build frequency map from the FULL tree to check global uniqueness
+        var aidCounts = new Dictionary<string, int>();
+        try
+        {
+            var allElements = root.FindAll(
+                TreeScope.TreeScope_Descendants,
+                _automation.CreateTrueCondition());
+
+            if (allElements is not null)
+            {
+                var count = allElements.get_Length();
+                for (var i = 0; i < count; i++)
+                {
+                    try
+                    {
+                        var aid = SafeGetBstr(() => allElements.GetElement(i).get_CurrentAutomationId());
+                        if (aid is not null && candidateAids.Contains(aid))
+                        {
+                            aidCounts[aid] = aidCounts.GetValueOrDefault(aid) + 1;
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("AutomationId uniqueness check failed: {Message}", ex.Message);
+            return;
+        }
+
+        // Promote elements with globally unique AutomationIds
+        foreach (var el in elements)
+        {
+            if (el.AutomationId is not null &&
+                aidCounts.TryGetValue(el.AutomationId, out var count) && count == 1)
+            {
+                el.Selector = el.AutomationId;
+            }
+        }
     }
 
 
