@@ -1,7 +1,7 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.2.2
+version: 0.2.1
 ---
 ## When to use
 
@@ -23,8 +23,6 @@ npm install --save-dev @microsoft/winappcli
 ```
 
 You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
-
-> **Already have a `Package.appxmanifest`?** .NET projects that already have a packaging manifest (e.g., WinUI 3 apps or projects with an existing MSIX packaging setup) likely **don't need `winapp init`**. Ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>`). WinUI 3 apps created from Visual Studio templates are typically already fully configured — you can go straight to building and using `winapp run` or `winapp package`.
 
 ## Key concepts
 
@@ -94,10 +92,6 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
-
-# Launch and capture OutputDebugString messages and first-chance exceptions
-# Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
-winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
@@ -120,7 +114,6 @@ For console apps, add `--with-alias` to preserve stdin/stdout in the current ter
 > **`--debug-output` caveat:** Captures `OutputDebugString` but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger.
 
 For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
-
 
 ## Recommended workflow
 

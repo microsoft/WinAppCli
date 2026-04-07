@@ -72,7 +72,7 @@ function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
+| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
 | `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
@@ -208,6 +208,26 @@ function init(options?: InitOptions): Promise<WinappResult>
 
 ---
 
+### `manifestAddAlias()`
+
+Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+
+```typescript
+function manifestAddAlias(options?: ManifestAddAliasOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `appId` | `string \| undefined` | No | Application Id to add the alias to (default: first Application element) |
+| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
+| `name` | `string \| undefined` | No | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `manifestGenerate()`
 
 Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
@@ -247,7 +267,7 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `imagePath` | `string` | Yes | Path to source image file |
-| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml file (default: search current directory) |
+| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -255,7 +275,7 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ### `packageApp()`
 
-Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
+Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
 
 ```typescript
 function packageApp(options: PackageOptions): Promise<WinappResult>
@@ -301,12 +321,12 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 
 ---
 
-### `run()`
+### `runApp()`
 
 Creates packaged layout, registers the Application, and launches the packaged application.
 
 ```typescript
-function run(options: RunOptions): Promise<WinappResult>
+function runApp(options: RunOptions): Promise<WinappResult>
 ```
 
 **Options:**
@@ -380,6 +400,26 @@ function tool(options?: ToolOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `toolArgs` | `string[] \| undefined` | No | Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `unregister()`
+
+Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').
+
+```typescript
+function unregister(options?: UnregisterOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from current directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -715,7 +755,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `install` | `boolean \| undefined` | No | Install the certificate to the local machine store after generation |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml file to extract publisher information from |
+| `manifest` | `string \| undefined` | No | Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
 | `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
@@ -796,6 +836,17 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `ManifestAddAliasOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `appId` | `string \| undefined` | No | Application Id to add the alias to (default: first Application element) |
+| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
+| `name` | `string \| undefined` | No | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `ManifestGenerateOptions`
 
 | Property | Type | Required | Description |
@@ -818,7 +869,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `imagePath` | `string` | Yes | Path to source image file |
-| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml file (default: search current directory) |
+| `manifest` | `string \| undefined` | No | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -897,6 +948,17 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `toolArgs` | `string[] \| undefined` | No | Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UnregisterOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from current directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

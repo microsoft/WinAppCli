@@ -355,6 +355,7 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
+  'run': 'runApp', // `run` collides with the internal run() helper
 };
 
 function getFunctionName(cmdPath) {

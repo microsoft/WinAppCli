@@ -41,6 +41,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAppLauncherService, AppLauncherService>()
             .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
             .AddSingleton<IDebugOutputService, DebugOutputService>()
+            .AddSingleton<IPriService, PriService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();

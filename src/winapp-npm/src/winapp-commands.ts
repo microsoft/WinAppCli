@@ -60,7 +60,7 @@ function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
   return opts.cwd ? { cwd: opts.cwd } : {};
 }
 
-async function execCommand(args: string[], opts: CommonOptions): Promise<WinappResult> {
+async function run(args: string[], opts: CommonOptions): Promise<WinappResult> {
   pushCommon(args, opts);
   const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(opts));
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
@@ -79,7 +79,7 @@ export interface CertGenerateOptions extends CommonOptions {
   install?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to appxmanifest.xml file to extract publisher information from */
+  /** Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from */
   manifest?: string;
   /** Output path for the generated PFX file */
   output?: string;
@@ -105,7 +105,7 @@ export async function certGenerate(options: CertGenerateOptions = {}): Promise<W
   if (options.password) args.push('--password', options.password);
   if (options.publisher) args.push('--publisher', options.publisher);
   if (options.validDays !== undefined) args.push('--valid-days', options.validDays.toString());
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ export async function certInfo(options: CertInfoOptions): Promise<WinappResult> 
   args.push(options.certPath);
   if (options.json) args.push('--json');
   if (options.password) args.push('--password', options.password);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ export async function certInstall(options: CertInstallOptions): Promise<WinappRe
   args.push(options.certPath);
   if (options.force) args.push('--force');
   if (options.password) args.push('--password', options.password);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ export async function createDebugIdentity(options: CreateDebugIdentityOptions = 
   if (options.keepIdentity) args.push('--keep-identity');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noInstall) args.push('--no-install');
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
   if (options.output) args.push('--output', options.output);
   if (options.recursive) args.push('--recursive');
   if (options.usePageHashes) args.push('--use-page-hashes');
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ export interface GetWinappPathOptions extends CommonOptions {
 export async function getWinappPath(options: GetWinappPathOptions = {}): Promise<WinappResult> {
   const args: string[] = ['get-winapp-path'];
   if (options.global) args.push('--global');
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +267,31 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.noGitignore) args.push('--no-gitignore');
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.useDefaults) args.push('--use-defaults');
-  return execCommand(args, options);
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// manifest add-alias
+// ---------------------------------------------------------------------------
+
+export interface ManifestAddAliasOptions extends CommonOptions {
+  /** Application Id to add the alias to (default: first Application element) */
+  appId?: string;
+  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
+  manifest?: string;
+  /** Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. */
+  name?: string;
+}
+
+/**
+ * Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+ */
+export async function manifestAddAlias(options: ManifestAddAliasOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['manifest', 'add-alias'];
+  if (options.appId) args.push('--app-id', options.appId);
+  if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.name) args.push('--name', options.name);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +333,7 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
   if (options.publisherName) args.push('--publisher-name', options.publisherName);
   if (options.template) args.push('--template', options.template);
   if (options.version) args.push('--version', options.version);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +343,7 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
 export interface ManifestUpdateAssetsOptions extends CommonOptions {
   /** Path to source image file */
   imagePath: string;
-  /** Path to AppxManifest.xml file (default: search current directory) */
+  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
   manifest?: string;
 }
 
@@ -330,7 +354,7 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
   const args: string[] = ['manifest', 'update-assets'];
   args.push(options.imagePath);
   if (options.manifest) args.push('--manifest', options.manifest);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -365,7 +389,7 @@ export interface PackageOptions extends CommonOptions {
 }
 
 /**
- * Create MSIX installer from your built app. Run after building your app. appxmanifest.xml is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
+ * Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];
@@ -381,7 +405,7 @@ export async function packageApp(options: PackageOptions): Promise<WinappResult>
   if (options.publisher) args.push('--publisher', options.publisher);
   if (options.selfContained) args.push('--self-contained');
   if (options.skipPri) args.push('--skip-pri');
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +426,7 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
   const args: string[] = ['restore'];
   if (options.baseDirectory) args.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +459,7 @@ export interface RunOptions extends CommonOptions {
 /**
  * Creates packaged layout, registers the Application, and launches the packaged application.
  */
-export async function run(options: RunOptions): Promise<WinappResult> {
+export async function runApp(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
   if (options.args) args.push('--args', options.args);
@@ -447,7 +471,7 @@ export async function run(options: RunOptions): Promise<WinappResult> {
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -474,7 +498,7 @@ export async function sign(options: SignOptions): Promise<WinappResult> {
   args.push(options.certPath);
   if (options.password) args.push('--password', options.password);
   if (options.timestamp) args.push('--timestamp', options.timestamp);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -492,7 +516,7 @@ export interface StoreOptions extends CommonOptions {
 export async function store(options: StoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['store'];
   if (options.storeArgs) args.push(...options.storeArgs);
-  return execCommand(args, options);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +536,31 @@ export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   if (options.toolArgs && options.toolArgs.length > 0) {
     args.push('--', ...options.toolArgs);
   }
-  return execCommand(args, options);
+  return run(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// unregister
+// ---------------------------------------------------------------------------
+
+export interface UnregisterOptions extends CommonOptions {
+  /** Skip the install-location directory check and unregister even if the package was registered from a different project tree */
+  force?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Path to the appxmanifest.xml (default: auto-detect from current directory) */
+  manifest?: string;
+}
+
+/**
+ * Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').
+ */
+export async function unregister(options: UnregisterOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['unregister'];
+  if (options.force) args.push('--force');
+  if (options.json) args.push('--json');
+  if (options.manifest) args.push('--manifest', options.manifest);
+  return run(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -530,5 +578,5 @@ export interface UpdateOptions extends CommonOptions {
 export async function update(options: UpdateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['update'];
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
-  return execCommand(args, options);
+  return run(args, options);
 }
