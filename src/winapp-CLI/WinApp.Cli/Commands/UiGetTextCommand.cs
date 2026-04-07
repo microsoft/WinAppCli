@@ -86,7 +86,8 @@ internal class UiGetTextCommand : Command, IShortDescription
                 }
                 else
                 {
-                    ansiConsole.WriteLine(text);
+                    // Strip carriage returns (Windows line endings → Unix) but preserve newlines
+                    ansiConsole.WriteLine(text.Replace("\r\n", "\n").TrimEnd('\r', '\n'));
                 }
 
                 return 0;

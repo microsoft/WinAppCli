@@ -81,6 +81,8 @@ internal class UiGetPropertyCommand : Command, IShortDescription
                     foreach (var kvp in props)
                     {
                         var value = kvp.Value?.ToString() ?? "(null)";
+                        // Sanitize control characters for single-line display
+                        value = value.Replace("\r\n", "↵").Replace("\r", "↵").Replace("\n", "↵").Replace("\t", "→");
                         ansiConsole.WriteLine($"  {kvp.Key}: {value}");
                     }
                 }
