@@ -312,19 +312,6 @@ internal class WorkspaceSetupService(
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Added default RuntimeIdentifier");
                     }
 
-                    if (installWinAppPackage)
-                    {
-                        if (await dotNetService.EnsureEnableMsixToolingAsync(csprojFile, cancellationToken))
-                        {
-                            taskContext.AddDebugMessage($"{UiSymbols.Check} Enabled MSIX tooling");
-                        }
-
-                        if (await dotNetService.RemoveWindowsPackageTypeNoneAsync(csprojFile, cancellationToken))
-                        {
-                            taskContext.AddStatusMessage($"{UiSymbols.Check} Removed WindowsPackageType=None to enable packaged app mode");
-                        }
-                    }
-
                     // Build dynamic package list: build tools are always needed,
                     // Windows App SDK is only added when the user chose to install SDKs
                     var packages = new List<(string Name, bool Required)>
@@ -334,7 +321,7 @@ internal class WorkspaceSetupService(
 
                     if (installWinAppPackage)
                     {
-                        packages.Add((DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, false));
+                        packages.Add((DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, true));
                     }
 
                     if (options.SdkInstallMode != SdkInstallMode.None)
@@ -422,6 +409,20 @@ internal class WorkspaceSetupService(
                     if (partialResult.Item1 != 0)
                     {
                         return partialResult;
+                    }
+
+                    // Apply MSIX csproj properties after confirming WinApp package was successfully installed
+                    if (installWinAppPackage)
+                    {
+                        if (await dotNetService.EnsureEnableMsixToolingAsync(csprojFile, cancellationToken))
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} Enabled MSIX tooling");
+                        }
+
+                        if (await dotNetService.RemoveWindowsPackageTypeNoneAsync(csprojFile, cancellationToken))
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Check} Removed WindowsPackageType=None to enable packaged app mode");
+                        }
                     }
 
                     // Add descriptive comments above package references in the csproj
