@@ -88,9 +88,9 @@ internal class UiSearchCommand : Command, IShortDescription
                             ? $" [green]\"{EscapeMarkup(displayName)}\"[/]" : "";
                         var value = el.Value is not null && el.Value != el.Name
                             ? $" [yellow]value=\"{EscapeMarkup(el.Value)}\"[/]" : "";
-                        var toggle = el.ToggleState is not null ? $" [grey]\\[{el.ToggleState}][/]" : "";
-                        var expand = el.ExpandState is not null ? $" [grey]\\[{el.ExpandState}][/]" : "";
-                        var scroll = el.ScrollDir is not null ? $" [grey]\\[scroll:{el.ScrollDir}][/]" : "";
+                        var toggle = el.ToggleState is not null ? $" [grey][[{el.ToggleState}]][/]" : "";
+                        var expand = el.ExpandState is not null ? $" [grey][[{el.ExpandState}]][/]" : "";
+                        var scroll = el.ScrollDir is not null ? $" [grey][[scroll:{el.ScrollDir}]][/]" : "";
                         var bounds = el.Width > 0 ? $" [grey]({el.X},{el.Y} {el.Width}x{el.Height})[/]" : "";
                         ansiConsole.MarkupLine($"  [bold cyan]{EscapeMarkup(elSelector)}[/] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}");
 

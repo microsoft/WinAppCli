@@ -117,12 +117,12 @@ internal class UiInspectCommand : Command, IShortDescription
                             ? $" [green]\"{EscapeMarkup(displayName)}\"[/]" : "";
                         var value = el.Value is not null && el.Value != el.Name
                             ? $" [yellow]value=\"{EscapeMarkup(el.Value)}\"[/]" : "";
-                        var toggle = el.ToggleState is not null ? $" [grey]\\[{el.ToggleState}][/]" : "";
-                        var expand = el.ExpandState is not null ? $" [grey]\\[{el.ExpandState}][/]" : "";
-                        var scroll = el.ScrollDir is not null ? $" [grey]\\[scroll:{el.ScrollDir}][/]" : "";
+                        var toggle = el.ToggleState is not null ? $" [grey][[{el.ToggleState}]][/]" : "";
+                        var expand = el.ExpandState is not null ? $" [grey][[{el.ExpandState}]][/]" : "";
+                        var scroll = el.ScrollDir is not null ? $" [grey][[scroll:{el.ScrollDir}]][/]" : "";
                         var bounds = el.Width > 0 ? $" [grey]({el.X},{el.Y} {el.Width}x{el.Height})[/]" : "";
-                        var disabled = el.IsEnabled ? "" : " [grey]\\[disabled][/]";
-                        var offscreen = el.IsOffscreen ? " [grey]\\[offscreen][/]" : "";
+                        var disabled = el.IsEnabled ? "" : " [grey][[disabled]][/]";
+                        var offscreen = el.IsOffscreen ? " [grey][[offscreen]][/]" : "";
                         ansiConsole.MarkupLine($"{indent}[bold cyan]{EscapeMarkup(elSelector)}[/] {el.Type}{name}{value}{toggle}{expand}{scroll}{bounds}{disabled}{offscreen}");
                     }
 
@@ -130,9 +130,9 @@ internal class UiInspectCommand : Command, IShortDescription
                     var example = elements.FirstOrDefault(IsInteractiveType) ?? elements.FirstOrDefault();
                     var exampleSelector = example?.Selector ?? example?.Id;
                     var exampleHint = exampleSelector is not null
-                        ? $" Use the [bold cyan]first word[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
+                        ? $" Use the [bold cyan]first token[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
                         : "";
-                    ansiConsole.MarkupLine($"[grey]Found {elements.Length} elements (depth {depth}).{exampleHint}[/]");
+                    ansiConsole.MarkupLine($"[grey]Found {elements.Length} elements (--depth {depth}).{exampleHint}[/]");
                 }
 
                 logger.LogDebug("Inspect returned {Count} elements at depth {Depth}", elements.Length, depth);

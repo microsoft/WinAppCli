@@ -89,7 +89,7 @@ TabView Tab (0,-1 1200x48)
   TabListView List (4,-1 1100x48)
     tab-newtab-5f5b TabItem "New Tab" (14,-1 200x48)
   NewTabButton SplitButton "New Tab" [collapsed] (1104,5 96x36)
-Found 10 elements (depth 3). Use the first word as selector, e.g.: winapp ui invoke TabView -a terminal
+Found 10 elements (--depth 3). Use the first token as selector, e.g.: winapp ui invoke TabView -a terminal
 ```
 
 The **first word** on each line is the selector — use it with other `ui` commands.
