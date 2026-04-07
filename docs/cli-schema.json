@@ -2019,8 +2019,8 @@
             }
           }
         },
-        "get-text": {
-          "description": "Read text content from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox), then Name (labels). Usage: winapp ui get-text <selector> -a <app>",
+        "get-value": {
+          "description": "Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>",
           "hidden": false,
           "arguments": {
             "selector": {

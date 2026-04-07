@@ -21,7 +21,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiClickResult))]
 [JsonSerializable(typeof(UiScreenshotResult))]
 [JsonSerializable(typeof(UiScreenshotResult[]))]
-[JsonSerializable(typeof(UiGetTextResult))]
+[JsonSerializable(typeof(UiGetValueResult))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(WindowInfo))]
 [JsonSerializable(typeof(WindowInfo[]))]
@@ -99,7 +99,7 @@ internal sealed class WindowInfo
     public string? Title { get; set; }
 }
 
-internal sealed class UiGetTextResult
+internal sealed class UiGetValueResult
 {
     public string ElementId { get; set; } = "";
     public string? Text { get; set; }

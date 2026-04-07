@@ -910,7 +910,7 @@ winapp ui [command] [options]
 - `inspect` - View element tree
 - `search` - Find elements by selector
 - `get-property` - Read element properties
-- `get-text` - Read text content from element (TextPattern, ValuePattern, or Name)
+- `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)

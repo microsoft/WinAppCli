@@ -14,7 +14,7 @@ internal class UiCommand : Command, IShortDescription
         UiInspectCommand inspectCommand,
         UiSearchCommand searchCommand,
         UiGetPropertyCommand getPropertyCommand,
-        UiGetTextCommand getTextCommand,
+        UiGetValueCommand getValueCommand,
         UiScreenshotCommand screenshotCommand,
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
@@ -33,7 +33,7 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(inspectCommand);
         Subcommands.Add(searchCommand);
         Subcommands.Add(getPropertyCommand);
-        Subcommands.Add(getTextCommand);
+        Subcommands.Add(getValueCommand);
         Subcommands.Add(screenshotCommand);
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);

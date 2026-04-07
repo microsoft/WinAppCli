@@ -267,12 +267,13 @@ winapp ui set-value txt-textbox-a4b1 "Hello world" -a notepad
 winapp ui set-value sld-volume-b2c3 75 -a myapp
 ```
 
-### get-text
-Read text content from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox), then Name (labels).
+### get-value
+Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, Slider), then Name (labels).
 ```bash
-winapp ui get-text doc-texteditor-53ad -a notepad          # read full document text
-winapp ui get-text SearchBox -a myapp                      # read TextBox content
-winapp ui get-text lbl-title-a1b2 -a myapp --json          # JSON: { "elementId": "...", "text": "..." }
+winapp ui get-value doc-texteditor-53ad -a notepad          # read full document text
+winapp ui get-value SearchBox -a myapp                      # read TextBox content
+winapp ui get-value sld-volume-b2c3 -a myapp                # read Slider value
+winapp ui get-value lbl-title-a1b2 -a myapp --json          # JSON: { "elementId": "...", "text": "..." }
 ```
 
 ### focus

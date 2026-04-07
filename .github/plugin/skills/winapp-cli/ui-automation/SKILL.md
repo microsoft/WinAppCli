@@ -102,9 +102,9 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
-# Read text content (works for RichEditBox, TextBox, labels)
-winapp ui get-text doc-texteditor-53ad -a notepad
-winapp ui get-text SearchBox -a myapp
+# Read text/value content (works for RichEditBox, TextBox, Slider, labels)
+winapp ui get-value doc-texteditor-53ad -a notepad
+winapp ui get-value SearchBox -a myapp
 
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
@@ -260,9 +260,9 @@ Read UIA property values from an element. Specify --property for a single proper
 | `--property` | Property name to read or filter on | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
-### `winapp ui get-text`
+### `winapp ui get-value`
 
-Read text content from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox), then Name (labels). Usage: winapp ui get-text <selector> -a <app>
+Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->

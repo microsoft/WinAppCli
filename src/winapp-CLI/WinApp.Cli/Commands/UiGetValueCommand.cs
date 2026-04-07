@@ -12,14 +12,14 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class UiGetTextCommand : Command, IShortDescription
+internal class UiGetValueCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Read text content from an element";
+    public string ShortDescription => "Read the current value from an element";
 
-    public UiGetTextCommand()
-        : base("get-text", "Read text content from an element. " +
-               "Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox), then Name (labels). " +
-               "Usage: winapp ui get-text <selector> -a <app>")
+    public UiGetValueCommand()
+        : base("get-value", "Read the current value from an element. " +
+               "Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). " +
+               "Usage: winapp ui get-value <selector> -a <app>")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
@@ -33,7 +33,7 @@ internal class UiGetTextCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IAnsiConsole ansiConsole,
-        ILogger<UiGetTextCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiGetValueCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -50,7 +50,7 @@ internal class UiGetTextCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "get-text");
+                UiErrors.MissingSelector(logger, "get-value");
                 return 1;
             }
 
@@ -70,24 +70,24 @@ internal class UiGetTextCommand : Command, IShortDescription
 
                 if (json)
                 {
-                    var result = new UiGetTextResult
+                    var result = new UiGetValueResult
                     {
                         ElementId = element.Selector ?? element.Id,
                         Text = text
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
-                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiGetTextResult));
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiGetValueResult));
                     return 0;
                 }
 
                 if (text is null)
                 {
-                    logger.LogInformation("No text content found on {ElementId}", element.Selector ?? element.Id);
+                    logger.LogInformation("No value found on {ElementId}", element.Selector ?? element.Id);
                 }
                 else
                 {
-                    // Strip carriage returns (Windows line endings → Unix) but preserve newlines
-                    ansiConsole.WriteLine(text.Replace("\r\n", "\n").TrimEnd('\r', '\n'));
+                    // Strip all carriage returns (Windows line endings → Unix) but preserve newlines
+                    ansiConsole.WriteLine(text.Replace("\r", "").TrimEnd('\n'));
                 }
 
                 return 0;
