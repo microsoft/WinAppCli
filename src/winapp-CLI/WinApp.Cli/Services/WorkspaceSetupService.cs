@@ -230,7 +230,7 @@ internal class WorkspaceSetupService(
             {
                 installWinAppPackage = await ShowConfirmationPromptAsync(
                     ansiConsole,
-                    $"Install {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
+                    $"Add package {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
                     cancellationToken);
                 if (!installWinAppPackage)
                 {
@@ -440,7 +440,7 @@ internal class WorkspaceSetupService(
                     // Add descriptive comments above package references in the csproj
                     var packageComments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        [BuildToolsService.BUILD_TOOLS_PACKAGE] = "Windows SDK build tools: provides headers, libs, and tools for Windows API access",
+                        [BuildToolsService.BUILD_TOOLS_PACKAGE] = "Tools required for running and building projects targeting the Windows SDK",
                         [DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE] = "WinApp CLI integration: enables 'dotnet run' support for packaged apps",
                         [DotNetService.WINAPP_SDK_NUGET_PACKAGE] = "Windows App SDK: provides WinUI 3, app lifecycle, windowing, and other modern Windows APIs"
                     };
