@@ -1,9 +1,7 @@
 ## When to use
 
 Use this skill when:
-- **Creating a new WinUI 3 project** from scratch
 - **Adding Windows platform support** to an existing project (Electron, .NET, C++, Rust, Flutter, Tauri, etc.)
-- **Adding items** (pages, windows, controls) to an existing WinUI project
 - **Cloning a repo** that already uses winapp and need to restore SDK packages
 - **Updating SDK versions** to get the latest Windows SDK or Windows App SDK
 
@@ -19,9 +17,9 @@ winget install Microsoft.WinAppCli --source winget
 npm install --save-dev @microsoft/winappcli
 ```
 
-You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase. To create a new WinUI 3 project, use `winapp new` instead.
+You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
 
-> **Already have a `Package.appxmanifest`?** .NET projects that already have a packaging manifest (e.g., WinUI 3 apps or projects with an existing MSIX packaging setup) likely **don't need `winapp init`**. Ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>`). WinUI 3 apps created from Visual Studio templates or `winapp new` are typically already fully configured — you can go straight to building and using `winapp run` or `winapp package`.
+> **Already have a `Package.appxmanifest`?** .NET projects that already have a packaging manifest (e.g., WinUI 3 apps or projects with an existing MSIX packaging setup) likely **don't need `winapp init`**. Ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>`). WinUI 3 apps created from Visual Studio templates are typically already fully configured — you can go straight to building and using `winapp run` or `winapp package`.
 
 ## Key concepts
 
@@ -33,30 +31,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Usage
 
-### Create a new WinUI 3 project
-
-```powershell
-# Interactive — select template and enter a name
-winapp new
-
-# Create a blank WinUI app (uses default name)
-winapp new winui
-
-# Create a NavigationView app with a specific name
-winapp new winui-navview -n MyApp
-
-# Add items to an existing project (run inside a .csproj directory)
-cd MyApp
-winapp new winui-page -n SettingsPage
-```
-
-After `winapp new`, your project is ready to build and run:
-```powershell
-cd MyApp
-dotnet run
-```
-
-### Initialize an existing project with Windows support
+### Initialize a new winapp project
 
 ```powershell
 # Interactive — prompts for app name, publisher, SDK channel, etc.
@@ -142,7 +117,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ## Recommended workflow
 
-1. **Create or initialize** — `winapp new winui -n MyApp` for new WinUI projects, or `winapp init --use-defaults` to add Windows support to an existing project
+1. **Initialize** — `winapp init --use-defaults` in your existing project
 2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging

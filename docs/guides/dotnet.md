@@ -22,20 +22,6 @@ A standard executable (like one created with `dotnet build`) does not have packa
 
 ## 1. Create a New .NET App
 
-You can create a WinUI 3 app using `winapp new`, or start with a plain .NET console app:
-
-**Option A: WinUI 3 app (recommended for Windows UI apps)**
-
-```powershell
-winapp new winui -n my-winui-app
-cd my-winui-app
-dotnet run
-```
-
-This creates a fully configured WinUI 3 project with MSIX packaging, default assets, and package identity — ready to build and run.
-
-**Option B: Plain .NET console app (for non-UI or cross-platform apps)**
-
 Start by creating a simple .NET console application:
 
 ```powershell

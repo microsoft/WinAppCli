@@ -69,11 +69,9 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         ToolCommand toolCommand,
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
-        CreateExternalCatalogCommand createExternalCatalogCommand,
-        NewCommand newCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        CreateExternalCatalogCommand createExternalCatalogCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
-        Subcommands.Add(newCommand);
         Subcommands.Add(restoreCommand);
         Subcommands.Add(packageCommand);
         Subcommands.Add(manifestCommand);
@@ -94,7 +92,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
-            ("Setup", [typeof(NewCommand), typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
+            ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)])
         );
