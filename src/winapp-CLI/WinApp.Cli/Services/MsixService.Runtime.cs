@@ -208,7 +208,7 @@ internal partial class MsixService
     /// Collects all user NuGet packages from .csproj or winapp.yaml.
     /// Returns the full package dictionary (name → version) for WinRT component scanning.
     /// </summary>
-    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    internal async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -697,7 +697,7 @@ internal partial class MsixService
         return msixDir;
     }
 
-    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    internal async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? mainVersion = null;
         // Path 1: Try .csproj via `dotnet list package --format json`
