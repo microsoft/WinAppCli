@@ -161,7 +161,7 @@ Download the latest CI build artifacts directly (no GitHub login required):
 |----------|-------------|
 | [**CLI Binaries**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/cli-binaries.zip) | Native CLI executables (win-x64, win-arm64) |
 | [**npm Package**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/npm-package.zip) | `@microsoft/winappcli` .tgz package |
-| [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | Signed MSIX installer bundle |
+| [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | MSIX installer bundle (self-signed) |
 | [**NuGet Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/nuget-packages.zip) | NuGet .nupkg packages |
 
 <details>
