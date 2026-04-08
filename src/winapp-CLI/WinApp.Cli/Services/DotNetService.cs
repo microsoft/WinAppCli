@@ -45,7 +45,7 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
-    [GeneratedRegex(@"<RuntimeIdentifier[\s>]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"<RuntimeIdentifier>(.*?)</RuntimeIdentifier>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifierElementRegex();
 
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
@@ -492,16 +492,12 @@ internal partial class DotNetService : IDotNetService
         var ridMatch = RuntimeIdentifierElementRegex().Match(content);
         if (ridMatch.Success)
         {
-            // Find end of the RuntimeIdentifier line
-            var lineEnd = content.IndexOf('\n', ridMatch.Index);
-            if (lineEnd >= 0)
-            {
-                var insertPos = lineEnd + 1;
-                content = content[..insertPos]
-                    + "    " + element + Environment.NewLine
-                    + content[insertPos..];
-                modified = true;
-            }
+            // Insert after the full closing </RuntimeIdentifier> tag
+            var insertPos = ridMatch.Index + ridMatch.Length;
+            content = content[..insertPos]
+                + Environment.NewLine + "    " + element
+                + content[insertPos..];
+            modified = true;
         }
         else
         {
