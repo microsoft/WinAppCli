@@ -223,7 +223,9 @@ $markerFile = Join-Path $env:USERPROFILE ".winapp\.first-run-complete"
 Write-Host "  First-run marker exists: $(Test-Path $markerFile)"
 
 Write-Host "Running --detach --json..."
+Push-Location $sampleDir
 $launchStdout = & $WinAppPath run $buildOutput --detach --json 2>"$ScreenshotDir\winapp-run-stderr.txt"
+Pop-Location
 $launchStderr = Get-Content "$ScreenshotDir\winapp-run-stderr.txt" -ErrorAction SilentlyContinue
 
 Write-Host "  stdout lines: $($launchStdout.Count)"

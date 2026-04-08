@@ -278,10 +278,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (success != 0)
             {
-                if (isJson)
-                {
-                    PrintJson(aumid, processId: null, errorMessage);
-                }
+                // StatusService already wrote JSON error output when --json is active
                 return success;
             }
 
