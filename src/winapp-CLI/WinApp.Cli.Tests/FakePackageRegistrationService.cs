@@ -13,7 +13,7 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
 {
     public List<string> RegisterLooseLayoutCalls { get; } = [];
     public List<(string ManifestPath, string ExternalLocation)> RegisterSparseCalls { get; } = [];
-    public List<string> UnregisterCalls { get; } = [];
+    public List<(string PackageName, bool PreserveAppData)> UnregisterCalls { get; } = [];
     public List<string> InstallPackageCalls { get; } = [];
     public List<string> GetInstalledVersionCalls { get; } = [];
     public List<string> FindDevPackagesCalls { get; } = [];
@@ -48,9 +48,9 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
-    public Task<bool> UnregisterAsync(string packageName, CancellationToken cancellationToken = default)
+    public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
-        UnregisterCalls.Add(packageName);
+        UnregisterCalls.Add((packageName, preserveAppData));
         return Task.FromResult(FakeUnregisterResult);
     }
 
