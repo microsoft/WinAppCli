@@ -222,6 +222,10 @@ internal class WorkspaceSetupService(
                     UiSymbols.Skip, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
                 installWinAppPackage = true;
             }
+            else if (options.UseDefaults)
+            {
+                installWinAppPackage = true;
+            }
             else
             {
                 installWinAppPackage = await ShowConfirmationPromptAsync(
