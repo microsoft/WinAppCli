@@ -213,14 +213,14 @@ internal partial class PriService(
 
             await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
 
-            if (!File.Exists(dumpOutputFile))
+            if (!File.Exists(dumpPath))
             {
                 return [];
             }
 
             try
             {
-                var dumpContent = await File.ReadAllTextAsync(dumpOutputFile, cancellationToken);
+                var dumpContent = await File.ReadAllTextAsync(dumpPath, cancellationToken);
 
                 // Extract language qualifiers from Candidate elements:
                 // <Candidate qualifiers="Language-en-US" ...> or multi-qualifier like "Language-en-US, Scale-200"
@@ -234,7 +234,7 @@ internal partial class PriService(
             }
             finally
             {
-                File.Delete(dumpOutputFile);
+                File.Delete(dumpPath);
             }
         }
         catch (Exception ex)

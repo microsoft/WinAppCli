@@ -13,6 +13,7 @@ internal static class LongPathHelper
 {
     private const int MaxPath = 260;
     private const string ExtendedLengthPathPrefix = @"\\?\";
+    private const string ExtendedLengthUncPrefix = @"\\?\UNC\";
 
     /// <summary>
     /// Checks whether the system-level long path support is enabled via the
@@ -75,7 +76,7 @@ internal static class LongPathHelper
         // UNC paths need \\?\UNC\ prefix instead
         if (path.StartsWith(@"\\", StringComparison.Ordinal))
         {
-            return @"\\?\UNC\" + path[2..];
+            return ExtendedLengthUncPrefix + path[2..];
         }
 
         return ExtendedLengthPathPrefix + path;
@@ -91,11 +92,12 @@ internal static class LongPathHelper
     /// </summary>
     internal static string GetShortPath(string path)
     {
-        if (path.Length < MaxPath)
+        if (path.Length <= MaxPath)
         {
             return path;
         }
 
+        var trailingSep = Path.EndsInDirectorySeparator(path);
         var directory = Path.GetDirectoryName(path);
         var fileName = Path.GetFileName(path);
 
@@ -107,7 +109,13 @@ internal static class LongPathHelper
         var shortDir = GetShortPathRaw(directory);
         var result = Path.Combine(shortDir, fileName);
 
-        return result.Length < MaxPath ? result : path;
+        // Preserve trailing separator: Path.Combine drops it when fileName is empty
+        if (trailingSep && !Path.EndsInDirectorySeparator(result))
+        {
+            result += Path.DirectorySeparatorChar;
+        }
+
+        return result.Length <= MaxPath ? result : path;
     }
 
     /// <summary>
@@ -122,7 +130,7 @@ internal static class LongPathHelper
     internal static string GetShortPathOrThrow(string path)
     {
         var shortPath = GetShortPath(path);
-        if (shortPath.Length >= MaxPath)
+        if (shortPath.Length > MaxPath)
         {
             throw new InvalidOperationException(
                 $"The path is too long for the Windows deployment API (limit: {MaxPath} characters) " +
@@ -142,36 +150,50 @@ internal static class LongPathHelper
         // GetShortPathName needs the \\?\ prefix to accept paths > MAX_PATH
         var extendedPath = EnsureExtendedLengthPrefix(path);
 
-        unsafe
+        try
         {
-            fixed (char* pInput = extendedPath)
+            unsafe
             {
-                var bufferSize = PInvoke.GetShortPathName(pInput, null, 0);
-                if (bufferSize == 0)
+                fixed (char* pInput = extendedPath)
                 {
-                    return path;
-                }
-
-                Span<char> buffer = stackalloc char[(int)bufferSize];
-                fixed (char* pBuffer = buffer)
-                {
-                    var result = PInvoke.GetShortPathName(pInput, new Windows.Win32.Foundation.PWSTR(pBuffer), bufferSize);
-                    if (result == 0)
+                    var bufferSize = PInvoke.GetShortPathName(pInput, null, 0);
+                    if (bufferSize == 0)
                     {
                         return path;
                     }
 
-                    var shortPath = new string(pBuffer, 0, (int)result);
-
-                    // Strip the \\?\ prefix if GetShortPathName preserved it
-                    if (shortPath.StartsWith(ExtendedLengthPathPrefix, StringComparison.Ordinal))
+                    Span<char> buffer = stackalloc char[(int)bufferSize];
+                    fixed (char* pBuffer = buffer)
                     {
-                        shortPath = shortPath[ExtendedLengthPathPrefix.Length..];
-                    }
+                        var result = PInvoke.GetShortPathName(pInput, new Windows.Win32.Foundation.PWSTR(pBuffer), bufferSize);
+                        if (result == 0)
+                        {
+                            return path;
+                        }
 
-                    return shortPath;
+                        var shortPath = new string(pBuffer, 0, (int)result);
+
+                        // Strip the extended-length prefix added by EnsureExtendedLengthPrefix.
+                        // \\?\UNC\server\share\... must be converted back to \\server\share\...
+                        // not to UNC\server\share\... (which would be invalid).
+                        if (shortPath.StartsWith(ExtendedLengthUncPrefix, StringComparison.Ordinal))
+                        {
+                            shortPath = @"\\" + shortPath[ExtendedLengthUncPrefix.Length..];
+                        }
+                        else if (shortPath.StartsWith(ExtendedLengthPathPrefix, StringComparison.Ordinal))
+                        {
+                            shortPath = shortPath[ExtendedLengthPathPrefix.Length..];
+                        }
+
+                        return shortPath;
+                    }
                 }
             }
+        }
+        catch (DllNotFoundException)
+        {
+            // GetShortPathName is not available on this platform; return the original path unchanged.
+            return path;
         }
     }
 }
