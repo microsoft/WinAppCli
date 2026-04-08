@@ -914,3 +914,32 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+### ui
+
+Inspect and interact with running Windows app UIs using UI Automation (UIA).
+
+```bash
+winapp ui [command] [options]
+```
+
+**Commands:**
+- `status` - Connect to app and show info
+- `inspect` - View element tree
+- `search` - Find elements by selector
+- `get-property` - Read element properties
+- `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
+- `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
+- `invoke` - Activate element (click, toggle, expand)
+- `click` - Click element via mouse simulation (for controls that don't support invoke)
+- `set-value` - Set value on editable element (text, number)
+- `focus` - Move keyboard focus
+- `scroll-into-view` - Scroll element visible
+- `wait-for` - Wait for element state
+- `list-windows` - List all windows for an app
+- `get-focused` - Report the currently focused element
+
+**Options:**
+- `-a, --app <app>` - Target app (name, title, or PID)
+- `-w, --window <hwnd>` - Target window by HWND (stable)
+
+For full documentation, see [docs/ui-automation.md](ui-automation.md).

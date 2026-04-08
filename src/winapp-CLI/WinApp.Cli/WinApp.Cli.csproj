@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>winapp</AssemblyName>
     <ApplicationIcon>Assets\winapp.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <Description>A command-line tool for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework.</Description>
 
     <!-- Enable Code Analysis -->
@@ -26,6 +27,7 @@
     <TrimMode>full</TrimMode>
     <CsWin32RunAsBuildTask>true</CsWin32RunAsBuildTask>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     
     <!-- Faster startup for single-file -->
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
