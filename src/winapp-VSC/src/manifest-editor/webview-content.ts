@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS } from './manifest-types';
+import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS, OPTIONAL_VISUAL_ASSETS } from './manifest-types';
 
 /** Generates an error view shown when the manifest XML cannot be parsed. */
 export function getParseErrorContent(webview: vscode.Webview, nonce: string, errorMessage: string): string {
@@ -545,6 +545,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <button class="tab-btn active" role="tab" data-tab="identity" aria-selected="true">Identity</button>
         <button class="tab-btn" role="tab" data-tab="properties" aria-selected="false">Properties</button>
         <button class="tab-btn" role="tab" data-tab="dependencies" aria-selected="false">Dependencies</button>
+        <button class="tab-btn" role="tab" data-tab="resources" aria-selected="false">Resources</button>
         <button class="tab-btn" role="tab" data-tab="applications" aria-selected="false">Applications</button>
         <button class="tab-btn" role="tab" data-tab="capabilities" aria-selected="false">Capabilities</button>
         <div class="tab-bar-spacer"></div>
@@ -644,6 +645,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <button class="btn" id="add-package-dep">+ Add Package Dependency</button>
     </div>
 
+    <!-- ───── Resources ───── -->
+    <div class="tab-content" id="tab-resources" role="tabpanel">
+        <div class="section-header">Resources</div>
+        <p class="page-description">Use this page to declare the language resources your app supports.</p>
+        <div id="resources-list" class="list-container"></div>
+        <button class="btn" id="add-resource-btn">+ Add Resource</button>
+    </div>
+
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
@@ -690,7 +699,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
     <div class="info-banner">
         <span class="info-banner-icon">ℹ</span>
-        <span>This editor does not support all appxmanifest customizations. For advanced scenarios, <a class="info-banner-link" id="open-xml-link">open the XML source</a>.</span>
+        <span>This editor does not support all appxmanifest customizations. For advanced scenarios, <a class="info-banner-link" id="open-xml-link">open the XML source</a>. Missing a feature? <a class="info-banner-link" href="https://github.com/microsoft/winappCli/issues">File feedback</a>.</span>
     </div>
 
     <script nonce="${nonce}">
@@ -700,6 +709,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         let currentData = null;
         const capabilityDescriptions = ${JSON.stringify(CAPABILITY_DESCRIPTIONS)};
         const extensionTemplates = ${JSON.stringify(EXTENSION_TEMPLATES)};
+        const optionalVisualAssets = ${JSON.stringify(OPTIONAL_VISUAL_ASSETS)};
         const activeAppSubTabs = {};
 
         // ─── Tab switching ──────────────────────────────────
@@ -844,6 +854,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         document.addEventListener('click', () => {
             document.getElementById('add-family-menu').classList.remove('open');
             document.querySelectorAll('.add-ext-menu').forEach(m => m.classList.remove('open'));
+            document.querySelectorAll('.add-visual-asset-menu').forEach(m => m.classList.remove('open'));
         });
 
         // ─── Add/Remove package dependency ──────────────────
@@ -857,6 +868,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         // ─── Add application ────────────────────────────────
         document.getElementById('add-application-btn').addEventListener('click', () => {
             vscode.postMessage({ type: 'addApplication' });
+        });
+
+        // ─── Add resource ───────────────────────────────────
+        document.getElementById('add-resource-btn').addEventListener('click', () => {
+            vscode.postMessage({
+                type: 'addResource',
+                resource: { language: '' }
+            });
         });
 
         // ─── Populate form from data ────────────────────────
@@ -916,6 +935,9 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
             // Capabilities
             updateCapabilityCheckboxes(data.capabilities);
+
+            // Resources
+            renderResources(data.resources);
 
             // Restore focus after DOM rebuild
             if (focusInfo) {
@@ -1040,6 +1062,69 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     vscode.postMessage({ type: 'removePackageDependency', index: idx });
                 });
             });
+        }
+
+        function renderResources(resources) {
+            const container = document.getElementById('resources-list');
+            container.innerHTML = '';
+            resources.forEach((res, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">Resource \${idx + 1}</span>
+                        <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group" data-field="resources.\${idx}.language">
+                        <label>Language:</label>
+                        <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
+                        <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp")</div>
+                        <div class="validation-msg"></div>
+                    </div>
+                \`;
+                container.appendChild(item);
+
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelector('.remove-resource').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeResource', index: idx });
+                });
+            });
+        }
+
+        function buildOptionalAssetsHtml(app, idx) {
+            let html = '';
+            optionalVisualAssets.forEach(asset => {
+                const val = app.visualElements[asset.field];
+                if (val !== null && val !== undefined) {
+                    html += '<div class="form-group" data-field="applications.' + idx + '.visualElements.' + asset.field + '">' +
+                        '<label>' + escapeHtml(asset.label) + ':</label>' +
+                        '<div class="browse-row">' +
+                        '<input type="text" data-section="applications" data-field-name="visualElements.' + asset.field + '" data-index="' + idx + '" value="' + escapeHtml(val) + '" placeholder="' + escapeHtml(asset.placeholder) + '" />' +
+                        '<button class="btn btn-sm browse-image-btn" data-section="applications" data-field-name="visualElements.' + asset.field + '" data-index="' + idx + '">Choose file</button>' +
+                        '</div>' +
+                        '<div class="description">' + escapeHtml(asset.description) + '</div>' +
+                        '<div class="validation-msg"></div>' +
+                        '</div>';
+                }
+            });
+            return html;
+        }
+
+        function buildAddVisualAssetMenuHtml(app, idx) {
+            let html = '';
+            optionalVisualAssets.forEach(asset => {
+                const val = app.visualElements[asset.field];
+                if (val === null || val === undefined) {
+                    html += '<div class="custom-dropdown-item add-visual-asset-item" data-app-index="' + idx + '" data-asset-field="' + asset.field + '">' + escapeHtml(asset.label) + '</div>';
+                }
+            });
+            return html;
+        }
+
+        function hasUnspecifiedVisualAssets(app) {
+            return optionalVisualAssets.some(asset => app.visualElements[asset.field] === null || app.visualElements[asset.field] === undefined);
         }
 
         function renderApplications(apps) {
@@ -1185,15 +1270,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 <div class="logo-caption app-logo-caption" data-app-idx="\${idx}"></div>
                             </div>
                         </div>
-                        <div class="form-group" data-field="applications.\${idx}.visualElements.wide310x150Logo">
-                            <label>Wide 310x150 Logo:</label>
-                            <div class="browse-row">
-                                <input type="text" data-section="applications" data-field-name="visualElements.wide310x150Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.wide310x150Logo)}" placeholder="Assets\\\\Wide310x150Logo.png" />
-                                <button class="btn btn-sm browse-image-btn" data-section="applications" data-field-name="visualElements.wide310x150Logo" data-index="\${idx}">Choose file</button>
-                            </div>
-                            <div class="description">Wide tile image for the Start menu, relative path to a 310×150 pixel PNG (Optional)</div>
-                            <div class="validation-msg"></div>
+                        <div class="optional-assets-list" data-app-idx="\${idx}">
+                        \${buildOptionalAssetsHtml(app, idx)}
                         </div>
+                        \${hasUnspecifiedVisualAssets(app) ? '<div class="custom-dropdown add-visual-asset-dropdown" data-app-idx="' + idx + '">' +
+                            '<button class="custom-dropdown-btn add-visual-asset-btn">+ Add Visual Asset</button>' +
+                            '<div class="custom-dropdown-menu add-visual-asset-menu">' +
+                            buildAddVisualAssetMenuHtml(app, idx) +
+                            '</div></div>' : ''}
                         <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
@@ -1333,6 +1417,50 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 xml: item.getAttribute('data-xml')
                             });
                             addExtMenu.classList.remove('open');
+                        });
+                    });
+                }
+
+                // Bind optional visual asset inputs and browse buttons
+                card.querySelectorAll('.optional-assets-list input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                card.querySelectorAll('.optional-assets-list .browse-image-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const msg = {
+                            type: 'browseImage',
+                            section: btn.getAttribute('data-section'),
+                            field: btn.getAttribute('data-field-name'),
+                        };
+                        const bIdx = btn.getAttribute('data-index');
+                        if (bIdx !== null) { msg.index = parseInt(bIdx, 10); }
+                        vscode.postMessage(msg);
+                    });
+                });
+
+                // Bind add visual asset dropdown
+                const addVisualBtn = card.querySelector('.add-visual-asset-btn');
+                const addVisualMenu = card.querySelector('.add-visual-asset-menu');
+                if (addVisualBtn && addVisualMenu) {
+                    addVisualBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        addVisualMenu.classList.toggle('open');
+                    });
+                    card.querySelectorAll('.add-visual-asset-item').forEach(item => {
+                        item.addEventListener('click', () => {
+                            const appIndex = parseInt(item.getAttribute('data-app-index'), 10);
+                            const assetField = item.getAttribute('data-asset-field');
+                            const asset = optionalVisualAssets.find(a => a.field === assetField);
+                            if (asset) {
+                                vscode.postMessage({
+                                    type: 'fieldChanged',
+                                    section: 'applications',
+                                    field: 'visualElements.' + assetField,
+                                    value: '',
+                                    index: appIndex
+                                });
+                            }
+                            addVisualMenu.classList.remove('open');
                         });
                     });
                 }

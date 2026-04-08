@@ -9,6 +9,7 @@ export interface ManifestData {
     dependencies: DependenciesData;
     applications: ApplicationData[];
     capabilities: string[];
+    resources: ResourceData[];
 }
 
 export interface IdentityData {
@@ -56,7 +57,15 @@ export interface VisualElementsData {
     backgroundColor: string;
     square150x150Logo: string;
     square44x44Logo: string;
-    wide310x150Logo: string;
+    wide310x150Logo: string | null;
+    square71x71Logo: string | null;
+    square310x310Logo: string | null;
+    badgeLogo: string | null;
+    splashScreenImage: string | null;
+}
+
+export interface ResourceData {
+    language: string;
 }
 
 /** Validation error for a single field. */
@@ -75,6 +84,8 @@ export type ExtensionToWebviewMessage =
 /** Message types sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
     | { type: 'fieldChanged'; section: string; field: string; value: string; index?: number }
+    | { type: 'addResource'; resource: ResourceData }
+    | { type: 'removeResource'; index: number }
     | { type: 'addCapability'; capability: string }
     | { type: 'removeCapability'; capability: string }
     | { type: 'addPackageDependency'; dependency: PackageDependencyData }
@@ -161,4 +172,13 @@ export const DEVICE_FAMILY_OPTIONS = [
     'Windows.Xbox',
     'Windows.Holographic',
     'Windows.IoT',
+] as const;
+
+/** Optional visual asset types that can be added to an application. */
+export const OPTIONAL_VISUAL_ASSETS = [
+    { field: 'wide310x150Logo', label: 'Wide 310x150 Logo', placeholder: 'Assets\\Wide310x150Logo.png', description: 'Wide tile image for the Start menu, relative path to a 310×150 pixel PNG' },
+    { field: 'square71x71Logo', label: 'Square 71x71 Logo', placeholder: 'Assets\\Square71x71Logo.png', description: 'Small tile image, relative path to a 71×71 pixel PNG' },
+    { field: 'square310x310Logo', label: 'Square 310x310 Logo', placeholder: 'Assets\\Square310x310Logo.png', description: 'Large tile image for the Start menu, relative path to a 310×310 pixel PNG' },
+    { field: 'badgeLogo', label: 'Badge Logo', placeholder: 'Assets\\BadgeLogo.png', description: 'Badge notification image shown on the lock screen, relative path to a 24×24 pixel PNG' },
+    { field: 'splashScreenImage', label: 'Splash Screen', placeholder: 'Assets\\SplashScreen.png', description: 'Image displayed while the app is launching, relative path to a 620×300 pixel PNG' },
 ] as const;

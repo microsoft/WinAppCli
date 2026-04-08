@@ -14,6 +14,7 @@ import {
     PackageDependencyData,
     ApplicationData,
     VisualElementsData,
+    ResourceData,
 } from './manifest-types';
 
 // Common AppxManifest namespace URIs
@@ -50,6 +51,7 @@ export function parseManifest(xmlText: string): ManifestData {
         dependencies: parseDependencies(root),
         applications: parseApplications(root),
         capabilities: parseCapabilities(root),
+        resources: parseResources(root),
     };
 }
 
@@ -76,6 +78,8 @@ export function applyFieldChange(
             return applyDependenciesChangeString(xmlText, field, value, idx);
         case 'applications':
             return applyApplicationChangeString(xmlText, field, value, idx);
+        case 'resources':
+            return applyResourcesChangeString(xmlText, field, value, idx);
         default:
             return xmlText;
     }
@@ -196,6 +200,41 @@ export function removeTargetDeviceFamily(xmlText: string, index: number): string
     const families = getChildrenByLocalName(depsEl, 'TargetDeviceFamily');
     if (index >= 0 && index < families.length) {
         removeElementClean(depsEl, families[index]);
+    }
+
+    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+}
+
+/** Add a Resource element to the XML. */
+export function addResource(xmlText: string, resource: ResourceData): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    let resourcesEl = getChildByLocalName(root, 'Resources');
+
+    if (!resourcesEl) {
+        resourcesEl = doc.createElementNS(NS.default, 'Resources');
+        root.appendChild(resourcesEl);
+    }
+
+    const el = doc.createElementNS(NS.default, 'Resource');
+    if (resource.language) { el.setAttribute('Language', resource.language); }
+    resourcesEl.appendChild(doc.createTextNode('  '));
+    resourcesEl.appendChild(el);
+    resourcesEl.appendChild(doc.createTextNode('\n  '));
+
+    return new XMLSerializer().serializeToString(doc);
+}
+
+/** Remove a Resource element by index. */
+export function removeResource(xmlText: string, index: number): string {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const root = doc.documentElement!;
+    const resourcesEl = getChildByLocalName(root, 'Resources');
+    if (!resourcesEl) { return xmlText; }
+
+    const resources = getChildrenByLocalName(resourcesEl, 'Resource');
+    if (index >= 0 && index < resources.length) {
+        removeElementClean(resourcesEl, resources[index]);
     }
 
     return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
@@ -480,6 +519,8 @@ function parseApplications(root: Element): ApplicationData[] {
     for (const appEl of getChildrenByLocalName(appsEl, 'Application')) {
         const visualEl = findChildByLocalNameNS(appEl, 'VisualElements');
         const defaultTile = visualEl ? findChildByLocalNameNS(visualEl, 'DefaultTile') : null;
+        const lockScreen = visualEl ? findChildByLocalNameNS(visualEl, 'LockScreen') : null;
+        const splashScreen = visualEl ? findChildByLocalNameNS(visualEl, 'SplashScreen') : null;
 
         // Gather extension raw XML for display and editing
         const extensions: string[] = [];
@@ -505,7 +546,11 @@ function parseApplications(root: Element): ApplicationData[] {
                 backgroundColor: visualEl?.getAttribute('BackgroundColor') ?? '',
                 square150x150Logo: visualEl?.getAttribute('Square150x150Logo') ?? '',
                 square44x44Logo: visualEl?.getAttribute('Square44x44Logo') ?? '',
-                wide310x150Logo: defaultTile?.getAttribute('Wide310x150Logo') ?? '',
+                wide310x150Logo: defaultTile?.getAttribute('Wide310x150Logo') ?? null,
+                square71x71Logo: defaultTile?.getAttribute('Square71x71Logo') ?? null,
+                square310x310Logo: defaultTile?.getAttribute('Square310x310Logo') ?? null,
+                badgeLogo: lockScreen?.getAttribute('BadgeLogo') ?? null,
+                splashScreenImage: splashScreen?.getAttribute('Image') ?? null,
             },
             extensions,
         });
@@ -540,6 +585,19 @@ function parseCapabilities(root: Element): string[] {
     return capabilities;
 }
 
+function parseResources(root: Element): ResourceData[] {
+    const resourcesEl = getChildByLocalName(root, 'Resources');
+    if (!resourcesEl) { return []; }
+
+    const resources: ResourceData[] = [];
+    for (const child of getChildrenByLocalName(resourcesEl, 'Resource')) {
+        resources.push({
+            language: child.getAttribute('Language') ?? '',
+        });
+    }
+    return resources;
+}
+
 // ─── Apply changes ──────────────────────────────────────────────────
 
 // ─── Surgical string-based field change helpers ─────────────────────
@@ -567,6 +625,21 @@ function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string,
         + attrMatch[1] + attrMatch[2] + newValue + attrMatch[2]
         + elementStr.substring(attrMatch.index + attrMatch[0].length);
 
+    return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
+}
+
+/** Add a new attribute to an existing XML element. Returns the original string if element not found. */
+function addAttributeToElement(xml: string, elementPattern: RegExp, attrName: string, value: string): string {
+    const elementMatch = elementPattern.exec(xml);
+    if (!elementMatch) { return xml; }
+
+    const elementStr = elementMatch[0];
+    // Insert the new attribute before the closing /> or >
+    const closingMatch = /(\s*\/?>)\s*$/.exec(elementStr);
+    if (!closingMatch) { return xml; }
+
+    const insertPos = closingMatch.index;
+    const newElementStr = elementStr.substring(0, insertPos) + ` ${attrName}="${value}"` + elementStr.substring(insertPos);
     return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
 }
 
@@ -661,6 +734,21 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
     return xml;
 }
 
+function applyResourcesChangeString(xml: string, field: string, value: string, index: number): string {
+    if (field === 'language') {
+        const regex = /<Resource\b[^>]*>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
+            }
+            count++;
+        }
+    }
+    return xml;
+}
+
 function applyApplicationChangeString(xml: string, field: string, value: string, index: number): string {
     // Top-level Application attributes
     const appAttrMap: Record<string, string> = {
@@ -685,9 +773,34 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
     if (field.startsWith('visualElements.')) {
         const veField = field.replace('visualElements.', '');
 
-        if (veField === 'wide310x150Logo') {
-            // Attribute on DefaultTile
-            return replaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, 'Wide310x150Logo', value);
+        // Attributes on DefaultTile
+        const defaultTileAttrs: Record<string, string> = {
+            wide310x150Logo: 'Wide310x150Logo',
+            square71x71Logo: 'Square71x71Logo',
+            square310x310Logo: 'Square310x310Logo',
+        };
+        if (defaultTileAttrs[veField]) {
+            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], value);
+            if (result !== xml) { return result; }
+            // Element exists but attribute doesn't — add the attribute
+            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField], value);
+            if (addResult !== xml) { return addResult; }
+        }
+
+        // Attribute on LockScreen
+        if (veField === 'badgeLogo') {
+            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, 'BadgeLogo', value);
+            if (result !== xml) { return result; }
+            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, 'BadgeLogo', value);
+            if (addResult !== xml) { return addResult; }
+        }
+
+        // Attribute on SplashScreen
+        if (veField === 'splashScreenImage') {
+            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, 'Image', value);
+            if (result !== xml) { return result; }
+            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, 'Image', value);
+            if (addResult !== xml) { return addResult; }
         }
 
         const attrMap: Record<string, string> = {
@@ -697,14 +810,84 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             square150x150Logo: 'Square150x150Logo',
             square44x44Logo: 'Square44x44Logo',
         };
-        const attr = attrMap[veField];
-        if (!attr) { return xml; }
+        if (attrMap[veField]) {
+            return replaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], value);
+        }
 
-        // Find the Nth VisualElements within the Nth Application context
-        return replaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attr, value);
+        // Fallback: surgically insert new child element inside VisualElements
+        // This avoids DOM serialization which destroys whitespace formatting
+        const veClosePattern = /(<[a-zA-Z0-9]*:?VisualElements\b[^>]*?)\s*\/>/s;
+        const veCloseMatch = veClosePattern.exec(xml);
+        if (veCloseMatch) {
+            // Self-closing VisualElements — convert to open/close and insert child
+            const indent = detectIndent(xml, veCloseMatch.index);
+            const childIndent = indent + '  ';
+            const childXml = buildVisualChildElement(veField, value);
+            if (childXml) {
+                return xml.substring(0, veCloseMatch.index)
+                    + veCloseMatch[1] + '>\n'
+                    + childIndent + childXml + '\n'
+                    + indent + '</uap:VisualElements>'
+                    + xml.substring(veCloseMatch.index + veCloseMatch[0].length);
+            }
+        } else {
+            // Non-self-closing VisualElements — insert before closing tag
+            const veEndPattern = /<\/[a-zA-Z0-9]*:?VisualElements\s*>/s;
+            const veEndMatch = veEndPattern.exec(xml);
+            if (veEndMatch) {
+                // Try to detect child indent from an existing child element (e.g., DefaultTile)
+                const existingChildPattern = /\n([ \t]+)<[a-zA-Z0-9]*:?(?:DefaultTile|LockScreen|SplashScreen)\b/;
+                const existingChildMatch = existingChildPattern.exec(xml);
+                const veEndIndent = detectIndent(xml, veEndMatch.index);
+                const childIndent = existingChildMatch ? existingChildMatch[1] : (veEndIndent + '  ');
+                const childXml = buildVisualChildElement(veField, value);
+                if (childXml) {
+                    // Find the start of the whitespace preceding the closing tag
+                    const beforeClose = xml.substring(0, veEndMatch.index);
+                    const trailingWsMatch = /\n[ \t]*$/.exec(beforeClose);
+                    const insertPos = trailingWsMatch ? veEndMatch.index - trailingWsMatch[0].length : veEndMatch.index;
+                    return xml.substring(0, insertPos)
+                        + '\n' + childIndent + childXml
+                        + '\n' + veEndIndent + veEndMatch[0]
+                        + xml.substring(veEndMatch.index + veEndMatch[0].length);
+                }
+            }
+        }
+
+        return xml;
     }
 
     return xml;
+}
+
+// ─── Surgical string insertion helpers for visual asset child elements ─
+
+/** Detect the indentation of the line containing the given position. */
+function detectIndent(xml: string, pos: number): string {
+    const lineStart = xml.lastIndexOf('\n', pos - 1);
+    if (lineStart === -1) { return ''; }
+    const lineContent = xml.substring(lineStart + 1, pos);
+    const match = /^(\s*)/.exec(lineContent);
+    return match ? match[1] : '';
+}
+
+/** Build the XML string for a new child element inside VisualElements. */
+function buildVisualChildElement(veField: string, value: string): string | null {
+    const defaultTileFields: Record<string, string> = {
+        wide310x150Logo: 'Wide310x150Logo',
+        square71x71Logo: 'Square71x71Logo',
+        square310x310Logo: 'Square310x310Logo',
+    };
+    if (defaultTileFields[veField]) {
+        return `<uap:DefaultTile ${defaultTileFields[veField]}="${value}" />`;
+    }
+    if (veField === 'badgeLogo') {
+        return `<uap:LockScreen Notification="badge" BadgeLogo="${value}" />`;
+    }
+    if (veField === 'splashScreenImage') {
+        return `<uap:SplashScreen Image="${value}" />`;
+    }
+    return null;
 }
 
 // ─── DOM-based change helpers (used as fallback for element creation) ─
@@ -823,25 +1006,54 @@ function applyApplicationChange(root: Element, field: string, value: string, ind
         const visualEl = findChildByLocalNameNS(appEl, 'VisualElements');
         if (!visualEl) { return; }
 
-        if (veField === 'wide310x150Logo') {
-            // This is on the DefaultTile child element
+        // DefaultTile attributes
+        const defaultTileAttrs: Record<string, string> = {
+            wide310x150Logo: 'Wide310x150Logo',
+            square71x71Logo: 'Square71x71Logo',
+            square310x310Logo: 'Square310x310Logo',
+        };
+        if (defaultTileAttrs[veField]) {
             let defaultTile = findChildByLocalNameNS(visualEl, 'DefaultTile');
             if (!defaultTile) {
                 defaultTile = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:DefaultTile');
                 visualEl.appendChild(defaultTile);
             }
-            defaultTile.setAttribute('Wide310x150Logo', value);
-        } else {
-            const attrMap: Record<string, string> = {
-                displayName: 'DisplayName',
-                description: 'Description',
-                backgroundColor: 'BackgroundColor',
-                square150x150Logo: 'Square150x150Logo',
-                square44x44Logo: 'Square44x44Logo',
-            };
-            const attr = attrMap[veField];
-            if (attr) { visualEl.setAttribute(attr, value); }
+            defaultTile.setAttribute(defaultTileAttrs[veField], value);
+            return;
         }
+
+        // LockScreen attribute
+        if (veField === 'badgeLogo') {
+            let lockScreen = findChildByLocalNameNS(visualEl, 'LockScreen');
+            if (!lockScreen) {
+                lockScreen = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:LockScreen');
+                lockScreen.setAttribute('Notification', 'badge');
+                visualEl.appendChild(lockScreen);
+            }
+            lockScreen.setAttribute('BadgeLogo', value);
+            return;
+        }
+
+        // SplashScreen attribute
+        if (veField === 'splashScreenImage') {
+            let splashScreen = findChildByLocalNameNS(visualEl, 'SplashScreen');
+            if (!splashScreen) {
+                splashScreen = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:SplashScreen');
+                visualEl.appendChild(splashScreen);
+            }
+            splashScreen.setAttribute('Image', value);
+            return;
+        }
+
+        const attrMap: Record<string, string> = {
+            displayName: 'DisplayName',
+            description: 'Description',
+            backgroundColor: 'BackgroundColor',
+            square150x150Logo: 'Square150x150Logo',
+            square44x44Logo: 'Square44x44Logo',
+        };
+        const attr = attrMap[veField];
+        if (attr) { visualEl.setAttribute(attr, value); }
     }
 }
 
