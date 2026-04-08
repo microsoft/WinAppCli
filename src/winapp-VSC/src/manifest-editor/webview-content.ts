@@ -336,6 +336,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .form-group.has-error textarea {
             border-color: var(--vscode-inputValidation-errorBorder, #f44747);
         }
+        .form-group.has-warning input,
+        .form-group.has-warning select,
+        .form-group.has-warning textarea {
+            border-color: var(--vscode-editorWarning-foreground, #cca700);
+        }
 
         /* ─── Color picker row ─────────────────────────────── */
         .color-row {
@@ -407,6 +412,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .btn-danger:hover {
             background: var(--vscode-errorForeground, #f44747);
             color: var(--vscode-editor-background);
+        }
+        .btn-secondary {
+            color: var(--vscode-button-foreground);
+            background: transparent;
+            border: 1px solid var(--vscode-button-foreground);
+        }
+        .btn-secondary:hover {
+            background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
         }
         .btn-sm {
             padding: 2px 8px;
@@ -1071,12 +1084,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 const item = document.createElement('div');
                 item.className = 'list-item';
                 item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Resource \${idx + 1}</span>
-                        <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
-                    </div>
                     <div class="form-group" data-field="resources.\${idx}.language">
-                        <label>Language:</label>
+                        <div class="item-header">
+                            <label>Language:</label>
+                            <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                        </div>
                         <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
                         <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp")</div>
                         <div class="validation-msg"></div>
@@ -1278,7 +1290,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             '<div class="custom-dropdown-menu add-visual-asset-menu">' +
                             buildAddVisualAssetMenuHtml(app, idx) +
                             '</div></div>' : ''}
-                        <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
+                        <button class="btn btn-secondary update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
@@ -1517,7 +1529,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function showValidationErrors(errors) {
             // Clear only manifest-level validation errors (those with data-field), not extension field errors
             document.querySelectorAll('.form-group[data-field]').forEach(fg => {
-                fg.classList.remove('has-error');
+                fg.classList.remove('has-error', 'has-warning');
                 const msg = fg.querySelector('.validation-msg');
                 if (msg) { msg.className = 'validation-msg'; msg.textContent = ''; }
             });
@@ -1526,7 +1538,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             errors.forEach(err => {
                 const fg = document.querySelector('.form-group[data-field="' + err.field + '"]');
                 if (fg) {
-                    fg.classList.add('has-error');
+                    fg.classList.add(err.severity === 'warning' ? 'has-warning' : 'has-error');
                     const msg = fg.querySelector('.validation-msg');
                     if (msg) {
                         msg.className = 'validation-msg ' + err.severity;

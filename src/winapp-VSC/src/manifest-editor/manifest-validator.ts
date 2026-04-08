@@ -10,6 +10,27 @@ const PUBLISHER_DN_REGEX = /^CN\s*=\s*.+/i;
 const IDENTITY_NAME_REGEX = /^[a-zA-Z0-9.\-]+$/;
 const WINDOWS_VERSION_REGEX = /^10\.0\.\d+\.\d+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+// BCP-47: language[-script][-region][-variant] (simplified for common MSIX usage)
+const BCP47_REGEX = /^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*$/;
+
+/** Returns true if a path has a non-.png file extension (i.e. an unsupported image format). */
+function hasNonPngExtension(path: string): boolean {
+    const filename = path.split(/[\\/]/).pop() || '';
+    const dotIdx = filename.lastIndexOf('.');
+    if (dotIdx < 0) { return false; } // no extension — valid (could be scale-qualified)
+    return filename.substring(dotIdx).toLowerCase() !== '.png';
+}
+
+const PNG_ERROR = 'Visual assets must be PNG files (.png).';
+
+/** Validate an image field: error if blank (but present in manifest) or non-.png extension. */
+function validateImageField(errors: ValidationError[], field: string, value: string | null | undefined): void {
+    if (value === '') {
+        errors.push({ field, message: 'Image path cannot be empty.', severity: 'error' });
+    } else if (value && hasNonPngExtension(value)) {
+        errors.push({ field, message: PNG_ERROR, severity: 'error' });
+    }
+}
 
 /** Validate all fields and return a list of errors. */
 export function validateManifest(data: ManifestData): ValidationError[] {
@@ -48,6 +69,7 @@ export function validateManifest(data: ManifestData): ValidationError[] {
     if (!data.properties.logo) {
         errors.push({ field: 'properties.logo', message: 'Store logo path is required.', severity: 'error' });
     }
+    validateImageField(errors, 'properties.logo', data.properties.logo);
 
     if (data.properties.description && data.properties.description.length > 2048) {
         errors.push({ field: 'properties.description', message: 'Description must be 2048 characters or fewer.', severity: 'error' });
@@ -96,6 +118,16 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
+    // Resources validation
+    for (let i = 0; i < data.resources.length; i++) {
+        const res = data.resources[i];
+        if (!res.language) {
+            errors.push({ field: `resources.${i}.language`, message: 'Language is required.', severity: 'error' });
+        } else if (!BCP47_REGEX.test(res.language)) {
+            errors.push({ field: `resources.${i}.language`, message: 'Language must be a valid BCP-47 tag (e.g. en, en-US, zh-Hans-CN).', severity: 'error' });
+        }
+    }
+
     // Applications validation
     for (let i = 0; i < data.applications.length; i++) {
         const app = data.applications[i];
@@ -130,6 +162,17 @@ export function validateManifest(data: ManifestData): ValidationError[] {
             !HEX_COLOR_REGEX.test(app.visualElements.backgroundColor)) {
             errors.push({ field: `${prefix}.visualElements.backgroundColor`, message: 'Background color must be a hex color (e.g. #FFFFFF) or "transparent".', severity: 'error' });
         }
+
+        // Visual asset PNG validation
+        const ve = app.visualElements;
+        const vePrefix = `${prefix}.visualElements`;
+        validateImageField(errors, `${vePrefix}.square150x150Logo`, ve.square150x150Logo);
+        validateImageField(errors, `${vePrefix}.square44x44Logo`, ve.square44x44Logo);
+        validateImageField(errors, `${vePrefix}.wide310x150Logo`, ve.wide310x150Logo);
+        validateImageField(errors, `${vePrefix}.square71x71Logo`, ve.square71x71Logo);
+        validateImageField(errors, `${vePrefix}.square310x310Logo`, ve.square310x310Logo);
+        validateImageField(errors, `${vePrefix}.badgeLogo`, ve.badgeLogo);
+        validateImageField(errors, `${vePrefix}.splashScreenImage`, ve.splashScreenImage);
     }
 
     return errors;
