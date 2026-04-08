@@ -33,9 +33,10 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 **How it works:**
 
 1. You press **F5** (or start a debug session).
-2. The extension locates your `AppxManifest.xml` in the build output.
-3. It launches your app via `winapp run` to give it package identity.
-4. A child debug session attaches to the running process using the debugger you specified.
+2. The extension locates your build output directories and `AppxManifest.xml`.
+3. You'll then have the option to select the build directory you'd like to run.
+4. It launches your app via `winapp run` to give it package identity.
+5. A child debug session attaches to the running process using the debugger you specified.
 
 **Supported debuggers:**
 
@@ -55,8 +56,6 @@ The extension provides a **custom `winapp` debug type** that launches your app w
             "type": "winapp",
             "request": "launch",
             "name": "WinApp: Launch and Attach",
-            "debuggerType": "coreclr",
-            "buildOutputManifest": "**/bin/**/AppxManifest.xml"
         }
     ]
 }
@@ -66,11 +65,12 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| `inputFolder` | string | | Path to the build output folder containing your app binaries (e.g., `${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621`). If not set, you will be prompted to select a folder. |
+| `manifest` | string | | Path to the `AppxManifest.xml` file. If not set, the CLI auto-detects from the input folder or current directory. |
 | `debuggerType` | string | `coreclr` | Underlying debugger to use (`coreclr`, `cppvsdbg`, or `node`). |
-| `buildOutputManifest` | string | `**/*/AppxManifest.xml` | Glob pattern to locate `AppxManifest.xml` in your build output. |
 | `workingDirectory` | string | workspace folder | Working directory for the application. |
 | `args` | string | | Command-line arguments to pass to the application. |
-| `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder next to the manifest. |
+| `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
 
 ## Scenarios
 
@@ -113,7 +113,8 @@ The winapp CLI (and this extension) works with any Windows app framework:
 
 - Windows 10 or later
 - Visual Studio Code 1.109.0 or later
-- The winapp CLI is bundled with the extension — no separate installation required
+
+The winapp CLI is bundled with the extension — no separate installation required
 
 For debugging, install the debugger extension that matches your app's language (see [Supported debuggers](#integrated-debugging) above).
 
