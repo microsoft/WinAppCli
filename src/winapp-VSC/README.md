@@ -114,7 +114,7 @@ The winapp CLI (and this extension) works with any Windows app framework:
 - Windows 10 or later
 - Visual Studio Code 1.109.0 or later
 
-The winapp CLI is bundled with the extension — no separate installation required
+The winapp CLI is bundled with the extension — no separate installation required.
 
 For debugging, install the debugger extension that matches your app's language (see [Supported debuggers](#integrated-debugging) above).
 
