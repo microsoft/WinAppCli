@@ -206,6 +206,40 @@ internal class WorkspaceSetupService(
             logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
         }
 
+        // Prompt to install the WinApp CLI package before entering the live display context
+        // (Spectre.Console does not allow interactive prompts inside a live display)
+        var installWinAppPackage = false;
+        if (isDotNetProject && csprojFile != null)
+        {
+            var hasWinAppPackage = await dotNetService.HasPackageReferenceAsync(
+                csprojFile,
+                DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE,
+                cancellationToken);
+
+            if (hasWinAppPackage)
+            {
+                logger.LogDebug("{UISymbol} {Package} already referenced by project; skipping install prompt",
+                    UiSymbols.Skip, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                installWinAppPackage = true;
+            }
+            else if (options.UseDefaults)
+            {
+                installWinAppPackage = true;
+            }
+            else
+            {
+                installWinAppPackage = await ShowConfirmationPromptAsync(
+                    ansiConsole,
+                    $"Install {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
+                    cancellationToken);
+                if (!installWinAppPackage)
+                {
+                    logger.LogWarning("{UISymbol} Skipped {Package} — packaged app support via 'dotnet run' will not be available",
+                        UiSymbols.Warning, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+                }
+            }
+        }
+
         var statusLabel = isDotNetProject ? "Setting up .NET project" : "Setting up workspace";
         return await statusService.ExecuteWithStatusAsync(statusLabel, async (taskContext, cancellationToken) =>
         {
@@ -283,17 +317,24 @@ internal class WorkspaceSetupService(
                     }
 
                     // Build dynamic package list: build tools are always needed,
-                    // Windows App SDK is only added when the user chose to install SDKs
+                    // WinApp integration package is added only when the user opted in
                     var packages = new List<(string Name, bool Required)>
                     {
                         (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
-                        (DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, false)
                     };
+
+                    if (installWinAppPackage)
+                    {
+                        // Non-required: a transient NuGet failure should not abort init
+                        packages.Add((DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, false));
+                    }
 
                     if (options.SdkInstallMode != SdkInstallMode.None)
                     {
                         packages.Add((DotNetService.WINAPP_SDK_NUGET_PACKAGE, true));
                     }
+
+                    var winAppPackageApplied = false;
 
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
@@ -302,8 +343,38 @@ internal class WorkspaceSetupService(
                         // When SdkInstallMode is None, still use Stable versions for build tools packages
                         var versionQueryMode = sdkInstallMode == SdkInstallMode.None ? SdkInstallMode.Stable : sdkInstallMode;
 
+                        // Query existing package versions so we can preserve them
+                        // (except for the WinApp CLI package which should always be updated)
+                        var existingVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        try
+                        {
+                            var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken);
+                            if (packageList?.Projects is not null)
+                            {
+                                foreach (var pkg in packageList.Projects
+                                    .SelectMany(p => p.Frameworks ?? [])
+                                    .SelectMany(f => f.TopLevelPackages ?? []))
+                                {
+                                    existingVersions[pkg.Id] = pkg.ResolvedVersion;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not query existing packages: {ex.Message}");
+                        }
+
                         foreach (var (packageName, required) in packages)
                         {
+                            // Preserve existing package versions unless it's the WinApp CLI package
+                            if (existingVersions.TryGetValue(packageName, out var existingVersion)
+                                && !string.Equals(packageName, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase))
+                            {
+                                usedVersions[packageName] = existingVersion;
+                                taskContext.AddStatusMessage($"{UiSymbols.Check} Keeping {packageName} {existingVersion}");
+                                continue;
+                            }
+
                             taskContext.UpdateSubStatus($"Querying latest {packageName} version");
                             string? version = null;
                             try
@@ -328,6 +399,11 @@ internal class WorkspaceSetupService(
                                 version = await dotNetService.AddOrUpdatePackageReferenceAsync(csprojFile, packageName, version, cancellationToken);
                                 usedVersions[packageName] = version;
                                 taskContext.AddStatusMessage($"{UiSymbols.Check} Added {packageName} {version}");
+
+                                if (string.Equals(packageName, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    winAppPackageApplied = true;
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -346,6 +422,29 @@ internal class WorkspaceSetupService(
                     {
                         return partialResult;
                     }
+
+                    // Apply MSIX csproj properties only if the WinApp package was actually added/updated
+                    if (winAppPackageApplied)
+                    {
+                        if (await dotNetService.EnsureEnableMsixToolingAsync(csprojFile, cancellationToken))
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} Enabled MSIX tooling");
+                        }
+
+                        if (await dotNetService.RemoveWindowsPackageTypeNoneAsync(csprojFile, cancellationToken))
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Check} Removed WindowsPackageType=None to enable packaged app mode");
+                        }
+                    }
+
+                    // Add descriptive comments above package references in the csproj
+                    var packageComments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        [BuildToolsService.BUILD_TOOLS_PACKAGE] = "Windows SDK build tools: provides headers, libs, and tools for Windows API access",
+                        [DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE] = "WinApp CLI integration: enables 'dotnet run' support for packaged apps",
+                        [DotNetService.WINAPP_SDK_NUGET_PACKAGE] = "Windows App SDK: provides WinUI 3, app lifecycle, windowing, and other modern Windows APIs"
+                    };
+                    await dotNetService.AnnotatePackageReferencesAsync(csprojFile, packageComments, cancellationToken);
                 }
 
                 // Native/C++ specific: Install SDK packages, headers, and build tools

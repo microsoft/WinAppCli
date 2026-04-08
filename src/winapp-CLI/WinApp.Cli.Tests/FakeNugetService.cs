@@ -21,9 +21,19 @@ internal class FakeNugetService : INugetService
     /// </summary>
     public DirectoryInfo? CacheDirectory { get; set; }
 
+    /// <summary>
+    /// Packages listed here will cause <see cref="GetLatestVersionAsync"/> to throw an exception,
+    /// simulating a transient NuGet failure for that specific package.
+    /// </summary>
+    public HashSet<string> PackagesToThrow { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
     {
         QueriedPackages.Add(packageName);
+        if (PackagesToThrow.Contains(packageName))
+        {
+            throw new InvalidOperationException($"Simulated NuGet failure for {packageName}");
+        }
         return Task.FromResult(DefaultVersion);
     }
 
