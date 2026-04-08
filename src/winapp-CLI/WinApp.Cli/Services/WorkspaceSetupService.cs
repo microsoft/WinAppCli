@@ -317,7 +317,7 @@ internal class WorkspaceSetupService(
                     }
 
                     // Build dynamic package list: build tools are always needed,
-                    // Windows App SDK is only added when the user chose to install SDKs
+                    // WinApp integration package is added only when the user opted in
                     var packages = new List<(string Name, bool Required)>
                     {
                         (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
@@ -325,13 +325,16 @@ internal class WorkspaceSetupService(
 
                     if (installWinAppPackage)
                     {
-                        packages.Add((DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, true));
+                        // Non-required: a transient NuGet failure should not abort init
+                        packages.Add((DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, false));
                     }
 
                     if (options.SdkInstallMode != SdkInstallMode.None)
                     {
                         packages.Add((DotNetService.WINAPP_SDK_NUGET_PACKAGE, true));
                     }
+
+                    var winAppPackageApplied = false;
 
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
@@ -346,10 +349,10 @@ internal class WorkspaceSetupService(
                         try
                         {
                             var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken);
-                            if (packageList?.Projects is not null)
+                            var project = packageList?.Projects?.FirstOrDefault();
+                            if (project is not null)
                             {
-                                foreach (var pkg in packageList.Projects
-                                    .SelectMany(p => p.Frameworks ?? [])
+                                foreach (var pkg in (project.Frameworks ?? [])
                                     .SelectMany(f => f.TopLevelPackages ?? []))
                                 {
                                     existingVersions[pkg.Id] = pkg.ResolvedVersion;
@@ -396,6 +399,11 @@ internal class WorkspaceSetupService(
                                 version = await dotNetService.AddOrUpdatePackageReferenceAsync(csprojFile, packageName, version, cancellationToken);
                                 usedVersions[packageName] = version;
                                 taskContext.AddStatusMessage($"{UiSymbols.Check} Added {packageName} {version}");
+
+                                if (string.Equals(packageName, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    winAppPackageApplied = true;
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -415,8 +423,8 @@ internal class WorkspaceSetupService(
                         return partialResult;
                     }
 
-                    // Apply MSIX csproj properties after confirming WinApp package was successfully installed
-                    if (installWinAppPackage)
+                    // Apply MSIX csproj properties only if the WinApp package was actually added/updated
+                    if (winAppPackageApplied)
                     {
                         if (await dotNetService.EnsureEnableMsixToolingAsync(csprojFile, cancellationToken))
                         {
