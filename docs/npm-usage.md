@@ -338,6 +338,7 @@ function run(options: RunOptions): Promise<WinappResult>
 | `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -492,6 +493,27 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 
 ---
 
+### `uiGetValue()`
+
+Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
+
+```typescript
+function uiGetValue(options?: UiGetValueOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `uiInspect()`
 
 View the UI element tree with semantic slugs, element types, names, and bounds.
@@ -560,7 +582,7 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 
 ### `uiScreenshot()`
 
-Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
+Capture the target window or element as a PNG image. When multiple windows exist (e.g., dialogs), captures each to a separate file. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
 
 ```typescript
 function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
@@ -596,6 +618,7 @@ function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
@@ -1221,6 +1244,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -1311,6 +1335,18 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `UiGetValueOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `UiInspectOptions`
 
 | Property | Type | Required | Description |
@@ -1371,6 +1407,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |

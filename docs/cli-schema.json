@@ -2630,6 +2630,19 @@
               "required": false,
               "recursive": false
             },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--quiet": {
               "description": "Suppress progress messages",
               "hidden": false,

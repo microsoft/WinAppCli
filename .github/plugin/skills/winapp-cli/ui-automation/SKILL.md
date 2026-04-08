@@ -407,6 +407,7 @@ Scroll a container element using ScrollPattern. Use --direction to scroll increm
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--direction` | Scroll direction: up, down, left, right | (none) |
+| `--json` | Format output as JSON | (none) |
 | `--to` | Scroll to position: top, bottom | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 

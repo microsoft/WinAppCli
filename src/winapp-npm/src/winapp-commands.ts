@@ -445,6 +445,8 @@ export interface RunOptions extends CommonOptions {
   clean?: boolean;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
+  /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
+  detach?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) */
@@ -468,6 +470,7 @@ export async function run(options: RunOptions): Promise<WinappResult> {
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');
+  if (options.detach) args.push('--detach');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
@@ -657,6 +660,33 @@ export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// ui get-value
+// ---------------------------------------------------------------------------
+
+export interface UiGetValueOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
+ */
+export async function uiGetValue(options: UiGetValueOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'get-value'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui inspect
 // ---------------------------------------------------------------------------
 
@@ -766,7 +796,7 @@ export interface UiScreenshotOptions extends CommonOptions {
 }
 
 /**
- * Capture the target window or element as a PNG image. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
+ * Capture the target window or element as a PNG image. When multiple windows exist (e.g., dialogs), captures each to a separate file. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.
  */
 export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'screenshot'];
@@ -790,6 +820,8 @@ export interface UiScrollOptions extends CommonOptions {
   app?: string;
   /** Scroll direction: up, down, left, right */
   direction?: string;
+  /** Format output as JSON */
+  json?: boolean;
   /** Scroll to position: top, bottom */
   to?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
@@ -804,6 +836,7 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.direction) args.push('--direction', options.direction);
+  if (options.json) args.push('--json');
   if (options.to) args.push('--to', options.to);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
