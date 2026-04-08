@@ -67,11 +67,20 @@ internal class TemplateService(IEnumerable<ITemplateProvider> providers) : ITemp
         IReadOnlyList<string>? extraArgs,
         CancellationToken cancellationToken = default)
     {
-        // Find which provider owns this template
+        // Build a shortName → provider lookup from cached templates
+        var allTemplates = await GetAvailableTemplatesAsync(cancellationToken);
+        var targetTemplate = allTemplates.FirstOrDefault(t =>
+            string.Equals(t.ShortName, shortName, StringComparison.OrdinalIgnoreCase));
+
+        if (targetTemplate is null)
+        {
+            return (1, string.Empty, $"No template provider found for template '{shortName}'.");
+        }
+
+        // Find the provider that owns this template's language
         foreach (var provider in providers)
         {
-            var templates = await provider.GetTemplatesAsync(cancellationToken);
-            if (templates.Any(t => string.Equals(t.ShortName, shortName, StringComparison.OrdinalIgnoreCase)))
+            if (string.Equals(provider.Language, targetTemplate.Language, StringComparison.Ordinal))
             {
                 return await provider.CreateAsync(shortName, name, outputDir, projectFile, parameters, extraArgs, cancellationToken);
             }

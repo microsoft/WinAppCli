@@ -99,7 +99,8 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
         {
             foreach (var arg in extraArgs)
             {
-                args += $" {arg}";
+                // Quote args that contain spaces to prevent dotnet CLI from splitting them
+                args += arg.Contains(' ') ? $" \"{arg}\"" : $" {arg}";
             }
         }
 
@@ -114,6 +115,7 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
 
     /// <summary>
     /// Finds the installed .nupkg for the template package in the template engine packages directory.
+    /// Returns the latest version by parsing semantic versions from the file names.
     /// </summary>
     private static string? FindInstalledNupkg()
     {
@@ -126,12 +128,28 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
             return null;
         }
 
-        // Find matching nupkg files, sorted to get latest version first
-        var matchingFiles = Directory.GetFiles(templateEngineDir, $"{TemplatePackageId}.*.nupkg")
-            .OrderByDescending(f => f)
-            .ToList();
+        var prefix = $"{TemplatePackageId}.";
+        var matchingFiles = Directory.GetFiles(templateEngineDir, $"{prefix}*.nupkg");
 
-        return matchingFiles.FirstOrDefault();
+        if (matchingFiles.Length == 0)
+        {
+            return null;
+        }
+
+        // Parse version from filename and sort semantically
+        // Filename format: Microsoft.WindowsAppSDK.WinUI.CSharp.Templates.0.0.3-alpha.nupkg
+        return matchingFiles
+            .Select(f =>
+            {
+                var fileName = Path.GetFileNameWithoutExtension(f);
+                var versionStr = fileName[prefix.Length..];
+                var parsed = Version.TryParse(versionStr.Split('-')[0], out var version);
+                return (Path: f, Version: parsed ? version! : new Version(0, 0, 0), Raw: versionStr);
+            })
+            .OrderByDescending(x => x.Version)
+            .ThenByDescending(x => x.Raw) // Pre-release tie-breaker
+            .Select(x => x.Path)
+            .FirstOrDefault();
     }
 
     /// <summary>

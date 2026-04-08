@@ -107,7 +107,7 @@ internal class NewCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                ansiConsole.MarkupLine($"{UiSymbols.Error} Failed to load templates: {ex.Message}");
+                ansiConsole.MarkupLine($"{UiSymbols.Error} Failed to load templates: {Markup.Escape(ex.Message)}");
                 return 1;
             }
 
@@ -133,8 +133,8 @@ internal class NewCommand : Command, IShortDescription
 
                 if (selectedTemplate is null)
                 {
-                    var available = string.Join(", ", allTemplates.Select(t => t.ShortName));
-                    ansiConsole.MarkupLine($"{UiSymbols.Error} Template [bold]'{templateName}'[/] not found.");
+                    var available = string.Join(", ", allTemplates.Select(t => Markup.Escape(t.ShortName)));
+                    ansiConsole.MarkupLine($"{UiSymbols.Error} Template [bold]'{Markup.Escape(templateName)}'[/] not found.");
                     ansiConsole.MarkupLine($"Available: {available}");
                     return 1;
                 }
@@ -148,12 +148,12 @@ internal class NewCommand : Command, IShortDescription
                 }
 
                 // Show what was selected (match winapp init's style: clear prompt, show result)
-                ansiConsole.MarkupLine($"Template: [underline]{selectedTemplate.Name}[/]");
+                ansiConsole.MarkupLine($"Template: [underline]{Markup.Escape(selectedTemplate.Name)}[/]");
             }
             else
             {
                 ansiConsole.MarkupLine($"{UiSymbols.Error} Template argument is required.");
-                ansiConsole.MarkupLine($"Available: {string.Join(", ", availableTemplates.Select(t => t.ShortName))}");
+                ansiConsole.MarkupLine($"Available: {string.Join(", ", availableTemplates.Select(t => Markup.Escape(t.ShortName)))}");
                 return 1;
             }
 
@@ -281,8 +281,8 @@ internal class NewCommand : Command, IShortDescription
             {
                 ansiConsole.WriteLine();
                 ansiConsole.MarkupLine("[bold]Next steps:[/]");
-                ansiConsole.MarkupLine($"  cd {name}");
-                ansiConsole.MarkupLine($"  dotnet run");
+                ansiConsole.WriteLine($"  cd {name}");
+                ansiConsole.WriteLine("  dotnet run");
             }
 
             return result;
@@ -316,15 +316,15 @@ internal class NewCommand : Command, IShortDescription
                 {
                     var langTemplates = templates.Where(t => t.Language == language).ToList();
                     prompt.AddChoiceGroup(
-                        ($"[bold yellow]{language}[/]", (TemplateInfo?)null),
-                        langTemplates.Select(t => ($"{t.Name} [dim]({t.ShortName})[/]", (TemplateInfo?)t)).ToArray());
+                        ($"[bold yellow]{Markup.Escape(language)}[/]", (TemplateInfo?)null),
+                        langTemplates.Select(t => ($"{Markup.Escape(t.Name)} [dim]({Markup.Escape(t.ShortName)})[/]", (TemplateInfo?)t)).ToArray());
                 }
             }
             else
             {
                 foreach (var t in templates)
                 {
-                    prompt.AddChoice(($"{t.Name} [dim]({t.ShortName})[/]", (TemplateInfo?)t));
+                    prompt.AddChoice(($"{Markup.Escape(t.Name)} [dim]({Markup.Escape(t.ShortName)})[/]", (TemplateInfo?)t));
                 }
             }
 
