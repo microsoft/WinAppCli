@@ -161,43 +161,55 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 		}
 
 		try {
-			// Search for AppxManifest.xml in build output using glob (bypasses .gitignore)
-			const searchPattern = config.buildOutputManifest || '**/*/AppxManifest.xml';
-			const allMatches = await glob(searchPattern, {
-				cwd: folder.uri.fsPath,
-				absolute: true,
-				nocase: true
-			});
-
-			// Filter out manifests inside AppX folders (created by winapp run)
-			const matches = allMatches.filter(m => !m.split(path.sep).includes('AppX'));
-
-			let manifest: string;
-			if (matches.length === 0) {
-				throw new Error(`No manifest found matching "${searchPattern}". Build your project first or update "buildOutputManifest" in launch.json.`);
-			} else if (matches.length === 1) {
-				manifest = matches[0];
-			} else {
-				// Multiple manifests found — let the user pick
-				const items = matches.map(m => ({
-					label: path.relative(folder.uri.fsPath, m),
-					fsPath: m
-				}));
-				const picked = await vscode.window.showQuickPick(items, {
-					placeHolder: 'Multiple AppxManifest.xml files found — select one'
+			// The run command requires an input-folder positional argument.
+			// If not set in launch.json, search for folders containing .exe
+			// files and let the user pick one.
+			let inputFolder: string | undefined = config.inputFolder;
+			if (!inputFolder) {
+				const exeMatches = await glob('**/*.exe', {
+					cwd: folder.uri.fsPath,
+					absolute: true,
+					nocase: true,
+					ignore: ['**/node_modules/**', '**/.git/**', '**/AppX/**', '**/.winapp/**', '**/obj/**', '**/.vs/**', '**/packages/**']
 				});
-				if (!picked) {
-					throw new Error('No manifest selected, cancelling debug session.');
+
+				// Collect unique parent directories that contain .exe files
+				const dirSet = new Set<string>();
+				for (const exe of exeMatches) {
+					dirSet.add(path.dirname(exe));
 				}
-				manifest = picked.fsPath;
+
+				if (dirSet.size === 0) {
+					throw new Error('No folders containing .exe files found in the workspace. Build your project first, or set "inputFolder" in launch.json.');
+				}
+
+				const dirs = [...dirSet].sort();
+				if (dirs.length === 1) {
+					inputFolder = dirs[0];
+				} else {
+					const items = dirs.map(d => ({
+						label: path.relative(folder.uri.fsPath, d),
+						description: d,
+						fsPath: d
+					}));
+					const picked = await vscode.window.showQuickPick(items, {
+						placeHolder: 'Select the build output folder containing your app'
+					});
+					if (!picked) {
+						throw new Error('No build output folder selected, cancelling debug session.');
+					}
+					inputFolder = picked.fsPath;
+				}
 			}
 
-			// Build the command with mapped arguments
-			// The run command requires an input-folder positional argument;
-			// use the directory containing the discovered manifest.
-			const inputFolder = config.inputFolder || path.dirname(manifest);
 			const cliPath = getWinappCliPath(this.extensionPath);
-			const spawnArgs = ['run', inputFolder, '--manifest', manifest];
+			const spawnArgs = ['run', inputFolder];
+
+			// Optional explicit manifest path; when omitted the CLI
+			// auto-detects from the input folder or current directory.
+			if (config.manifest) {
+				spawnArgs.push('--manifest', config.manifest);
+			}
 
 			if (config.outputAppxDirectory) {
 				spawnArgs.push('--output-appx-directory', config.outputAppxDirectory);
