@@ -3,9 +3,12 @@
 
 // The CLI requires Windows 10+; suppress platform compat warnings for Debug APIs.
 #pragma warning disable CA1416
+// _logWriter lifetime is managed in RunDebugLoopAsync try/finally, not via IDisposable.
+#pragma warning disable CA1001
 
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using System.Runtime.InteropServices;
 using System.Text;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -22,7 +25,7 @@ namespace WinApp.Cli.Services;
 /// The debugged process is terminated when the debug session ends (e.g., Ctrl+C)
 /// or if the winapp process exits unexpectedly.
 /// </summary>
-internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutputService> logger) : IDebugOutputService
+internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService crashDumpService, ILogger<DebugOutputService> logger) : IDebugOutputService
 {
     // Well-known NTSTATUS / exception codes
     private const uint STATUS_BREAKPOINT = 0x80000003;
@@ -30,12 +33,52 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
     private const uint STATUS_WX86_BREAKPOINT = 0x4000001F;
     private const uint THREAD_NAME_EXCEPTION = 0x406D1388;
 
+    // Set by the debug loop when a crash dump is captured.
+    private string? _crashDumpPath;
+
+    // Log writer for verbose debug output (OutputDebugString, first-chance exceptions).
+    private StreamWriter? _logWriter;
+    private string? _logPath;
+
+    // Saved first-chance exception context — at first-chance time the thread context
+    // still points to user code. By second-chance, XAML's FailFast has replaced the stack.
+    private byte[]? _savedFirstChanceContext;
+    private uint _savedFirstChanceThreadId;
+    private int _savedFirstChanceExceptionCode;
+    private nuint _savedFirstChanceExceptionAddress;
+
     /// <inheritdoc/>
-    public Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken)
+    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken)
     {
-        // DebugActiveProcess + WaitForDebugEventEx must be called from the same thread,
-        // so spin up a dedicated thread via Task.Run.
-        return Task.Run(() => RunDebugLoop(processId, cancellationToken), cancellationToken);
+        // Create a log file alongside the dump directory for verbose debug output.
+        var logDir = Path.Combine(Path.GetTempPath(), "winapp-dumps");
+        Directory.CreateDirectory(logDir);
+        _logPath = Path.Combine(logDir, $"debug-{processId}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        _logWriter = new StreamWriter(_logPath, append: false, Encoding.UTF8) { AutoFlush = true };
+
+        try
+        {
+            // DebugActiveProcess + WaitForDebugEventEx must be called from the same thread,
+            // so spin up a dedicated thread via Task.Run.
+            var exitCode = await Task.Run(() => RunDebugLoop(processId, cancellationToken), cancellationToken);
+
+            // Close the log writer before analysis appends to the same file.
+            _logWriter.Dispose();
+            _logWriter = null;
+
+            // After the debug loop ends, analyze the crash dump if one was captured.
+            if (_crashDumpPath != null)
+            {
+                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!);
+            }
+
+            return exitCode;
+        }
+        finally
+        {
+            _logWriter?.Dispose();
+            _logWriter = null;
+        }
     }
 
     private int RunDebugLoop(uint processId, CancellationToken cancellationToken)
@@ -143,9 +186,9 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
 
         if (!string.IsNullOrWhiteSpace(message))
         {
-            // Trim trailing newline so Spectre doesn't double-space the output.
+            // Trim trailing newline so log doesn't double-space the output.
             message = message.TrimEnd('\r', '\n');
-            console.MarkupLine($"[dim][[Debug]][/] {message.EscapeMarkup()}");
+            _logWriter?.WriteLine($"[Debug] {message}");
         }
     }
 
@@ -177,7 +220,45 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         {
             var name = GetExceptionName(code);
             var address = (nuint)exInfo.ExceptionRecord.ExceptionAddress;
-            console.MarkupLine($"[yellow]First-chance exception:[/] {name} (0x{code:X8}) at 0x{address:X}");
+            _logWriter?.WriteLine($"First-chance exception: {name} (0x{code:X8}) at 0x{address:X}");
+
+            // Save thread context for the FIRST critical exception — at first-chance
+            // time, the context still points to user code. Later exceptions (CLR wrapping
+            // the AV) have already unwound the stack. Only save once per crash sequence.
+            if (_savedFirstChanceContext == null &&
+                code is 0xC0000005 or 0xC00000FD or 0xE0434352 or 0xE06D7363)
+            {
+                SaveFirstChanceContext(debugEvent.dwThreadId, code, address);
+            }
+
+            // Stack Overflow is always fatal in .NET — no second-chance will follow.
+            // Capture the dump immediately on first-chance.
+            if (code is 0xC00000FD && _crashDumpPath == null)
+            {
+                console.MarkupLine($"[red]Crash:[/] {name} (0x{code:X8}) at 0x{address:X}");
+                _crashDumpPath = crashDumpService.WriteMiniDump(
+                    debugEvent.dwProcessId, debugEvent.dwThreadId,
+                    _savedFirstChanceContext, _savedFirstChanceThreadId,
+                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
+            }
+        }
+        else
+        {
+            // Second-chance exception — the process is about to crash.
+            // Only capture if we don't already have a dump (e.g., Stack Overflow
+            // already captured at first-chance time).
+            var name = GetExceptionName(code);
+            var address = (nuint)exInfo.ExceptionRecord.ExceptionAddress;
+            _logWriter?.WriteLine($"Second-chance exception (crash): {name} (0x{code:X8}) at 0x{address:X}");
+            console.MarkupLine($"[red]Crash:[/] {name} (0x{code:X8}) at 0x{address:X}");
+
+            if (_crashDumpPath == null)
+            {
+                _crashDumpPath = crashDumpService.WriteMiniDump(
+                    debugEvent.dwProcessId, debugEvent.dwThreadId,
+                    _savedFirstChanceContext, _savedFirstChanceThreadId,
+                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
+            }
         }
 
         // Let the target's own exception handling run. For second-chance exceptions
@@ -191,6 +272,60 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         if (!handle.IsNull && handle.Value != (void*)-1)
         {
             PInvoke.CloseHandle(handle);
+        }
+    }
+
+    /// <summary>
+    /// Captures the faulting thread's context at first-chance time, when it still
+    /// points to the user code that caused the exception.
+    /// </summary>
+    private unsafe void SaveFirstChanceContext(uint threadId, uint code, nuint address)
+    {
+        using var threadHandle = PInvoke.OpenThread_SafeHandle(
+            THREAD_ACCESS_RIGHTS.THREAD_ALL_ACCESS,
+            false, threadId);
+
+        if (threadHandle.IsInvalid)
+        {
+            var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            _logWriter?.WriteLine($"[CrashDump] OpenThread failed for thread {threadId}: error {err}");
+            return;
+        }
+
+        // CONTEXT must be 16-byte aligned on x64. Allocate on native heap to guarantee alignment.
+        var contextSize = sizeof(CONTEXT);
+        var pContext = (CONTEXT*)NativeMemory.AlignedAlloc((nuint)contextSize, 16);
+        try
+        {
+            NativeMemory.Clear(pContext, (nuint)contextSize);
+            pContext->ContextFlags = RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.Arm64 => CONTEXT_FLAGS.CONTEXT_FULL_ARM64,
+                _ => CONTEXT_FLAGS.CONTEXT_FULL_AMD64,
+            };
+
+            if (PInvoke.GetThreadContext(new HANDLE(threadHandle.DangerousGetHandle()), pContext))
+            {
+                _savedFirstChanceContext = new byte[contextSize];
+                fixed (byte* p = _savedFirstChanceContext)
+                {
+                    Buffer.MemoryCopy(pContext, p, contextSize, contextSize);
+                }
+                _savedFirstChanceThreadId = threadId;
+                _savedFirstChanceExceptionCode = unchecked((int)code);
+                _savedFirstChanceExceptionAddress = address;
+
+                _logWriter?.WriteLine($"[CrashDump] Saved first-chance context for thread {threadId} (0x{code:X8}) at 0x{address:X}");
+            }
+            else
+            {
+                var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                _logWriter?.WriteLine($"[CrashDump] GetThreadContext failed for thread {threadId}: error {err}");
+            }
+        }
+        finally
+        {
+            NativeMemory.AlignedFree(pContext);
         }
     }
 
