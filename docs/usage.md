@@ -326,7 +326,7 @@ winapp run <input-folder> [options]
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
-- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
+- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. If the app crashes, automatically captures a minidump and analyzes it with CDB to show the faulting source file, line number, and stack trace. Crash analysis requires WinDbg (`winget install Microsoft.WinDbg`); if not installed, the dump file path is printed for manual analysis. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
@@ -363,7 +363,7 @@ winapp run ./bin/Debug --no-launch
 # Launch via execution alias (console apps run in current terminal)
 winapp run ./bin/Debug --with-alias
 
-# Launch and capture OutputDebugString messages and first-chance exceptions
+# Launch and capture OutputDebugString messages and crash diagnostics
 winapp run ./bin/Debug --debug-output
 
 # Combine with execution alias to debug console apps inline
