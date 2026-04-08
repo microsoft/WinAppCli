@@ -217,8 +217,14 @@ Write-Host "Build output: $buildOutput"
 # Trigger first-run notice (creates marker file) before any JSON-parsed command
 & $WinAppPath --version 2>$null | Out-Null
 
-$launchJson = & $WinAppPath run $buildOutput --detach --json 2>$null
-$launchResult = $launchJson | ConvertFrom-Json
+$launchOutput = & $WinAppPath run $buildOutput --detach --json 2>$null
+# Handle potential multi-line or multi-object output: take only the last JSON object
+$jsonStr = ($launchOutput -join "`n")
+if ($jsonStr -match '(?s).*(\{[^{}]*"ProcessId"[^{}]*\})') {
+    $launchResult = $Matches[1] | ConvertFrom-Json
+} else {
+    throw "Failed to parse launch JSON. Raw output: $jsonStr"
+}
 $appPid = $launchResult.ProcessId
 
 if (-not $appPid) {
