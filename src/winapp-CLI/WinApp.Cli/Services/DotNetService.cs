@@ -45,11 +45,8 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
-    [GeneratedRegex(@"<RuntimeIdentifier[\s>]", RegexOptions.IgnoreCase)]
-    private static partial Regex RuntimeIdentifierElementRegex();
-
     [GeneratedRegex(@"<RuntimeIdentifier>(.*?)</RuntimeIdentifier>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
-    private static partial Regex RuntimeIdentifierSimpleElementRegex();
+    private static partial Regex RuntimeIdentifierElementRegex();
 
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifiersElementRegex();
@@ -492,7 +489,7 @@ internal partial class DotNetService : IDotNetService
             + Environment.NewLine + "    <EnableMsixTooling>true</EnableMsixTooling>";
 
         var modified = false;
-        var ridMatch = RuntimeIdentifierSimpleElementRegex().Match(content);
+        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
         if (ridMatch.Success)
         {
             // Insert after the full closing </RuntimeIdentifier> tag

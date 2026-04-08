@@ -261,6 +261,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -319,6 +320,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -348,6 +350,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -406,6 +409,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -489,6 +493,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert - The overall setup should still succeed
@@ -531,6 +536,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -567,6 +573,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -598,6 +605,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -646,6 +654,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -677,6 +686,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -775,6 +785,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
