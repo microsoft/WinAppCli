@@ -105,7 +105,7 @@ internal class UiSearchCommand : Command, IShortDescription
 
                 var moreText = hasMore ? $" (showing first {maxResults})" : "";
                 logger.LogInformation("Found {Count} matches{MoreText}", matches.Length, moreText);
-                return 0;
+                return matches.Length > 0 ? 0 : 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {

@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
@@ -38,6 +39,7 @@ internal class UiScrollCommand : Command, IShortDescription
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
+        Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(DirectionOption);
         Options.Add(ToOption);
     }
@@ -46,6 +48,7 @@ internal class UiScrollCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IAnsiConsole ansiConsole,
         ILogger<UiScrollCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -62,6 +65,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
             var direction = parseResult.GetValue(DirectionOption);
             var to = parseResult.GetValue(ToOption);
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
@@ -88,6 +92,18 @@ internal class UiScrollCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.ScrollContainerAsync(session, element, direction, to, cancellationToken);
+
+                if (json)
+                {
+                    var result = new UiScrollResult
+                    {
+                        ElementId = element.Selector ?? element.Id,
+                        Direction = direction,
+                        To = to
+                    };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiScrollResult));
+                }
 
                 logger.LogInformation("Scrolled {Selector}", selectorStr);
                 return 0;

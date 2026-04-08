@@ -91,6 +91,9 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Options.Add(CliSchemaOption);
         Options.Add(CallerOption);
 
+        // Reject unknown options/arguments so typos and removed flags fail loudly
+        TreatUnmatchedTokensAsErrors = true;
+
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
