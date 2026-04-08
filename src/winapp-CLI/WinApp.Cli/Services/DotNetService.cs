@@ -45,7 +45,7 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
-    [GeneratedRegex(@"<RuntimeIdentifier>(.*?)</RuntimeIdentifier>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    [GeneratedRegex(@"<RuntimeIdentifier\b[^>]*>(.*?)</RuntimeIdentifier>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifierElementRegex();
 
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
