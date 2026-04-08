@@ -67,6 +67,9 @@ if (-not $WinAppPath) {
     }
 }
 
+# Resolve to absolute path so it works after Push-Location
+$WinAppPath = (Resolve-Path $WinAppPath).Path
+
 # ============================================================================
 # Helpers
 # ============================================================================
