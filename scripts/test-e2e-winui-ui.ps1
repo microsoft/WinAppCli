@@ -215,11 +215,28 @@ Write-Host "Using winapp: $WinAppPath"
 Write-Host "Build output: $buildOutput"
 
 # Trigger first-run notice (creates marker file) before any JSON-parsed command
-& $WinAppPath --version 2>$null | Out-Null
+Write-Host "Running --version warmup..."
+$versionOut = & $WinAppPath --version 2>&1
+Write-Host "  --version stdout: $versionOut"
 
-$launchOutput = & $WinAppPath run $buildOutput --detach --json 2>$null
+$markerFile = Join-Path $env:USERPROFILE ".winapp\.first-run-complete"
+Write-Host "  First-run marker exists: $(Test-Path $markerFile)"
+
+Write-Host "Running --detach --json..."
+$launchStdout = & $WinAppPath run $buildOutput --detach --json 2>"$ScreenshotDir\winapp-run-stderr.txt"
+$launchStderr = Get-Content "$ScreenshotDir\winapp-run-stderr.txt" -ErrorAction SilentlyContinue
+
+Write-Host "  stdout lines: $($launchStdout.Count)"
+for ($i = 0; $i -lt $launchStdout.Count; $i++) {
+    Write-Host "  stdout[$i]: [$($launchStdout[$i])]"
+}
+if ($launchStderr) {
+    Write-Host "  stderr lines: $($launchStderr.Count)"
+    $launchStderr | Select-Object -First 5 | ForEach-Object { Write-Host "  stderr: [$_]" }
+}
+
 # Handle potential multi-line or multi-object output: take only the last JSON object
-$jsonStr = ($launchOutput -join "`n")
+$jsonStr = ($launchStdout -join "`n")
 if ($jsonStr -match '(?s).*(\{[^{}]*"ProcessId"[^{}]*\})') {
     $launchResult = $Matches[1] | ConvertFrom-Json
 } else {
