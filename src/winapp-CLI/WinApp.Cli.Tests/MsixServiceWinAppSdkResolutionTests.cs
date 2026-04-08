@@ -10,6 +10,8 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
 {
+    private const string TestFramework = "net9.0-windows10.0.26100.0";
+
     private MsixService _msixService = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
@@ -31,7 +33,7 @@ public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
             new DotNetProject(
             [
                 new DotNetFramework(
-                    "net9.0-windows10.0.26100.0",
+                    TestFramework,
                     [new DotNetPackage(BuildToolsService.WINAPP_SDK_PACKAGE, sdkVersion, sdkVersion)],
                     []
                 )
@@ -47,7 +49,7 @@ public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
             new DotNetProject(
             [
                 new DotNetFramework(
-                    "net9.0-windows10.0.26100.0",
+                    TestFramework,
                     [new DotNetPackage("SomeOther.Package", "1.0.0", "1.0.0")],
                     []
                 )
@@ -191,7 +193,7 @@ public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
         [
             new DotNetProject(
             [
-                new DotNetFramework("net9.0-windows10.0.26100.0", [], [])
+                new DotNetFramework(TestFramework, [], [])
             ])
         ]);
 
