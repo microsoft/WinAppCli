@@ -72,6 +72,42 @@ Describe ".NET App Guide Workflow" {
             }
         }
 
+        Context "Debug with Identity" {
+            It "Should build in Debug mode" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-Expression "dotnet build -c Debug"
+                    $LASTEXITCODE | Should -Be 0
+                } finally { Pop-Location }
+            }
+
+            It "Should apply debug identity with create-debug-identity" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    $exeFile = Get-ChildItem -Path (Join-Path $script:projectDir "bin\Debug") -Filter "*.exe" -Recurse |
+                        Select-Object -First 1
+                    $exeFile | Should -Not -BeNullOrEmpty
+                    Invoke-WinappCommand -Arguments "create-debug-identity `"$($exeFile.FullName)`""
+                } finally { Pop-Location }
+            }
+
+            It "Should add execution alias to manifest" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-WinappCommand -Arguments "manifest add-alias"
+                } finally { Pop-Location }
+            }
+
+            It "Should run app with identity via winapp run" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    $debugDir = Get-ChildItem -Path (Join-Path $script:projectDir "bin\Debug") -Filter "*.exe" -Recurse |
+                        Select-Object -First 1
+                    Invoke-WinappCommand -Arguments "run `"$($debugDir.DirectoryName)`" --with-alias --unregister-on-exit"
+                } finally { Pop-Location }
+            }
+        }
+
         Context "Certificate Generation" {
             It "Should generate dev certificate" -Skip:$script:skip {
                 Push-Location $script:projectDir
