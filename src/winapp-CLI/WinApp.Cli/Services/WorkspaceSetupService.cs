@@ -349,10 +349,10 @@ internal class WorkspaceSetupService(
                         try
                         {
                             var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken);
-                            if (packageList?.Projects is not null)
+                            var project = packageList?.Projects?.FirstOrDefault();
+                            if (project is not null)
                             {
-                                foreach (var pkg in packageList.Projects
-                                    .SelectMany(p => p.Frameworks ?? [])
+                                foreach (var pkg in (project.Frameworks ?? [])
                                     .SelectMany(f => f.TopLevelPackages ?? []))
                                 {
                                     existingVersions[pkg.Id] = pkg.ResolvedVersion;
