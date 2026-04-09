@@ -331,7 +331,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -449,6 +449,7 @@ internal partial class RunCommand : Command, IShortDescription
             DirectoryInfo inputFolder,
             string? appArgs,
             bool debugOutput,
+            bool useSymbols,
             string? packageFullName,
             CancellationToken cancellationToken)
         {
@@ -498,7 +499,7 @@ internal partial class RunCommand : Command, IShortDescription
                 if (debugOutput)
                 {
                     var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken,
-                        symbolSearchPaths: [inputFolder.FullName]);
+                        useSymbols, symbolSearchPaths: [inputFolder.FullName]);
                     if (cancellationToken.IsCancellationRequested)
                     {
                         appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));

@@ -40,7 +40,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             var dumpPath = Path.Combine(DumpDirectory, $"crash-{processId}-{DateTime.Now:yyyyMMdd-HHmmss}.dmp");
 
             using var processHandle = PInvoke.OpenProcess_SafeHandle(
-                PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_INFORMATION | PROCESS_ACCESS_RIGHTS.PROCESS_VM_READ,
+                PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_INFORMATION | PROCESS_ACCESS_RIGHTS.PROCESS_VM_READ | PROCESS_ACCESS_RIGHTS.PROCESS_DUP_HANDLE,
                 false, processId);
 
             if (processHandle.IsInvalid)
