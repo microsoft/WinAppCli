@@ -416,19 +416,15 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
         // Verify that the correct NuGet packages were queried
-        Assert.Contains(BuildToolsService.BUILD_TOOLS_PACKAGE, _fakeNugetService.QueriedPackages,
-            "Should query for BuildTools package version");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK package version");
         Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK BuildTools Extras package version");
 
         // Verify that the correct NuGet packages were added to the project
-        Assert.HasCount(3, _fakeDotNetService.AddedPackages, "Should add exactly 3 NuGet packages");
+        Assert.HasCount(2, _fakeDotNetService.AddedPackages, "Should add exactly 2 NuGet packages");
 
         var addedNames = _fakeDotNetService.AddedPackages.Select(p => p.PackageName).ToList();
-        Assert.Contains(BuildToolsService.BUILD_TOOLS_PACKAGE, addedNames,
-            "Should add BuildTools as PackageReference");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, addedNames,
             "Should add WindowsAppSDK as PackageReference");
         Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, addedNames,
@@ -542,11 +538,9 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
-        // Verify build tools packages were still added, but WinAppSDK was not (SdkInstallMode.None)
+        // Verify WinAppSDK was not added (SdkInstallMode.None)
         Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Windows App SDK should not be added when SdkInstallMode is None");
-        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
-            "Build tools package should always be added for .NET projects");
     }
 
     #endregion
@@ -753,11 +747,9 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully without prompting");
 
-        // Verify build tools packages were still added, but WinAppSDK was not (SdkInstallMode auto-set to None)
+        // Verify WinAppSDK was not added (SdkInstallMode auto-set to None)
         Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Windows App SDK should not be added because SDK install mode was auto-defaulted to None");
-        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
-            "Build tools package should always be added for .NET projects");
     }
 
     #endregion
@@ -798,11 +790,9 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         Assert.DoesNotContain(">net8.0<", updatedContent,
             "Original unsupported TFM should be replaced");
 
-        // Verify build tools packages were still added, but WinAppSDK was not (SDK install was None)
+        // Verify WinAppSDK was not added (SDK install was None)
         Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Windows App SDK should not be added when SdkInstallMode is None");
-        Assert.IsTrue(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
-            "Build tools package should always be added for .NET projects");
     }
 
     #endregion
@@ -815,7 +805,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Verifies that existing package versions are not overwritten during init,
         // except for the WinApp integration package which is always updated.
 
-        // Arrange - Create a .csproj with an existing BuildTools package at a pinned version
+        // Arrange - Create a .csproj with an existing package at a pinned version
         await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
 
         _fakeDotNetService.PackageListResult = new DotNetPackageListJson(
@@ -823,7 +813,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             new DotNetProject(
             [
                 new DotNetFramework("net10.0-windows10.0.26100.0",
-                    [new DotNetPackage(BuildToolsService.BUILD_TOOLS_PACKAGE, "10.0.26100.1-pinned", "10.0.26100.1-pinned")],
+                    [],
                     [])
             ])
         ]);
@@ -844,11 +834,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
-
-        // BuildTools already has a version — should be preserved (not re-added)
-        Assert.IsFalse(
-            _fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
-            "Existing BuildTools version should be preserved and not re-added");
 
         // WinApp package is always updated regardless of existing versions
         Assert.IsTrue(
@@ -968,11 +953,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Assert: init must succeed even though NuGet lookup failed for the WinApp package
         Assert.AreEqual(0, exitCode,
             "Init should succeed (exit code 0) even when NuGet version lookup fails for the WinApp integration package");
-
-        // BuildTools (a required package) should still be added successfully
-        Assert.IsTrue(
-            _fakeDotNetService.AddedPackages.Any(p => p.PackageName == BuildToolsService.BUILD_TOOLS_PACKAGE),
-            "Build tools package should still be added even when the WinApp NuGet lookup fails");
     }
 
     #endregion

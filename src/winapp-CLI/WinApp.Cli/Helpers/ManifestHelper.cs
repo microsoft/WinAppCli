@@ -4,15 +4,15 @@
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
-/// Shared helper for locating appxmanifest.xml files.
+/// Shared helper for locating appxmanifest files.
 /// </summary>
 internal static class ManifestHelper
 {
-    private static readonly string[] ManifestNames = ["appxmanifest.xml", "Package.appxmanifest"];
+    private static readonly string[] ManifestNames = ["Package.appxmanifest", "appxmanifest.xml"];
 
     /// <summary>
     /// Finds an appxmanifest file in the specified directory.
-    /// Checks for <c>appxmanifest.xml</c> first, then <c>Package.appxmanifest</c>.
+    /// Checks for <c>Package.appxmanifest</c> first, then <c>appxmanifest.xml</c>.
     /// </summary>
     /// <returns>A <see cref="FileInfo"/> for the manifest. Check <see cref="FileInfo.Exists"/> before using.</returns>
     public static FileInfo FindManifest(string directory)

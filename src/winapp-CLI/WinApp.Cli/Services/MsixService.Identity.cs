@@ -157,6 +157,10 @@ internal partial class MsixService
             var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
             if (!registrationManifest.Exists)
             {
+                registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "Package.appxmanifest"));
+            }
+            if (!registrationManifest.Exists)
+            {
                 registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
             }
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);

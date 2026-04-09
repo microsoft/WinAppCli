@@ -256,8 +256,11 @@ internal partial class DotNetService : IDotNetService
 
         // Insert a RuntimeIdentifier with a Condition so it only applies when not already set
         // (e.g. via command-line -r or Directory.Build.props)
-        const string runtimeIdentifierElement =
+        const string runtimeIdentifierComment =
+            "<!-- Added by winapp: default RuntimeIdentifier for MSIX packaging. Only applies when not set via -r or Directory.Build.props. -->";
+        const string runtimeIdentifierProperty =
             "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
+        var runtimeIdentifierElement = runtimeIdentifierComment + Environment.NewLine + "    " + runtimeIdentifierProperty;
 
         // Insert into the first PropertyGroup:
         // 1. After <RuntimeIdentifiers> if present (keep RID properties together)
@@ -472,10 +475,30 @@ internal partial class DotNetService : IDotNetService
 
             if (string.Equals(existingValue, "false", StringComparison.OrdinalIgnoreCase))
             {
-                // Update existing element from false to true
-                content = content[..match.Index]
-                    + "<EnableMsixTooling>true</EnableMsixTooling>"
-                    + content[(match.Index + match.Length)..];
+                // Update existing element from false to true, adding a comment if one doesn't already exist
+                var replacement = "<EnableMsixTooling>true</EnableMsixTooling>";
+
+                // Check if there's already a comment above the element
+                var beforeMatch = content[..match.Index];
+                if (!beforeMatch.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
+                {
+                    // Detect indentation from the EnableMsixTooling line
+                    var lastNewline = beforeMatch.LastIndexOf('\n');
+                    var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
+                    replacement = $"{indent}<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
+                        + Environment.NewLine + replacement;
+                    // Replace including the leading whitespace on this line
+                    content = content[..(lastNewline + 1)]
+                        + replacement
+                        + content[(match.Index + match.Length)..];
+                }
+                else
+                {
+                    content = content[..match.Index]
+                        + replacement
+                        + content[(match.Index + match.Length)..];
+                }
+
                 await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
                 return true;
             }

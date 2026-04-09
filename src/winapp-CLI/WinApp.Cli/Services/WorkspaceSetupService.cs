@@ -316,12 +316,9 @@ internal class WorkspaceSetupService(
                         taskContext.AddDebugMessage($"{UiSymbols.Check} Added default RuntimeIdentifier");
                     }
 
-                    // Build dynamic package list: build tools are always needed,
+                    // Build dynamic package list:
                     // WinApp integration package is added only when the user opted in
-                    var packages = new List<(string Name, bool Required)>
-                    {
-                        (BuildToolsService.BUILD_TOOLS_PACKAGE, true),
-                    };
+                    var packages = new List<(string Name, bool Required)>();
 
                     if (installWinAppPackage)
                     {
@@ -333,8 +330,6 @@ internal class WorkspaceSetupService(
                     {
                         packages.Add((DotNetService.WINAPP_SDK_NUGET_PACKAGE, true));
                     }
-
-                    var winAppPackageApplied = false;
 
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
@@ -399,11 +394,6 @@ internal class WorkspaceSetupService(
                                 version = await dotNetService.AddOrUpdatePackageReferenceAsync(csprojFile, packageName, version, cancellationToken);
                                 usedVersions[packageName] = version;
                                 taskContext.AddStatusMessage($"{UiSymbols.Check} Added {packageName} {version}");
-
-                                if (string.Equals(packageName, DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    winAppPackageApplied = true;
-                                }
                             }
                             catch (Exception ex)
                             {
@@ -423,8 +413,9 @@ internal class WorkspaceSetupService(
                         return partialResult;
                     }
 
-                    // Apply MSIX csproj properties only if the WinApp package was actually added/updated
-                    if (winAppPackageApplied)
+                    // Apply MSIX csproj properties if the WindowsAppSDK package is in the project
+                    // (whether we just added it or it was already there)
+                    if (await dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, cancellationToken))
                     {
                         if (await dotNetService.EnsureEnableMsixToolingAsync(csprojFile, cancellationToken))
                         {
@@ -440,7 +431,6 @@ internal class WorkspaceSetupService(
                     // Add descriptive comments above package references in the csproj
                     var packageComments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        [BuildToolsService.BUILD_TOOLS_PACKAGE] = "Tools required for running and building projects targeting the Windows SDK",
                         [DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE] = "WinApp CLI integration: enables 'dotnet run' support for packaged apps",
                         [DotNetService.WINAPP_SDK_NUGET_PACKAGE] = "Windows App SDK: provides WinUI 3, app lifecycle, windowing, and other modern Windows APIs"
                     };
@@ -795,7 +785,7 @@ internal class WorkspaceSetupService(
                     taskContext,
                     cancellationToken: cancellationToken);
 
-                return (0, "Manifest and Assets created: [underline]appxmanifest.xml[/]");
+                return (0, "Manifest and Assets created: [underline]Package.appxmanifest[/]");
             }
             catch (Exception ex)
             {
