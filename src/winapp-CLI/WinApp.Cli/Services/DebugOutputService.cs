@@ -282,7 +282,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     private unsafe void SaveFirstChanceContext(uint threadId, uint code, nuint address)
     {
         using var threadHandle = PInvoke.OpenThread_SafeHandle(
-            THREAD_ACCESS_RIGHTS.THREAD_ALL_ACCESS,
+            THREAD_ACCESS_RIGHTS.THREAD_GET_CONTEXT | THREAD_ACCESS_RIGHTS.THREAD_QUERY_INFORMATION,
             false, threadId);
 
         if (threadHandle.IsInvalid)

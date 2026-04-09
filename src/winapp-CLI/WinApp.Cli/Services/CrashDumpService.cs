@@ -34,7 +34,8 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             var dumpPath = Path.Combine(DumpDirectory, $"crash-{processId}-{DateTime.Now:yyyyMMdd-HHmmss}.dmp");
 
             using var processHandle = PInvoke.OpenProcess_SafeHandle(
-                PROCESS_ACCESS_RIGHTS.PROCESS_ALL_ACCESS, false, processId);
+                PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_INFORMATION | PROCESS_ACCESS_RIGHTS.PROCESS_VM_READ,
+                false, processId);
 
             if (processHandle.IsInvalid)
             {
@@ -61,8 +62,17 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 // Use the first-chance context — it points to the user code that
                 // originally caused the exception, before XAML's error handling
                 // replaced the stack with FailFastWithStowedExceptions.
-                fixed (byte* pContext = savedContext)
+                // CONTEXT must be 16-byte aligned on x64/ARM64. The saved byte[]
+                // from a managed array doesn't guarantee this, so copy into an
+                // aligned native buffer.
+                var pContext = (CONTEXT*)NativeMemory.AlignedAlloc((nuint)savedContext.Length, 16);
+                try
                 {
+                    fixed (byte* pSaved = savedContext)
+                    {
+                        Buffer.MemoryCopy(pSaved, pContext, savedContext.Length, savedContext.Length);
+                    }
+
                     var exRecord = new EXCEPTION_RECORD
                     {
                         ExceptionCode = new NTSTATUS(savedExceptionCode),
@@ -73,7 +83,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                     var exPtrs = new EXCEPTION_POINTERS
                     {
                         ExceptionRecord = &exRecord,
-                        ContextRecord = (CONTEXT*)pContext,
+                        ContextRecord = pContext,
                     };
 
                     var exInfo = new MINIDUMP_EXCEPTION_INFORMATION
@@ -91,6 +101,10 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                         exInfo,
                         UserStreamParam: null,
                         CallbackParam: null);
+                }
+                finally
+                {
+                    NativeMemory.AlignedFree(pContext);
                 }
             }
             else
