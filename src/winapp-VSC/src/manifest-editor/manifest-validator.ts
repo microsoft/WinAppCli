@@ -10,6 +10,7 @@ const PUBLISHER_DN_REGEX = /^CN\s*=\s*.+/i;
 const IDENTITY_NAME_REGEX = /^[a-zA-Z0-9.\-]+$/;
 const WINDOWS_VERSION_REGEX = /^10\.0\.\d+\.\d+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 // BCP-47: language[-script][-region][-variant] (simplified for common MSIX usage)
 const BCP47_REGEX = /^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*$/;
 
@@ -53,6 +54,16 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         errors.push({ field: 'identity.version', message: 'Version is required.', severity: 'error' });
     } else if (!VERSION_REGEX.test(data.identity.version)) {
         errors.push({ field: 'identity.version', message: 'Version must be in Major.Minor.Build.Revision format (e.g. 1.0.0.0).', severity: 'error' });
+    }
+
+    // Phone Identity validation
+    if (data.phoneIdentity) {
+        if (data.phoneIdentity.phoneProductId && !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
+            errors.push({ field: 'phoneIdentity.phoneProductId', message: 'Phone Product ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
+        }
+        if (data.phoneIdentity.phonePublisherId && !GUID_REGEX.test(data.phoneIdentity.phonePublisherId)) {
+            errors.push({ field: 'phoneIdentity.phonePublisherId', message: 'Phone Publisher ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
+        }
     }
 
     // Properties validation

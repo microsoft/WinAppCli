@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, setShowNameOnTiles } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -149,6 +149,10 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
                     case 'removeResource':
                         newText = removeResource(text, message.index);
+                        break;
+
+                    case 'setShowNameOnTiles':
+                        newText = setShowNameOnTiles(text, message.appIndex, message.tiles);
                         break;
 
                     case 'addPackageDependency':

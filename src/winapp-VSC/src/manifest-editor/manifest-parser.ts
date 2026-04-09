@@ -8,6 +8,7 @@ import type { Element, Document } from '@xmldom/xmldom';
 import {
     ManifestData,
     IdentityData,
+    PhoneIdentityData,
     PropertiesData,
     DependenciesData,
     TargetDeviceFamilyData,
@@ -39,7 +40,15 @@ function cleanupBlankLines(xml: string): string {
     return xml.replace(/\n[ \t]*\n([ \t]*\n)*/g, '\n');
 }
 
-/** Parse appxmanifest.xml text into a ManifestData object. */
+/**
+ * Parse appxmanifest.xml text into a ManifestData object.
+ *
+ * NOTE: Package-level <Extensions> (outside <Applications>) are not yet
+ * parsed or editable. They are preserved in the XML but not surfaced in the
+ * editor UI. Common package-level extensions include
+ * windows.activatableClass.inProcessServer and background task host DLLs.
+ * See: https://github.com/microsoft/winappCli/issues
+ */
 export function parseManifest(xmlText: string): ManifestData {
     const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
     const root = doc.documentElement;
@@ -47,6 +56,7 @@ export function parseManifest(xmlText: string): ManifestData {
 
     return {
         identity: parseIdentity(root),
+        phoneIdentity: parsePhoneIdentity(root),
         properties: parseProperties(root),
         dependencies: parseDependencies(root),
         applications: parseApplications(root),
@@ -72,6 +82,8 @@ export function applyFieldChange(
     switch (section) {
         case 'identity':
             return applyIdentityChangeString(xmlText, field, value);
+        case 'phoneIdentity':
+            return applyPhoneIdentityChangeString(xmlText, field, value);
         case 'properties':
             return applyPropertiesChangeString(xmlText, field, value);
         case 'dependencies':
@@ -240,6 +252,141 @@ export function removeResource(xmlText: string, index: number): string {
     return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
 }
 
+/** Set the ShowNameOnTiles entries for an application by index.
+ *  `tiles` is an array of tile values like ['square150x150Logo', 'wide310x150Logo'].
+ *  An empty array removes ShowNameOnTiles entirely. */
+export function setShowNameOnTiles(xmlText: string, appIndex: number, tiles: string[]): string {
+    let xml = xmlText;
+
+    // Find the nth Application's VisualElements
+    const vePattern = /<[a-zA-Z0-9]*:?VisualElements\b[^>]*(?:\/>|>)/gs;
+    let veMatch: RegExpExecArray | null;
+    let count = 0;
+    let veMatchResult: RegExpExecArray | null = null;
+    while ((veMatch = vePattern.exec(xml)) !== null) {
+        if (count === appIndex) { veMatchResult = veMatch; break; }
+        count++;
+    }
+    if (!veMatchResult) { return xml; }
+
+    // Find the DefaultTile within this Application's scope
+    const veStart = veMatchResult.index;
+    // Find the end of VisualElements (closing tag)
+    const veClosePattern = /<\/[a-zA-Z0-9]*:?VisualElements\s*>/;
+    const afterVe = xml.substring(veStart);
+    const veCloseMatch = veClosePattern.exec(afterVe);
+    const veEndPos = veCloseMatch ? veStart + veCloseMatch.index + veCloseMatch[0].length : xml.length;
+    const veBlock = xml.substring(veStart, veEndPos);
+
+    // Check if DefaultTile exists in this VisualElements block
+    const dtPattern = /<[a-zA-Z0-9]*:?DefaultTile\b/;
+    const hasDT = dtPattern.test(veBlock);
+
+    if (!hasDT) {
+        // No DefaultTile — nothing to attach ShowNameOnTiles to
+        // (ShowNameOnTiles only makes sense when at least one tile-size asset is defined)
+        return xml;
+    }
+
+    // Find the existing ShowNameOnTiles block within this VE block (if any)
+    const showNamePattern = /[ \t]*<[a-zA-Z0-9]*:?ShowNameOnTiles\b[\s\S]*?<\/[a-zA-Z0-9]*:?ShowNameOnTiles\s*>\s*/;
+    const showNameMatch = showNamePattern.exec(veBlock);
+
+    if (tiles.length === 0) {
+        // Remove existing ShowNameOnTiles if present
+        if (showNameMatch) {
+            const absStart = veStart + showNameMatch.index;
+            // Include preceding newline
+            let removeStart = absStart;
+            if (removeStart > 0 && xml[removeStart - 1] === '\n') { removeStart--; }
+            xml = xml.substring(0, removeStart) + xml.substring(absStart + showNameMatch[0].length);
+
+            // Check if DefaultTile now has no children — convert back to self-closing
+            xml = collapseEmptyDefaultTile(xml, appIndex);
+        }
+        return xml;
+    }
+
+    // Build ShowNameOnTiles XML
+    const dtIndentMatch = veBlock.match(/\n([ \t]*)<[a-zA-Z0-9]*:?DefaultTile\b/);
+    const dtIndent = dtIndentMatch ? dtIndentMatch[1] : '          ';
+    const childIndent = dtIndent + '  ';
+    const showOnIndent = childIndent + '  ';
+
+    let showNameXml = childIndent + '<uap:ShowNameOnTiles>\n';
+    for (const tile of tiles) {
+        showNameXml += showOnIndent + `<uap:ShowOn Tile="${tile}" />\n`;
+    }
+    showNameXml += childIndent + '</uap:ShowNameOnTiles>';
+
+    if (showNameMatch) {
+        // Replace existing ShowNameOnTiles
+        const absStart = veStart + showNameMatch.index;
+        // Trim leading whitespace from the match to insert cleanly
+        const trimmedMatch = showNameMatch[0].replace(/^\s*\n?/, '');
+        const trimmedStart = xml.indexOf(trimmedMatch, absStart - 1);
+        if (trimmedStart >= 0) {
+            xml = xml.substring(0, trimmedStart) + showNameXml + xml.substring(trimmedStart + trimmedMatch.length);
+        } else {
+            xml = xml.substring(0, absStart) + '\n' + showNameXml + xml.substring(absStart + showNameMatch[0].length);
+        }
+    } else {
+        // Insert ShowNameOnTiles — need to handle self-closing vs open DefaultTile
+        const dtSelfClose = /<([a-zA-Z0-9]*:?DefaultTile)\b([^>]*?)\/>/s;
+        const dtSelfMatch = dtSelfClose.exec(veBlock);
+        if (dtSelfMatch) {
+            // Convert self-closing DefaultTile to open/close with ShowNameOnTiles inside
+            const absPos = veStart + dtSelfMatch.index;
+            const prefix = dtSelfMatch[1];
+            const attrs = dtSelfMatch[2];
+            const newDt = `<${prefix}${attrs}>\n` +
+                showNameXml + '\n' +
+                dtIndent + `</${prefix}>`;
+            xml = xml.substring(0, absPos) + newDt + xml.substring(absPos + dtSelfMatch[0].length);
+        } else {
+            // Open DefaultTile — insert before closing tag
+            const dtClosePattern = /<\/[a-zA-Z0-9]*:?DefaultTile\s*>/;
+            const dtCloseMatch = dtClosePattern.exec(veBlock);
+            if (dtCloseMatch) {
+                const absPos = veStart + dtCloseMatch.index;
+                xml = xml.substring(0, absPos) + showNameXml + '\n' + dtIndent + xml.substring(absPos);
+            }
+        }
+    }
+
+    return xml;
+}
+
+/** If DefaultTile is open/close but has no child elements, convert to self-closing. */
+function collapseEmptyDefaultTile(xml: string, appIndex: number): string {
+    const vePattern = /<[a-zA-Z0-9]*:?VisualElements\b[^>]*(?:\/>|>)/gs;
+    let veMatch: RegExpExecArray | null;
+    let count = 0;
+    while ((veMatch = vePattern.exec(xml)) !== null) {
+        if (count === appIndex) { break; }
+        count++;
+    }
+    if (!veMatch || count !== appIndex) { return xml; }
+
+    const veStart = veMatch.index;
+    const veClosePattern = /<\/[a-zA-Z0-9]*:?VisualElements\s*>/;
+    const afterVe = xml.substring(veStart);
+    const veCloseMatch = veClosePattern.exec(afterVe);
+    const veEndPos = veCloseMatch ? veStart + veCloseMatch.index + veCloseMatch[0].length : xml.length;
+    const veBlock = xml.substring(veStart, veEndPos);
+
+    // Match open/close DefaultTile with only whitespace inside
+    const emptyDtPattern = /(<([a-zA-Z0-9]*:?DefaultTile)\b[^>]*)>\s*<\/\2\s*>/s;
+    const emptyDtMatch = emptyDtPattern.exec(veBlock);
+    if (emptyDtMatch) {
+        const absPos = veStart + emptyDtMatch.index;
+        const selfClosing = emptyDtMatch[1] + ' />';
+        xml = xml.substring(0, absPos) + selfClosing + xml.substring(absPos + emptyDtMatch[0].length);
+    }
+
+    return xml;
+}
+
 /** Add an extension element to an application by index. */
 /** Add a new Application element to the manifest. */
 export function addApplication(xmlText: string): string {
@@ -329,9 +476,22 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     const indentedExt = extensionXml.split('\n').map(line => childIndent + line).join('\n');
 
     if (hasExtensions) {
-        // Insert before the closing </Extensions> tag
+        // Insert before the closing </Extensions> tag that belongs to this Application.
+        // We find the nth </Application> and search backwards from there to locate
+        // the correct </Extensions> (avoids hitting package-level Extensions).
         const closeTag = '</Extensions>';
-        const closeIdx = result.lastIndexOf(closeTag);
+        const closeAppTag = '</Application>';
+        let appCloseIdx = -1;
+        let appCount = 0;
+        let searchFrom = 0;
+        while (appCount <= appIndex) {
+            appCloseIdx = result.indexOf(closeAppTag, searchFrom);
+            if (appCloseIdx < 0) { return result; }
+            if (appCount === appIndex) { break; }
+            searchFrom = appCloseIdx + closeAppTag.length;
+            appCount++;
+        }
+        const closeIdx = result.lastIndexOf(closeTag, appCloseIdx);
         if (closeIdx < 0) { return result; }
         // Trim trailing whitespace before the close tag so we don't double-indent
         const beforeClose = result.substring(0, closeIdx).replace(/\s+$/, '');
@@ -476,6 +636,15 @@ function parseIdentity(root: Element): IdentityData {
     };
 }
 
+function parsePhoneIdentity(root: Element): PhoneIdentityData | null {
+    const el = findChildByLocalNameNS(root, 'PhoneIdentity');
+    if (!el) { return null; }
+    return {
+        phoneProductId: el.getAttribute('PhoneProductId') ?? '',
+        phonePublisherId: el.getAttribute('PhonePublisherId') ?? '',
+    };
+}
+
 function parseProperties(root: Element): PropertiesData {
     const el = getChildByLocalName(root, 'Properties');
     return {
@@ -522,6 +691,19 @@ function parseApplications(root: Element): ApplicationData[] {
         const lockScreen = visualEl ? findChildByLocalNameNS(visualEl, 'LockScreen') : null;
         const splashScreen = visualEl ? findChildByLocalNameNS(visualEl, 'SplashScreen') : null;
 
+        // Parse ShowNameOnTiles
+        const showNameOnTiles: string[] = [];
+        if (defaultTile) {
+            const showNameEl = findChildByLocalNameNS(defaultTile, 'ShowNameOnTiles');
+            if (showNameEl) {
+                const showOnEls = getChildrenByLocalName(showNameEl, 'ShowOn');
+                for (const showOn of showOnEls) {
+                    const tile = showOn.getAttribute('Tile');
+                    if (tile) { showNameOnTiles.push(tile); }
+                }
+            }
+        }
+
         // Gather extension raw XML for display and editing
         const extensions: string[] = [];
         const extEl = getChildByLocalName(appEl, 'Extensions');
@@ -551,6 +733,7 @@ function parseApplications(root: Element): ApplicationData[] {
                 square310x310Logo: defaultTile?.getAttribute('Square310x310Logo') ?? null,
                 badgeLogo: lockScreen?.getAttribute('BadgeLogo') ?? null,
                 splashScreenImage: splashScreen?.getAttribute('Image') ?? null,
+                showNameOnTiles,
             },
             extensions,
         });
@@ -663,6 +846,17 @@ function applyIdentityChangeString(xml: string, field: string, value: string): s
     if (!attr) { return xml; }
 
     return replaceAttribute(xml, /<Identity\b[^>]*>/s, attr, value);
+}
+
+function applyPhoneIdentityChangeString(xml: string, field: string, value: string): string {
+    const attrMap: Record<string, string> = {
+        phoneProductId: 'PhoneProductId',
+        phonePublisherId: 'PhonePublisherId',
+    };
+    const attr = attrMap[field];
+    if (!attr) { return xml; }
+
+    return replaceAttribute(xml, /<[a-zA-Z0-9]*:?PhoneIdentity\b[^>]*>/s, attr, value);
 }
 
 function applyPropertiesChangeString(xml: string, field: string, value: string): string {

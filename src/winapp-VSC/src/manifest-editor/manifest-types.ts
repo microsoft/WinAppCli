@@ -5,6 +5,7 @@
 /** Data extracted from an appxmanifest.xml for the form editor. */
 export interface ManifestData {
     identity: IdentityData;
+    phoneIdentity: PhoneIdentityData | null;
     properties: PropertiesData;
     dependencies: DependenciesData;
     applications: ApplicationData[];
@@ -17,6 +18,11 @@ export interface IdentityData {
     publisher: string;
     version: string;
     processorArchitecture: string;
+}
+
+export interface PhoneIdentityData {
+    phoneProductId: string;
+    phonePublisherId: string;
 }
 
 export interface PropertiesData {
@@ -62,6 +68,7 @@ export interface VisualElementsData {
     square310x310Logo: string | null;
     badgeLogo: string | null;
     splashScreenImage: string | null;
+    showNameOnTiles: string[];
 }
 
 export interface ResourceData {
@@ -84,6 +91,7 @@ export type ExtensionToWebviewMessage =
 /** Message types sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
     | { type: 'fieldChanged'; section: string; field: string; value: string; index?: number }
+    | { type: 'setShowNameOnTiles'; appIndex: number; tiles: string[] }
     | { type: 'addResource'; resource: ResourceData }
     | { type: 'removeResource'; index: number }
     | { type: 'addCapability'; capability: string }
@@ -143,6 +151,41 @@ export const EXTENSION_TEMPLATES = [
         category: 'windows.appExecutionAlias',
         xml: '<uap5:Extension Category="windows.appExecutionAlias">\n  <uap5:AppExecutionAlias>\n    <uap5:ExecutionAlias Alias="" />\n  </uap5:AppExecutionAlias>\n</uap5:Extension>',
     },
+    {
+        label: 'Background Tasks',
+        category: 'windows.backgroundTasks',
+        xml: '<Extension Category="windows.backgroundTasks" EntryPoint="">\n  <BackgroundTasks>\n    <Task Type="timer" />\n  </BackgroundTasks>\n</Extension>',
+    },
+    {
+        label: 'Protocol Activation',
+        category: 'windows.protocol',
+        xml: '<uap:Extension Category="windows.protocol">\n  <uap:Protocol Name="" />\n</uap:Extension>',
+    },
+    {
+        label: 'File Type Association',
+        category: 'windows.fileTypeAssociation',
+        xml: '<uap:Extension Category="windows.fileTypeAssociation">\n  <uap:FileTypeAssociation Name="">\n    <uap:DisplayName></uap:DisplayName>\n    <uap:SupportedFileTypes>\n      <uap:FileType>.example</uap:FileType>\n    </uap:SupportedFileTypes>\n  </uap:FileTypeAssociation>\n</uap:Extension>',
+    },
+    {
+        label: 'Startup Task',
+        category: 'windows.startupTask',
+        xml: '<desktop:Extension Category="windows.startupTask">\n  <desktop:StartupTask TaskId="" Enabled="true" DisplayName="" />\n</desktop:Extension>',
+    },
+    {
+        label: 'Share Target',
+        category: 'windows.shareTarget',
+        xml: '<uap:Extension Category="windows.shareTarget">\n  <uap:ShareTarget>\n    <uap:SupportedFileTypes>\n      <uap:SupportsAnyFileType />\n    </uap:SupportedFileTypes>\n    <uap:DataFormat>Text</uap:DataFormat>\n  </uap:ShareTarget>\n</uap:Extension>',
+    },
+    {
+        label: 'App Service',
+        category: 'windows.appService',
+        xml: '<uap:Extension Category="windows.appService">\n  <uap:AppService Name="" />\n</uap:Extension>',
+    },
+    {
+        label: 'Toast Notification Activation',
+        category: 'windows.toastNotificationActivation',
+        xml: '<desktop:Extension Category="windows.toastNotificationActivation">\n  <desktop:ToastNotificationActivation ToastActivatorCLSID="" />\n</desktop:Extension>',
+    },
 ] as const;
 
 /** Descriptions for known capabilities. */
@@ -181,4 +224,11 @@ export const OPTIONAL_VISUAL_ASSETS = [
     { field: 'square310x310Logo', label: 'Square 310x310 Logo', placeholder: 'Assets\\Square310x310Logo.png', description: 'Large tile image for the Start menu, relative path to a 310×310 pixel PNG' },
     { field: 'badgeLogo', label: 'Badge Logo', placeholder: 'Assets\\BadgeLogo.png', description: 'Badge notification image shown on the lock screen, relative path to a 24×24 pixel PNG' },
     { field: 'splashScreenImage', label: 'Splash Screen', placeholder: 'Assets\\SplashScreen.png', description: 'Image displayed while the app is launching, relative path to a 620×300 pixel PNG' },
+] as const;
+
+/** Tile sizes that support showing the app name overlay. */
+export const SHOW_NAME_ON_TILES_OPTIONS = [
+    { tile: 'square150x150Logo', label: 'Medium (150×150)', veField: 'square150x150Logo' },
+    { tile: 'wide310x150Logo', label: 'Wide (310×150)', veField: 'wide310x150Logo' },
+    { tile: 'square310x310Logo', label: 'Large (310×310)', veField: 'square310x310Logo' },
 ] as const;

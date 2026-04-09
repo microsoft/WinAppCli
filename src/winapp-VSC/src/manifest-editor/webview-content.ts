@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS, OPTIONAL_VISUAL_ASSETS } from './manifest-types';
+import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS, EXTENSION_TEMPLATES, CAPABILITY_DESCRIPTIONS, OPTIONAL_VISUAL_ASSETS, SHOW_NAME_ON_TILES_OPTIONS } from './manifest-types';
 
 /** Generates an error view shown when the manifest XML cannot be parsed. */
 export function getParseErrorContent(webview: vscode.Webview, nonce: string, errorMessage: string): string {
@@ -240,6 +240,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .hidden { display: none; }
         .mt-8 { margin-top: 8px; }
         .mt-12 { margin-top: 12px; }
+        .mb-8 { margin-bottom: 8px; }
         .mb-12 { margin-bottom: 12px; }
         .ext-field-readonly { opacity: 0.8; }
         .ext-field-computed { opacity: 0.6; font-style: italic; }
@@ -456,6 +457,17 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             width: 14px;
             height: 14px;
         }
+        .section-label {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--vscode-foreground);
+            display: block;
+        }
+        .tile-checkboxes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px 24px;
+        }
         .custom-cap-row {
             display: flex;
             gap: 8px;
@@ -598,6 +610,22 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">CPU architecture this package targets</div>
             <div class="validation-msg"></div>
         </div>
+        <div id="phone-identity-section" class="mt-12" style="display:none;">
+            <div class="section-header">Phone Identity</div>
+            <p class="page-description">Legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
+            <div class="form-group" data-field="phoneIdentity.phoneProductId">
+                <label for="phone-product-id">Phone Product ID:</label>
+                <input type="text" id="phone-product-id" data-section="phoneIdentity" data-field-name="phoneProductId" placeholder="00000000-0000-0000-0000-000000000000" />
+                <div class="description">GUID that identifies the product, carried over from Windows Phone 8</div>
+                <div class="validation-msg"></div>
+            </div>
+            <div class="form-group" data-field="phoneIdentity.phonePublisherId">
+                <label for="phone-publisher-id">Phone Publisher ID:</label>
+                <input type="text" id="phone-publisher-id" data-section="phoneIdentity" data-field-name="phonePublisherId" placeholder="00000000-0000-0000-0000-000000000000" />
+                <div class="description">GUID that identifies the publisher, typically all zeros for desktop apps</div>
+                <div class="validation-msg"></div>
+            </div>
+        </div>
     </div>
 
     <!-- ───── Properties ───── -->
@@ -723,6 +751,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         const capabilityDescriptions = ${JSON.stringify(CAPABILITY_DESCRIPTIONS)};
         const extensionTemplates = ${JSON.stringify(EXTENSION_TEMPLATES)};
         const optionalVisualAssets = ${JSON.stringify(OPTIONAL_VISUAL_ASSETS)};
+        const showNameOnTilesOptions = ${JSON.stringify(SHOW_NAME_ON_TILES_OPTIONS)};
         const activeAppSubTabs = {};
 
         // ─── Tab switching ──────────────────────────────────
@@ -925,6 +954,16 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 document.querySelectorAll('#arch-select-options .custom-select-option').forEach(opt => {
                     opt.classList.toggle('selected', opt.getAttribute('data-value') === data.identity.processorArchitecture);
                 });
+            }
+
+            // Phone Identity
+            const phoneSection = document.getElementById('phone-identity-section');
+            if (data.phoneIdentity) {
+                if (phoneSection) phoneSection.style.display = '';
+                setValueIfNotFocused('phone-product-id', data.phoneIdentity.phoneProductId, focused);
+                setValueIfNotFocused('phone-publisher-id', data.phoneIdentity.phonePublisherId, focused);
+            } else {
+                if (phoneSection) phoneSection.style.display = 'none';
             }
 
             // Properties
@@ -1139,6 +1178,30 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             return optionalVisualAssets.some(asset => app.visualElements[asset.field] === null || app.visualElements[asset.field] === undefined);
         }
 
+        function buildShowNameOnTilesHtml(app, idx) {
+            // Only show checkboxes for tile sizes that have defined visual assets
+            const ve = app.visualElements;
+            const availableTiles = showNameOnTilesOptions.filter(opt => {
+                // square150x150Logo is always required, so always a string
+                if (opt.veField === 'square150x150Logo') return true;
+                // Optional tiles: only show checkbox if the asset is defined (not null)
+                return ve[opt.veField] !== null && ve[opt.veField] !== undefined;
+            });
+            if (availableTiles.length === 0) return '';
+
+            const currentTiles = ve.showNameOnTiles || [];
+            let html = '<div class="show-name-on-tiles-section mt-12">' +
+                '<label class="section-label">Show App Name on Tiles:</label>' +
+                '<div class="description mb-8">Select which tile sizes display the app name overlay.</div>' +
+                '<div class="tile-checkboxes">';
+            availableTiles.forEach(opt => {
+                const checked = currentTiles.includes(opt.tile) ? ' checked' : '';
+                html += '<label class="cap-item"><input type="checkbox" class="show-name-tile-cb" data-app-index="' + idx + '" data-tile="' + opt.tile + '"' + checked + ' /><span>' + escapeHtml(opt.label) + '</span></label>';
+            });
+            html += '</div></div>';
+            return html;
+        }
+
         function renderApplications(apps) {
             const container = document.getElementById('applications-list');
             container.innerHTML = '';
@@ -1290,6 +1353,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             '<div class="custom-dropdown-menu add-visual-asset-menu">' +
                             buildAddVisualAssetMenuHtml(app, idx) +
                             '</div></div>' : ''}
+                        \${buildShowNameOnTilesHtml(app, idx)}
                         <button class="btn btn-secondary update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
@@ -1476,6 +1540,19 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         });
                     });
                 }
+
+                // Bind ShowNameOnTiles checkboxes
+                card.querySelectorAll('.show-name-tile-cb').forEach(cb => {
+                    cb.addEventListener('change', () => {
+                        const appIdx = parseInt(cb.getAttribute('data-app-index'), 10);
+                        // Gather all checked tiles for this app
+                        const tiles = [];
+                        card.querySelectorAll('.show-name-tile-cb:checked').forEach(checked => {
+                            tiles.push(checked.getAttribute('data-tile'));
+                        });
+                        vscode.postMessage({ type: 'setShowNameOnTiles', appIndex: appIdx, tiles: tiles });
+                    });
+                });
 
                 // Update logo previews
                 const logoPreview = card.querySelector('.app-logo-preview');

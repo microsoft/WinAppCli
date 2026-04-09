@@ -72,6 +72,35 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 | `args` | string | | Command-line arguments to pass to the application. |
 | `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
 
+### AppxManifest Visual Editor
+
+The extension includes a **visual editor** for `AppxManifest.xml` and `.appxmanifest` files. Instead of hand-editing XML, you get a form-based UI organized into tabs:
+
+| Tab | What you can edit |
+|-----|-------------------|
+| **Identity** | Package name, publisher, version, and processor architecture |
+| **Properties** | Display name, publisher display name, description, and store logo path |
+| **Dependencies** | Target device families (min/max versions) and package dependencies |
+| **Resources** | BCP-47 language declarations (e.g. `en-us`, `fr-fr`) |
+| **Capabilities** | General, restricted, and device capabilities (e.g. Internet Client, Run Full Trust, Microphone) |
+| **Applications** | Application entries including executable path, entry point, visual elements, and extensions |
+
+**Asset Generation:**
+
+The editor provides a **Regenerate Assets** button which invokes the CLI to auto-generate all icon sizes from a single source image.
+
+**Validation:**
+
+The editor provides real-time inline validation:
+- Required fields and field types
+- Version and publisher formats
+
+**How to open:**
+
+When you open an `AppxManifest.xml` or `.appxmanifest` file, VS Code will offer the visual editor as an option alongside the default text editor. You can switch between them at any time by right clicking on the file and selecting the **Open With…** command.
+
+For a detailed breakdown of every supported and unsupported manifest property, see [EDITOR_SUPPORT.md](EDITOR_SUPPORT.md).
+
 ## Scenarios
 
 ### Initialize and set up a project
