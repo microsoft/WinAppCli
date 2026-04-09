@@ -1,0 +1,199 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
+using System.Diagnostics;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Commands;
+
+internal class UiWaitForCommand : Command, IShortDescription
+{
+    public string ShortDescription => "Wait for an element to appear, disappear, or change";
+
+    public static Option<bool> GoneOption { get; }
+    public static Option<string?> ValueOption { get; }
+
+    static UiWaitForCommand()
+    {
+        GoneOption = new Option<bool>("--gone")
+        {
+            Description = "Wait for element to disappear instead of appear"
+        };
+
+        ValueOption = new Option<string?>("--value")
+        {
+            Description = "Wait for property to equal this value (use with --property)"
+        };
+    }
+
+    public UiWaitForCommand()
+        : base("wait-for", "Wait for an element to appear, disappear, or have a property reach a target value. " +
+               "Polls at 100ms intervals until condition met or timeout.")
+    {
+        Arguments.Add(SharedUiOptions.SelectorArgument);
+        Options.Add(SharedUiOptions.AppOption);
+        Options.Add(SharedUiOptions.WindowOption);
+
+        Options.Add(WinAppRootCommand.JsonOption);
+        Options.Add(SharedUiOptions.TimeoutOption);
+        Options.Add(SharedUiOptions.PropertyOption);
+        Options.Add(GoneOption);
+        Options.Add(ValueOption);
+    }
+
+    public class Handler(
+        IUiSessionService sessionService,
+        IUiAutomationService uiAutomation,
+        ISelectorService selectorService,
+        IAnsiConsole ansiConsole,
+        ILogger<UiWaitForCommand> logger) : AsynchronousCommandLineAction
+    {
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+
+            if (string.IsNullOrWhiteSpace(app) && window is null)
+            {
+                UiErrors.MissingApp(logger);
+                return 1;
+            }
+            var timeout = parseResult.GetRequiredValue(SharedUiOptions.TimeoutOption);
+            var gone = parseResult.GetValue(GoneOption);
+            var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
+            var value = parseResult.GetValue(ValueOption);
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            if (string.IsNullOrWhiteSpace(selectorStr))
+            {
+                UiErrors.MissingSelector(logger, "wait-for");
+                return 1;
+            }
+
+            if (value != null && string.IsNullOrWhiteSpace(property))
+            {
+                logger.LogError("{Symbol} --value requires --property to specify which property to check.", UiSymbols.Error);
+                return 1;
+            }
+
+            try
+            {
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var selector = selectorService.Parse(selectorStr);
+                var sw = Stopwatch.StartNew();
+
+                while (sw.ElapsedMilliseconds < timeout)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    Models.UiElement? element;
+                    try
+                    {
+                        if (selector.IsSlug)
+                        {
+                            // Slug resolution via FindSingleElementAsync (walks tree + validates hash)
+                            element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                        }
+                        else
+                        {
+                            // Use SearchAsync for legacy selectors
+                            var matches = await uiAutomation.SearchAsync(session, selector, 1, cancellationToken);
+                            element = matches.Length > 0 ? matches[0] : null;
+                        }
+                    }
+                    catch
+                    {
+                        element = null;
+                    }
+
+                    if (gone)
+                    {
+                        if (element is null)
+                        {
+                            if (json)
+                            {
+                                var result = new UiWaitForResult { Found = false, WaitedMs = (int)sw.ElapsedMilliseconds };
+                                ansiConsole.Profile.Out.Writer.WriteLine(
+                                    JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
+                            }
+                            logger.LogInformation("Element disappeared after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            return 0;
+                        }
+                    }
+                    else if (element is not null)
+                    {
+                        // Check property+value condition if specified
+                        if (property is not null && value is not null)
+                        {
+                            var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
+                            if (props.TryGetValue(property, out var propValue) &&
+                                string.Equals(propValue?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (json)
+                                {
+                                    var result = new UiWaitForResult
+                                    {
+                                        Found = true,
+                                        WaitedMs = (int)sw.ElapsedMilliseconds,
+                                        Element = element
+                                    };
+                                    ansiConsole.Profile.Out.Writer.WriteLine(
+                                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
+                                }
+                                logger.LogInformation("Element found with {Property}=\"{Value}\" after {Elapsed}ms", property, value, sw.ElapsedMilliseconds);
+                                return 0;
+                            }
+                            // Property doesn't match yet — keep polling
+                        }
+                        else
+                        {
+                            if (json)
+                            {
+                                var result = new UiWaitForResult
+                                {
+                                    Found = true,
+                                    WaitedMs = (int)sw.ElapsedMilliseconds,
+                                    Element = element
+                                };
+                                ansiConsole.Profile.Out.Writer.WriteLine(
+                                    JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
+                            }
+                            logger.LogInformation("Element found after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            return 0;
+                        }
+                    }
+
+                    await Task.Delay(100, cancellationToken);
+                }
+
+                logger.LogError("'{Selector}' not found after {Timeout}ms", selectorStr, timeout);
+                return 1;
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogError("Wait cancelled");
+                return 1;
+            }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
+                UiErrors.StaleElement(logger);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                UiErrors.GenericError(logger, ex);
+                return 1;
+            }
+        }
+    }
+}

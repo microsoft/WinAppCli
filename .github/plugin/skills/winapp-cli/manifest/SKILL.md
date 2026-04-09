@@ -83,6 +83,25 @@ The source image should be at least 400x400 pixels (PNG or SVG recommended). The
 - **app.ico** — multi-resolution ICO file for shell integration. If an existing `.ico` file is present in the assets directory, it is replaced in-place (preserving the original filename)
 - With `--light-image`: light theme variants using the correct MRT qualifiers per asset type
 
+### Add an execution alias
+
+Execution aliases let users launch the app by typing its name in a terminal (e.g. `myapp`).
+
+```powershell
+# Add alias inferred from the Executable attribute in the manifest
+winapp manifest add-alias
+
+# Specify the alias name explicitly
+winapp manifest add-alias --name myapp
+
+# Target a specific manifest file
+winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
+```
+
+This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
+
+> **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
+
 ## Manifest structure overview
 
 A typical `appxmanifest.xml` looks like:
@@ -182,4 +201,16 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--light-image` | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) | (none) |
-| `--manifest` | Path to AppxManifest.xml file (default: search current directory) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+
+### `winapp manifest add-alias`
+
+Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
+| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+| `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |

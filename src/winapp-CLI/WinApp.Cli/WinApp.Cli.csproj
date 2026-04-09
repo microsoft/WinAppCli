@@ -2,12 +2,14 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>winapp</AssemblyName>
     <ApplicationIcon>Assets\winapp.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <Description>A command-line tool for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- Enable Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
@@ -26,6 +28,7 @@
     <TrimMode>full</TrimMode>
     <CsWin32RunAsBuildTask>true</CsWin32RunAsBuildTask>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     
     <!-- Faster startup for single-file -->
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>

@@ -93,7 +93,7 @@ When prompted:
 - **Package name**: Press Enter to accept the default (rust-app)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
-- **Entry point**: Press Enter to accept the default (rust-app.exe)
+- **Description**: Press Enter to accept the default or enter a description
 - **Setup SDKs**: Select "Do not setup SDKs"
 
 This command will:
@@ -101,55 +101,16 @@ This command will:
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
-## 5. Debug with Identity
+### Add Execution Alias (for console apps)
+To allow users to run your app from the command line after installation (like `rust-app`), and to use `winapp run --with-alias` during development (which keeps console output in the current terminal), add an execution alias to the `appxmanifest.xml`.
 
-To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp create-debug-identity`. This applies a temporary identity to your executable using the manifest we just generated.
-
-1.  **Build the executable**:
-    ```powershell
-    cargo build
-    ```
-
-2.  **Apply Debug Identity**:
-    Run the following command on your built executable:
-    ```powershell
-    winapp create-debug-identity .\target\debug\rust-app.exe
-    ```
-
-3.  **Run the Executable**:
-    Run the executable directly (do not use `cargo run` as it might rebuild/overwrite the file):
-    ```powershell
-    .\target\debug\rust-app.exe
-    ```
-
-You should now see output similar to:
-```
-Package Family Name: rust-app_12345abcde
-```
-This confirms your app is running with a valid package identity!
-
-## 6. Package with MSIX
-
-Once you're ready to distribute your app, you can package it as an MSIX using the same manifest.
-
-### Prepare the Package Directory
-First, build your application in release mode for optimal performance:
+You can add one automatically:
 
 ```powershell
-cargo build --release
+winapp manifest add-alias
 ```
 
-Then, create a directory to hold your package files and copy your release executable.
-
-```powershell
-mkdir dist
-copy .\target\release\rust-app.exe .\dist\
-```
-
-### Add Execution Alias
-To allow users to run your app from the command line after installation (like `rust-app`), add an execution alias to the `appxmanifest.xml`.
-
-Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
+Or manually: open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
 
 ```diff
 <Package
@@ -172,6 +133,48 @@ Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if i
     </Application>
   </Applications>
 </Package>
+```
+
+## 5. Debug with Identity
+
+To test features that require identity (like Notifications) without fully packaging the app, use `winapp run`. This registers the entire build output folder as a loose layout package — just like a real MSIX install — and launches the app.
+
+1.  **Build the executable**:
+    ```powershell
+    cargo build
+    ```
+
+2.  **Run with identity**:
+    ```powershell
+    winapp run .\target\debug --with-alias
+    ```
+
+The `--with-alias` flag launches the app via its execution alias so console output stays in the current terminal. This requires a `uap5:ExecutionAlias` in the manifest — you can add one with `winapp manifest add-alias`.
+
+You should now see output similar to:
+```
+Package Family Name: rust-app_12345abcde
+```
+This confirms your app is running with a valid package identity!
+
+> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+
+## 6. Package with MSIX
+
+Once you're ready to distribute your app, you can package it as an MSIX using the same manifest.
+
+### Prepare the Package Directory
+First, build your application in release mode for optimal performance:
+
+```powershell
+cargo build --release
+```
+
+Then, create a directory to hold your package files and copy your release executable.
+
+```powershell
+mkdir dist
+copy .\target\release\rust-app.exe .\dist\
 ```
 
 ### Generate a Development Certificate

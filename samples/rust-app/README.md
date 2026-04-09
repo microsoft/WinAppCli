@@ -2,23 +2,20 @@
 
 This sample demonstrates how to check for package identity and send Windows notifications from a Rust application.
 
-## Dependencies
+For a complete step-by-step guide, see the [Rust Getting Started Guide](../../docs/guides/rust.md).
 
-Before running the sample, ensure you have Rust and the `winappcli` tool installed.
+## What This Sample Shows
 
-### Install Rust
-If you haven't installed Rust yet, you can download it from [rust-lang.org](https://www.rust-lang.org/tools/install) or use winget:
+- Basic Rust console application
+- Using Windows Runtime APIs to retrieve package identity
+- Using `winapp run` to run the app packaged (registers a loose layout package, just like a real MSIX install)
+- Sending Windows notifications with package identity
+- MSIX packaging with app manifest and assets
 
-```powershell
-winget install Rustlang.Rustup --source winget
-```
+## Prerequisites
 
-### Install winappcli
-Install the `winapp` command line tool using winget:
-
-```powershell
-winget install microsoft.winappcli --source winget
-```
+- Rust toolchain ([rustup](https://rustup.rs/) or `winget install Rustlang.Rustup --source winget`)
+- winapp CLI (`winget install microsoft.winappcli --source winget`)
 
 ## How to Run
 
@@ -36,50 +33,50 @@ To run the application as a standard executable without package identity:
    *Output should be: "Not packaged"*
 
 ### 2. Run with Identity (Debug)
-To run the application with a temporary debug identity:
+To run the application packaged with `winapp run`:
 
 1. Build the project:
    ```powershell
    cargo build
    ```
-2. Apply debug identity to the executable:
+2. Run packaged using `winapp run`:
    ```powershell
-   winapp create-debug-identity .\target\debug\rust-app.exe
+   winapp run .\target\debug --with-alias
    ```
-3. Run the executable:
-   ```powershell
-   .\target\debug\rust-app.exe
-   ```
+   This registers a loose layout package (just like a real MSIX install), then launches the app via its execution alias so console output stays in the current terminal.
+
    *Output should show the Package Family Name and trigger a notification.*
+
+> **Note:** The `--with-alias` flag requires a `uap5:ExecutionAlias` in the manifest. This sample's `appxmanifest.xml` already includes one. You can add one to a appxmanifest.xml with `winapp manifest add-alias`.
 
 ### 3. Package and Run (MSIX)
 To fully package the application as an MSIX and install it:
 
-1. **Generate a Certificate**: Create a self-signed certificate for signing based on the manifest.
-   ```powershell
-   winapp cert generate --manifest .\appxmanifest.xml
-   ```
-
-2. **Install the Certificate**: Install the certificate locally (requires Admin privileges).
-   ```powershell
-   winapp cert install .\devcert.pfx
-   ```
-
-3. **Build for Release**:
+1. **Build for Release**:
    ```powershell
    cargo build --release
    ```
 
-4. **Prepare Packaging Directory**:
+2. **Prepare Packaging Directory**:
    ```powershell
    mkdir msix
-   mv .\target\release\rust-app.exe .\msix\
+   copy .\target\release\rust-app.exe .\msix\
    ```
-   *(Note: Move the exe and any other needed dependencies to this `msix` folder)*
+   *(Note: Copy the exe and any other needed dependencies to this `msix` folder)*
 
-5. **Pack the Application**:
+3. **Generate a Development Certificate** (first time only):
    ```powershell
-   winapp pack .\msix --manifest .\appxmanifest.xml --cert .\devcert.pfx
+   winapp cert generate --if-exists skip
+   ```
+
+4. **Pack the Application**:
+   ```powershell
+   winapp pack .\msix --cert .\devcert.pfx
+   ```
+
+5. **Install the Certificate** (first time only, requires Admin):
+   ```powershell
+   winapp cert install .\devcert.pfx
    ```
 
 6. **Install and Run**:

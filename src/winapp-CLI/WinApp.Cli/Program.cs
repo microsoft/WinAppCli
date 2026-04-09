@@ -70,7 +70,7 @@ internal static class Program
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
         var services = new ServiceCollection()
-            .ConfigureServices(Console.Out)
+            .ConfigureServices()
             .ConfigureCommands()
             .AddLogging(b =>
             {
@@ -105,6 +105,13 @@ internal static class Program
         }
 
         var parseResult = rootCommand.Parse(args);
+
+        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
+        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+        if (!string.IsNullOrWhiteSpace(caller))
+        {
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+        }
 
         try
         {

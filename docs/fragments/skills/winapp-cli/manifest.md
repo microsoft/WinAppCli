@@ -78,6 +78,25 @@ The source image should be at least 400x400 pixels (PNG or SVG recommended). The
 - **app.ico** — multi-resolution ICO file for shell integration. If an existing `.ico` file is present in the assets directory, it is replaced in-place (preserving the original filename)
 - With `--light-image`: light theme variants using the correct MRT qualifiers per asset type
 
+### Add an execution alias
+
+Execution aliases let users launch the app by typing its name in a terminal (e.g. `myapp`).
+
+```powershell
+# Add alias inferred from the Executable attribute in the manifest
+winapp manifest add-alias
+
+# Specify the alias name explicitly
+winapp manifest add-alias --name myapp
+
+# Target a specific manifest file
+winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
+```
+
+This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
+
+> **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
+
 ## Manifest structure overview
 
 A typical `appxmanifest.xml` looks like:

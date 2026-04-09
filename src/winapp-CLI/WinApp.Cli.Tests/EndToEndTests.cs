@@ -19,7 +19,6 @@ public class EndToEndTests : BaseCommandTests
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         return services
-            .AddSingleton<IPowerShellService, FakePowerShellService>()
             .AddSingleton<IDevModeService, FakeDevModeService>();
     }
 
@@ -51,11 +50,11 @@ public class EndToEndTests : BaseCommandTests
         var binFolder = new DirectoryInfo(Path.Combine(projectDir.FullName, "bin", "Release"));
         Assert.IsTrue(binFolder.Exists, "Build output directory should exist");
 
-        // Find the target framework folder (e.g., net10.0-windows)
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        // Find the build output folder (handles runtime-specific subfolders like win-x64)
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
-        var exePath = Path.Combine(targetFrameworkFolder.FullName, $"{projectName}.exe");
+        var exePath = Path.Combine(buildOutputFolder.FullName, $"{projectName}.exe");
         Assert.IsTrue(File.Exists(exePath), "Built executable should exist");
 
         // Step 3: Run 'winapp manifest generate' to create the manifest
@@ -83,7 +82,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageArgs = new[]
         {
-            targetFrameworkFolder.FullName,  // Input folder with built binaries
+            buildOutputFolder.FullName,  // Input folder with built binaries
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"                     // Skip PRI generation for faster tests
@@ -129,10 +128,10 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build WinForms app: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(projectDir.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
-        var exePath = Path.Combine(targetFrameworkFolder.FullName, $"{projectName}.exe");
+        var exePath = Path.Combine(buildOutputFolder.FullName, $"{projectName}.exe");
         Assert.IsTrue(File.Exists(exePath), "Built executable should exist");
 
         // Step 3: Generate manifest with custom options
@@ -169,7 +168,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageArgs = new[]
         {
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath
         };
@@ -220,8 +219,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Step 4: Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -231,7 +230,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"
@@ -293,8 +292,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -304,7 +303,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"
@@ -366,8 +365,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -377,7 +376,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri",
@@ -755,6 +754,24 @@ public class EndToEndTests : BaseCommandTests
         }
 
     /// <summary>
+    /// Finds the build output folder under bin/Release, handling both direct TFM layouts
+    /// (e.g., net10.0-windows10.0.26100.0/) and runtime-specific layouts
+    /// (e.g., net10.0-windows10.0.26100.0/win-x64/).
+    /// </summary>
+    private static DirectoryInfo? FindBuildOutputFolder(DirectoryInfo binReleaseFolder)
+    {
+        var tfmFolder = binReleaseFolder.GetDirectories("net*-windows*").FirstOrDefault();
+        if (tfmFolder == null)
+        {
+            return null;
+        }
+
+        // Check for a runtime-specific subfolder (e.g., win-x64, win-arm64)
+        var runtimeFolder = tfmFolder.GetDirectories("win-*").FirstOrDefault();
+        return runtimeFolder ?? tfmFolder;
+    }
+
+    /// <summary>
     /// Helper method to run dotnet commands
     /// </summary>
     private static async Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
@@ -923,7 +940,7 @@ public class EndToEndTests : BaseCommandTests
             return;
         }
 
-        var packageList = await dotNetService.GetPackageListAsync(csprojFiles[0], TestContext.CancellationToken);
+        var packageList = await dotNetService.GetPackageListAsync(csprojFiles[0], cancellationToken: TestContext.CancellationToken);
         var frameworks = packageList?.Projects?
             .SelectMany(p => p.Frameworks ?? [])
             .ToList();

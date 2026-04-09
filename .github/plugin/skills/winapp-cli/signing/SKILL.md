@@ -120,7 +120,7 @@ Create a self-signed certificate for local testing only. Publisher must match Ap
 | `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
 | `--install` | Install the certificate to the local machine store after generation | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--manifest` | Path to appxmanifest.xml file to extract publisher information from | (none) |
+| `--manifest` | Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from | (none) |
 | `--output` | Output path for the generated PFX file | (none) |
 | `--password` | Password for the generated PFX file | `password` |
 | `--publisher` | Publisher name for the generated certificate. If not specified, will be inferred from manifest. | (none) |
