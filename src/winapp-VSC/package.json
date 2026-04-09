@@ -106,6 +106,14 @@
         "configurationAttributes": {
           "launch": {
             "properties": {
+              "inputFolder": {
+                "type": "string",
+                "description": "Path to the build output folder containing your app binaries (e.g., '${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621'). If not set, you will be prompted to select a folder."
+              },
+              "manifest": {
+                "type": "string",
+                "description": "Path to the AppxManifest.xml file. If not set, the CLI auto-detects from the input folder or current directory."
+              },
               "debuggerType": {
                 "type": "string",
                 "description": "The underlying debugger to use (e.g., 'coreclr', 'cppvsdbg')",
@@ -115,18 +123,13 @@
                 "type": "string",
                 "description": "Working directory for the application"
               },
-              "buildOutputManifest": {
-                "type": "string",
-                "description": "Glob pattern to locate AppxManifest.xml in build output (used when 'manifest' is not set)",
-                "default": "**/*/AppxManifest.xml"
-              },
               "args": {
                 "type": "string",
                 "description": "Command-line arguments to pass to the application"
               },
               "outputAppxDirectory": {
                 "type": "string",
-                "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the manifest's directory will be used."
+                "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input folder will be used."
               }
             }
           }
@@ -135,8 +138,7 @@
           {
             "type": "winapp",
             "request": "launch",
-            "name": "WinApp: Launch and Attach",
-            "buildOutputManifest": "**/*/AppxManifest.xml"
+            "name": "WinApp: Launch and Attach"
           }
         ],
         "configurationSnippets": [
@@ -147,8 +149,7 @@
               "type": "winapp",
               "request": "launch",
               "name": "WinApp: Launch and Attach",
-              "debuggerType": "coreclr",
-              "buildOutputManifest": "**/*/AppxManifest.xml"
+              "debuggerType": "coreclr"
             }
           }
         ]
