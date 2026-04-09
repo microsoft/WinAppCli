@@ -4,8 +4,8 @@
 namespace WinApp.Cli.Services;
 
 /// <summary>
-/// Writes a minidump for a crashed process and optionally analyzes
-/// it using CDB (Console Debugger) to produce a human-readable crash report.
+/// Writes a minidump for a crashed process and analyzes it using ClrMD
+/// to produce a human-readable crash report with managed exception details.
 /// </summary>
 internal interface ICrashDumpService
 {
@@ -26,9 +26,9 @@ internal interface ICrashDumpService
         int savedExceptionCode, nuint savedExceptionAddress);
 
     /// <summary>
-    /// Analyzes a minidump using CDB and prints a crash summary to the console.
-    /// Full CDB output is appended to the log file for detailed investigation.
-    /// If CDB is not installed, prints the dump file path and installation instructions.
+    /// Analyzes a minidump using ClrMD and prints a crash summary to the console.
+    /// Full analysis output is appended to the log file for detailed investigation.
+    /// For native-only crashes (no CLR runtime), prints the dump path and WinDbg instructions.
     /// </summary>
     /// <param name="dumpPath">Path to the minidump file.</param>
     /// <param name="logPath">Path to the debug log file where full analysis is appended.</param>

@@ -104,15 +104,17 @@ Now launch the exe any way you like — from the terminal, from VS Code's F5, fr
 
 > This is also the best approach for **Electron apps** where the exe path differs from your source directory.
 
-### Scenario E: Capture debug output
+### Scenario E: Capture debug output and crash diagnostics
 
-Capture `OutputDebugString` messages and first-chance exceptions inline:
+Capture `OutputDebugString` messages and first-chance exceptions inline. If the app crashes, a minidump is captured and analyzed automatically:
 
 ```powershell
 winapp run .\build\Debug --debug-output
 ```
 
-> **Important:** This attaches winapp as the debugger. Windows only allows one debugger per process, so you **cannot** also attach Visual Studio, VS Code, or WinDbg. 
+On crash, the output includes the exception type, message, and managed stack trace — no external tools or symbol downloads required. For native-only crashes, the dump file path is printed for manual analysis with WinDbg.
+
+> **Important:** This attaches winapp as the debugger. Windows only allows one debugger per process, so you **cannot** also attach Visual Studio, VS Code, or WinDbg.
 
 ## IDE setup
 

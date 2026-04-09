@@ -111,7 +111,7 @@ Use `winapp run` during iterative development — it creates a loose layout pack
 
 For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
 
-> **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + CDB analysis) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. Install WinDbg for automatic crash analysis: `winget install Microsoft.WinDbg`.
+> **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + managed exception analysis) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. No external tools required for managed crash analysis; for native-only crashes, the dump can be opened in WinDbg.
 
 For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
