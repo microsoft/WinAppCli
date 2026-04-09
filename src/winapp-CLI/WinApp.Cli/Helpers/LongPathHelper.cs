@@ -49,8 +49,7 @@ internal static class LongPathHelper
         {
             throw new InvalidOperationException(
                 $"The path exceeds the Windows MAX_PATH limit of {MaxPath} characters and long path support is not enabled on this system. " +
-                "To fix this, either:\n" +
-                "  1. Enable long paths: run 'reg add HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f' as Administrator and restart your terminal, or\n" +
+                "Visit https://aka.ms/enable-long-paths-on-windows for guidance on enabling long paths.
                 "  2. Use a shorter directory path.");
         }
     }
