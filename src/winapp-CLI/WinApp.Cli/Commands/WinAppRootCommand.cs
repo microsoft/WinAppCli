@@ -69,7 +69,8 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         ToolCommand toolCommand,
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
-        CreateExternalCatalogCommand createExternalCatalogCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        CreateExternalCatalogCommand createExternalCatalogCommand,
+        UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -85,16 +86,21 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
+        Subcommands.Add(uiCommand);
 
         Options.Add(CliSchemaOption);
         Options.Add(CallerOption);
+
+        // Reject unknown options/arguments so typos and removed flags fail loudly
+        TreatUnmatchedTokensAsErrors = true;
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)])
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
+            ("UI Automation", [typeof(UiCommand)])
         );
     }
 }

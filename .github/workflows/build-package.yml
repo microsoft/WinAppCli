@@ -200,3 +200,39 @@ jobs:
     - name: Run E2E Electron test
       run: |
         .\scripts\test-e2e-electron.ps1 -ArtifactsPath "artifacts/npm" -Verbose
+
+  # E2E test for winapp ui commands against WinUI 3 sample app
+  e2e-test-ui:
+    runs-on: windows-latest
+    needs: build-and-package
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Enable Windows Developer Mode
+      run: |
+        reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v "AllowDevelopmentWithoutDevLicense" /d 1 /f
+
+    - name: Setup .NET 10
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+
+    - name: Download CLI binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: cli-binaries
+        path: artifacts/cli
+
+    - name: Run WinUI UI E2E test
+      run: |
+        $platform = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+        .\scripts\test-e2e-winui-ui.ps1 -WinAppPath "artifacts/cli/win-$platform/winapp.exe"
+
+    - name: Upload screenshots
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ui-test-screenshots
+        path: artifacts/screenshots/
+        if-no-files-found: warn

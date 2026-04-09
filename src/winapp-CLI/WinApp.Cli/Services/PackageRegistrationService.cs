@@ -88,7 +88,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     }
 
     /// <inheritdoc />
-    public async Task<bool> UnregisterAsync(string packageName, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         var pm = new PackageManager();
 
@@ -107,9 +107,13 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         foreach (var pkg in matchingPackages)
         {
             var fullName = pkg.Id.FullName;
-            logger.LogDebug("Removing package: {PackageFullName}", fullName);
+            logger.LogDebug("Removing package: {PackageFullName} (preserveAppData={PreserveAppData})", fullName, preserveAppData);
 
-            var result = await pm.RemovePackageAsync(fullName).AsTask(cancellationToken);
+            var removalOptions = preserveAppData
+                ? RemovalOptions.PreserveApplicationData
+                : RemovalOptions.None;
+
+            var result = await pm.RemovePackageAsync(fullName, removalOptions).AsTask(cancellationToken);
 
             if (!string.IsNullOrEmpty(result.ErrorText))
             {

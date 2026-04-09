@@ -328,6 +328,14 @@ winapp run <input-folder> [options]
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
+- `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
+- `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
+
+**Application data persistence:**
+
+By default, `winapp run` preserves your application's data (`LocalState`, `RoamingState`, `Settings`, etc.) when re-deploying. If your app writes data to `ApplicationData.Current.LocalFolder` or `Environment.GetFolderPath(SpecialFolder.LocalApplicationData)` within the package context, that data will survive across `winapp run` invocations.
+
+Use `--clean` when you need a fresh start (e.g., to reset corrupted state or test first-run behavior).
 
 **What it does:**
 
@@ -363,6 +371,15 @@ winapp run ./bin/Debug --with-alias --debug-output
 
 # Run and automatically clean up registration on exit
 winapp run ./bin/Debug --with-alias --unregister-on-exit
+
+# Launch and detach immediately (useful for CI/automation)
+winapp run ./bin/Debug --detach
+
+# Detach with JSON output (returns PID for scripting)
+winapp run ./bin/Debug --detach --json
+
+# Wipe application data (LocalState, settings) and start fresh
+winapp run ./bin/Debug --clean
 ```
 
 **MSBuild properties (NuGet package):**
@@ -897,3 +914,32 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+### ui
+
+Inspect and interact with running Windows app UIs using UI Automation (UIA).
+
+```bash
+winapp ui [command] [options]
+```
+
+**Commands:**
+- `status` - Connect to app and show info
+- `inspect` - View element tree
+- `search` - Find elements by selector
+- `get-property` - Read element properties
+- `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
+- `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
+- `invoke` - Activate element (click, toggle, expand)
+- `click` - Click element via mouse simulation (for controls that don't support invoke)
+- `set-value` - Set value on editable element (text, number)
+- `focus` - Move keyboard focus
+- `scroll-into-view` - Scroll element visible
+- `wait-for` - Wait for element state
+- `list-windows` - List all windows for an app
+- `get-focused` - Report the currently focused element
+
+**Options:**
+- `-a, --app <app>` - Target app (name, title, or PID)
+- `-w, --window <hwnd>` - Target window by HWND (stable)
+
+For full documentation, see [docs/ui-automation.md](ui-automation.md).

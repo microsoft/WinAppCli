@@ -27,6 +27,8 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
     public static Option<DirectoryInfo?> CrashDumpPathOption { get; }
+    public static Option<bool> DetachOption { get; }
+    public static Option<bool> CleanOption { get; }
 
     static RunCommand()
     {
@@ -77,6 +79,16 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory."
         };
+
+        DetachOption = new Option<bool>("--detach")
+        {
+            Description = "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json)."
+        };
+        
+        CleanOption = new Option<bool>("--clean")
+        {
+            Description = "Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -90,6 +102,8 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
         Options.Add(CrashDumpPathOption);
+        Options.Add(DetachOption);
+        Options.Add(CleanOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -116,6 +130,8 @@ internal partial class RunCommand : Command, IShortDescription
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
             var crashDumpPath = parseResult.GetValue(CrashDumpPathOption);
+            var detach = parseResult.GetValue(DetachOption);
+            var clean = parseResult.GetValue(CleanOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -146,6 +162,30 @@ internal partial class RunCommand : Command, IShortDescription
             if (unregisterOnExit && noLaunch)
             {
                 logger.LogError("{UISymbol} --unregister-on-exit and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && noLaunch)
+            {
+                logger.LogError("{UISymbol} --detach and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && debugOutput)
+            {
+                logger.LogError("{UISymbol} --detach and --debug-output cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && withAlias)
+            {
+                logger.LogError("{UISymbol} --detach and --with-alias cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && unregisterOnExit)
+            {
+                logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
                 return 1;
             }
 
@@ -204,6 +244,7 @@ internal partial class RunCommand : Command, IShortDescription
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        clean,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -297,6 +338,16 @@ internal partial class RunCommand : Command, IShortDescription
                     PrintJson(aumid, processId: null, errorMessage: null);
                 }
                 return success;
+            }
+
+            // --detach: return immediately after launch without waiting for exit
+            if (detach)
+            {
+                if (isJson)
+                {
+                    PrintJson(aumid, processId, errorMessage: null);
+                }
+                return 0;
             }
 
             // --with-alias: launch via execution alias with inherited stdio
@@ -451,7 +502,7 @@ internal partial class RunCommand : Command, IShortDescription
                         continue;
                     }
 
-                    await packageRegistrationService.UnregisterAsync(pkg.Name, cancellationToken);
+                    await packageRegistrationService.UnregisterAsync(pkg.Name, preserveAppData: false, cancellationToken);
                     logger.LogDebug("Unregistered package {FullName} on exit.", pkg.FullName);
                 }
             }
