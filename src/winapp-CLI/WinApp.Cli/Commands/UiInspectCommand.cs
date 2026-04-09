@@ -87,10 +87,6 @@ internal class UiInspectCommand : Command, IShortDescription
                 }
 
                 // Apply filters (preserve window separator elements)
-                if (interactive)
-                {
-                    elements = elements.Where(e => e.Type == "---" || IsInteractiveType(e)).ToArray();
-                }
                 if (hideDisabled)
                 {
                     elements = elements.Where(e => e.Type == "---" || e.IsEnabled).ToArray();
@@ -98,6 +94,14 @@ internal class UiInspectCommand : Command, IShortDescription
                 if (hideOffscreen)
                 {
                     elements = elements.Where(e => e.Type == "---" || !e.IsOffscreen).ToArray();
+                }
+
+                // For --interactive, filter to interactive elements but keep the full
+                // list for breadcrumb context rendering (non-JSON path)
+                var allElements = elements;
+                if (interactive && json)
+                {
+                    elements = elements.Where(e => e.Type == "---" || IsInteractiveType(e)).ToArray();
                 }
 
                 if (json)
@@ -108,14 +112,43 @@ internal class UiInspectCommand : Command, IShortDescription
                 }
                 else
                 {
-                    foreach (var el in elements)
+                    // Track ancestor types per depth for breadcrumb rendering in --interactive mode
+                    var ancestorTypes = new string?[depth + 10]; // Type at each depth level
+                    var lastBreadcrumb = "";
+
+                    foreach (var el in interactive ? allElements : elements)
                     {
                         // Window separator element
                         if (el.Type == "---")
                         {
                             ansiConsole.WriteLine();
                             ansiConsole.MarkupLine($"[grey]--- {EscapeMarkup(el.Name ?? "")} ---[/]");
+                            lastBreadcrumb = "";
+                            Array.Clear(ancestorTypes);
                             continue;
+                        }
+
+                        if (interactive && !IsInteractiveType(el))
+                        {
+                            // Track as ancestor context for upcoming interactive elements
+                            ancestorTypes[el.Depth] = el.Type;
+                            continue;
+                        }
+
+                        // In --interactive mode, emit a breadcrumb when ancestor path changed
+                        if (interactive && el.Depth > 0)
+                        {
+                            var parts = new List<string>();
+                            for (int d = 0; d < el.Depth; d++)
+                            {
+                                if (ancestorTypes[d] is not null) { parts.Add(ancestorTypes[d]!); }
+                            }
+                            var breadcrumb = string.Join(" > ", parts);
+                            if (breadcrumb.Length > 0 && breadcrumb != lastBreadcrumb)
+                            {
+                                ansiConsole.MarkupLine($"[grey]{EscapeMarkup(breadcrumb)}[/]");
+                                lastBreadcrumb = breadcrumb;
+                            }
                         }
 
                         var indent = new string(' ', el.Depth * 2);
@@ -135,15 +168,18 @@ internal class UiInspectCommand : Command, IShortDescription
                     }
 
                     // Footer with example using first interactive element or first element
-                    var realElements = elements.Where(e => e.Type != "---").ToArray();
-                    var separators = elements.Where(e => e.Type == "---").ToArray();
+                    var realElements = (interactive ? allElements : elements).Where(e => e.Type != "---").ToArray();
+                    var displayedElements = interactive
+                        ? realElements.Where(IsInteractiveType).ToArray()
+                        : realElements;
+                    var separators = (interactive ? allElements : elements).Where(e => e.Type == "---").ToArray();
                     var example = realElements.FirstOrDefault(IsInteractiveType) ?? realElements.FirstOrDefault();
                     var exampleSelector = example?.Selector ?? example?.Id;
                     var exampleHint = exampleSelector is not null
                         ? $" Use the [bold cyan]first token[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
                         : "";
                     ansiConsole.WriteLine();
-                    ansiConsole.MarkupLine($"[grey]Found {realElements.Length} elements (--depth {depth}).{exampleHint}[/]");
+                    ansiConsole.MarkupLine($"[grey]Found {displayedElements.Length} elements (--depth {depth}).{exampleHint}[/]");
                     if (separators.Length > 1)
                     {
                         ansiConsole.MarkupLine("[grey]Use -w <HWND> to target a specific window.[/]");
