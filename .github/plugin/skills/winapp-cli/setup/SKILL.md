@@ -214,7 +214,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--args` | Command-line arguments to pass to the application | (none) |
-| `--crash-dump-path` | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. Defaults to the system temp directory when --debug-output is active. | (none) |
+| `--crash-dump-path` | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. | (none) |
 | `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |

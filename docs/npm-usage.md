@@ -336,7 +336,7 @@ function run(options: RunOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
 | `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
-| `crashDumpPath` | `string \| undefined` | No | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. Defaults to the system temp directory when --debug-output is active. |
+| `crashDumpPath` | `string \| undefined` | No | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |
@@ -912,7 +912,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
 | `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
-| `crashDumpPath` | `string \| undefined` | No | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. Defaults to the system temp directory when --debug-output is active. |
+| `crashDumpPath` | `string \| undefined` | No | Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) |

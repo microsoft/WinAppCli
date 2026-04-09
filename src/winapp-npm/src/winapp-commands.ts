@@ -441,7 +441,7 @@ export interface RunOptions extends CommonOptions {
   inputFolder: string;
   /** Command-line arguments to pass to the application */
   args?: string;
-  /** Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. Defaults to the system temp directory when --debug-output is active. */
+  /** Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. */
   crashDumpPath?: string;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;

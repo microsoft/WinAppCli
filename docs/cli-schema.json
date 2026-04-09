@@ -1357,7 +1357,7 @@
           "recursive": false
         },
         "--crash-dump-path": {
-          "description": "Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory. Defaults to the system temp directory when --debug-output is active.",
+          "description": "Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory.",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
