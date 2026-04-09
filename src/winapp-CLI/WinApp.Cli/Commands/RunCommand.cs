@@ -26,6 +26,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> WithAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
+    public static Option<DirectoryInfo?> CrashDumpPathOption { get; }
 
     static RunCommand()
     {
@@ -71,6 +72,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Unregister the development package after the application exits. Only removes packages registered in development mode."
         };
+
+        CrashDumpPathOption = new Option<DirectoryInfo?>("--crash-dump-path")
+        {
+            Description = "Directory to save crash dump files when used with --debug-output. If the app crashes, a mini-dump is automatically written to this directory."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -83,14 +89,17 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
+        Options.Add(CrashDumpPathOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler(
+    public partial class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
         IPackageRegistrationService packageRegistrationService,
         IDebugOutputService debugOutputService,
+        ICrashHookService crashHookService,
+        ICrashReportService crashReportService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         IStatusService statusService,
@@ -106,6 +115,7 @@ internal partial class RunCommand : Command, IShortDescription
             var withAlias = parseResult.GetValue(WithAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
+            var crashDumpPath = parseResult.GetValue(CrashDumpPathOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -222,6 +232,42 @@ internal partial class RunCommand : Command, IShortDescription
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
+                    // Set up crash hook for managed exception capture when using --debug-output.
+                    // This injects a tiny DLL via DOTNET_STARTUP_HOOKS that captures exception
+                    // type, message, and full managed stack trace over a named pipe.
+                    string? crashHookEnv = null;
+                    if (debugOutput && resolvedOutputDir != null)
+                    {
+                        crashHookEnv = crashHookService.Setup(resolvedOutputDir.FullName);
+                        if (crashHookEnv != null && packageFullName != null)
+                        {
+                            try
+                            {
+                                var debugSettings = Windows.Win32.UI.Shell.PackageDebugSettings.CreateInstance<Windows.Win32.UI.Shell.IPackageDebugSettings>();
+
+                                // Build PZZWSTR as a char array with explicit null terminators.
+                                // PZZWSTR format: "KEY=VALUE\0KEY=VALUE\0\0"
+                                var envChars = crashHookEnv.ToCharArray();
+
+                                unsafe
+                                {
+                                    fixed (char* pEnv = envChars)
+                                    fixed (char* pPkg = packageFullName)
+                                    {
+                                        debugSettings.EnableDebugging(pPkg, null,
+                                            new Windows.Win32.Foundation.PZZWSTR(pEnv));
+                                    }
+                                }
+                                taskContext.AddDebugMessage($"{UiSymbols.Check} Crash hook: EnableDebugging for {packageFullName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                taskContext.AddDebugMessage($"{UiSymbols.Warning} Crash hook EnableDebugging failed: {ex.GetType().Name}: {ex.Message}");
+                                crashHookEnv = null;
+                            }
+                        }
+                    }
+
                     // Step 3: Launch the application using IApplicationActivationManager
                     taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
                     processId = appLauncherService.LaunchByAumid(aumid, appArgs);
@@ -256,7 +302,9 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                var dumpDir = debugOutput ? crashDumpPath?.FullName : null;
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, dumpDir, packageFullName, cancellationToken);
+                crashReportService.PrintExitCodeSummary(aliasExitCode);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -269,15 +317,56 @@ internal partial class RunCommand : Command, IShortDescription
                 PrintJson(aumid, processId, errorMessage: null);
             }
 
-            // --debug-output: run the debug event loop instead of plain WaitForExit.
-            // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
+            // Record time before waiting/debugging for Event Log queries after crash
+            var crashTime = DateTime.UtcNow;
+
+            // --debug-output: run the debug event loop.
+            // The crash hook DLL (if injected) captures managed exceptions via
+            // FirstChanceException and writes them to our named pipe synchronously
+            // on the exception's own thread — no EventPipe buffering issues.
             if (debugOutput)
             {
-                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                // Start reading from the crash hook pipe (background thread)
+                crashHookService.StartReading();
+
+                // Only write crash dumps when --crash-dump-path is explicitly provided
+                var dumpDir = crashDumpPath?.FullName;
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, dumpDir, cancellationToken);
+
+                // Wait for the crash hook pipe to drain (process exited → pipe closed)
+                await crashHookService.WaitForCompletionAsync(TimeSpan.FromSeconds(3));
+
+                // After crash exit, print managed exception details.
+                // Prefer crash hook (has full stack with file:line), only fall back to
+                // Event Log when the crash hook didn't capture anything (e.g., FailFast,
+                // StackOverflow, or non-.NET apps that bypass FirstChanceException).
+                if (exitCode != 0 && !cancellationToken.IsCancellationRequested)
+                {
+                    await crashReportService.PrintCrashReportAsync(crashHookService, processId, crashTime);
+                }
+
                 if (cancellationToken.IsCancellationRequested)
                 {
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
                 }
+
+                // Clean up EnableDebugging state
+                if (packageFullName != null)
+                {
+                    try
+                    {
+                        var debugSettings = Windows.Win32.UI.Shell.PackageDebugSettings.CreateInstance<Windows.Win32.UI.Shell.IPackageDebugSettings>();
+                        unsafe
+                        {
+                            fixed (char* pPkg = packageFullName)
+                            {
+                                debugSettings.DisableDebugging(pPkg);
+                            }
+                        }
+                    }
+                    catch { /* ignore cleanup errors */ }
+                }
+
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -313,6 +402,14 @@ internal partial class RunCommand : Command, IShortDescription
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
                     appExitCode = -1;
                 }
+            }
+
+            crashReportService.PrintExitCodeSummary(appExitCode);
+
+            // On crash, print exception details from Event Log
+            if (appExitCode != 0 && !cancellationToken.IsCancellationRequested)
+            {
+                await crashReportService.PrintCrashReportAsync(crashHookService, processId, crashTime);
             }
 
             if (unregisterOnExit && packageName != null)
@@ -372,6 +469,7 @@ internal partial class RunCommand : Command, IShortDescription
             DirectoryInfo outputAppXDirectory,
             string? appArgs,
             bool debugOutput,
+            string? crashDumpDirectory,
             string? packageFullName,
             CancellationToken cancellationToken)
         {
@@ -394,6 +492,9 @@ internal partial class RunCommand : Command, IShortDescription
 
             var alias = aliases[0]; // Use the first alias
 
+            // Set up crash hook for managed exception capture
+            var hookEnv = crashHookService.Setup(outputAppXDirectory.FullName);
+
             // Launch the execution alias process with inherited stdio
             var psi = new ProcessStartInfo
             {
@@ -403,6 +504,32 @@ internal partial class RunCommand : Command, IShortDescription
                 RedirectStandardOutput = false,
                 RedirectStandardError = false,
             };
+
+            // Inject crash hook env vars via ProcessStartInfo (propagates for --with-alias)
+            if (hookEnv != null)
+            {
+                // Parse the double-null-terminated string into individual KEY=VALUE pairs
+                foreach (var entry in hookEnv.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var eqIndex = entry.IndexOf('=');
+                    if (eqIndex > 0)
+                    {
+                        psi.Environment[entry[..eqIndex]] = entry[(eqIndex + 1)..];
+                    }
+                }
+            }
+
+            // When not using --debug-output, configure the .NET runtime to auto-create
+            // crash dumps. This is the only way to get dumps for --with-alias without
+            // attaching a debugger. The dump path defaults to %TEMP%.
+            if (!debugOutput)
+            {
+                var dumpDir = crashDumpDirectory ?? Path.GetTempPath();
+                var dumpName = Path.Combine(dumpDir, "crash-%p-%t.dmp");
+                psi.Environment["DOTNET_DbgEnableMiniDump"] = "1";
+                psi.Environment["DOTNET_DbgMiniDumpType"] = "1"; // Mini dump
+                psi.Environment["DOTNET_DbgMiniDumpName"] = dumpName;
+            }
 
             if (!string.IsNullOrEmpty(appArgs))
             {
@@ -420,7 +547,20 @@ internal partial class RunCommand : Command, IShortDescription
 
                 if (debugOutput)
                 {
-                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    // Start reading crash hook pipe
+                    crashHookService.StartReading();
+
+                    var crashTime = DateTime.UtcNow;
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), crashDumpDirectory, cancellationToken);
+
+                    // Wait for crash hook pipe to drain
+                    await crashHookService.WaitForCompletionAsync(TimeSpan.FromSeconds(3));
+
+                    if (exitCode != 0 && !cancellationToken.IsCancellationRequested)
+                    {
+                        await crashReportService.PrintCrashReportAsync(crashHookService, unchecked((uint)process.Id), crashTime);
+                    }
+
                     if (cancellationToken.IsCancellationRequested)
                     {
                         appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));
@@ -428,9 +568,19 @@ internal partial class RunCommand : Command, IShortDescription
                     return exitCode;
                 }
 
+                // Non-debug path: start crash hook reader and wait for exit
+                crashHookService.StartReading();
+
                 try
                 {
                     await process.WaitForExitAsync(cancellationToken);
+                    await crashHookService.WaitForCompletionAsync(TimeSpan.FromSeconds(3));
+
+                    if (process.ExitCode != 0)
+                    {
+                        await crashReportService.PrintCrashReportAsync(crashHookService, unchecked((uint)process.Id), DateTime.UtcNow);
+                    }
+
                     return process.ExitCode;
                 }
                 catch (OperationCanceledException)

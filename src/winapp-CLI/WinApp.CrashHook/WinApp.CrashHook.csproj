@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>winapp-crash-hook</AssemblyName>
+
+    <!-- This DLL is loaded into the TARGET app's process via DOTNET_STARTUP_HOOKS.
+         It must be a plain class library (no NativeAOT, no trimming) because it runs
+         inside the user's .NET runtime, not ours. Target net9.0 for broad compatibility
+         with .NET 9+ and .NET 10+ apps (startup hooks load across TFM versions). -->
+  </PropertyGroup>
+
+</Project>

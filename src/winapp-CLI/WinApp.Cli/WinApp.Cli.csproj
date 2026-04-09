@@ -40,11 +40,24 @@
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64'">
+    <DefineConstants>$(DefineConstants);ARM64</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Embed templates and default MSIX assets -->
     <EmbeddedResource Include="Templates\**\*.*" />
     <EmbeddedResource Include="Assets\msix_default_assets\**\*.*" />
+    <!-- Embed the crash hook DLL for DOTNET_STARTUP_HOOKS injection -->
+    <EmbeddedResource Include="Assets\winapp-crash-hook.dll" LogicalName="WinApp.Cli.Assets.winapp-crash-hook.dll" />
   </ItemGroup>
+
+  <!-- Build the crash hook DLL before embedding -->
+  <Target Name="BuildCrashHook" BeforeTargets="PrepareForBuild">
+    <Exec Command="dotnet build &quot;$(MSBuildThisFileDirectory)..\WinApp.CrashHook\WinApp.CrashHook.csproj&quot; -c Release -v q" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\WinApp.CrashHook\bin\Release\net9.0\winapp-crash-hook.dll"
+          DestinationFolder="$(MSBuildThisFileDirectory)Assets" SkipUnchangedFiles="true" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />

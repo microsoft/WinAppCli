@@ -18,7 +18,12 @@ internal interface IDebugOutputService
     /// When cancelled, the debugged process is terminated before returning.
     /// </summary>
     /// <param name="processId">The ID of the process to attach to.</param>
+    /// <param name="crashDumpDirectory">
+    /// Optional directory for crash dump files. When set and the app crashes
+    /// (second-chance exception), a mini-dump is automatically written to this
+    /// directory. Pass <c>null</c> to disable crash dump collection.
+    /// </param>
     /// <param name="cancellationToken">Token to stop the debug loop (e.g. Ctrl+C). The debugged process is terminated when this token is signaled.</param>
     /// <returns>The exit code of the debugged process, or <c>-1</c> if terminated early.</returns>
-    Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken);
+    Task<int> RunDebugLoopAsync(uint processId, string? crashDumpDirectory, CancellationToken cancellationToken);
 }

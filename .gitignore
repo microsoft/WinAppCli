@@ -216,3 +216,6 @@ devcert.pfx
 
 # Do not ignore the targets and props files in the build folder, which are needed for consuming the NuGet package
 !/src/winapp-NuGet/build/
+
+# Build-generated crash hook DLL (rebuilt from WinApp.CrashHook project during build)
+src/winapp-CLI/WinApp.Cli/Assets/winapp-crash-hook.dll
