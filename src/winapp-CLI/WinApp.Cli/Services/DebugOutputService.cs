@@ -71,6 +71,11 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
             {
                 await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!, useSymbols, symbolSearchPaths);
             }
+            else
+            {
+                // No crash — show log path so users can find captured debug output.
+                console.MarkupLine($"[dim]Full debug log:[/] {_logPath!.EscapeMarkup()}");
+            }
 
             return exitCode;
         }
@@ -256,7 +261,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
             {
                 console.MarkupLine($"[red]Crash:[/] {name} (0x{code:X8}) at 0x{address:X}");
                 _crashDumpPath = crashDumpService.WriteMiniDump(
-                    debugEvent.dwProcessId, debugEvent.dwThreadId,
+                    debugEvent.dwProcessId,
                     _savedFirstChanceContext, _savedFirstChanceThreadId,
                     _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
             }
@@ -274,7 +279,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
             if (_crashDumpPath == null)
             {
                 _crashDumpPath = crashDumpService.WriteMiniDump(
-                    debugEvent.dwProcessId, debugEvent.dwThreadId,
+                    debugEvent.dwProcessId,
                     _savedFirstChanceContext, _savedFirstChanceThreadId,
                     _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
             }

@@ -15,13 +15,12 @@ internal interface ICrashDumpService
     /// exception before continuing with <c>DBG_EXCEPTION_NOT_HANDLED</c>).
     /// </summary>
     /// <param name="processId">The ID of the process to dump.</param>
-    /// <param name="threadId">The ID of the faulting thread.</param>
     /// <param name="savedContext">Thread context bytes captured at first-chance time, or null.</param>
     /// <param name="savedThreadId">Thread ID from the first-chance exception.</param>
     /// <param name="savedExceptionCode">Exception code from the first-chance exception.</param>
     /// <param name="savedExceptionAddress">Exception address from the first-chance exception.</param>
     /// <returns>The full path to the dump file, or <c>null</c> if the dump failed.</returns>
-    string? WriteMiniDump(uint processId, uint threadId,
+    string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
         int savedExceptionCode, nuint savedExceptionAddress);
 

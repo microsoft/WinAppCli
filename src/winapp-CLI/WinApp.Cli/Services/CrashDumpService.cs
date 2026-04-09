@@ -30,7 +30,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     private static readonly string DumpDirectory = Path.Combine(Path.GetTempPath(), "winapp-dumps");
 
     /// <inheritdoc/>
-    public unsafe string? WriteMiniDump(uint processId, uint threadId,
+    public unsafe string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
         int savedExceptionCode, nuint savedExceptionAddress)
     {
@@ -243,7 +243,24 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             return (string.Empty, "No CLR runtime found in dump (native-only crash).");
         }
 
-        using var runtime = dt.ClrVersions[0].CreateRuntime();
+        ClrRuntime runtime;
+        try
+        {
+            runtime = dt.ClrVersions[0].CreateRuntime();
+        }
+        catch (ClrDiagnosticsException ex) when (ex.InnerException is BadImageFormatException)
+        {
+            // ClrMD cannot load the DAC DLL — typically a cross-architecture dump
+            // (e.g., x64 .NET app running under emulation on ARM64 Windows).
+            return (
+                "Unable to analyze crash dump: the .NET runtime in the dump does not match " +
+                $"the host architecture ({RuntimeInformation.ProcessArchitecture}).\n" +
+                "This typically happens when debugging an x64 app under ARM64 emulation.\n" +
+                "Open the dump in WinDbg for full analysis.",
+                $"ClrMD DAC load failed: {ex.Message}");
+        }
+
+        using var _ = runtime;
         using var pdbResolver = new PdbSourceResolver(symbolSearchPaths, runtime, logger);
 
         var summary = new StringBuilder();

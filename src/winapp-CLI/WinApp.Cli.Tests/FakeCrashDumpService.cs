@@ -14,11 +14,11 @@ internal class FakeCrashDumpService : ICrashDumpService
     public string? FakeDumpPath { get; set; }
     public List<string> AnalyzeCalls { get; } = [];
 
-    public string? WriteMiniDump(uint processId, uint threadId,
+    public string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
         int savedExceptionCode, nuint savedExceptionAddress)
     {
-        WriteCalls.Add((processId, threadId));
+        WriteCalls.Add((processId, savedThreadId));
         return FakeDumpPath;
     }
 
