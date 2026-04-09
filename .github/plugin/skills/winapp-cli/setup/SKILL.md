@@ -95,7 +95,7 @@ winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
 
-# Launch and capture OutputDebugString messages and first-chance exceptions
+# Launch and capture OutputDebugString messages and crash diagnostics
 # Note: prevents other debuggers (VS, VS Code) from attaching — use --no-launch if you need those instead
 winapp run ./bin/Debug --debug-output
 ```
@@ -116,7 +116,7 @@ Use `winapp run` during iterative development — it creates a loose layout pack
 
 For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
 
-> **`--debug-output` caveat:** Captures `OutputDebugString` but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger.
+> **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + managed exception analysis) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. No external tools required for managed crash analysis; for native-only crashes, the dump can be opened in WinDbg.
 
 For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
