@@ -2192,7 +2192,7 @@
               ],
               "valueType": "System.Int32",
               "hasDefaultValue": true,
-              "defaultValue": 5,
+              "defaultValue": 4,
               "arity": {
                 "minimum": 1,
                 "maximum": 1
