@@ -8,6 +8,10 @@ using Microsoft.Diagnostics.Runtime.Utilities;
 using Microsoft.Diagnostics.Runtime.Utilities.DbgEng;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using System.Collections.Immutable;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Text;
 using Windows.Win32;
@@ -139,13 +143,13 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     }
 
     /// <inheritdoc/>
-    public async Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false)
+    public async Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
         console.MarkupLine("[dim]Analyzing crash dump...[/]");
 
         try
         {
-            var (summary, details) = await Task.Run(() => AnalyzeWithClrMD(dumpPath));
+            var (summary, details) = await Task.Run(() => AnalyzeWithClrMD(dumpPath, symbolSearchPaths));
 
             // ClrMD found managed exception — no need for native fallback
             if (!string.IsNullOrWhiteSpace(summary))
@@ -215,7 +219,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
     }
 
-    private static (string Summary, string Details) AnalyzeWithClrMD(string dumpPath)
+    private (string Summary, string Details) AnalyzeWithClrMD(string dumpPath, IReadOnlyList<string>? symbolSearchPaths)
     {
         using var dt = DataTarget.LoadDump(dumpPath);
 
@@ -225,6 +229,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
 
         using var runtime = dt.ClrVersions[0].CreateRuntime();
+        using var pdbResolver = new PdbSourceResolver(symbolSearchPaths, runtime, logger);
 
         var summary = new StringBuilder();
         var details = new StringBuilder();
@@ -271,7 +276,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
         if (exception != null)
         {
-            FormatException(exception, summary, details);
+            FormatException(exception, summary, details, pdbResolver);
         }
 
         // 3. No exception found — check for Stack Overflow by finding a thread with
@@ -310,6 +315,9 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                     }
 
                     var name = $"{frame.Method!.Type?.Name}.{frame.Method!.Name}";
+                    var sourceInfo = pdbResolver.GetSourceLocation(frame);
+                    var displayName = sourceInfo != null ? $"{name} in {sourceInfo}" : name;
+
                     if (name == lastFrame)
                     {
                         repeatCount++;
@@ -327,7 +335,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                         break;
                     }
 
-                    summary.AppendLine($"  {name}");
+                    summary.AppendLine($"  {displayName}");
                     displayed++;
                     repeatCount = 0;
                     lastFrame = name;
@@ -360,7 +368,13 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             {
                 if (frame.Method != null)
                 {
-                    details.AppendLine($"  {frame.Method.Type?.Module?.Name}!{frame.Method.Type?.Name}.{frame.Method.Name}");
+                    var sourceInfo = pdbResolver.GetSourceLocation(frame);
+                    var frameLine = $"  {frame.Method.Type?.Module?.Name}!{frame.Method.Type?.Name}.{frame.Method.Name}";
+                    if (sourceInfo != null)
+                    {
+                        frameLine += $" in {sourceInfo}";
+                    }
+                    details.AppendLine(frameLine);
                 }
             }
         }
@@ -368,7 +382,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         return (summary.ToString().Trim(), details.ToString().Trim());
     }
 
-    private static void FormatException(ClrException ex, StringBuilder summary, StringBuilder details)
+    private static void FormatException(ClrException ex, StringBuilder summary, StringBuilder details, PdbSourceResolver pdbResolver)
     {
         // Console summary
         summary.AppendLine($"Exception: {ex.Type?.Name}");
@@ -394,7 +408,11 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 var method = ex.StackTrace[i].Method;
                 if (method != null)
                 {
-                    summary.AppendLine($"  {method.Type?.Name}.{method.Name}");
+                    var sourceInfo = pdbResolver.GetSourceLocation(ex.StackTrace[i]);
+                    var line = sourceInfo != null
+                        ? $"  {method.Type?.Name}.{method.Name} in {sourceInfo}"
+                        : $"  {method.Type?.Name}.{method.Name}";
+                    summary.AppendLine(line);
                 }
             }
 
@@ -426,7 +444,13 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             var method = frame.Method;
             if (method != null)
             {
-                details.AppendLine($"  {method.Type?.Module?.Name}!{method.Type?.Name}.{method.Name}");
+                var sourceInfo = pdbResolver.GetSourceLocation(frame);
+                var frameLine = $"  {method.Type?.Module?.Name}!{method.Type?.Name}.{method.Name}";
+                if (sourceInfo != null)
+                {
+                    frameLine += $" in {sourceInfo}";
+                }
+                details.AppendLine(frameLine);
             }
         }
     }
@@ -689,5 +713,234 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
 
         return result.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Resolves source file and line numbers from portable PDB files for ClrMD stack frames.
+    /// Searches for PDBs in the provided search paths and next to the module's image on disk.
+    /// Caches loaded PDB readers to avoid re-opening the same PDB for every frame.
+    /// </summary>
+    private sealed class PdbSourceResolver : IDisposable
+    {
+        private readonly IReadOnlyList<string> _searchPaths;
+        private readonly ClrRuntime _runtime;
+        private readonly ILogger _logger;
+        // Cache: module name → (MetadataReaderProvider, MetadataReader), or null if not found
+        private readonly Dictionary<string, (MetadataReaderProvider Provider, MetadataReader Reader)?> _pdbCache = new(StringComparer.OrdinalIgnoreCase);
+
+        public PdbSourceResolver(IReadOnlyList<string>? searchPaths, ClrRuntime runtime, ILogger logger)
+        {
+            _searchPaths = searchPaths ?? [];
+            _runtime = runtime;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Returns "file:line" for the given stack frame, or null if PDB info is unavailable.
+        /// </summary>
+        public string? GetSourceLocation(ClrStackFrame frame)
+        {
+            var method = frame.Method;
+            if (method == null)
+            {
+                return null;
+            }
+
+            var ilOffset = method.GetILOffset(frame.InstructionPointer);
+            if (ilOffset < 0)
+            {
+                return null;
+            }
+
+            return GetSourceLocation(method, ilOffset);
+        }
+
+        /// <summary>
+        /// Returns "file:line" for a method at the given IL offset, or null if PDB info is unavailable.
+        /// </summary>
+        public string? GetSourceLocation(ClrMethod method, int ilOffset)
+        {
+            var module = method.Type?.Module;
+            if (module == null)
+            {
+                return null;
+            }
+
+            var reader = GetOrLoadPdbReader(module);
+            if (reader == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var methodToken = (int)method.MetadataToken;
+                var handle = MetadataTokens.MethodDefinitionHandle(methodToken);
+                var debugInfo = reader.GetMethodDebugInformation(handle);
+
+                // Walk sequence points to find the one at or just before the IL offset.
+                // Skip hidden sequence points (line 0xFEEFEE).
+                string? bestFile = null;
+                int bestLine = -1;
+                int bestOffset = -1;
+
+                foreach (var sp in debugInfo.GetSequencePoints())
+                {
+                    if (sp.IsHidden)
+                    {
+                        continue;
+                    }
+
+                    if (sp.Offset <= ilOffset && sp.Offset > bestOffset)
+                    {
+                        bestOffset = sp.Offset;
+                        bestLine = sp.StartLine;
+                        bestFile = reader.GetString(reader.GetDocument(sp.Document).Name);
+                    }
+                }
+
+                if (bestFile != null && bestLine > 0)
+                {
+                    // Show just the filename for terminal readability
+                    return $"{Path.GetFileName(bestFile)}:{bestLine}";
+                }
+            }
+            catch (BadImageFormatException)
+            {
+                // Corrupted or non-portable PDB — skip silently
+            }
+
+            return null;
+        }
+
+        private MetadataReader? GetOrLoadPdbReader(ClrModule module)
+        {
+            var moduleName = module.Name ?? "";
+            if (_pdbCache.TryGetValue(moduleName, out var cached))
+            {
+                return cached?.Reader;
+            }
+
+            var reader = TryLoadPdb(module);
+            _pdbCache[moduleName] = reader;
+            return reader?.Reader;
+        }
+
+        private (MetadataReaderProvider Provider, MetadataReader Reader)? TryLoadPdb(ClrModule module)
+        {
+            var modulePath = module.Name;
+            if (string.IsNullOrEmpty(modulePath))
+            {
+                return null;
+            }
+
+            var moduleDllName = Path.GetFileNameWithoutExtension(modulePath);
+
+            // Build candidate PDB paths:
+            // 1. Provided search paths (e.g., build output folder)
+            // 2. Next to the module DLL on disk (may be in AppX folder)
+            // 3. Parent of the module directory (build output is often parent of AppX)
+            var candidates = new List<string>();
+
+            foreach (var searchPath in _searchPaths)
+            {
+                candidates.Add(Path.Combine(searchPath, $"{moduleDllName}.pdb"));
+            }
+
+            var moduleDir = Path.GetDirectoryName(modulePath);
+            if (moduleDir != null)
+            {
+                candidates.Add(Path.Combine(moduleDir, $"{moduleDllName}.pdb"));
+                var parentDir = Path.GetDirectoryName(moduleDir);
+                if (parentDir != null)
+                {
+                    candidates.Add(Path.Combine(parentDir, $"{moduleDllName}.pdb"));
+                }
+            }
+
+            foreach (var pdbPath in candidates)
+            {
+                if (!File.Exists(pdbPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // Validate this is the matching PDB by checking the PDB ID from the PE debug directory.
+                    // If we can't read the PE (e.g., file locked), fall back to accepting the PDB by name.
+                    if (!ValidatePdbMatchesDll(modulePath, pdbPath))
+                    {
+                        continue;
+                    }
+
+                    var stream = File.OpenRead(pdbPath);
+                    var provider = MetadataReaderProvider.FromPortablePdbStream(stream);
+                    var reader = provider.GetMetadataReader();
+                    _logger.LogDebug("Loaded PDB for {Module} from {Path}", moduleDllName, pdbPath);
+                    return (provider, reader);
+                }
+                catch (Exception ex) when (ex is BadImageFormatException or IOException or InvalidOperationException)
+                {
+                    // Not a valid portable PDB or I/O error — try next candidate
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Validates that the PDB matches the DLL by comparing the CodeView debug directory GUID.
+        /// Returns true if the PDB matches or if validation cannot be performed (e.g., file locked).
+        /// </summary>
+        private static bool ValidatePdbMatchesDll(string dllPath, string pdbPath)
+        {
+            try
+            {
+                if (!File.Exists(dllPath))
+                {
+                    return true; // Can't validate, accept by name
+                }
+
+                using var dllStream = File.OpenRead(dllPath);
+                using var peReader = new PEReader(dllStream);
+                var debugEntries = peReader.ReadDebugDirectory();
+
+                Guid? peGuid = null;
+                foreach (var entry in debugEntries)
+                {
+                    if (entry.Type == DebugDirectoryEntryType.CodeView)
+                    {
+                        peGuid = peReader.ReadCodeViewDebugDirectoryData(entry).Guid;
+                        break;
+                    }
+                }
+
+                if (peGuid == null)
+                {
+                    return true; // No CodeView entry, accept by name
+                }
+
+                using var pdbStream = File.OpenRead(pdbPath);
+                using var pdbProvider = MetadataReaderProvider.FromPortablePdbStream(pdbStream, MetadataStreamOptions.LeaveOpen);
+                var pdbReader = pdbProvider.GetMetadataReader();
+                var pdbId = new BlobContentId(pdbReader.DebugMetadataHeader!.Id);
+
+                return pdbId.Guid == peGuid.Value;
+            }
+            catch
+            {
+                return true; // Can't validate, accept by name
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var entry in _pdbCache.Values)
+            {
+                entry?.Provider.Dispose();
+            }
+            _pdbCache.Clear();
+        }
     }
 }

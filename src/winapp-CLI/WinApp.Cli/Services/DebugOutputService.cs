@@ -48,7 +48,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     private nuint _savedFirstChanceExceptionAddress;
 
     /// <inheritdoc/>
-    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false)
+    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
         // Create a log file alongside the dump directory for verbose debug output.
         var logDir = Path.Combine(Path.GetTempPath(), "winapp-dumps");
@@ -69,7 +69,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
             // After the debug loop ends, analyze the crash dump if one was captured.
             if (_crashDumpPath != null)
             {
-                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!, useSymbols);
+                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!, useSymbols, symbolSearchPaths);
             }
 
             return exitCode;
@@ -188,7 +188,16 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         {
             // Trim trailing newline so log doesn't double-space the output.
             message = message.TrimEnd('\r', '\n');
+
+            // Log file gets everything for detailed investigation.
             _logWriter?.WriteLine($"[Debug] {message}");
+
+            // Console only shows app-specific messages — filter out OS/framework
+            // noise from WinUI, COM, DirectX, and other system DLLs.
+            if (!IsFrameworkNoise(message))
+            {
+                console.MarkupLine($"[dim][[Debug]][/] {message.EscapeMarkup()}");
+            }
         }
     }
 
@@ -220,7 +229,17 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         {
             var name = GetExceptionName(code);
             var address = (nuint)exInfo.ExceptionRecord.ExceptionAddress;
+
+            // Log file gets all first-chance exceptions.
             _logWriter?.WriteLine($"First-chance exception: {name} (0x{code:X8}) at 0x{address:X}");
+
+            // Console only shows exceptions meaningful for crash diagnosis.
+            // Skip WinUI/COM internal exceptions (0x40080201, 0x04242420, etc.)
+            // that are caught and handled during normal framework operation.
+            if (code is 0xE0434352 or 0xC0000005 or 0xC00000FD)
+            {
+                console.MarkupLine($"[yellow]First-chance exception:[/] {name} (0x{code:X8}) at 0x{address:X}");
+            }
 
             // Save thread context for the FIRST critical exception — at first-chance
             // time, the context still points to user code. Later exceptions (CLR wrapping
@@ -346,4 +365,91 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         0xE0434352 => "CLR Exception",
         _ => "Exception",
     };
+
+    /// <summary>
+    /// Returns true if the debug message is internal OS/framework noise
+    /// rather than an app-specific debug message worth showing on the console.
+    /// </summary>
+    private static bool IsFrameworkNoise(string message)
+    {
+        // Windows OS source paths (onecore, onecoreuap, minkernel, etc.)
+        if (message.StartsWith("onecore\\", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("onecoreuap\\", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("minkernel\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // WinRT/COM internal trace markers
+        if (message.Contains("ReturnHr(", StringComparison.Ordinal) ||
+            message.Contains("LogHr(", StringComparison.Ordinal) ||
+            message.Contains("ReturnNt(", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Windows SDK build paths (Azure DevOps build agent)
+        if (message.StartsWith("C:\\__w\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Framework DLL WIL/HRESULT trace format: "DllName.dll!0x..." or "DllName.dll!FuncName"
+        if (IsFrameworkDllTrace(message))
+        {
+            return true;
+        }
+
+        // Common framework HRESULT noise
+        if (message.StartsWith("E_INVALIDARG", StringComparison.Ordinal) ||
+            message.StartsWith("E_FAIL", StringComparison.Ordinal) ||
+            message.StartsWith("HRESULT:", StringComparison.Ordinal) ||
+            message.StartsWith("hr = ", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if the message looks like a framework DLL debug trace
+    /// (e.g., "Microsoft.UI.Xaml.dll!0x..." or "twinapi.appcore.dll!SomeFunc").
+    /// </summary>
+    private static bool IsFrameworkDllTrace(string message)
+    {
+        var bangIndex = message.IndexOf('!');
+        if (bangIndex < 5)
+        {
+            return false;
+        }
+
+        var beforeBang = message.AsSpan(0, bangIndex);
+        if (!beforeBang.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (beforeBang.StartsWith("Microsoft.UI.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.Windows.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.Web.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.WinUI.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("twinapi", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("dxgi", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("d3d", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("d2d", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("combase", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("oleaut32", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("ntdll", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("kernelbase", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("kernel32", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("WinAppRuntime", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("MRM", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
 }

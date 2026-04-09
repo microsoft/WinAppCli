@@ -331,7 +331,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -348,7 +348,8 @@ internal partial class RunCommand : Command, IShortDescription
             // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
             if (debugOutput)
             {
-                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken, useSymbols);
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken, useSymbols,
+                    symbolSearchPaths: [inputFolder.FullName]);
                 if (cancellationToken.IsCancellationRequested)
                 {
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
@@ -445,6 +446,7 @@ internal partial class RunCommand : Command, IShortDescription
         /// </summary>
         private async Task<int> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
+            DirectoryInfo inputFolder,
             string? appArgs,
             bool debugOutput,
             string? packageFullName,
@@ -495,7 +497,8 @@ internal partial class RunCommand : Command, IShortDescription
 
                 if (debugOutput)
                 {
-                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken,
+                        symbolSearchPaths: [inputFolder.FullName]);
                     if (cancellationToken.IsCancellationRequested)
                     {
                         appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));

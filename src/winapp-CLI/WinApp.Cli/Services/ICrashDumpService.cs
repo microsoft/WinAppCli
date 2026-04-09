@@ -33,5 +33,6 @@ internal interface ICrashDumpService
     /// <param name="dumpPath">Path to the minidump file.</param>
     /// <param name="logPath">Path to the debug log file where full analysis is appended.</param>
     /// <param name="useSymbols">When true, downloads symbols from Microsoft Symbol Server for richer native analysis.</param>
-    Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false);
+    /// <param name="symbolSearchPaths">Additional directories to search for PDB files (e.g., the build output folder). Used to resolve source file and line numbers in managed stack traces.</param>
+    Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null);
 }

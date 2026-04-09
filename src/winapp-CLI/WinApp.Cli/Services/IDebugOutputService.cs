@@ -20,6 +20,7 @@ internal interface IDebugOutputService
     /// <param name="processId">The ID of the process to attach to.</param>
     /// <param name="cancellationToken">Token to stop the debug loop (e.g. Ctrl+C). The debugged process is terminated when this token is signaled.</param>
     /// <param name="useSymbols">When true, downloads symbols from Microsoft Symbol Server for richer native crash analysis.</param>
+    /// <param name="symbolSearchPaths">Additional directories to search for PDB files (e.g., build output folder) for source file:line resolution.</param>
     /// <returns>The exit code of the debugged process, or <c>-1</c> if terminated early.</returns>
-    Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false);
+    Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null);
 }
