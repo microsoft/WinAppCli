@@ -48,8 +48,7 @@ internal static class LongPathHelper
         if (!IsSystemLongPathEnabled())
         {
             throw new InvalidOperationException(
-                $"The path exceeds the Windows MAX_PATH limit of {MaxPath} characters and long path support is not enabled on this system. " +
-                "Visit https://aka.ms/enable-long-paths-on-windows for guidance on enabling long paths.");
+                $"The path exceeds the Windows MAX_PATH limit of {MaxPath} characters and long path support is not enabled on this system. Visit https://aka.ms/enable-long-paths-on-windows for guidance on enabling long paths.");
         }
     }
 
