@@ -114,9 +114,9 @@ internal class UiInspectCommand : Command, IShortDescription
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
                         var name = displayName is not null && displayName != elSelector
-                            ? $" [green]\"{EscapeMarkup(displayName)}\"[/]" : "";
+                            ? $" [green]\"{EscapeMarkup(Truncate(displayName, 80))}\"[/]" : "";
                         var value = el.Value is not null && el.Value != el.Name
-                            ? $" [yellow]value=\"{EscapeMarkup(el.Value)}\"[/]" : "";
+                            ? $" [yellow]value=\"{EscapeMarkup(Truncate(el.Value, 60))}\"[/]" : "";
                         var toggle = el.ToggleState is not null ? $" [grey][[{el.ToggleState}]][/]" : "";
                         var expand = el.ExpandState is not null ? $" [grey][[{el.ExpandState}]][/]" : "";
                         var scroll = el.ScrollDir is not null ? $" [grey][[scroll:{el.ScrollDir}]][/]" : "";
@@ -152,6 +152,12 @@ internal class UiInspectCommand : Command, IShortDescription
         }
 
         private static string EscapeMarkup(string text) => Markup.Escape(SanitizeForDisplay(text));
+
+        private static string Truncate(string text, int maxLength)
+        {
+            if (text.Length <= maxLength) { return text; }
+            return string.Concat(text.AsSpan(0, maxLength), "…");
+        }
 
         /// <summary>Replace control characters (newlines, tabs, carriage returns) with visual representations for single-line display.</summary>
         private static string SanitizeForDisplay(string text)

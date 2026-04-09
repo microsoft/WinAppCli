@@ -85,9 +85,9 @@ internal class UiSearchCommand : Command, IShortDescription
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
                         var name = displayName is not null && displayName != elSelector
-                            ? $" [green]\"{EscapeMarkup(displayName)}\"[/]" : "";
+                            ? $" [green]\"{EscapeMarkup(Truncate(displayName, 80))}\"[/]" : "";
                         var value = el.Value is not null && el.Value != el.Name
-                            ? $" [yellow]value=\"{EscapeMarkup(el.Value)}\"[/]" : "";
+                            ? $" [yellow]value=\"{EscapeMarkup(Truncate(el.Value, 60))}\"[/]" : "";
                         var toggle = el.ToggleState is not null ? $" [grey][[{el.ToggleState}]][/]" : "";
                         var expand = el.ExpandState is not null ? $" [grey][[{el.ExpandState}]][/]" : "";
                         var scroll = el.ScrollDir is not null ? $" [grey][[scroll:{el.ScrollDir}]][/]" : "";
@@ -121,5 +121,11 @@ internal class UiSearchCommand : Command, IShortDescription
         }
 
         private static string EscapeMarkup(string text) => Markup.Escape(text.Replace("\r\n", "↵").Replace("\r", "↵").Replace("\n", "↵").Replace("\t", "→"));
+
+        private static string Truncate(string text, int maxLength)
+        {
+            if (text.Length <= maxLength) { return text; }
+            return string.Concat(text.AsSpan(0, maxLength), "…");
+        }
     }
 }
