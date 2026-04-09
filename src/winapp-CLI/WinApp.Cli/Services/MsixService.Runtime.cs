@@ -205,28 +205,19 @@ internal partial class MsixService
     }
 
     /// <summary>
-    /// Collects all user NuGet packages from winapp.yaml or .csproj.
+    /// Collects all user NuGet packages from .csproj or winapp.yaml.
     /// Returns the full package dictionary (name → version) for WinRT component scanning.
     /// </summary>
-    private async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    internal async Task<Dictionary<string, string>> GetAllUserPackagesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // Path 1: Try winapp.yaml
-        if (configService.Exists())
+        // Path 1: Try .csproj via `dotnet list package --format json` (cached)
+        if (dotNetPackageList != null)
         {
-            var config = configService.Load();
-            foreach (var pkg in config.Packages)
-            {
-                packages.TryAdd(pkg.Name, pkg.Version);
-            }
-        }
-        else
-        {
-            // Path 2: Try .csproj via `dotnet list package --format json` (cached)
             try
             {
-                var allPackages = dotNetPackageList?.Projects?
+                var allPackages = dotNetPackageList.Projects?
                     .SelectMany(p => p.Frameworks ?? [])
                     .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
 
@@ -244,6 +235,16 @@ internal partial class MsixService
             catch (Exception ex)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not retrieve package list from .csproj: {ex.Message}");
+            }
+        }
+
+        // Path 2: Fall back to winapp.yaml (C++ / native projects)
+        if (packages.Count == 0 && configService.Exists())
+        {
+            var config = configService.Load();
+            foreach (var pkg in config.Packages)
+            {
+                packages.TryAdd(pkg.Name, pkg.Version);
             }
         }
 
@@ -696,21 +697,15 @@ internal partial class MsixService
         return msixDir;
     }
 
-    private async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    internal async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? mainVersion = null;
-        // Path 1: Try winapp.yaml (C++ / native projects)
-        if (configService.Exists())
+        // Path 1: Try .csproj via `dotnet list package --format json`
+        if (dotNetPackageList != null)
         {
-            var config = configService.Load();
-            mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
-        }
-        else
-        {
-            // Path 2: Try .csproj via `dotnet list package --format json`
             taskContext.AddDebugMessage($"{UiSymbols.Package} Querying NuGet package list...");
 
-            var allPackages = dotNetPackageList?.Projects?
+            var allPackages = dotNetPackageList.Projects?
                 .SelectMany(p => p.Frameworks ?? [])
                 .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
 
@@ -723,9 +718,16 @@ internal partial class MsixService
             }
         }
 
+        // Path 2: Fall back to winapp.yaml (C++ / native projects)
+        if (string.IsNullOrEmpty(mainVersion) && configService.Exists())
+        {
+            var config = configService.Load();
+            mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
+        }
+
         if (string.IsNullOrEmpty(mainVersion))
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Warning} No {BuildToolsService.WINAPP_SDK_PACKAGE} package found in winapp.yaml");
+            taskContext.AddDebugMessage($"{UiSymbols.Warning} No {BuildToolsService.WINAPP_SDK_PACKAGE} package found");
             return (null, null);
         }
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package: v{mainVersion}");

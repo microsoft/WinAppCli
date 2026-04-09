@@ -26,6 +26,8 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> WithAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
+    public static Option<bool> DetachOption { get; }
+    public static Option<bool> CleanOption { get; }
 
     static RunCommand()
     {
@@ -71,6 +73,16 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Unregister the development package after the application exits. Only removes packages registered in development mode."
         };
+
+        DetachOption = new Option<bool>("--detach")
+        {
+            Description = "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json)."
+        };
+        
+        CleanOption = new Option<bool>("--clean")
+        {
+            Description = "Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -83,6 +95,8 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
+        Options.Add(DetachOption);
+        Options.Add(CleanOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -106,6 +120,8 @@ internal partial class RunCommand : Command, IShortDescription
             var withAlias = parseResult.GetValue(WithAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
+            var detach = parseResult.GetValue(DetachOption);
+            var clean = parseResult.GetValue(CleanOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -136,6 +152,42 @@ internal partial class RunCommand : Command, IShortDescription
             if (unregisterOnExit && noLaunch)
             {
                 logger.LogError("{UISymbol} --unregister-on-exit and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && noLaunch)
+            {
+                logger.LogError("{UISymbol} --detach and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && debugOutput)
+            {
+                logger.LogError("{UISymbol} --detach and --debug-output cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && withAlias)
+            {
+                logger.LogError("{UISymbol} --detach and --with-alias cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && unregisterOnExit)
+            {
+                logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            // Validate the input folder path early so the command fails fast with a clear
+            // long-path message before any file system operations are attempted.
+            try
+            {
+                LongPathHelper.ValidatePathLength(inputFolder.FullName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, ex.Message);
                 return 1;
             }
 
@@ -187,6 +239,10 @@ internal partial class RunCommand : Command, IShortDescription
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
                     resolvedOutputDir = outputAppXDirectory;
 
+                    // Validate that the manifest and output paths are usable (check long path support if needed)
+                    LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
+                    LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
+
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
@@ -194,6 +250,7 @@ internal partial class RunCommand : Command, IShortDescription
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        clean,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -251,6 +308,16 @@ internal partial class RunCommand : Command, IShortDescription
                     PrintJson(aumid, processId: null, errorMessage: null);
                 }
                 return success;
+            }
+
+            // --detach: return immediately after launch without waiting for exit
+            if (detach)
+            {
+                if (isJson)
+                {
+                    PrintJson(aumid, processId, errorMessage: null);
+                }
+                return 0;
             }
 
             // --with-alias: launch via execution alias with inherited stdio
@@ -355,7 +422,7 @@ internal partial class RunCommand : Command, IShortDescription
                         continue;
                     }
 
-                    await packageRegistrationService.UnregisterAsync(pkg.Name, cancellationToken);
+                    await packageRegistrationService.UnregisterAsync(pkg.Name, preserveAppData: false, cancellationToken);
                     logger.LogDebug("Unregistered package {FullName} on exit.", pkg.FullName);
                 }
             }
