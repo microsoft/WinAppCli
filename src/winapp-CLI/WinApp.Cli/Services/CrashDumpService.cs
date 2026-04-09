@@ -209,6 +209,10 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
             console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
             console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
+            if (!useSymbols && !string.IsNullOrWhiteSpace(nativeSummary))
+            {
+                console.MarkupLine("[dim]Tip: Re-run with [bold]--symbols[/] for resolved function names in native stacks.[/]");
+            }
         }
         catch (Exception ex)
         {
