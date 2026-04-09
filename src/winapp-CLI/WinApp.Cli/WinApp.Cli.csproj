@@ -9,6 +9,7 @@
     <ApplicationIcon>Assets\winapp.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Description>A command-line tool for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- Enable Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

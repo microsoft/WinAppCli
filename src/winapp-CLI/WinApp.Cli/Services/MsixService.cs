@@ -626,7 +626,9 @@ internal partial class MsixService(
     private async Task CreateMsixPackageFromFolderAsync(DirectoryInfo inputFolder, FileInfo outputMsixPath, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Create MSIX package
-        var makeappxArguments = $@"pack /o /d ""{Path.TrimEndingDirectorySeparator(inputFolder.FullName)}"" /nv /p ""{outputMsixPath.FullName}""";
+        var inputPath = LongPathHelper.EnsureExtendedLengthPrefix(Path.TrimEndingDirectorySeparator(inputFolder.FullName));
+        var outputPath = LongPathHelper.EnsureExtendedLengthPrefix(outputMsixPath.FullName);
+        var makeappxArguments = $@"pack /o /d ""{inputPath}"" /nv /p ""{outputPath}""";
 
         taskContext.AddDebugMessage("Creating MSIX package...");
 

@@ -57,7 +57,8 @@ internal partial class PriService(
         }
 
         var configPath = new FileInfo(Path.Combine(packageDir.FullName, "priconfig.xml"));
-        var arguments = $@"createconfig /cf ""{configPath}"" /dq lang-{language}_scale-200 /pv {platformVersion} /o";
+        var configPathStr = LongPathHelper.EnsureExtendedLengthPrefix(configPath.FullName);
+        var arguments = $@"createconfig /cf ""{configPathStr}"" /dq lang-{language}_scale-200 /pv {platformVersion} /o";
 
         taskContext.AddDebugMessage("Creating PRI configuration file...");
 
@@ -151,7 +152,10 @@ internal partial class PriService(
             throw new FileNotFoundException($"PRI configuration file not found: {priConfigPath}");
         }
 
-        var arguments = $@"new /pr ""{Path.TrimEndingDirectorySeparator(packageDir.FullName)}"" /cf ""{priConfigPath.FullName}"" /of ""{priOutputPath.FullName}"" /o";
+        var prPath = LongPathHelper.EnsureExtendedLengthPrefix(Path.TrimEndingDirectorySeparator(packageDir.FullName));
+        var cfPath = LongPathHelper.EnsureExtendedLengthPrefix(priConfigPath.FullName);
+        var ofPath = LongPathHelper.EnsureExtendedLengthPrefix(priOutputPath.FullName);
+        var arguments = $@"new /pr ""{prPath}"" /cf ""{cfPath}"" /of ""{ofPath}"" /o";
 
         taskContext.AddDebugMessage("Generating PRI file...");
 
@@ -203,18 +207,20 @@ internal partial class PriService(
         try
         {
             var dumpOutputFile = Path.Combine(Path.GetTempPath(), $"winapp-pri-dump-{Guid.NewGuid():N}.xml");
-            var arguments = $@"dump /if ""{priFile.FullName}"" /of ""{dumpOutputFile}"" /o";
+            var ifPath = LongPathHelper.EnsureExtendedLengthPrefix(priFile.FullName);
+            var dumpPath = LongPathHelper.EnsureExtendedLengthPrefix(dumpOutputFile);
+            var arguments = $@"dump /if ""{ifPath}"" /of ""{dumpPath}"" /o";
 
             await buildToolsService.RunBuildToolAsync(new MakePriTool(), arguments, taskContext, cancellationToken: cancellationToken);
 
-            if (!File.Exists(dumpOutputFile))
+            if (!File.Exists(dumpPath))
             {
                 return [];
             }
 
             try
             {
-                var dumpContent = await File.ReadAllTextAsync(dumpOutputFile, cancellationToken);
+                var dumpContent = await File.ReadAllTextAsync(dumpPath, cancellationToken);
 
                 // Extract language qualifiers from Candidate elements:
                 // <Candidate qualifiers="Language-en-US" ...> or multi-qualifier like "Language-en-US, Scale-200"
@@ -228,7 +234,7 @@ internal partial class PriService(
             }
             finally
             {
-                File.Delete(dumpOutputFile);
+                File.Delete(dumpPath);
             }
         }
         catch (Exception ex)

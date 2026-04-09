@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 using Windows.Management.Deployment;
 
 namespace WinApp.Cli.Services;
@@ -21,7 +22,12 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public async Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
-        var manifestUri = new Uri(Path.GetFullPath(manifestPath));
+        var fullPath = Path.GetFullPath(manifestPath);
+        LongPathHelper.ValidatePathLength(fullPath);
+
+        // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
+        // Convert to 8.3 short path as a workaround; throw if shortening fails.
+        var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
         var pm = new PackageManager();
 
         try
@@ -52,8 +58,21 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public async Task RegisterSparseAsync(string manifestPath, string externalLocation, CancellationToken cancellationToken = default)
     {
-        var manifestUri = new Uri(Path.GetFullPath(manifestPath));
-        var externalUri = new Uri(Path.GetFullPath(externalLocation) + Path.DirectorySeparatorChar);
+        var fullManifestPath = Path.GetFullPath(manifestPath);
+        LongPathHelper.ValidatePathLength(fullManifestPath);
+        var fullExternalPath = Path.GetFullPath(externalLocation);
+        LongPathHelper.ValidatePathLength(fullExternalPath);
+
+        // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
+        // Convert to 8.3 short paths as a workaround; throw if shortening fails.
+        var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullManifestPath));
+        var shortExternalPath = LongPathHelper.GetShortPathOrThrow(fullExternalPath + Path.DirectorySeparatorChar);
+        if (!Path.EndsInDirectorySeparator(shortExternalPath))
+        {
+            shortExternalPath += Path.DirectorySeparatorChar;
+        }
+
+        var externalUri = new Uri(shortExternalPath);
         var pm = new PackageManager();
 
         try
@@ -127,7 +146,12 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public async Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)
     {
-        var packageUri = new Uri(Path.GetFullPath(packagePath));
+        var fullPath = Path.GetFullPath(packagePath);
+        LongPathHelper.ValidatePathLength(fullPath);
+
+        // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
+        // Convert to 8.3 short path as a workaround; throw if shortening fails.
+        var packageUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
         var pm = new PackageManager();
 
         var result = await pm.AddPackageAsync(
