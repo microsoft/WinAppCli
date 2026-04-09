@@ -227,6 +227,17 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     {
         using var dt = DataTarget.LoadDump(dumpPath);
 
+        // Cross-architecture analysis is not supported (e.g., ARM64 winapp analyzing x64 dump).
+        // ClrMD requires a matching-architecture DAC DLL that cannot be loaded cross-arch.
+        if (dt.DataReader.Architecture != RuntimeInformation.ProcessArchitecture)
+        {
+            return (
+                $"Cross-architecture crash dump (target: {dt.DataReader.Architecture}, host: {RuntimeInformation.ProcessArchitecture}).\n" +
+                "Automatic analysis is not supported for cross-architecture dumps.\n" +
+                "Open the dump in WinDbg for full analysis.",
+                $"Skipped analysis: dump architecture ({dt.DataReader.Architecture}) does not match host ({RuntimeInformation.ProcessArchitecture}).");
+        }
+
         if (dt.ClrVersions.Length == 0)
         {
             return (string.Empty, "No CLR runtime found in dump (native-only crash).");
