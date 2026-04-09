@@ -16,6 +16,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
 
+    <!-- Exclude test app source files from compilation -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);TestApps\**\*</DefaultItemExcludes>
+
     <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
     <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
   </PropertyGroup>
