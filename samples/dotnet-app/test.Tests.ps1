@@ -73,6 +73,13 @@ Describe ".NET App Guide Workflow" {
         }
 
         Context "Debug with Identity" {
+            It "Should add execution alias to manifest" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-WinappCommand -Arguments "manifest add-alias"
+                } finally { Pop-Location }
+            }
+
             It "Should build in Debug mode" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
@@ -88,13 +95,6 @@ Describe ".NET App Guide Workflow" {
                         Select-Object -First 1
                     $exeFile | Should -Not -BeNullOrEmpty
                     Invoke-WinappCommand -Arguments "create-debug-identity `"$($exeFile.FullName)`""
-                } finally { Pop-Location }
-            }
-
-            It "Should add execution alias to manifest" -Skip:$script:skip {
-                Push-Location $script:projectDir
-                try {
-                    Invoke-WinappCommand -Arguments "manifest add-alias"
                 } finally { Pop-Location }
             }
 
