@@ -200,7 +200,7 @@ try
     Write-Host "[PACK] Creating npm package tarball..." -ForegroundColor Blue
     
     # Calculate relative path from npm project to output directory
-    $RelativeOutputPath = [System.IO.Path]::GetRelativePath($NpmProjectPath, $OutputPath)
+    $RelativeOutputPath = Resolve-Path -Relative $OutputPath
     
     npm pack --pack-destination $RelativeOutputPath
     $PackResult = $LASTEXITCODE

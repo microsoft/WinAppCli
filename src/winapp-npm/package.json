@@ -1,6 +1,6 @@
 {
     "name":  "@microsoft/winappcli",
-    "version":  "0.2.2-zt-395-csproj-version-overwriting.41",
+    "version":  "0.2.2-zt-395-csproj-version-overwriting.47",
     "description":  "Windows App Development CLI and BuildTools utilities for Node.js native addon development",
     "main":  "dist/index.js",
     "types":  "dist/index.d.ts",
