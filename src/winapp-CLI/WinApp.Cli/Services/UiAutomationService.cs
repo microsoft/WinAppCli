@@ -126,6 +126,45 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         var elements = new List<UiElement>();
         WalkTree(startElement, depth, 0, "", elements, ref nextElementId);
 
+        // Set SourceWindowHandle on all elements from main window
+        foreach (var el in elements)
+        {
+            el.SourceWindowHandle = session.WindowHandle;
+        }
+
+        // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
+        if (string.IsNullOrEmpty(elementId))
+        {
+            var allWindows = GetAllAppWindows(session);
+            var mainHwnd = (nint)session.WindowHandle;
+
+            foreach (var (hwnd, pid, title) in allWindows)
+            {
+                if (hwnd == mainHwnd) { continue; }
+                var windowRoot = GetRootElementForHwnd(hwnd);
+                if (windowRoot is null) { continue; }
+
+                // Add a separator element to visually distinguish windows
+                var info = UiSessionService.GetWindowInfo(hwnd);
+                elements.Add(new UiElement
+                {
+                    Id = $"--- HWND {hwnd}",
+                    Type = "---",
+                    Name = $"HWND {hwnd}: \"{title}\" ({info.Label}, {info.ClassName})",
+                    Depth = 0,
+                    SourceWindowHandle = hwnd
+                });
+
+                var popupElements = new List<UiElement>();
+                WalkTree(windowRoot, depth, 0, "", popupElements, ref nextElementId);
+                foreach (var el in popupElements)
+                {
+                    el.SourceWindowHandle = hwnd;
+                }
+                elements.AddRange(popupElements);
+            }
+        }
+
         // Promote unique AutomationIds to selectors (more stable than slugs)
         PromoteUniqueAutomationIds(root, elements);
 
@@ -295,7 +334,19 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         // Slug resolution: walk tree, regenerate slugs, match and validate hash
         if (selector.IsSlug)
         {
-            return Task.FromResult(FindElementBySlug(selector.Slug!, root));
+            var slugResult = FindElementBySlug(selector.Slug!, root);
+            if (slugResult is not null)
+            {
+                slugResult.SourceWindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(slugResult);
+            }
+            // Not found on main window — search other windows
+            var otherResult = FindElementOnOtherWindows(session, selector);
+            if (otherResult is not null)
+            {
+                return Task.FromResult<UiElement?>(otherResult);
+            }
+            return Task.FromResult<UiElement?>(null);
         }
 
         // Try exact AutomationId match first (fast, unambiguous — used when inspect promoted a unique AutomationId)
@@ -308,7 +359,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             if (exactMatch is not null)
             {
                 var nextId = 0;
-                return Task.FromResult<UiElement?>(ToUiElement(exactMatch, "", ref nextId));
+                var exactResult = ToUiElement(exactMatch, "", ref nextId);
+                exactResult.SourceWindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(exactResult);
             }
         }
 
@@ -330,6 +383,12 @@ return Task.FromResult<UiElement?>(null);
 
         if (found is null || found.get_Length() == 0)
         {
+            // Element not found on main window — search popup/owned windows
+            var otherResult = FindElementOnOtherWindows(session, selector);
+            if (otherResult is not null)
+            {
+                return Task.FromResult<UiElement?>(otherResult);
+            }
             return Task.FromResult<UiElement?>(null);
         }
 
@@ -371,6 +430,7 @@ return Task.FromResult<UiElement?>(null);
         var element = found.GetElement(0);
         var nextElementId = 0;
         var result = ToUiElement(element, "", ref nextElementId);
+        result.SourceWindowHandle = session.WindowHandle;
 
         // Surface invokable ancestor for non-invokable elements
         if (!IsInvokable(element))
@@ -1012,7 +1072,18 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private IUIAutomationElement? ResolveComElement(UiSessionInfo session, UiElement element)
     {
-        var root = GetRootElement(session);
+        // Use the element's source HWND if it came from a different window (popup/dialog)
+        IUIAutomationElement? root;
+        if (element.SourceWindowHandle != 0 && element.SourceWindowHandle != session.WindowHandle)
+        {
+            root = GetRootElementForHwnd((nint)element.SourceWindowHandle);
+            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.SourceWindowHandle);
+        }
+        else
+        {
+            root = GetRootElement(session);
+        }
+
         if (root is null)
         {
             return null;
@@ -1065,6 +1136,122 @@ return Task.FromResult<UiElement?>(null);
             var found = root.FindFirst(TreeScope.TreeScope_Descendants, condition);
             if (found is not null)
             {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Get all windows associated with an app: same-PID windows + cross-process owned windows.
+    /// </summary>
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
+    {
+        var windows = FindWindowsByPid(session.ProcessId);
+
+        // Find cross-process owned windows (file pickers, system dialogs)
+        var appHwnds = new HashSet<nint>(windows.Select(w => w.Hwnd));
+        var hwnd = Windows.Win32.Foundation.HWND.Null;
+        while (true)
+        {
+            hwnd = Windows.Win32.PInvoke.FindWindowEx(
+                Windows.Win32.Foundation.HWND.Null, hwnd, null, (string?)null);
+            if (hwnd.IsNull) { break; }
+            if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd)) { continue; }
+            if (appHwnds.Contains((nint)hwnd)) { continue; }
+
+            var owner = Windows.Win32.PInvoke.GetWindow(hwnd,
+                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
+            if (!owner.IsNull && appHwnds.Contains((nint)owner))
+            {
+                unsafe
+                {
+                    uint pid = 0;
+                    Windows.Win32.PInvoke.GetWindowThreadProcessId(hwnd, &pid);
+                    var titleChars = new char[512];
+                    fixed (char* buffer = titleChars)
+                    {
+                        var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
+                        var title = len > 0 ? new string(buffer, 0, len) : "";
+                        windows.Add(((nint)hwnd, (int)pid, title));
+                    }
+                }
+            }
+        }
+
+        return windows;
+    }
+
+    /// <summary>Get UIA root element for a specific HWND.</summary>
+    private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
+    {
+        try
+        {
+            return _automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Search for an element across all popup/owned windows of the app.
+    /// Called when FindSingleElementAsync fails to find the element on the main window.
+    /// </summary>
+    private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
+    {
+        var allWindows = GetAllAppWindows(session);
+        var mainHwnd = (nint)session.WindowHandle;
+
+        foreach (var (hwnd, pid, title) in allWindows)
+        {
+            if (hwnd == mainHwnd) { continue; }
+
+            var windowRoot = GetRootElementForHwnd(hwnd);
+            if (windowRoot is null) { continue; }
+
+            _logger.LogDebug("Searching popup/owned window HWND {Hwnd} \"{Title}\"", hwnd, title);
+
+            UiElement? found = null;
+
+            if (selector.IsSlug)
+            {
+                found = FindElementBySlug(selector.Slug!, windowRoot);
+            }
+            else if (selector.Query is not null)
+            {
+                // Try exact AutomationId first
+                var exactAidCondition = _automation.CreatePropertyCondition(
+                    UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                    ComVariant.Create(selector.Query));
+                var exactMatch = windowRoot.FindFirst(TreeScope.TreeScope_Descendants, exactAidCondition);
+                if (exactMatch is not null)
+                {
+                    var nextId = 0;
+                    found = ToUiElement(exactMatch, "", ref nextId);
+                }
+                else
+                {
+                    // Substring search
+                    var condition = BuildCondition(selector);
+                    if (condition is not null)
+                    {
+                        var matches = windowRoot.FindAll(TreeScope.TreeScope_Descendants, condition);
+                        if (matches is not null && matches.get_Length() == 1)
+                        {
+                            var nextId = 0;
+                            found = ToUiElement(matches.GetElement(0), "", ref nextId);
+                        }
+                    }
+                }
+            }
+
+            if (found is not null)
+            {
+                found.SourceWindowHandle = hwnd;
+                _logger.LogDebug("Found element on HWND {Hwnd} \"{Title}\"", hwnd, title);
                 return found;
             }
         }

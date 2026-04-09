@@ -110,6 +110,14 @@ internal class UiInspectCommand : Command, IShortDescription
                 {
                     foreach (var el in elements)
                     {
+                        // Window separator element
+                        if (el.Type == "---")
+                        {
+                            ansiConsole.WriteLine();
+                            ansiConsole.MarkupLine($"[grey]--- {EscapeMarkup(el.Name ?? "")} ---[/]");
+                            continue;
+                        }
+
                         var indent = new string(' ', el.Depth * 2);
                         var elSelector = el.Selector ?? el.Id;
                         var displayName = el.Name ?? el.AutomationId;
@@ -127,12 +135,13 @@ internal class UiInspectCommand : Command, IShortDescription
                     }
 
                     // Footer with example using first interactive element or first element
-                    var example = elements.FirstOrDefault(IsInteractiveType) ?? elements.FirstOrDefault();
+                    var realElements = elements.Where(e => e.Type != "---").ToArray();
+                    var example = realElements.FirstOrDefault(IsInteractiveType) ?? realElements.FirstOrDefault();
                     var exampleSelector = example?.Selector ?? example?.Id;
                     var exampleHint = exampleSelector is not null
                         ? $" Use the [bold cyan]first token[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
                         : "";
-                    ansiConsole.MarkupLine($"[grey]Found {elements.Length} elements (--depth {depth}).{exampleHint}[/]");
+                    ansiConsole.MarkupLine($"[grey]Found {realElements.Length} elements (--depth {depth}).{exampleHint}[/]");
                 }
 
                 logger.LogDebug("Inspect returned {Count} elements at depth {Depth}", elements.Length, depth);
