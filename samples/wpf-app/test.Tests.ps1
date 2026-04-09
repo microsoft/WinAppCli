@@ -68,6 +68,22 @@ Describe 'wpf-app sample' {
             'appxmanifest.xml' | Should -Exist
         }
 
+        It 'Builds in Debug mode' -Skip:$script:skip {
+            Invoke-Expression 'dotnet build -c Debug /p:ApplyDebugIdentity=false'
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It 'Applies debug identity with create-debug-identity' -Skip:$script:skip {
+            $exeFile = Get-ChildItem -Path 'bin\Debug' -Filter '*.exe' -Recurse | Select-Object -First 1
+            $exeFile | Should -Not -BeNullOrEmpty
+            Invoke-WinappCommand -Arguments "create-debug-identity `"$($exeFile.FullName)`""
+        }
+
+        It 'Registers app with winapp run --no-launch' -Skip:$script:skip {
+            $exeFile = Get-ChildItem -Path 'bin\Debug' -Filter '*.exe' -Recurse | Select-Object -First 1
+            Invoke-WinappCommand -Arguments "run `"$($exeFile.DirectoryName)`" --no-launch"
+        }
+
         It 'Generates a dev certificate' -Skip:$script:skip {
             Invoke-WinappCommand -Arguments 'cert generate --if-exists skip'
             'devcert.pfx' | Should -Exist
@@ -78,7 +94,8 @@ Describe 'wpf-app sample' {
         }
 
         It 'Builds in Release mode with RID' -Skip:$script:skip {
-            Invoke-Expression 'dotnet build -c Release -r win-x64'
+            $rid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'win-arm64' } else { 'win-x64' }
+            Invoke-Expression "dotnet build -c Release -r $rid"
             $LASTEXITCODE | Should -Be 0
         }
 

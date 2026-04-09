@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <!-- Automatically apply debug identity after Debug builds -->
-  <Target Name="ApplyDebugIdentity" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+  <Target Name="ApplyDebugIdentity" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug' AND '$(ApplyDebugIdentity)' != 'false'">
     <Exec Command="winapp create-debug-identity &quot;$(TargetDir)$(TargetName).exe&quot;" WorkingDirectory="$(ProjectDir)" IgnoreExitCode="false" />
   </Target>
 
