@@ -103,7 +103,7 @@ Describe ".NET App Guide Workflow" {
                 try {
                     $debugDir = Get-ChildItem -Path (Join-Path $script:projectDir "bin\Debug") -Filter "*.exe" -Recurse |
                         Select-Object -First 1
-                    Invoke-WinappCommand -Arguments "run `"$($debugDir.DirectoryName)`" --with-alias --unregister-on-exit"
+                    Invoke-WinappCommand -Arguments "run `"$($debugDir.DirectoryName)`" --unregister-on-exit"
                 } finally { Pop-Location }
             }
         }
