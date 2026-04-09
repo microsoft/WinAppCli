@@ -15,7 +15,7 @@ steps:
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\build-cli.ps1
-    arguments: "-Stable:$${{ parameters.stable }} -SkipNpm -SkipMsix"
+    arguments: "-Stable:$${{ parameters.stable }} -SkipMsix"
 - ${{ if eq(parameters['DoEsrp'], 'true') }}:
   - task: EsrpCodeSigning@5
     displayName: Code Sign ESRP - CLI

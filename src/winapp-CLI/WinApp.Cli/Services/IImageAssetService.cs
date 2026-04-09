@@ -17,23 +17,30 @@ internal interface IImageAssetService
 {
     /// <summary>
     /// Generates MSIX image assets from a source image and saves them to the specified directory.
-    /// Uses a hardcoded list of standard MSIX asset specifications.
+    /// Uses the default manifest asset references to generate the standard MSIX asset set.
     /// </summary>
     /// <param name="sourceImagePath">Path to the source image file</param>
     /// <param name="outputDirectory">Directory where generated assets will be saved</param>
     /// <param name="taskContext">Task context for status messages</param>
+    /// <param name="lightImagePath">Optional path to the source image for light theme variants</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Task that completes when all assets are generated</returns>
-    Task GenerateAssetsAsync(FileInfo sourceImagePath, DirectoryInfo outputDirectory, TaskContext taskContext, CancellationToken cancellationToken = default);
+    Task GenerateAssetsAsync(
+        FileInfo sourceImagePath,
+        DirectoryInfo outputDirectory,
+        TaskContext taskContext,
+        FileInfo? lightImagePath = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates MSIX image assets from a source image based on asset references from the manifest.
-    /// Creates the base asset and scaled variants (scale-200, targetsize variants) matching the aspect ratio.
+    /// Creates the base asset, scale variants, targetsize variants, and optional light-theme variants.
     /// </summary>
     /// <param name="sourceImagePath">Path to the source image file</param>
     /// <param name="manifestDirectory">Directory where the manifest is located (assets are relative to this)</param>
     /// <param name="assetReferences">Asset references extracted from the manifest</param>
     /// <param name="taskContext">Task context for status messages</param>
+    /// <param name="lightImagePath">Optional path to the source image for light theme variants</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Task that completes when all assets are generated</returns>
     Task GenerateAssetsFromManifestAsync(
@@ -41,5 +48,16 @@ internal interface IImageAssetService
         DirectoryInfo manifestDirectory,
         IReadOnlyList<ManifestAssetReference> assetReferences,
         TaskContext taskContext,
+        FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates a multi-resolution ICO file from the source image.
+    /// </summary>
+    /// <param name="sourceImagePath">Path to the source image file</param>
+    /// <param name="outputPath">Output path for the generated ICO file</param>
+    /// <param name="taskContext">Task context for status messages</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Task that completes when the ICO file is generated</returns>
+    Task GenerateIcoAsync(FileInfo sourceImagePath, string outputPath, TaskContext taskContext, CancellationToken cancellationToken = default);
 }

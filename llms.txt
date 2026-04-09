@@ -26,6 +26,7 @@ The plugin is at `.github/plugin/` and includes:
 
 - [CLI Schema](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json): Machine-readable JSON schema of all commands, options, and types
 - [Usage Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md): Full documentation for humans
+- [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md): `winapp run` vs `create-debug-identity`, IDE setup, and debugging workflows
 
 ## Guides
 

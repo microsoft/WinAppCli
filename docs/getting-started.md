@@ -73,18 +73,33 @@ That's it. `dotnet run` builds the project, then the MSIX Extras package automat
        {
          "type": "winapp",
          "request": "launch",
-         "name": "WinApp: Launch and Attach",
-         "buildOutputManifest": "**/*/AppxManifest.xml"
+         "name": "WinApp: Launch and Attach"
        }
      ]
    }
    ```
 
-4. Press **F5**. The extension automatically finds your `AppxManifest.xml`, registers a loose-layout package, launches the app, and attaches the debugger.
+   Optionally, set `inputFolder` to point directly at your build output to skip the folder picker:
+
+   ```jsonc
+   {
+     "version": "0.2.0",
+     "configurations": [
+       {
+         "type": "winapp",
+         "request": "launch",
+         "name": "WinApp: Launch and Attach",
+         "inputFolder": "${workspaceFolder}\\bin\\Debug\\net10.0-windows10.0.26100.0"
+       }
+     ]
+   }
+   ```
+
+4. Press **F5**. If `inputFolder` is not set, the extension scans the workspace for folders containing `.exe` files and lets you pick the build output. It then registers a loose-layout package, launches the app, and attaches the debugger.
 
 You get the full debugging experience: breakpoints, call stack, locals, watch — all running as a packaged app. The `debuggerType` launch option controls which debugger is used (default is `coreclr` for .NET; set it to `cppvsdbg` for native C++ or `node` for Node.js/Electron apps).
 
-> **Multiple build configurations:** If you have build output for more than one architecture (e.g., `win-arm64` and `win-x64`), the extension shows a picker so you can choose which one to launch.
+> **Multiple build configurations:** If you have build output for more than one configuration (e.g., `Debug` and `Release`, or `win-arm64` and `win-x64`), the extension shows a picker so you can choose which one to launch.
 
 ---
 
@@ -162,8 +177,8 @@ The `Microsoft.Windows.SDK.BuildTools.WinApp` package contains MSBuild `.props` 
 
 When you press F5 with a `winapp` launch configuration:
 
-1. The extension searches your workspace for `AppxManifest.xml` using the configured glob pattern.
-2. It invokes `winapp run --manifest <path>` and captures the process ID from the output.
+1. If `inputFolder` is set in `launch.json`, the extension uses that directory. Otherwise, it scans the workspace for folders containing `.exe` files (ignoring `node_modules`, `obj`, `.winapp`, etc.) and presents a quick pick.
+2. It invokes `winapp run <inputFolder> [--manifest <path>]` and captures the process ID from the output. If `manifest` is not set, the CLI auto-detects from the input folder or current directory.
 3. It starts a child debug session using the specified `debuggerType` (default: `coreclr`) and attaches to the process.
 4. When you stop debugging, the session is cleaned up automatically.
 

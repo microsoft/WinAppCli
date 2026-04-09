@@ -96,6 +96,7 @@ samples/
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID. Keeps console I/O in the current terminal. Requires `uap5:ExecutionAlias` in the manifest. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
+| `WinAppRunDebugOutput` | `false` | Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time, so Visual Studio or VS Code cannot debug simultaneously. Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 
 ### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
 
@@ -154,6 +155,7 @@ cd MyApp
 dotnet run
 ```
 
+
 ### Customization
 
 Disable run support for a project:
@@ -191,7 +193,15 @@ Register identity without launching:
 </PropertyGroup>
 ```
 
-## Outstanding Production Blockers
+
+Capture OutputDebugString messages and first-chance exceptions:
+```xml
+<PropertyGroup>
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
+</PropertyGroup>
+```
+
+Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
 

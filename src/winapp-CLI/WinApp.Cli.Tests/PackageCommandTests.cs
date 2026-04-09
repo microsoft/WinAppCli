@@ -1617,4 +1617,276 @@ public class PackageCommandTests : BaseCommandTests
             }
         }
     }
+
+    #region AppxRecipe helpers
+
+    /// <summary>
+    /// Manifest content that includes build:Metadata with makepri.exe entry,
+    /// mimicking what MSBuild generates during dotnet build.
+    /// </summary>
+    private const string MSBuildGeneratedManifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+         IgnorableNamespaces=""uap rescap build"">
+  <Identity Name=""RecipeTestPackage""
+            Publisher=""CN=TestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>Recipe Test Package</DisplayName>
+    <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+    <Description>Test package with MSBuild metadata</Description>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""TestApp.exe"" EntryPoint=""TestApp.App"">
+      <uap:VisualElements DisplayName=""Test App"" Description=""Test application""
+                          BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+  <build:Metadata>
+    <build:Item Name=""makepri.exe"" Version=""10.0.22621.3233"" />
+  </build:Metadata>
+</Package>";
+
+    /// <summary>
+    /// Creates a .build.appxrecipe XML file that maps source files to their package paths.
+    /// </summary>
+    private static string CreateAppxRecipeContent(string inputDir, (string relativeSource, string packagePath)[] files, string? manifestRelativePath = null)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(@"<?xml version=""1.0"" encoding=""utf-8""?>");
+        sb.AppendLine(@"<Project xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">");
+        sb.AppendLine(@"  <ItemGroup>");
+
+        // Add manifest entry
+        var manifestSource = manifestRelativePath ?? "AppxManifest.xml";
+        sb.AppendLine($@"    <AppXManifest Include=""{Path.Combine(inputDir, manifestSource)}"">");
+        sb.AppendLine(@"      <PackagePath>AppxManifest.xml</PackagePath>");
+        sb.AppendLine(@"    </AppXManifest>");
+
+        // Add file entries
+        foreach (var (relativeSource, packagePath) in files)
+        {
+            sb.AppendLine($@"    <AppxPackagedFile Include=""{Path.Combine(inputDir, relativeSource)}"">");
+            sb.AppendLine($@"      <PackagePath>{packagePath}</PackagePath>");
+            sb.AppendLine(@"    </AppxPackagedFile>");
+        }
+
+        sb.AppendLine(@"  </ItemGroup>");
+        sb.AppendLine(@"</Project>");
+        return sb.ToString();
+    }
+
+    #endregion
+
+    #region AppxRecipe packaging tests
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_WithAppxRecipe_OnlyIncludesRecipeFiles()
+    {
+        // Arrange — create an input folder with an MSBuild-generated manifest,
+        // a .build.appxrecipe, and some files that should NOT end up in the package.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "RecipeTestPackage"));
+        packageDir.Create();
+
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "AppxManifest.xml"), MSBuildGeneratedManifestContent, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.dll"), "fake dll content", TestContext.CancellationToken);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        await File.WriteAllTextAsync(Path.Combine(assetsDir, "Logo.png"), "fake logo content", TestContext.CancellationToken);
+
+        // Files that should NOT be in the package (not in recipe)
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.pdb"), "debug symbols", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.deps.json"), "{}", TestContext.CancellationToken);
+
+        // Create the .build.appxrecipe — only lists the files that belong in the package
+        var recipeContent = CreateAppxRecipeContent(packageDir.FullName,
+        [
+            ("TestApp.exe", "TestApp.exe"),
+            ("TestApp.dll", "TestApp.dll"),
+            (@"Assets\Logo.png", @"Assets\Logo.png"),
+        ]);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.build.appxrecipe"), recipeContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "RecipeTestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        // Files listed in the recipe should be present
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe from recipe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.dll", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.dll from recipe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/Logo.png from recipe");
+
+        // Files NOT in the recipe should be excluded
+        Assert.IsFalse(entryNames.Any(e => e.Equals("TestApp.pdb", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should NOT include TestApp.pdb (not in recipe)");
+        Assert.IsFalse(entryNames.Any(e => e.Equals("TestApp.deps.json", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should NOT include TestApp.deps.json (not in recipe)");
+        Assert.IsFalse(entryNames.Any(e => e.Contains(".appxrecipe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should NOT include the .appxrecipe file itself");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_MSBuildManifestWithoutRecipe_FallsBackToFullCopy()
+    {
+        // Arrange — MSBuild-generated manifest but no .build.appxrecipe file
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "NoRecipeTestPackage"));
+        packageDir.Create();
+
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "AppxManifest.xml"), MSBuildGeneratedManifestContent, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        await File.WriteAllTextAsync(Path.Combine(assetsDir, "Logo.png"), "fake logo content", TestContext.CancellationToken);
+
+        // Extra file — without a recipe, full copy should include it
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.pdb"), "debug symbols", TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "NoRecipeTestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert — all files should be present because we fell back to full copy
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.pdb", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.pdb (full copy fallback)");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_NonMSBuildManifest_UsesFullCopy()
+    {
+        // Arrange — standard manifest without build:Metadata
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "NonMSBuildTestPackage"));
+        CreateTestPackageStructure(packageDir);
+
+        // Add extra file — should be included since it's a non-MSBuild manifest
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "extra.dll"), "extra dll content", TestContext.CancellationToken);
+
+        // Even though there's a .appxrecipe, it should be ignored for non-MSBuild manifests
+        var recipeContent = CreateAppxRecipeContent(packageDir.FullName,
+        [
+            ("TestApp.exe", "TestApp.exe"),
+        ]);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.build.appxrecipe"), recipeContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "NonMSBuildTestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert — all files should be present (non-MSBuild manifests always use full copy)
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("extra.dll", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include extra.dll (full copy for non-MSBuild manifest)");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_WithAppxRecipe_MapsPackagePathsCorrectly()
+    {
+        // Arrange — recipe maps a file from a flat source to a nested package path
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "RecipePathMappingPackage"));
+        packageDir.Create();
+
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "AppxManifest.xml"), MSBuildGeneratedManifestContent, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        // File at root that the recipe says should go to a subdirectory
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "logo.png"), "logo content", TestContext.CancellationToken);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        await File.WriteAllTextAsync(Path.Combine(assetsDir, "Logo.png"), "asset logo content", TestContext.CancellationToken);
+
+        var recipeContent = CreateAppxRecipeContent(packageDir.FullName,
+        [
+            ("TestApp.exe", "TestApp.exe"),
+            ("logo.png", @"Assets\Logo.png"),  // remap: root → Assets subdirectory
+        ]);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.build.appxrecipe"), recipeContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "RecipePathMappingPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        // The logo.png from root should appear at Assets/Logo.png per recipe mapping
+        Assert.IsTrue(entryNames.Any(e => e.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/Logo.png mapped from root logo.png by recipe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe");
+    }
+
+    #endregion
 }

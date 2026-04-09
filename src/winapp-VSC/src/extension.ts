@@ -8,6 +8,46 @@ import { ManifestEditorProvider } from './manifest-editor/manifest-editor-provid
 const WINAPP_DEBUG_TYPE = 'winapp';
 
 /**
+ * Maps debugger types to the VS Code extensions that provide them.
+ */
+const DEBUGGER_EXTENSION_MAP: Record<string, { id: string; name: string }> = {
+	'coreclr': { id: 'ms-dotnettools.csharp', name: 'C# (ms-dotnettools.csharp)' },
+	'cppvsdbg': { id: 'ms-vscode.cpptools', name: 'C/C++ (ms-vscode.cpptools)' },
+};
+
+/**
+ * Check that the VS Code extension required for the given debugger type is installed.
+ * If it is not installed, show a clear error message with an option to install it.
+ * Returns true if the extension is present (or the debugger type has no known requirement),
+ * false if the extension is missing.
+ */
+async function ensureDebuggerExtensionInstalled(debuggerType: string): Promise<boolean> {
+	const requirement = DEBUGGER_EXTENSION_MAP[debuggerType];
+	if (!requirement) {
+		return true;
+	}
+
+	if (vscode.extensions.getExtension(requirement.id)) {
+		return true;
+	}
+
+	const install = await vscode.window.showErrorMessage(
+		`The "${debuggerType}" debugger requires the ${requirement.name} VS Code extension. ` +
+		`Please install it and reload VS Code, then retry.`,
+		'Install Extension'
+	);
+
+	if (install === 'Install Extension') {
+		await vscode.commands.executeCommand('workbench.extensions.installExtension', requirement.id);
+		vscode.window.showInformationMessage(
+			`Installing ${requirement.name}. Please reload VS Code once the installation completes, then retry the debug session.`
+		);
+	}
+
+	return false;
+}
+
+/**
  * Execute a winapp CLI command and show output in the terminal
  */
 async function runWinappCommand(extensionPath: string, command: string, cwd: string, showTerminal: boolean = true): Promise<string> {
@@ -122,50 +162,68 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 		}
 
 		try {
-			// Search for AppxManifest.xml in build output using glob (bypasses .gitignore)
-			const searchPattern = config.buildOutputManifest || '**/*/AppxManifest.xml';
-			const allMatches = await glob(searchPattern, {
-				cwd: folder.uri.fsPath,
-				absolute: true,
-				nocase: true
-			});
-
-			// Filter out manifests inside AppX folders (created by winapp run)
-			const matches = allMatches.filter(m => !m.split(path.sep).includes('AppX'));
-
-			let manifest: string;
-			if (matches.length === 0) {
-				throw new Error(`No manifest found matching "${searchPattern}". Build your project first or update "buildOutputManifest" in launch.json.`);
-			} else if (matches.length === 1) {
-				manifest = matches[0];
-			} else {
-				// Multiple manifests found — let the user pick
-				const items = matches.map(m => ({
-					label: path.relative(folder.uri.fsPath, m),
-					fsPath: m
-				}));
-				const picked = await vscode.window.showQuickPick(items, {
-					placeHolder: 'Multiple AppxManifest.xml files found — select one'
+			// The run command requires an input-folder positional argument.
+			// If not set in launch.json, search for folders containing .exe
+			// files and let the user pick one.
+			let inputFolder: string | undefined = config.inputFolder;
+			if (!inputFolder) {
+				const exeMatches = await glob('**/*.exe', {
+					cwd: folder.uri.fsPath,
+					absolute: true,
+					nocase: true,
+					ignore: ['**/node_modules/**', '**/.git/**', '**/AppX/**', '**/.winapp/**', '**/obj/**', '**/.vs/**', '**/packages/**']
 				});
-				if (!picked) {
-					throw new Error('No manifest selected, cancelling debug session.');
+
+				// Collect unique parent directories that contain .exe files
+				const dirSet = new Set<string>();
+				for (const exe of exeMatches) {
+					dirSet.add(path.dirname(exe));
 				}
-				manifest = picked.fsPath;
+
+				if (dirSet.size === 0) {
+					throw new Error('No folders containing .exe files found in the workspace. Build your project first, or set "inputFolder" in launch.json.');
+				}
+
+				const dirs = [...dirSet].sort();
+				if (dirs.length === 1) {
+					inputFolder = dirs[0];
+				} else {
+					const items = dirs.map(d => ({
+						label: path.relative(folder.uri.fsPath, d),
+						description: d,
+						fsPath: d
+					}));
+					const picked = await vscode.window.showQuickPick(items, {
+						placeHolder: 'Select the build output folder containing your app'
+					});
+					if (!picked) {
+						throw new Error('No build output folder selected, cancelling debug session.');
+					}
+					inputFolder = picked.fsPath;
+				}
 			}
 
-			// Build the command with mapped arguments
-			// The run command requires an input-folder positional argument;
-			// use the directory containing the discovered manifest.
-			const inputFolder = config.inputFolder || path.dirname(manifest);
-			const cmdParts: string[] = [getWinappCliPath(this.extensionPath), 'run', `"${inputFolder}"`];
-			cmdParts.push('--manifest', `"${manifest}"`);
+			const cliPath = getWinappCliPath(this.extensionPath);
+			const spawnArgs = ['run', inputFolder];
+
+			// Optional explicit manifest path; when omitted the CLI
+			// auto-detects from the input folder or current directory.
+			if (config.manifest) {
+				spawnArgs.push('--manifest', config.manifest);
+			}
 
 			if (config.outputAppxDirectory) {
-				cmdParts.push('--output-appx-directory', `"${config.outputAppxDirectory}"`);
+				spawnArgs.push('--output-appx-directory', config.outputAppxDirectory);
 			}
 
 			// Determine the debugger type based on config or default to coreclr
 			const debuggerType = config.debuggerType || 'coreclr';
+
+			// Verify the required VS Code extension for this debugger type is installed
+			// before starting the app, so we don't launch the process only to fail on attach.
+			if (!await ensureDebuggerExtensionInstalled(debuggerType)) {
+				return new vscode.DebugAdapterInlineImplementation(new NoOpDebugAdapter());
+			}
 
 			let args = config.args || '';
 			if (debuggerType === 'node') {
@@ -173,11 +231,10 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 			}
 
 			if (args.trim()) {
-				cmdParts.push('--args', `"${args.trim()}"`);
+				spawnArgs.push('--args', args.trim());
 			}
 
-			cmdParts.push('--json');
-			const command = cmdParts.join(' ');
+			spawnArgs.push('--json');
 
 			// Spawn winapp run --json. The process stays alive while the app runs,
 			// so we stream stdout to parse the JSON with the PID before waiting for exit.
@@ -194,10 +251,10 @@ class WinAppDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 				}
 
 				return new Promise<{ processId: number; runProcess: ReturnType<typeof spawn> }>((resolve, reject) => {
-					const child = spawn(command, {
+					const child = spawn(cliPath, spawnArgs, {
 						cwd,
 						env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE },
-						shell: true
+						shell: false
 					});
 
 					let stdout = '';
