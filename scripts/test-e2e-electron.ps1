@@ -315,7 +315,7 @@ try {
     # Verify workspace was created
     Assert-DirectoryExists ".winapp" ".winapp directory"
     Assert-FileExists "winapp.yaml" "winapp.yaml configuration file"
-    Assert-FileExists "appxmanifest.xml" "appxmanifest.xml manifest file"
+    Assert-FileExists "Package.appxmanifest" "Package.appxmanifest manifest file"
 
     # ========================================================================
     # Create Native Addons
