@@ -138,12 +138,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             bool captureScreen,
             CancellationToken ct)
         {
-            var basePath = output ?? "screenshot.png";
-            var ext = Path.GetExtension(basePath);
-            var nameWithoutExt = Path.GetFileNameWithoutExtension(basePath);
-            var dir = Path.GetDirectoryName(basePath) ?? ".";
-
-            var results = new List<UiScreenshotResult>();
+            var filePath = output ?? "screenshot.png";
 
             // Sort: main window first (largest), then others
             var sorted = windows.OrderByDescending(w =>
@@ -152,19 +147,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 return (long)info.Width * info.Height;
             }).ToList();
 
-            ansiConsole.MarkupLine($"[yellow]⚠  {windows.Count} windows detected. Capturing each separately.[/]");
+            ansiConsole.MarkupLine($"[yellow]⚠  {windows.Count} windows detected. Compositing into single image.[/]");
 
-            for (var i = 0; i < sorted.Count; i++)
+            // Capture each window
+            var captures = new List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)>();
+            foreach (var w in sorted)
             {
-                var w = sorted[i];
                 var info = UiSessionService.GetWindowInfo(w.Hwnd);
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
-
-                // File naming: screenshot.png for first, screenshot.HWND-type.png for others
-                var filePath = i == 0
-                    ? basePath
-                    : Path.Combine(dir, $"{nameWithoutExt}.{w.Hwnd}-{info.Label}{ext}");
-
                 try
                 {
                     var windowSession = new UiSessionInfo
@@ -175,21 +165,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         WindowHandle = w.Hwnd
                     };
                     var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, ct);
-                    var pngBytes = EncodePng(pixels, width, height);
-                    await File.WriteAllBytesAsync(filePath, pngBytes, ct);
-                    var absolutePath = Path.GetFullPath(filePath);
+                    captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
 
                     var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-                    ansiConsole.MarkupLine($"  [green]✓[/] {absolutePath} — [grey]HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" ({info.Label}, {width}x{height}{owner})[/]");
-
-                    results.Add(new UiScreenshotResult
-                    {
-                        FilePath = absolutePath,
-                        Width = width,
-                        Height = height,
-                        ProcessId = w.Pid,
-                        WindowTitle = title
-                    });
+                    ansiConsole.MarkupLine($"  [green]✓[/] HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" [grey]({info.Label}, {width}x{height}{owner})[/]");
                 }
                 catch (Exception ex)
                 {
@@ -198,16 +177,85 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 }
             }
 
+            if (captures.Count == 0)
+            {
+                logger.LogError("No windows could be captured.");
+                return 1;
+            }
+
+            // Compose all captures side-by-side into single image
+            var pngBytes = ComposeSideBySide(captures);
+            await File.WriteAllBytesAsync(filePath, pngBytes, ct);
+            var absolutePath = Path.GetFullPath(filePath);
+
+            ansiConsole.MarkupLine($"  [green]✓[/] Saved composite: {absolutePath}");
+
             if (json)
             {
+                var result = new UiScreenshotResult
+                {
+                    FilePath = absolutePath,
+                    ProcessId = session.ProcessId,
+                    WindowTitle = session.WindowTitle
+                };
                 ansiConsole.Profile.Out.Writer.WriteLine(
-                    JsonSerializer.Serialize(results.ToArray(), UiJsonContext.Default.UiScreenshotResultArray));
+                    JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
             }
 
             return 0;
         }
 
-        /// <summary>Find windows from other processes that are owned by any of the given windows.</summary>
+        private const int LabelBarHeight = 28;
+        private const int WindowGap = 8;
+
+        private static byte[] ComposeSideBySide(List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)> captures)
+        {
+            // Calculate composite dimensions
+            var totalWidth = captures.Sum(c => c.Width) + WindowGap * (captures.Count - 1);
+            var maxHeight = captures.Max(c => c.Height);
+            var compositeHeight = maxHeight + LabelBarHeight;
+
+            using var composite = new SKBitmap(totalWidth, compositeHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var canvas = new SKCanvas(composite);
+
+            // Dark background
+            canvas.Clear(new SKColor(30, 30, 30));
+
+            using var labelPaint = new SKPaint
+            {
+                Color = SKColors.White,
+                TextSize = 14,
+                IsAntialias = true,
+                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+            };
+            using var labelBgPaint = new SKPaint { Color = new SKColor(50, 50, 50) };
+
+            var x = 0;
+            foreach (var (pixels, width, height, hwnd, title, label) in captures)
+            {
+                // Draw label bar
+                canvas.DrawRect(x, 0, width, LabelBarHeight, labelBgPaint);
+                var labelText = $"HWND {hwnd} ({label})  {title}";
+                if (labelText.Length > 60) { labelText = labelText[..57] + "..."; }
+                canvas.DrawText(labelText, x + 6, LabelBarHeight - 8, labelPaint);
+
+                // Draw window capture
+                using var windowBitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                unsafe
+                {
+                    var ptr = (byte*)windowBitmap.GetPixels().ToPointer();
+                    System.Runtime.InteropServices.Marshal.Copy(pixels, 0, (nint)ptr, pixels.Length);
+                }
+                canvas.DrawBitmap(windowBitmap, x, LabelBarHeight);
+
+                x += width + WindowGap;
+            }
+
+            using var image = SKImage.FromBitmap(composite);
+            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+            return data.ToArray();
+        }
+
         /// <summary>
         /// Discover all windows for the target app, including cross-process owned windows.
         /// Returns null if we can't determine the app's windows (e.g., no --app provided).
