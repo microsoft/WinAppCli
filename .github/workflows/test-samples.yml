@@ -48,6 +48,11 @@ jobs:
       with:
         name: npm-package
         path: artifacts/*.tgz
+    - uses: actions/upload-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget/*.nupkg
+        if-no-files-found: ignore
 
   test-sample:
     needs: [build]
@@ -113,6 +118,57 @@ jobs:
         name: npm-package
         path: artifacts/npm
       continue-on-error: true
+
+    # Download NuGet package for .NET samples
+    - name: Download NuGet package (pull_request)
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        github.event_name == 'pull_request' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget
+      continue-on-error: true
+
+    - name: Download NuGet package (workflow_run)
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        github.event_name == 'workflow_run' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget
+        run-id: ${{ github.event.workflow_run.id }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true
+
+    - name: Download NuGet package (workflow_dispatch)
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        github.event_name == 'workflow_dispatch' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget
+      continue-on-error: true
+
+    - name: Add local NuGet source
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      shell: pwsh
+      run: |
+        $nugetPath = "artifacts/nuget"
+        if (Test-Path $nugetPath) {
+          $resolvedPath = (Resolve-Path $nugetPath).Path
+          dotnet nuget add source $resolvedPath --name WinAppLocal
+          Write-Host "Added local NuGet source: $resolvedPath"
+        } else {
+          Write-Warning "No NuGet artifacts found — .NET samples may fail to restore"
+        }
 
     # --- Toolchain setup (conditional per sample) ---
 

@@ -61,6 +61,28 @@ Describe "Rust App Sample" {
             Join-Path $script:rustProjectDir "appxmanifest.xml" | Should -Exist
         }
 
+        It "Should add execution alias to manifest" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-WinappCommand -Arguments "manifest add-alias"
+            } finally { Pop-Location }
+        }
+
+        It "Should build Rust app in debug mode" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-Expression "cargo build"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should run app with identity via winapp run" -Skip:$script:skip {
+            Push-Location $script:rustProjectDir
+            try {
+                Invoke-WinappCommand -Arguments "run .\target\debug --with-alias --unregister-on-exit"
+            } finally { Pop-Location }
+        }
+
         It "Should build Rust app in release mode" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
