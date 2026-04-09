@@ -188,6 +188,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
             await File.WriteAllBytesAsync(filePath, pngBytes, ct);
             var absolutePath = Path.GetFullPath(filePath);
 
+            // Calculate composite dimensions for JSON output
+            var compositeWidth = captures.Sum(c => c.Width) + WindowGap * (captures.Count - 1);
+            var compositeHeight = captures.Max(c => c.Height) + LabelBarHeight;
+
             ansiConsole.MarkupLine($"  [green]✓[/] Saved composite: {absolutePath}");
 
             if (json)
@@ -195,6 +199,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 var result = new UiScreenshotResult
                 {
                     FilePath = absolutePath,
+                    Width = compositeWidth,
+                    Height = compositeHeight,
                     ProcessId = session.ProcessId,
                     WindowTitle = session.WindowTitle
                 };

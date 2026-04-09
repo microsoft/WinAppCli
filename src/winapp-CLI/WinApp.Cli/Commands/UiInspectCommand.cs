@@ -124,7 +124,7 @@ internal class UiInspectCommand : Command, IShortDescription
                             ansiConsole.WriteLine();
                             ansiConsole.MarkupLine($"[grey]--- {EscapeMarkup(el.Name ?? "")} ---[/]");
                             lastBreadcrumb = "";
-                            Array.Clear(ancestorTypes);
+                            Array.Clear(ancestorTypes, 0, ancestorTypes.Length);
                             continue;
                         }
 

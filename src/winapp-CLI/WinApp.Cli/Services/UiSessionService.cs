@@ -66,7 +66,7 @@ internal sealed class UiSessionService(
     }
 
     /// <summary>
-    /// Auto-selects the best window from multiple candidates and warns about the others.
+    /// Auto-selects the best window from multiple candidates silently.
     /// Heuristic: prefer foreground window → prefer largest window.
     /// </summary>
     private UiSessionInfo AutoSelectWindow(List<(nint Hwnd, int Pid, string Title)> windows, string app)
