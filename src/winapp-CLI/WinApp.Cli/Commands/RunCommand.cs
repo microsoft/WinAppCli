@@ -179,6 +179,18 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            // Validate the input folder path early so the command fails fast with a clear
+            // long-path message before any file system operations are attempted.
+            try
+            {
+                LongPathHelper.ValidatePathLength(inputFolder.FullName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, ex.Message);
+                return 1;
+            }
+
             uint processId = 0;
             string? packageFamilyName = null;
             string? packageFullName = null;
@@ -226,6 +238,10 @@ internal partial class RunCommand : Command, IShortDescription
 
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
                     resolvedOutputDir = outputAppXDirectory;
+
+                    // Validate that the manifest and output paths are usable (check long path support if needed)
+                    LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
+                    LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
 
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
