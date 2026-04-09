@@ -135,22 +135,62 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
         if (string.IsNullOrEmpty(elementId))
         {
-            var allWindows = GetAllAppWindows(session);
             var mainHwnd = (nint)session.WindowHandle;
+            var allWindows = GetAllAppWindows(session);
 
+            // Filter out windows whose UIA root is already in the main tree (e.g., modal dialogs)
+            var independentWindows = new List<(nint Hwnd, int Pid, string Title)>();
             foreach (var (hwnd, pid, title) in allWindows)
             {
                 if (hwnd == mainHwnd) { continue; }
+
+                // Skip internal system windows (PseudoConsoleWindow, IME, etc.)
+                var className = UiSessionService.GetWindowClassName(hwnd);
+                if (IsInternalWindow(className)) { continue; }
+
+                try
+                {
+                    var hwndCondition = _automation.CreatePropertyCondition(
+                        UIA_PROPERTY_ID.UIA_NativeWindowHandlePropertyId, ComVariant.Create((int)hwnd));
+                    var alreadyInMain = root!.FindFirst(TreeScope.TreeScope_Descendants, hwndCondition);
+                    if (alreadyInMain is not null)
+                    {
+                        _logger.LogDebug("Skipping HWND {Hwnd} \"{Title}\" — already in main window tree", hwnd, title);
+                        continue;
+                    }
+                }
+                catch { /* COM errors are non-fatal, include the window */ }
+                independentWindows.Add((hwnd, pid, title));
+            }
+
+            // Add header for main window when there are other independent windows
+            if (independentWindows.Count > 0)
+            {
+                var mainInfo = UiSessionService.GetWindowInfo(mainHwnd);
+                var mainTitle = session.WindowTitle ?? "";
+                elements.Insert(0, new UiElement
+                {
+                    Id = $"--- HWND {mainHwnd}",
+                    Type = "---",
+                    Name = $"HWND {mainHwnd}: \"{mainTitle}\" ({mainInfo.Label}, {mainInfo.ClassName})",
+                    Depth = 0,
+                    SourceWindowHandle = mainHwnd
+                });
+            }
+
+            foreach (var (hwnd, pid, title) in independentWindows)
+            {
                 var windowRoot = GetRootElementForHwnd(hwnd);
                 if (windowRoot is null) { continue; }
 
                 // Add a separator element to visually distinguish windows
                 var info = UiSessionService.GetWindowInfo(hwnd);
+                var ownerSuffix = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
                 elements.Add(new UiElement
                 {
                     Id = $"--- HWND {hwnd}",
                     Type = "---",
-                    Name = $"HWND {hwnd}: \"{title}\" ({info.Label}, {info.ClassName})",
+                    Name = $"HWND {hwnd}: \"{title}\" ({info.Label}, {info.ClassName}{ownerSuffix})",
                     Depth = 0,
                     SourceWindowHandle = hwnd
                 });
@@ -1145,10 +1185,14 @@ return Task.FromResult<UiElement?>(null);
 
     /// <summary>
     /// Get all windows associated with an app: same-PID windows + cross-process owned windows.
+    /// Excludes internal system windows (PseudoConsoleWindow, IME, etc.).
     /// </summary>
     private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
     {
         var windows = FindWindowsByPid(session.ProcessId);
+
+        // Remove internal system windows from same-PID results
+        windows.RemoveAll(w => IsInternalWindow(UiSessionService.GetWindowClassName(w.Hwnd)));
 
         // Find cross-process owned windows (file pickers, system dialogs)
         var appHwnds = new HashSet<nint>(windows.Select(w => w.Hwnd));
@@ -1165,6 +1209,10 @@ return Task.FromResult<UiElement?>(null);
                 Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
             if (!owner.IsNull && appHwnds.Contains((nint)owner))
             {
+                // Skip internal system windows
+                var className = UiSessionService.GetWindowClassName((nint)hwnd);
+                if (IsInternalWindow(className)) { continue; }
+
                 unsafe
                 {
                     uint pid = 0;
@@ -1182,6 +1230,17 @@ return Task.FromResult<UiElement?>(null);
 
         return windows;
     }
+
+    /// <summary>Window classes that are internal system/framework windows with no useful UI elements.</summary>
+    private static readonly HashSet<string> InternalWindowClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PseudoConsoleWindow",
+        "IME",
+        "MSCTFIME UI",
+    };
+
+    private static bool IsInternalWindow(string? className) =>
+        className is not null && InternalWindowClasses.Contains(className);
 
     /// <summary>Get UIA root element for a specific HWND.</summary>
     private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)

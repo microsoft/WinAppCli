@@ -67,7 +67,7 @@ internal class UiInspectCommand : Command, IShortDescription
             var hideOffscreen = parseResult.GetValue(SharedUiOptions.HideOffscreenOption);
 
             // --interactive bumps default depth to 8 (sparse tree after filtering)
-            if (interactive && depth == 5)
+            if (interactive && depth == 4)
             {
                 depth = 8;
             }
@@ -86,18 +86,18 @@ internal class UiInspectCommand : Command, IShortDescription
                     elements = await uiAutomation.InspectAsync(session, selector, depth, cancellationToken);
                 }
 
-                // Apply filters
+                // Apply filters (preserve window separator elements)
                 if (interactive)
                 {
-                    elements = elements.Where(IsInteractiveType).ToArray();
+                    elements = elements.Where(e => e.Type == "---" || IsInteractiveType(e)).ToArray();
                 }
                 if (hideDisabled)
                 {
-                    elements = elements.Where(e => e.IsEnabled).ToArray();
+                    elements = elements.Where(e => e.Type == "---" || e.IsEnabled).ToArray();
                 }
                 if (hideOffscreen)
                 {
-                    elements = elements.Where(e => !e.IsOffscreen).ToArray();
+                    elements = elements.Where(e => e.Type == "---" || !e.IsOffscreen).ToArray();
                 }
 
                 if (json)
@@ -136,12 +136,18 @@ internal class UiInspectCommand : Command, IShortDescription
 
                     // Footer with example using first interactive element or first element
                     var realElements = elements.Where(e => e.Type != "---").ToArray();
+                    var separators = elements.Where(e => e.Type == "---").ToArray();
                     var example = realElements.FirstOrDefault(IsInteractiveType) ?? realElements.FirstOrDefault();
                     var exampleSelector = example?.Selector ?? example?.Id;
                     var exampleHint = exampleSelector is not null
                         ? $" Use the [bold cyan]first token[/] as selector, e.g.: [grey]winapp ui invoke {EscapeMarkup(exampleSelector)} -a <app>[/]"
                         : "";
+                    ansiConsole.WriteLine();
                     ansiConsole.MarkupLine($"[grey]Found {realElements.Length} elements (--depth {depth}).{exampleHint}[/]");
+                    if (separators.Length > 1)
+                    {
+                        ansiConsole.MarkupLine("[grey]Use -w <HWND> to target a specific window.[/]");
+                    }
                 }
 
                 logger.LogDebug("Inspect returned {Count} elements at depth {Depth}", elements.Length, depth);

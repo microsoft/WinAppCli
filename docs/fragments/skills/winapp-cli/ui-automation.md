@@ -72,7 +72,7 @@ winapp ui status -a myapp; winapp ui inspect -a myapp --interactive
 ### Inspect element tree
 ```powershell
 winapp ui inspect -a myapp --interactive      # invokable elements only, auto-depth 8
-winapp ui inspect -a myapp --depth 5          # full tree at depth 5
+winapp ui inspect -a myapp --depth 5          # deeper tree at depth 5
 winapp ui inspect txt-searchbox-e5f6 -a myapp  # subtree rooted at element
 winapp ui inspect btn-settings-a1b2 -a myapp --ancestors  # walk up from element to root
 winapp ui inspect -a myapp --hide-offscreen   # hide offscreen elements

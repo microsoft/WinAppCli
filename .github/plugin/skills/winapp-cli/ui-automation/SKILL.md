@@ -77,7 +77,7 @@ winapp ui status -a myapp; winapp ui inspect -a myapp --interactive
 ### Inspect element tree
 ```powershell
 winapp ui inspect -a myapp --interactive      # invokable elements only, auto-depth 8
-winapp ui inspect -a myapp --depth 5          # full tree at depth 5
+winapp ui inspect -a myapp --depth 5          # deeper tree at depth 5
 winapp ui inspect txt-searchbox-e5f6 -a myapp  # subtree rooted at element
 winapp ui inspect btn-settings-a1b2 -a myapp --ancestors  # walk up from element to root
 winapp ui inspect -a myapp --hide-offscreen   # hide offscreen elements
@@ -215,7 +215,7 @@ View the UI element tree with semantic slugs, element types, names, and bounds.
 |--------|-------------|---------|
 | `--ancestors` | Walk up the tree from the specified element to the root | (none) |
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--depth` | Tree inspection depth | `5` |
+| `--depth` | Tree inspection depth | `4` |
 | `--hide-disabled` | Hide disabled elements from output | (none) |
 | `--hide-offscreen` | Hide offscreen elements from output | (none) |
 | `--interactive` | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. | (none) |

@@ -119,7 +119,7 @@ internal sealed class UiSessionService(
         };
     }
 
-    private static string? GetWindowClassName(nint hwnd)
+    internal static string? GetWindowClassName(nint hwnd)
     {
         try
         {
