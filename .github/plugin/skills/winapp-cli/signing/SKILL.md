@@ -78,16 +78,16 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 
 ## Recommended workflow
 
-1. **Generate cert** — `winapp cert generate` (auto-infers publisher from manifest)
-2. **Trust cert** (one-time) — `winapp cert install ./devcert.pfx` (run as admin)
-3. **Package + sign** — `winapp package ./dist --cert ./devcert.pfx`
-4. **Distribute** — share the `.msix`; recipients must also trust the cert, or use a trusted CA cert
+1. **Generate cert** â€” `winapp cert generate` (auto-infers publisher from manifest)
+2. **Trust cert** (one-time) â€” `winapp cert install ./devcert.pfx` (run as admin)
+3. **Package + sign** â€” `winapp package ./dist --cert ./devcert.pfx`
+4. **Distribute** â€” share the `.msix`; recipients must also trust the cert, or use a trusted CA cert
 
 ## Tips
 
 - Always use `--manifest` (or have `appxmanifest.xml` in the working directory) when generating certs to ensure the publisher matches automatically
 - For CI/CD, store the PFX as a secret and pass the password via `--password` rather than using the default
-- `winapp cert install` modifies the machine certificate store — it persists across reboots and user sessions
+- `winapp cert install` modifies the machine certificate store â€” it persists across reboots and user sessions
 - Use `--timestamp` when signing production builds so the signature survives certificate expiration
 - You can also use the shorthand: `winapp package ./dist --generate-cert --install-cert` to do everything in one command
 
@@ -99,7 +99,7 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Publisher mismatch" | Cert publisher ≠ manifest publisher | `winapp cert generate --manifest ./appxmanifest.xml` to re-generate with correct publisher |
+| "Publisher mismatch" | Cert publisher â‰  manifest publisher | `winapp cert generate --manifest ./appxmanifest.xml` to re-generate with correct publisher |
 | "Access denied" / "elevation required" | `cert install` needs admin | Run your terminal as Administrator |
 | "Certificate not trusted" | Cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `--if-exists overwrite` or `--if-exists skip` |
@@ -110,7 +110,7 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 
 ### `winapp cert generate`
 
-Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
+Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -120,7 +120,7 @@ Create a self-signed certificate for local testing only. Publisher must match Ap
 | `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
 | `--install` | Install the certificate to the local machine store after generation | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--manifest` | Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from | (none) |
+| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from | (none) |
 | `--output` | Output path for the generated PFX file | (none) |
 | `--password` | Password for the generated PFX file | `password` |
 | `--publisher` | Publisher name for the generated certificate. If not specified, will be inferred from manifest. | (none) |

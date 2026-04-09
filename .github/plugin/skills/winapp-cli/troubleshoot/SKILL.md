@@ -8,7 +8,7 @@ version: 0.2.2
 Use this skill when:
 - **Diagnosing errors** from winapp CLI commands
 - **Choosing the right command** for a task
-- **Understanding prerequisites** — what each command needs and what it produces
+- **Understanding prerequisites** â€” what each command needs and what it produces
 
 ## Common errors & solutions
 
@@ -16,7 +16,7 @@ Use this skill when:
 |-------|-------|----------|
 | "winapp.yaml not found" | Running `restore` or `update` without config | Run `winapp init` first, or `cd` to the directory containing `winapp.yaml` |
 | "appxmanifest.xml not found" | Running `package`, `create-debug-identity`, or `cert generate --manifest` | Run `winapp init` or `winapp manifest generate` first, or pass `--manifest <path>` |
-| "Publisher mismatch" | Certificate publisher ≠ manifest publisher | Regenerate cert: `winapp cert generate --manifest`, or edit `appxmanifest.xml` `Identity.Publisher` to match |
+| "Publisher mismatch" | Certificate publisher â‰  manifest publisher | Regenerate cert: `winapp cert generate --manifest`, or edit `appxmanifest.xml` `Identity.Publisher` to match |
 | "Access denied" / "elevation required" | `cert install` without admin | Run terminal as Administrator for `winapp cert install` |
 | "Package installation failed" | Cert not trusted, or stale package registration | `winapp cert install ./devcert.pfx` (admin), then `Get-AppxPackage <name> \| Remove-AppxPackage` |
 | "Certificate not trusted" | Dev cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
@@ -29,37 +29,37 @@ Use this skill when:
 
 ```
 Does the project have an appxmanifest.xml?
-├─ No → Do you want full setup (manifest + config + optional SDKs)?
-│       ├─ Yes → winapp init (adds Windows platform files to existing project)
-│       └─ No, just a manifest → winapp manifest generate
-└─ Yes
-   ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder missing?
-   │  └─ winapp restore
-   ├─ Want newer SDK versions?
-   │  └─ winapp update
-   ├─ Need a dev certificate?
-   │  └─ winapp cert generate (then winapp cert install for trust)
-   ├─ Need package identity for debugging? (see [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md))
-   │  ├─ Exe is in your build output folder? (most frameworks)
-   │  │  └─ winapp run <build-output-dir>
-   │  └─ Exe is separate from app code? (Electron, sparse testing)
-   │     └─ winapp create-debug-identity <exe>
-   ├─ Ready to create MSIX installer?
-   │  └─ winapp package <build-output> --cert ./devcert.pfx
-   ├─ Need to sign an existing file?
-   │  └─ winapp sign <file> <cert>
-   ├─ Need to update app icons?
-   │  └─ winapp manifest update-assets ./logo.png
-   ├─ Need to run SDK tools directly?
-   │  └─ winapp tool <toolname> <args>
-   ├─ Need to publish to Microsoft Store?
-   │  └─ winapp store <args> (passthrough to Store Developer CLI)
-   └─ Need the .winapp directory path for build scripts?
-      └─ winapp get-winapp-path (or --global for shared cache)
+â”œâ”€ No â†’ Do you want full setup (manifest + config + optional SDKs)?
+â”‚       â”œâ”€ Yes â†’ winapp init (adds Windows platform files to existing project)
+â”‚       â””â”€ No, just a manifest â†’ winapp manifest generate
+â””â”€ Yes
+   â”œâ”€ Has winapp.yaml, cloned/pulled but .winapp/ folder missing?
+   â”‚  â””â”€ winapp restore
+   â”œâ”€ Want newer SDK versions?
+   â”‚  â””â”€ winapp update
+   â”œâ”€ Need a dev certificate?
+   â”‚  â””â”€ winapp cert generate (then winapp cert install for trust)
+   â”œâ”€ Need package identity for debugging? (see [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md))
+   â”‚  â”œâ”€ Exe is in your build output folder? (most frameworks)
+   â”‚  â”‚  â””â”€ winapp run <build-output-dir>
+   â”‚  â””â”€ Exe is separate from app code? (Electron, sparse testing)
+   â”‚     â””â”€ winapp create-debug-identity <exe>
+   â”œâ”€ Ready to create MSIX installer?
+   â”‚  â””â”€ winapp package <build-output> --cert ./devcert.pfx
+   â”œâ”€ Need to sign an existing file?
+   â”‚  â””â”€ winapp sign <file> <cert>
+   â”œâ”€ Need to update app icons?
+   â”‚  â””â”€ winapp manifest update-assets ./logo.png
+   â”œâ”€ Need to run SDK tools directly?
+   â”‚  â””â”€ winapp tool <toolname> <args>
+   â”œâ”€ Need to publish to Microsoft Store?
+   â”‚  â””â”€ winapp store <args> (passthrough to Store Developer CLI)
+   â””â”€ Need the .winapp directory path for build scripts?
+      â””â”€ winapp get-winapp-path (or --global for shared cache)
 ```
 
 **Important notes:**
-- `winapp init` adds files to an **existing** project — it does not create a new project
+- `winapp init` adds files to an **existing** project â€” it does not create a new project
 - The key prerequisite for most commands is `appxmanifest.xml`, not `winapp.yaml`
 - `winapp.yaml` is only needed for SDK version management (`restore`/`update`)
 - Projects with NuGet package references (e.g., `.csproj` referencing `Microsoft.Windows.SDK.BuildTools`) can use winapp commands without `winapp.yaml`
@@ -70,15 +70,15 @@ Does the project have an appxmanifest.xml?
 | Goal | Command | Key detail |
 |------|---------|------------|
 | Run with identity (most common) | `winapp run .\build\Debug` | Registers loose layout + launches; add `--with-alias` for console apps |
-| Attach debugger to running app | `winapp run .\build\Debug` → attach to PID | Misses startup code |
-| Register identity, launch manually | `winapp run .\build\Debug --no-launch` | Launch via `start shell:AppsFolder\<AUMID>` or execution alias — **not** the exe directly |
+| Attach debugger to running app | `winapp run .\build\Debug` â†’ attach to PID | Misses startup code |
+| Register identity, launch manually | `winapp run .\build\Debug --no-launch` | Launch via `start shell:AppsFolder\<AUMID>` or execution alias â€” **not** the exe directly |
 | F5 startup debugging (IDE launches exe) | `winapp create-debug-identity .\bin\myapp.exe` | Exe has identity regardless of how it's launched; best for debugging activation/startup code |
-| Capture OutputDebugString | `winapp run .\build\Debug --debug-output` | **Blocks other debuggers** — use `--no-launch` if you need VS Code/WinDbg |
+| Capture OutputDebugString | `winapp run .\build\Debug --debug-output` | **Blocks other debuggers** â€” use `--no-launch` if you need VS Code/WinDbg |
 | Run and auto-clean | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
 | Launch and detach (CI) | `winapp run .\build\Debug --detach` | Returns immediately after launch; use `--json` to get PID for scripting |
 | Clean up stale registration | `winapp unregister` | Removes dev-mode packages for the current project |
 
-> **Visual Studio users:** If you have a packaging project, VS already handles identity and debugging from F5 — you likely don't need winapp for debugging. These workflows are for VS Code, terminal, and frameworks VS doesn't natively package.
+> **Visual Studio users:** If you have a packaging project, VS already handles identity and debugging from F5 â€” you likely don't need winapp for debugging. These workflows are for VS Code, terminal, and frameworks VS doesn't natively package.
 
 For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
@@ -119,12 +119,12 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 - File an issue: https://github.com/microsoft/WinAppCli/issues
 
 ## Related skills
-- **Setup & init**: `winapp-setup` — adding Windows support to a project
-- **Manifest**: `winapp-manifest` — creating and editing `appxmanifest.xml`
-- **Signing**: `winapp-signing` — certificate generation and management
-- **Packaging**: `winapp-package` — creating MSIX installers
-- **Identity**: `winapp-identity` — enabling package identity for Windows APIs
-- **Frameworks**: `winapp-frameworks` — framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
+- **Setup & init**: `winapp-setup` â€” adding Windows support to a project
+- **Manifest**: `winapp-manifest` â€” creating and editing `appxmanifest.xml`
+- **Signing**: `winapp-signing` â€” certificate generation and management
+- **Packaging**: `winapp-package` â€” creating MSIX installers
+- **Identity**: `winapp-identity` â€” enabling package identity for Windows APIs
+- **Frameworks**: `winapp-frameworks` â€” framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
 
 
 ## Command Reference
