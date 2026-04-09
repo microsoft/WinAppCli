@@ -11,7 +11,7 @@ version: 0.2.2
 - Debugging WinUI 3, WPF, WinForms, Win32, or Electron app UIs
 
 ## Prerequisites
-- For UIA mode (any app): No setup needed â€” works with any running Windows app
+- For UIA mode (any app): No setup needed — works with any running Windows app
 
 ## Common patterns
 
@@ -29,13 +29,13 @@ winapp ui set-value txt-searchbox-e5f6 "hello" -a myapp; winapp ui invoke btn-su
 
 ### Find visible text and click it
 ```powershell
-# Search by text â€” output shows invokable ancestor
+# Search by text — output shows invokable ancestor
 winapp ui search "Save changes" -a myapp
 # Output:
 #   lbl-savechanges-a1b2 "Save changes" (120,40 80x20)
 #         ^ invoke via: btn-save-c3d4 "Save"
 
-# Invoke by text â€” auto-walks to parent Button
+# Invoke by text — auto-walks to parent Button
 winapp ui invoke 'Save changes' -a myapp
 ```
 
@@ -47,20 +47,20 @@ winapp ui invoke itm-samples-3f2c -a myapp; winapp ui wait-for pn-samplespage-b4
 
 ### Disambiguate duplicate elements
 ```powershell
-# When text search matches multiple elements, the error shows slugs for each â€” pick the right one
+# When text search matches multiple elements, the error shows slugs for each — pick the right one
 winapp ui invoke Submit -a myapp
-# â†’ Selector matched 3 elements:
-#   [0] Button "Submit Order" â†’ btn-submitorder-a1b2
-#   [1] Button "Submit" â†’ btn-submit-c3d4
+# → Selector matched 3 elements:
+#   [0] Button "Submit Order" → btn-submitorder-a1b2
+#   [1] Button "Submit" → btn-submit-c3d4
 # Use the slug: winapp ui invoke btn-submit-c3d4 -a myapp
 ```
 
 ## Key concepts
-- **Selector brackets**: `inspect` and `search` output shows selectors in `[brackets]` â€” use the bracketed value with other `ui` commands. Selectors are either AutomationId (stable, developer-set) or generated slug (e.g., `btn-name-hash`).
-- **AutomationId selectors**: When an element has a unique AutomationId, it becomes the selector directly (e.g., `[MinimizeButton]`). These survive layout changes and localization â€” preferred for stable targeting.
+- **Selector brackets**: `inspect` and `search` output shows selectors in `[brackets]` — use the bracketed value with other `ui` commands. Selectors are either AutomationId (stable, developer-set) or generated slug (e.g., `btn-name-hash`).
+- **AutomationId selectors**: When an element has a unique AutomationId, it becomes the selector directly (e.g., `[MinimizeButton]`). These survive layout changes and localization — preferred for stable targeting.
 - **Slug selectors**: When no unique AutomationId exists, a generated slug is used (e.g., `[btn-close-a2b3]`). Format: `prefix-name-hash`. May go stale after UI changes.
-- **Plain text search**: `search` and `invoke` accept plain text â€” `search Minimize` finds elements with "Minimize" in their Name or AutomationId (substring, case-insensitive). No special syntax needed.
-- **`--interactive` flag**: Filters to invokable elements only with auto-depth 8 â€” the fastest way to see what you can click
+- **Plain text search**: `search` and `invoke` accept plain text — `search Minimize` finds elements with "Minimize" in their Name or AutomationId (substring, case-insensitive). No special syntax needed.
+- **`--interactive` flag**: Filters to invokable elements only with auto-depth 8 — the fastest way to see what you can click
 - **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its selector
 - **`;` chaining**: Chain commands with `;` to run multiple operations in one call, reducing agent round-trips
 - **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting
@@ -117,7 +117,7 @@ winapp ui get-focused -a myapp
 
 ### Scroll containers
 ```powershell
-# Find scrollable containers â€” look for [scroll:v] (vertical) or [scroll:h] (horizontal)
+# Find scrollable containers — look for [scroll:v] (vertical) or [scroll:h] (horizontal)
 winapp ui search scroll -a myapp
 # Output:
 #   pn-scrollview-bfef Pane "scrollView" [scroll:v] (2127,296 1191x965)
@@ -140,18 +140,18 @@ winapp ui wait-for itm-status-c3d4 -a myapp --property Name --value "Complete" -
 ```
 
 ## Tips
-- Use `--interactive` with `inspect` as your first command â€” it shows only what you can click
+- Use `--interactive` with `inspect` as your first command — it shows only what you can click
 - Chain commands with `;` to reduce round-trips (see note below on why not `&&`)
-- Use slugs from output to target specific elements â€” they're hash-validated and shell-safe
+- Use slugs from output to target specific elements — they're hash-validated and shell-safe
 - Use plain text search to find elements: `search Minimize`, `invoke Submit`
-- When multiple elements match text search, the error shows slugs for each â€” pick the right one
+- When multiple elements match text search, the error shows slugs for each — pick the right one
 - Use `get-property --property ToggleState` to verify checkbox/toggle state after invoke
 - `scroll` auto-finds the nearest scrollable parent
 - Use `--capture-screen` to capture popup overlays, dropdown menus, and flyouts
 - Use `--hide-disabled` and `--hide-offscreen` to reduce noise
 
 ### Why `;` instead of `&&`
-Use `;` (not `&&`) to chain commands. PowerShell's `&&` operator can freeze when a native CLI writes to stderr or uses ANSI escape sequences â€” this causes a pipeline deadlock. `;` runs each command unconditionally and avoids this issue. This is also better for agent workflows: you usually want the screenshot to run even if the invoke had a non-zero exit (to see what went wrong).
+Use `;` (not `&&`) to chain commands. PowerShell's `&&` operator can freeze when a native CLI writes to stderr or uses ANSI escape sequences — this causes a pipeline deadlock. `;` runs each command unconditionally and avoids this issue. This is also better for agent workflows: you usually want the screenshot to run even if the invoke had a non-zero exit (to see what went wrong).
 
 ### File dialog workaround
 File open/save dialogs are standard Windows dialogs with UIA support. Interact with them using existing commands:
@@ -161,7 +161,7 @@ winapp ui invoke btn-openfilebtn-a2b3 -a myapp
 
 # 2. Find the dialog window
 winapp ui list-windows -a myapp
-# â†’ Shows the main window + the dialog HWND
+# → Shows the main window + the dialog HWND
 
 # 3. Target the dialog, type the file path, and confirm
 winapp ui set-value txt-1148-c4d5 "C:\path\to\file.png" -w <dialog-hwnd>
@@ -180,7 +180,7 @@ Note: The filename input in standard file dialogs typically has AutomationId `11
 | "Multiple windows match" | Several windows match `-a` | Use `-w <HWND>` from the listed options |
 | "Selector matched N elements" | Text query matches multiple elements | Use a slug from the suggestions shown in the error, or from `inspect` output |
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` to get fresh slugs |
-| "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists â€” use that |
+| "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
 | Popup not in screenshot | PrintWindow misses overlays | Use `--capture-screen` flag |
 
