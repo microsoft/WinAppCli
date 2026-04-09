@@ -48,7 +48,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     private nuint _savedFirstChanceExceptionAddress;
 
     /// <inheritdoc/>
-    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken)
+    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false)
     {
         // Create a log file alongside the dump directory for verbose debug output.
         var logDir = Path.Combine(Path.GetTempPath(), "winapp-dumps");
@@ -69,7 +69,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
             // After the debug loop ends, analyze the crash dump if one was captured.
             if (_crashDumpPath != null)
             {
-                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!);
+                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!, useSymbols);
             }
 
             return exitCode;

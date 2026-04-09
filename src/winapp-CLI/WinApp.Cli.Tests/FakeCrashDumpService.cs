@@ -22,7 +22,7 @@ internal class FakeCrashDumpService : ICrashDumpService
         return FakeDumpPath;
     }
 
-    public Task AnalyzeDumpAsync(string dumpPath, string logPath)
+    public Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false)
     {
         AnalyzeCalls.Add(dumpPath);
         return Task.CompletedTask;

@@ -4,6 +4,8 @@
 #pragma warning disable CA1416
 
 using Microsoft.Diagnostics.Runtime;
+using Microsoft.Diagnostics.Runtime.Utilities;
+using Microsoft.Diagnostics.Runtime.Utilities.DbgEng;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.Runtime.InteropServices;
@@ -137,7 +139,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     }
 
     /// <inheritdoc/>
-    public async Task AnalyzeDumpAsync(string dumpPath, string logPath)
+    public async Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false)
     {
         console.MarkupLine("[dim]Analyzing crash dump...[/]");
 
@@ -145,26 +147,60 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         {
             var (summary, details) = await Task.Run(() => AnalyzeWithClrMD(dumpPath));
 
+            // ClrMD found managed exception — no need for native fallback
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                if (!string.IsNullOrWhiteSpace(details))
+                {
+                    await File.AppendAllTextAsync(logPath,
+                        $"\n\n=== Crash Analysis ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===\n{details}\n");
+                }
+
+                console.WriteLine();
+                console.MarkupLine("[red]========== CRASH DETECTED ==========[/]");
+                console.WriteLine();
+                console.MarkupLine("[red][[CRASH ANALYSIS]][/]");
+                console.WriteLine(summary);
+                console.MarkupLine("[red]=====================================[/]");
+                console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
+                console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
+                return;
+            }
+
+            // No managed info — fallback to DbgEng for native stack trace
+            if (useSymbols)
+            {
+                console.MarkupLine("[dim]Downloading symbols (first run may take a few minutes)...[/]");
+            }
+
+            var (nativeSummary, nativeDetails) = await Task.Run(() => AnalyzeWithDbgEng(dumpPath, useSymbols));
+
+            var allDetails = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(details))
             {
+                allDetails.AppendLine(details);
+            }
+
+            if (!string.IsNullOrWhiteSpace(nativeDetails))
+            {
+                allDetails.AppendLine(nativeDetails);
+            }
+
+            if (allDetails.Length > 0)
+            {
                 await File.AppendAllTextAsync(logPath,
-                    $"\n\n=== Crash Analysis ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===\n{details}\n");
+                    $"\n\n=== Crash Analysis ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===\n{allDetails}\n");
             }
 
             console.WriteLine();
             console.MarkupLine("[red]========== CRASH DETECTED ==========[/]");
 
-            if (!string.IsNullOrWhiteSpace(summary))
+            if (!string.IsNullOrWhiteSpace(nativeSummary))
             {
                 console.WriteLine();
-                console.MarkupLine("[red][[CRASH ANALYSIS]][/]");
-                console.WriteLine(summary);
+                console.MarkupLine("[red][[CRASH ANALYSIS (native)]][/]");
+                console.WriteLine(nativeSummary);
                 console.MarkupLine("[red]=====================================[/]");
-            }
-            else
-            {
-                console.MarkupLine("[dim]No managed exception found. For native crash analysis:[/]");
-                console.MarkupLine($"[blue]windbg -z \"{dumpPath.EscapeMarkup()}\"[/]");
             }
 
             console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
@@ -393,5 +429,251 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 details.AppendLine($"  {method.Type?.Module?.Name}!{method.Type?.Name}.{method.Name}");
             }
         }
+    }
+
+    private static (string Summary, string Details) AnalyzeWithDbgEng(string dumpPath, bool useSymbols)
+    {
+        // Use system32's dbgeng.dll — available on every Windows machine.
+        var dbgengPath = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        using IDisposable dbgeng = IDebugClient.Create(dbgengPath);
+
+        IDebugClient client = (IDebugClient)dbgeng;
+        IDebugControl control = (IDebugControl)dbgeng;
+
+        var hr = client.OpenDumpFile(dumpPath);
+        if (hr < 0)
+        {
+            return (string.Empty, $"DbgEng failed to open dump: HRESULT 0x{(uint)hr:X8}");
+        }
+
+        hr = control.WaitForEvent(TimeSpan.FromSeconds(30));
+        if (hr < 0)
+        {
+            return (string.Empty, $"DbgEng WaitForEvent failed: HRESULT 0x{(uint)hr:X8}");
+        }
+
+        var output = new StringBuilder();
+        void CaptureOutput(Action action)
+        {
+            output.Clear();
+            using var holder = new DbgEngOutputHolder(client, DEBUG_OUTPUT.ALL);
+            holder.OutputReceived += (text, _) => output.Append(text);
+            action();
+        }
+
+        // First pass: get stack trace without symbols
+        CaptureOutput(() =>
+        {
+            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".ecxr", DEBUG_EXECUTE.DEFAULT);
+            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, "kp 20", DEBUG_EXECUTE.DEFAULT);
+        });
+
+        var stackOutput = output.ToString();
+
+        // If --symbols, download PDBs for modules on the stack, then re-run
+        if (useSymbols)
+        {
+            var symbolCachePath = Path.Combine(Path.GetTempPath(), "symbols");
+            var downloaded = DownloadSymbolsForStack(stackOutput, control, client, symbolCachePath);
+            if (downloaded > 0)
+            {
+                IDebugSymbols symbols = (IDebugSymbols)dbgeng;
+                // Prepend local cache path — system32's dbgeng can load PDBs from
+                // local directories but doesn't support srv*/cache* (requires symsrv.dll).
+                // Preserve existing path so dbgeng can still find PDBs next to the DLLs.
+                var existingPath = symbols.SymbolPath ?? "";
+                symbols.SymbolPath = existingPath.Length > 0
+                    ? $"{symbolCachePath};{existingPath}"
+                    : symbolCachePath;
+
+                CaptureOutput(() =>
+                {
+                    control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".reload /f", DEBUG_EXECUTE.DEFAULT);
+                    control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".ecxr", DEBUG_EXECUTE.DEFAULT);
+                    control.Execute(DEBUG_OUTCTL.THIS_CLIENT, "kp 20", DEBUG_EXECUTE.DEFAULT);
+                });
+                stackOutput = output.ToString();
+            }
+        }
+
+        var summary = ExtractNativeStackSummary(stackOutput);
+        return (summary, $"Native Stack (DbgEng):\n{stackOutput}");
+    }
+
+    /// <summary>
+    /// Downloads PDB symbols for modules that appear in the native stack trace.
+    /// Reads PE headers from the original DLL on disk to get the PDB GUID,
+    /// then downloads from Microsoft Symbol Server.
+    /// </summary>
+    private static int DownloadSymbolsForStack(string stackOutput, IDebugControl control, IDebugClient client, string cachePath)
+    {
+        // Extract unique module names from stack (e.g., "Microsoft_UI_Xaml" from "Microsoft_UI_Xaml+0x3e503")
+        var modules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in stackOutput.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            var bangIdx = trimmed.IndexOf('!');
+            var plusIdx = trimmed.IndexOf('+');
+
+            // "Module!Function+0x..." or "Module+0x..."
+            if (plusIdx > 0)
+            {
+                var start = trimmed.LastIndexOf(' ', bangIdx > 0 ? bangIdx : plusIdx) + 1;
+                var end = bangIdx > 0 ? bangIdx : plusIdx;
+                if (end > start)
+                {
+                    var name = trimmed[start..end];
+                    // Skip addresses (hex strings) and empty names
+                    if (name.Length > 0 && !name.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                        && !name.Contains('`'))
+                    {
+                        modules.Add(name);
+                    }
+                }
+            }
+        }
+
+        if (modules.Count == 0)
+        {
+            return 0;
+        }
+
+        // For each module, get its DLL path via DbgEng, then read PE header from disk
+        var downloaded = 0;
+        using var http = new HttpClient();
+
+        foreach (var moduleName in modules)
+        {
+            try
+            {
+                // Get module file path from DbgEng
+                var modOutput = new StringBuilder();
+                using (var holder = new DbgEngOutputHolder(client, DEBUG_OUTPUT.ALL))
+                {
+                    holder.OutputReceived += (text, _) => modOutput.Append(text);
+                    control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $"lmvm {moduleName}", DEBUG_EXECUTE.DEFAULT);
+                }
+
+                // Parse "Image path: C:\...\Module.dll" from lmvm output
+                var dllPath = ExtractImagePath(modOutput.ToString());
+                if (dllPath == null || !File.Exists(dllPath))
+                {
+                    continue;
+                }
+
+                // Read PE CodeView entry to get PDB GUID
+                using var stream = File.OpenRead(dllPath);
+                using var peReader = new System.Reflection.PortableExecutable.PEReader(stream);
+                var debugEntries = peReader.ReadDebugDirectory();
+
+                foreach (var entry in debugEntries)
+                {
+                    if (entry.Type != System.Reflection.PortableExecutable.DebugDirectoryEntryType.CodeView)
+                    {
+                        continue;
+                    }
+
+                    var cv = peReader.ReadCodeViewDebugDirectoryData(entry);
+                    var pdbName = Path.GetFileName(cv.Path);
+                    var sig = cv.Guid.ToString("N").ToUpperInvariant() + cv.Age;
+                    var localPdb = Path.Combine(cachePath, pdbName, sig, pdbName);
+
+                    // Already cached?
+                    if (File.Exists(localPdb))
+                    {
+                        downloaded++;
+                        break;
+                    }
+
+                    // Download from Microsoft Symbol Server
+                    var url = $"https://msdl.microsoft.com/download/symbols/{pdbName}/{sig}/{pdbName}";
+                    using var response = http.Send(new HttpRequestMessage(HttpMethod.Get, url));
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        break;
+                    }
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(localPdb)!);
+                    using var pdbStream = response.Content.ReadAsStream();
+                    using var fileStream = File.Create(localPdb);
+                    pdbStream.CopyTo(fileStream);
+                    downloaded++;
+                    break;
+                }
+            }
+            catch
+            {
+                // Skip modules we can't process
+            }
+        }
+
+        return downloaded;
+    }
+
+    private static string? ExtractImagePath(string lmvmOutput)
+    {
+        foreach (var line in lmvmOutput.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("Image path:", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed["Image path:".Length..].Trim();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts a concise stack summary from DbgEng kp output for terminal display.
+    /// </summary>
+    private static string ExtractNativeStackSummary(string output)
+    {
+        var result = new StringBuilder();
+        var lines = output.Split('\n');
+        var inStack = false;
+        var frameCount = 0;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+
+            // kp output starts with "Child-SP" header
+            if (line.Contains("Child-SP"))
+            {
+                inStack = true;
+                result.AppendLine("Stack:");
+                continue;
+            }
+
+            if (!inStack || string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            if (frameCount >= 15)
+            {
+                result.AppendLine("  ... (more frames in log)");
+                break;
+            }
+
+            // Find call site by looking for Module!Function or Module+offset pattern
+            var parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+            var callSite = parts.FirstOrDefault(p => p.Contains('!') || p.Contains('+'));
+            if (callSite != null)
+            {
+                // Strip parameters: cut at first '('
+                var parenIdx = callSite.IndexOf('(');
+                if (parenIdx > 0)
+                {
+                    callSite = callSite[..parenIdx];
+                }
+
+                result.AppendLine($"  {callSite}");
+                frameCount++;
+            }
+        }
+
+        return result.ToString().Trim();
     }
 }

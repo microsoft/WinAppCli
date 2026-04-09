@@ -112,7 +112,7 @@ Capture `OutputDebugString` messages and first-chance exceptions inline. If the 
 winapp run .\build\Debug --debug-output
 ```
 
-On crash, the output includes the exception type, message, and managed stack trace — no external tools or symbol downloads required. For native-only crashes, the dump file path is printed for manual analysis with WinDbg.
+On crash, the output includes the exception type, message, and stack trace. Managed (.NET) crashes are analyzed instantly with no external tools. Native (C++/WinRT) crashes show module names and offsets; add `--symbols` to download PDB symbols for full function names.
 
 > **Important:** This attaches winapp as the debugger. Windows only allows one debugger per process, so you **cannot** also attach Visual Studio, VS Code, or WinDbg.
 

@@ -5,7 +5,7 @@ namespace WinApp.Cli.Services;
 
 /// <summary>
 /// Writes a minidump for a crashed process and analyzes it using ClrMD
-/// to produce a human-readable crash report with managed exception details.
+/// for managed exceptions and DbgEng for native stack traces.
 /// </summary>
 internal interface ICrashDumpService
 {
@@ -26,11 +26,12 @@ internal interface ICrashDumpService
         int savedExceptionCode, nuint savedExceptionAddress);
 
     /// <summary>
-    /// Analyzes a minidump using ClrMD and prints a crash summary to the console.
+    /// Analyzes a minidump and prints a crash summary to the console.
+    /// Uses ClrMD for managed exceptions; falls back to DbgEng for native stack traces.
     /// Full analysis output is appended to the log file for detailed investigation.
-    /// For native-only crashes (no CLR runtime), prints the dump path and WinDbg instructions.
     /// </summary>
     /// <param name="dumpPath">Path to the minidump file.</param>
     /// <param name="logPath">Path to the debug log file where full analysis is appended.</param>
-    Task AnalyzeDumpAsync(string dumpPath, string logPath);
+    /// <param name="useSymbols">When true, downloads symbols from Microsoft Symbol Server for richer native analysis.</param>
+    Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false);
 }
