@@ -669,6 +669,20 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                     callSite = callSite[..parenIdx];
                 }
 
+                // Truncate long C++ template names for terminal readability
+                if (callSite.Length > 100)
+                {
+                    var templateStart = callSite.IndexOf('<');
+                    if (templateStart > 20)
+                    {
+                        callSite = callSite[..templateStart] + "<...>";
+                    }
+                    else
+                    {
+                        callSite = callSite[..100] + "...";
+                    }
+                }
+
                 result.AppendLine($"  {callSite}");
                 frameCount++;
             }
