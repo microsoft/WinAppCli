@@ -2,6 +2,7 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
       <!-- Per-monitor DPI awareness v2 — required for accurate GetWindowRect
            coordinates in the ui screenshot command. Falls back to per-monitor v1
            on older Windows versions via the dpiAware element. -->
