@@ -144,6 +144,16 @@ For CI/CD pipelines on GitHub Actions or Azure DevOps, use the [`setup-WinAppCli
 
 **[Download the latest build from GitHub Releases](https://github.com/microsoft/WinAppCli/releases/latest)**
 
+### Build from Source (Quick Install)
+
+To build and install the CLI from source in one step:
+
+```powershell
+.\scripts\quick-install.ps1
+```
+
+This builds the native CLI, prepares the npm package, and installs `winapp` globally. Re-run it anytime after code changes to refresh your local install. Node.js is installed automatically via winget if not already present.
+
 ## 📋 Usage
 
 Once installed (see [Installation](#-installation) above), verify the installation by calling the CLI:

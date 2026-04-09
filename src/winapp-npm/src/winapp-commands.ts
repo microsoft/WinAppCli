@@ -445,6 +445,8 @@ export interface RunOptions extends CommonOptions {
   clean?: boolean;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
+  /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
+  detach?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) */
@@ -468,6 +470,7 @@ export async function run(options: RunOptions): Promise<WinappResult> {
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');
+  if (options.detach) args.push('--detach');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
