@@ -206,7 +206,7 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         }
 
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, elements);
+        PromoteUniqueAutomationIds(root, elements, session.WindowHandle);
 
         var result = elements.ToArray();
         return Task.FromResult(result);
@@ -1322,6 +1322,8 @@ return Task.FromResult<UiElement?>(null);
         {
             if (hwnd == mainHwnd) { continue; }
 
+            try
+            {
             var windowRoot = GetRootElementForHwnd(hwnd);
             if (windowRoot is null) { continue; }
 
@@ -1382,6 +1384,11 @@ return Task.FromResult<UiElement?>(null);
                 found.WindowHandle = hwnd;
                 _logger.LogDebug("Found element on HWND {Hwnd} \"{Title}\"", hwnd, title);
                 return found;
+            }
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                _logger.LogDebug("COM error searching HWND {Hwnd}: {Message}", hwnd, ex.Message);
             }
         }
 
@@ -1740,7 +1747,7 @@ child = next;
     /// across the full UIA tree, use it directly as the selector instead of a generated slug.
     /// AutomationIds are developer-set, stable across layout changes, and more readable.
     /// </summary>
-    private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements)
+    private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements, long mainWindowHandle = 0)
     {
         // Collect AutomationIds from the inspected elements that could be promoted
         var candidateAids = new HashSet<string>();
@@ -1789,9 +1796,11 @@ child = next;
         }
 
         // Promote elements with globally unique AutomationIds
+        // Skip elements from other windows — the frequency map only covers the main window tree
         foreach (var el in elements)
         {
             if (el.AutomationId is not null &&
+                (mainWindowHandle == 0 || el.WindowHandle == mainWindowHandle) &&
                 aidCounts.TryGetValue(el.AutomationId, out var count) && count == 1)
             {
                 el.Selector = el.AutomationId;

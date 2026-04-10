@@ -98,17 +98,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                     Models.UiElement? element;
                     try
                     {
-                        if (selector.IsSlug)
-                        {
-                            // Slug resolution via FindSingleElementAsync (walks tree + validates hash)
-                            element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
-                        }
-                        else
-                        {
-                            // Use SearchAsync for legacy selectors
-                            var matches = await uiAutomation.SearchAsync(session, selector, 1, cancellationToken);
-                            element = matches.Length > 0 ? matches[0] : null;
-                        }
+                        element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
                     }
                     catch
                     {

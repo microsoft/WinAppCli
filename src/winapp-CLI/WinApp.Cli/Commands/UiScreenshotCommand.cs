@@ -248,6 +248,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 IsAntialias = true,
                 Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
             };
+            using var typeface = labelPaint.Typeface;
             using var labelBgPaint = new SKPaint { Color = new SKColor(50, 50, 50) };
 
             var x = 0;

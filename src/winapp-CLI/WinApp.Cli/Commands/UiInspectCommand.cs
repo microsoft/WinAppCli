@@ -106,7 +106,8 @@ internal class UiInspectCommand : Command, IShortDescription
 
                 if (json)
                 {
-                    var result = new UiInspectResult { Elements = elements };
+                    var jsonElements = elements.Where(e => e.Type != "---").ToArray();
+                    var result = new UiInspectResult { Elements = jsonElements };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiInspectResult));
                 }
