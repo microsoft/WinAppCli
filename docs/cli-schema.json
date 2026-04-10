@@ -1461,6 +1461,19 @@
           "required": false,
           "recursive": false
         },
+        "--symbols": {
+          "description": "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--unregister-on-exit": {
           "description": "Unregister the development package after the application exits. Only removes packages registered in development mode.",
           "hidden": false,

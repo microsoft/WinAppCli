@@ -61,6 +61,8 @@
     <PackageReference Include="System.CommandLine" />
     <PackageReference Include="System.Diagnostics.EventLog" />
     <PackageReference Include="System.Drawing.Common" />
+    <PackageReference Include="Microsoft.Diagnostics.Runtime" />
+    <PackageReference Include="Microsoft.Diagnostics.Runtime.Utilities" />
   </ItemGroup>
 
   <ItemGroup>
