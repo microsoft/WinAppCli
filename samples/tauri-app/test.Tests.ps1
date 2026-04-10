@@ -72,6 +72,24 @@ Describe "Tauri App Sample" {
             Join-Path $script:tempApp "appxmanifest.xml" | Should -Exist
         }
 
+        It "Should build Tauri app in debug mode" -Skip:$script:skip {
+            Push-Location $script:tempApp
+            try {
+                Invoke-Expression "cargo build --manifest-path src-tauri\Cargo.toml"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
+        }
+
+        It "Should run app with identity via winapp run" -Skip:$script:skip {
+            Push-Location $script:tempApp
+            try {
+                $distDir = Join-Path $script:tempApp "dist"
+                $null = New-Item -ItemType Directory -Path $distDir -Force
+                Copy-Item (Join-Path $script:tempApp "src-tauri\target\debug\tauri-app.exe") -Destination $distDir
+                Invoke-WinappCommand -Arguments "run dist --no-launch"
+            } finally { Pop-Location }
+        }
+
         It "Should build Tauri app in release mode" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
