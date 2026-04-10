@@ -126,10 +126,10 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         var elements = new List<UiElement>();
         WalkTree(startElement, depth, 0, "", elements, ref nextElementId);
 
-        // Set SourceWindowHandle on all elements from main window
+        // Set WindowHandle on all elements from main window
         foreach (var el in elements)
         {
-            el.SourceWindowHandle = session.WindowHandle;
+            el.WindowHandle = session.WindowHandle;
         }
 
         // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
@@ -174,7 +174,7 @@ internal sealed partial class UiAutomationService : IUiAutomationService
                     Type = "---",
                     Name = $"HWND {mainHwnd}: \"{mainTitle}\" ({mainInfo.Label}, {mainInfo.ClassName})",
                     Depth = 0,
-                    SourceWindowHandle = mainHwnd
+                    WindowHandle = mainHwnd
                 });
             }
 
@@ -192,14 +192,14 @@ internal sealed partial class UiAutomationService : IUiAutomationService
                     Type = "---",
                     Name = $"HWND {hwnd}: \"{title}\" ({info.Label}, {info.ClassName}{ownerSuffix})",
                     Depth = 0,
-                    SourceWindowHandle = hwnd
+                    WindowHandle = hwnd
                 });
 
                 var popupElements = new List<UiElement>();
                 WalkTree(windowRoot, depth, 0, "", popupElements, ref nextElementId);
                 foreach (var el in popupElements)
                 {
-                    el.SourceWindowHandle = hwnd;
+                    el.WindowHandle = hwnd;
                 }
                 elements.AddRange(popupElements);
             }
@@ -377,7 +377,7 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             var slugResult = FindElementBySlug(selector.Slug!, root);
             if (slugResult is not null)
             {
-                slugResult.SourceWindowHandle = session.WindowHandle;
+                slugResult.WindowHandle = session.WindowHandle;
                 return Task.FromResult<UiElement?>(slugResult);
             }
             // Not found on main window — search other windows
@@ -400,7 +400,7 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             {
                 var nextId = 0;
                 var exactResult = ToUiElement(exactMatch, "", ref nextId);
-                exactResult.SourceWindowHandle = session.WindowHandle;
+                exactResult.WindowHandle = session.WindowHandle;
                 return Task.FromResult<UiElement?>(exactResult);
             }
         }
@@ -470,7 +470,7 @@ return Task.FromResult<UiElement?>(null);
         var element = found.GetElement(0);
         var nextElementId = 0;
         var result = ToUiElement(element, "", ref nextElementId);
-        result.SourceWindowHandle = session.WindowHandle;
+        result.WindowHandle = session.WindowHandle;
 
         // Surface invokable ancestor for non-invokable elements
         if (!IsInvokable(element))
@@ -1114,10 +1114,10 @@ return Task.FromResult<UiElement?>(null);
     {
         // Use the element's source HWND if it came from a different window (popup/dialog)
         IUIAutomationElement? root;
-        if (element.SourceWindowHandle != 0 && element.SourceWindowHandle != session.WindowHandle)
+        if (element.WindowHandle != 0 && element.WindowHandle != session.WindowHandle)
         {
-            root = GetRootElementForHwnd((nint)element.SourceWindowHandle);
-            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.SourceWindowHandle);
+            root = GetRootElementForHwnd((nint)element.WindowHandle);
+            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.WindowHandle);
         }
         else
         {
@@ -1309,7 +1309,7 @@ return Task.FromResult<UiElement?>(null);
 
             if (found is not null)
             {
-                found.SourceWindowHandle = hwnd;
+                found.WindowHandle = hwnd;
                 _logger.LogDebug("Found element on HWND {Hwnd} \"{Title}\"", hwnd, title);
                 return found;
             }
@@ -1447,7 +1447,8 @@ return Task.FromResult<UiElement?>(null);
 
         return null;
     }
-
+
+
     /// <summary>
     /// Checks if an element supports any invokable pattern (Invoke, Toggle, SelectionItem, ExpandCollapse).
     /// </summary>

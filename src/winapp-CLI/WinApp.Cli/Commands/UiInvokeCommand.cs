@@ -77,7 +77,7 @@ internal class UiInvokeCommand : Command, IShortDescription
                     pattern = await uiAutomation.InvokeAsync(session, ancestor, cancellationToken);
                     if (json)
                     {
-                        var result = new UiInvokeResult { ElementId = ancestor.Selector ?? ancestor.Id, Pattern = pattern };
+                        var result = new UiInvokeResult { ElementId = ancestor.Selector ?? ancestor.Id, Pattern = pattern, Hwnd = session.WindowHandle };
                         ansiConsole.Profile.Out.Writer.WriteLine(
                             JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                     }
@@ -91,7 +91,7 @@ internal class UiInvokeCommand : Command, IShortDescription
 
                 if (json)
                 {
-                    var result = new UiInvokeResult { ElementId = element.Selector ?? element.Id, Pattern = pattern };
+                    var result = new UiInvokeResult { ElementId = element.Selector ?? element.Id, Pattern = pattern, Hwnd = session.WindowHandle };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                 }

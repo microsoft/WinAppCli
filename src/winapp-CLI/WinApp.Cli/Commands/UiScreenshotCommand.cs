@@ -107,7 +107,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         Width = w,
                         Height = h,
                         ProcessId = singleSession.ProcessId,
-                        WindowTitle = singleSession.WindowTitle
+                        WindowTitle = singleSession.WindowTitle,
+                        Hwnd = singleSession.WindowHandle
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
@@ -214,7 +215,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     Width = compositeWidth,
                     Height = compositeHeight,
                     ProcessId = session.ProcessId,
-                    WindowTitle = session.WindowTitle
+                    WindowTitle = session.WindowTitle,
+                    Hwnd = session.WindowHandle
                 };
                 ansiConsole.Profile.Out.Writer.WriteLine(
                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));

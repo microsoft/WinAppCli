@@ -113,7 +113,8 @@ internal class UiClickCommand : Command, IShortDescription
                         ElementId = elementId,
                         ClickType = clickType,
                         X = centerX,
-                        Y = centerY
+                        Y = centerY,
+                        Hwnd = session.WindowHandle
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiClickResult));
