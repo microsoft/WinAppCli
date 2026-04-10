@@ -69,12 +69,12 @@ function Write-TestStep {
 
 function Write-TestSuccess {
     param([string]$Message)
-    Write-Host "✓ $Message" -ForegroundColor Green
+    Write-Host "[PASS] $Message" -ForegroundColor Green
 }
 
 function Write-TestError {
     param([string]$Message)
-    Write-Host "✗ $Message" -ForegroundColor Red
+    Write-Host "[FAIL] $Message" -ForegroundColor Red
 }
 
 function Assert-Command {
