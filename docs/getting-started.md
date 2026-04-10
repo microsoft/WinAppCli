@@ -163,7 +163,7 @@ Understanding the architecture helps when troubleshooting or customizing your se
 `winapp run` is the core primitive that the other tools build on. Given a path to an `AppxManifest.xml`, it:
 
 1. Creates a **loose-layout package** — a folder structure with your app binaries and manifest, registered with Windows via the same APIs that Visual Studio uses.
-2. Registers the package identity with the system using `Add-AppxPackage`.
+2. Registers the package identity with the system using the Windows app deployment APIs.
 3. Launches the app through the Windows Application Activation Manager.
 4. Prints the **process ID** to stdout, which callers (the VS Code extension, MSBuild targets, Electron Forge, etc.) use to attach a debugger.
 
