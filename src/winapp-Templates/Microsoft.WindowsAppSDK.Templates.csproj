@@ -8,7 +8,7 @@
     <Authors>Microsoft</Authors>
     <Company>Microsoft Corporation</Company>
     <Description>Project templates for Windows App SDK (WinUI) applications with 'dotnet run' support.</Description>
-    <PackageTags>dotnet-new;templates;winui;winappsdl;windows;desktop</PackageTags>
+    <PackageTags>dotnet-new;templates;winui;winappsdk;windows;desktop</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/microsoft/WinAppCli</PackageProjectUrl>
     <RepositoryUrl>https://github.com/microsoft/WinAppCli.git</RepositoryUrl>
