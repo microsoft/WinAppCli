@@ -495,7 +495,7 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 
 ### `uiGetValue()`
 
-Read the current value from an element. Uses smart fallback: TextPattern (RichEditBox, Document), ValuePattern (TextBox, Slider), SelectionPattern (ComboBox, RadioButton, TabView), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
+Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
 
 ```typescript
 function uiGetValue(options?: UiGetValueOptions): Promise<WinappResult>
