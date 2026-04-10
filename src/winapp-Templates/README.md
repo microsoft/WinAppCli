@@ -35,7 +35,7 @@ dotnet run
 ## Requirements
 
 - Windows 10 or later
-- .NET 10 SDK or later
+- .NET 8 SDK or later
 - Windows App SDK 1.4 or later (automatically referenced)
 
 ## Uninstalling
