@@ -128,6 +128,8 @@ winapp ui search "Save" -a notepad          # find elements containing "Save"
 winapp ui search "error" -a myapp           # case-insensitive match
 ```
 
+When a text search matches multiple elements (e.g., SettingsExpander where Group, Button, and Text all share the same name), the CLI automatically picks the only invokable element. If multiple are invokable, it lists all matches with slugs.
+
 For non-invokable search results (e.g., a TextBlock inside a Button), the search
 automatically surfaces the nearest **invokable ancestor** — the parent element you can use with `invoke`.
 This works for all search selectors:
@@ -268,10 +270,11 @@ winapp ui set-value sld-volume-b2c3 75 -a myapp
 ```
 
 ### get-value
-Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, Slider), then Name (labels).
+Read the current value from an element. Uses a smart fallback chain: TextPattern (RichEditBox, Document) → ValuePattern (TextBox, Slider) → SelectionPattern (ComboBox, RadioButton, TabView) → Name (labels).
 ```bash
 winapp ui get-value doc-texteditor-53ad -a notepad          # read full document text
 winapp ui get-value SearchBox -a myapp                      # read TextBox content
+winapp ui get-value CmbTheme -a myapp                       # read ComboBox selected item
 winapp ui get-value sld-volume-b2c3 -a myapp                # read Slider value
 winapp ui get-value lbl-title-a1b2 -a myapp --json          # JSON: { "elementId": "...", "text": "..." }
 ```
@@ -436,7 +439,7 @@ steps:
 
 ### Assert element state with `wait-for`
 `wait-for --value` polls until an element's value matches the expected string, using the same
-smart fallback as `get-value` (TextPattern → ValuePattern → Name). Returns exit code 0 on match,
+smart fallback as `get-value` (TextPattern → ValuePattern → SelectionPattern → Name). Returns exit code 0 on match,
 exit code 1 on timeout — making it a CI-friendly assertion. Use `--property` to check a specific
 UIA property instead.
 

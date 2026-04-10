@@ -97,9 +97,10 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
-# Read text/value content (works for RichEditBox, TextBox, Slider, labels)
+# Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
 winapp ui get-value doc-texteditor-53ad -a notepad
 winapp ui get-value SearchBox -a myapp
+winapp ui get-value CmbTheme -a myapp              # reads ComboBox selected item via SelectionPattern
 
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
