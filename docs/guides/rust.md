@@ -175,7 +175,7 @@ winapp manifest add-alias
 cargo build --release
 ```
 
-Then, create a directoryto hold your package files and copy your release executable.
+Then, create a directory to hold your package files and copy your release executable.
 
 ```powershell
 mkdir dist
