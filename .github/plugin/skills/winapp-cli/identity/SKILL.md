@@ -122,7 +122,7 @@ winapp create-debug-identity .\bin\Debug\myapp.exe
 | **Attach debugger to running app** | `winapp run .\build\Debug`, then attach to PID | Misses startup code |
 | **Register identity, launch via AUMID** | `winapp run .\build\Debug --no-launch` | Launch with `start shell:AppsFolder\<AUMID>` or the execution alias (not the exe directly) |
 | **F5 startup debugging** | `winapp create-debug-identity .\bin\myapp.exe` | IDE controls process from first instruction; best for debugging activation/startup code |
-| **Capture debug output** | `winapp run .\build\Debug --debug-output` | Captures `OutputDebugString`; **blocks other debuggers** (one debugger per process) |
+| **Capture debug output** | `winapp run .\build\Debug --debug-output` | Captures `OutputDebugString`; on crash, writes minidump and analyzes managed exceptions automatically. **Blocks other debuggers** (one debugger per process) |
 | **Run and auto-clean** | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
 | **Launch and detach (CI)** | `winapp run .\build\Debug --detach` | Returns immediately after launch; use `--json` to get PID for scripting |
 | **Clean up stale registration** | `winapp unregister` | Removes dev packages for the current project (auto-detects from manifest) |

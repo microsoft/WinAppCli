@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="winui_crash_app.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="WinUI Crash Test"
+    mc:Ignorable="d">
+
+    <ScrollViewer>
+        <StackPanel Padding="40" Spacing="16">
+
+            <TextBlock
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="Crash Test App" />
+
+            <TextBlock
+                Text="Click a button to trigger a specific crash type for testing winapp run --debug-output" />
+
+            <TextBlock
+                Foreground="Orange"
+                Text="⚠ These buttons will crash the application intentionally." />
+
+            <!-- Access Violation -->
+            <Button
+                x:Name="AccessViolationButton"
+                Click="AccessViolationButton_Click"
+                Content="Access Violation (null pointer write)" />
+
+            <!-- Stack Overflow -->
+            <Button
+                x:Name="StackOverflowButton"
+                Click="StackOverflowButton_Click"
+                Content="Stack Overflow (infinite recursion)" />
+
+            <!-- Unhandled managed exception -->
+            <Button
+                x:Name="ManagedExceptionButton"
+                Click="ManagedExceptionButton_Click"
+                Content="Unhandled Managed Exception (NullReferenceException)" />
+
+            <!-- Timed crash -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button
+                    x:Name="TimedCrashButton"
+                    Click="TimedCrashButton_Click"
+                    Content="Timed Crash (3 seconds)" />
+                <TextBlock
+                    x:Name="CountdownText"
+                    VerticalAlignment="Center"
+                    Text="" />
+            </StackPanel>
+
+            <!-- Status -->
+            <TextBlock
+                x:Name="StatusText"
+                Text="Ready" />
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

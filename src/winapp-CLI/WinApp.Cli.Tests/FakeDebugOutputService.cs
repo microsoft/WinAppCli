@@ -13,7 +13,7 @@ internal class FakeDebugOutputService : IDebugOutputService
     public List<uint> AttachCalls { get; } = [];
     public int FakeExitCode { get; set; }
 
-    public Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken)
+    public Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
         AttachCalls.Add(processId);
         return Task.FromResult(FakeExitCode);
