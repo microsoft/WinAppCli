@@ -201,7 +201,7 @@ Capture OutputDebugString messages and first-chance exceptions:
 </PropertyGroup>
 ```
 
-Production Blockers
+## Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
 
