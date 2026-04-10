@@ -1,7 +1,10 @@
 # winapp CLI
 
 > [!IMPORTANT]
-> :warning: **Status: Public Preview** - The Windows App Development CLI (winapp CLI) is experimental and in active development. We'd love your feedback! Share your thoughts by creating an [issue](https://github.com/microsoft/WinAppCli/issues).
+> :warning: **Status: Public Preview** — The Windows App Development CLI (winapp CLI) is experimental and in active development. We'd love your feedback! Share your thoughts by creating an [issue](https://github.com/microsoft/WinAppCli/issues).
+
+> [!NOTE]
+> The **`main` branch** contains work that is in **active development**. Documentation, features, and behavior here may differ from what is publicly released. For the latest stable version, see the [latest release](https://github.com/microsoft/WinAppCli/releases/latest). To try the newest in-progress build, see [Install from latest build](#install-from-latest-build-main-branch) below.
 
 <p align="center">
     <picture>
@@ -25,6 +28,9 @@
     <img alt="GitHub License" src="https://img.shields.io/github/license/microsoft/winappcli?style=for-the-badge">
   </a>
   <br />
+  <a href="https://github.com/microsoft/WinAppCli/actions/workflows/build-package.yml?query=branch%3Amain">
+    <img src="https://img.shields.io/github/actions/workflow/status/microsoft/WinAppCli/build-package.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=Build%20(main)" alt="Build Status">
+  </a>
 </p>
 
 <h3 align="center">
@@ -143,6 +149,32 @@ For CI/CD pipelines on GitHub Actions or Azure DevOps, use the [`setup-WinAppCli
 ### Download Release Manually
 
 **[Download the latest build from GitHub Releases](https://github.com/microsoft/WinAppCli/releases/latest)**
+
+### Install from latest build (main branch)
+
+> [!CAUTION]
+> These builds are from the `main` branch and may include unreleased features, breaking changes, or experimental functionality. Use at your own risk.
+
+Download the latest CI build artifacts directly (no GitHub login required):
+
+| Artifact | Description |
+|----------|-------------|
+| [**CLI Binaries**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/cli-binaries.zip) | Native CLI executables (win-x64, win-arm64) |
+| [**npm Package**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/npm-package.zip) | `@microsoft/winappcli` .tgz package |
+| [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | MSIX installer bundle (self-signed) |
+| [**NuGet Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/nuget-packages.zip) | NuGet .nupkg packages |
+
+<details>
+<summary>Download links not working?</summary>
+
+The direct links above are provided by [nightly.link](https://nightly.link), a third-party service. If they stop working, you can download the same artifacts from GitHub Actions directly:
+
+1. Go to the **[Build and Package workflow runs](https://github.com/microsoft/WinAppCli/actions/workflows/build-package.yml?query=branch%3Amain+is%3Asuccess)** (filtered to successful builds on `main`)
+2. Click the most recent workflow run
+3. Scroll down to the **Artifacts** section and download what you need
+
+Note: Downloading artifacts from GitHub Actions requires you to be signed in to GitHub.
+</details>
 
 ## 📋 Usage
 
