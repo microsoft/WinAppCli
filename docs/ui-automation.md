@@ -289,12 +289,13 @@ winapp ui scroll-into-view itm-targetitem-c3d4 -a myapp
 ```
 
 ### wait-for
-Wait for an element to appear, disappear, or have a property reach a target value.
+Wait for an element to appear, disappear, or have a value reach a target.
 ```bash
-winapp ui wait-for Button -a myapp --timeout 5000           # wait for any button
-winapp ui wait-for btn-submit-7a90 -a myapp --timeout 5000        # wait for specific element
-winapp ui wait-for lbl-status-8c9d -a myapp --property Name --value "Done" -a myapp --timeout 5000  # wait for property value
-winapp ui wait-for btn-submit-a1b2 --gone -a myapp --timeout 2000  # wait for element to disappear
+winapp ui wait-for Button -a myapp --timeout 5000                       # wait for any button
+winapp ui wait-for btn-submit-7a90 -a myapp --timeout 5000             # wait for specific element
+winapp ui wait-for CounterDisplay -a myapp --value "5" --timeout 5000  # wait for element value (smart fallback)
+winapp ui wait-for lbl-status -a myapp --property Name --value "Done" --timeout 5000  # wait for specific property
+winapp ui wait-for btn-submit-a1b2 --gone -a myapp --timeout 2000      # wait for element to disappear
 ```
 
 ### scroll
@@ -434,19 +435,21 @@ steps:
 ```
 
 ### Assert element state with `wait-for`
-`wait-for --property --value` polls until a property matches the expected value.
-Returns exit code 0 on match, exit code 1 on timeout — making it a CI-friendly assertion.
+`wait-for --value` polls until an element's value matches the expected string, using the same
+smart fallback as `get-value` (TextPattern → ValuePattern → Name). Returns exit code 0 on match,
+exit code 1 on timeout — making it a CI-friendly assertion. Use `--property` to check a specific
+UIA property instead.
 
 ```bash
-# Assert: button click updated the counter
+# Assert: button click updated the counter (smart value fallback — works for TextBlock, TextBox, etc.)
 winapp ui invoke "Counter Button" -a $pid
-winapp ui wait-for "Counter Display" -a $pid --property Name --value "Count: 1" -t 5000
+winapp ui wait-for "Counter Display" -a $pid --value "Count: 1" -t 5000
 
 # Assert: text input was accepted
-winapp ui set-value "Search Box" -a $pid --text "hello world"
-winapp ui wait-for "Search Box" -a $pid --property Value --value "hello world" -t 3000
+winapp ui set-value "Search Box" "hello world" -a $pid
+winapp ui wait-for "Search Box" -a $pid --value "hello world" -t 3000
 
-# Assert: checkbox was toggled
+# Assert: checkbox was toggled (use --property for specific UIA properties)
 winapp ui invoke "Dark Mode" -a $pid
 winapp ui wait-for "Dark Mode" -a $pid --property ToggleState --value "On" -t 3000
 

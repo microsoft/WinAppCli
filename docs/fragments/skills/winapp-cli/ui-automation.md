@@ -131,7 +131,7 @@ winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search 
 ### Wait for UI state
 ```powershell
 winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
-winapp ui wait-for itm-status-c3d4 -a myapp --property Name --value "Complete" --timeout 5000
+winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
 ## Tips

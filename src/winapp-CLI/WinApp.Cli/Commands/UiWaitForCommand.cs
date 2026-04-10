@@ -30,7 +30,7 @@ internal class UiWaitForCommand : Command, IShortDescription
 
         ValueOption = new Option<string?>("--value")
         {
-            Description = "Wait for property to equal this value (use with --property)"
+            Description = "Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead."
         };
     }
 
@@ -81,8 +81,8 @@ internal class UiWaitForCommand : Command, IShortDescription
 
             if (value != null && string.IsNullOrWhiteSpace(property))
             {
-                logger.LogError("{Symbol} --value requires --property to specify which property to check.", UiSymbols.Error);
-                return 1;
+                // --value without --property: use smart get-value fallback (TextPattern → ValuePattern → Name)
+                // No error — this is the recommended usage
             }
 
             try
@@ -134,12 +134,27 @@ internal class UiWaitForCommand : Command, IShortDescription
                     }
                     else if (element is not null)
                     {
-                        // Check property+value condition if specified
-                        if (property is not null && value is not null)
+                        // Check value condition
+                        if (value is not null)
                         {
-                            var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
-                            if (props.TryGetValue(property, out var propValue) &&
-                                string.Equals(propValue?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+                            string? currentValue = null;
+
+                            if (property is not null)
+                            {
+                                // --property specified: check raw UIA property
+                                var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
+                                if (props.TryGetValue(property, out var propValue))
+                                {
+                                    currentValue = propValue?.ToString();
+                                }
+                            }
+                            else
+                            {
+                                // No --property: use smart fallback (TextPattern → ValuePattern → Name)
+                                currentValue = await uiAutomation.GetTextAsync(session, element, cancellationToken);
+                            }
+
+                            if (string.Equals(currentValue, value, StringComparison.OrdinalIgnoreCase))
                             {
                                 if (json)
                                 {
@@ -154,11 +169,12 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 }
                                 else
                                 {
-                                    logger.LogInformation("Element found with {Property}=\"{Value}\" after {Elapsed}ms", property, value, sw.ElapsedMilliseconds);
+                                    var source = property is not null ? $"{property}=" : "value=";
+                                    logger.LogInformation("Element found with {Source}\"{Value}\" after {Elapsed}ms", source, value, sw.ElapsedMilliseconds);
                                 }
                                 return 0;
                             }
-                            // Property doesn't match yet — keep polling
+                            // Value doesn't match yet — keep polling
                         }
                         else
                         {
