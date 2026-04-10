@@ -434,6 +434,29 @@ return Task.FromResult<UiElement?>(null);
 
         if (found.get_Length() > 1)
         {
+            // When multiple elements match, prefer the invokable one (e.g., Button over Group/Text
+            // in SettingsExpander where all children share the same Name)
+            IUIAutomationElement? invokableMatch = null;
+            int invokableCount = 0;
+            for (int i = 0; i < found.get_Length(); i++)
+            {
+                var m = found.GetElement(i);
+                if (IsInvokable(m))
+                {
+                    invokableMatch = m;
+                    invokableCount++;
+                }
+            }
+
+            if (invokableCount == 1 && invokableMatch is not null)
+            {
+                _logger.LogDebug("Disambiguated {Count} matches by picking the only invokable element", found.get_Length());
+                var nextId = 0;
+                var invokableResult = ToUiElement(invokableMatch, "", ref nextId);
+                invokableResult.WindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(invokableResult);
+            }
+
             var matchCount = found.get_Length();
             var listing = new System.Text.StringBuilder();
             listing.AppendLine($"Selector matched {matchCount} elements:");
@@ -742,7 +765,24 @@ return Task.FromResult<UiElement?>(null);
         }
         catch { }
 
-        // 3. Fall back to element Name (static text, labels)
+        // 3. Try SelectionPattern (ComboBox, RadioButton, TabView, ListView — selected item name)
+        try
+        {
+            var pattern = (IUIAutomationSelectionPattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_SelectionPatternId);
+            var selection = pattern.GetCurrentSelection();
+            if (selection.get_Length() > 0)
+            {
+                var selected = selection.GetElement(0);
+                var name = selected.get_CurrentName();
+                if (!string.IsNullOrEmpty(name.ToString()))
+                {
+                    return Task.FromResult<string?>(name.ToString());
+                }
+            }
+        }
+        catch { }
+
+        // 4. Fall back to element Name (static text, labels)
         if (!string.IsNullOrEmpty(element.Name))
         {
             return Task.FromResult<string?>(element.Name);
