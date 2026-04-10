@@ -75,13 +75,16 @@ internal class UiInvokeCommand : Command, IShortDescription
                 {
                     // Element isn't invokable but has an invokable ancestor — invoke that instead
                     pattern = await uiAutomation.InvokeAsync(session, ancestor, cancellationToken);
-                    logger.LogInformation("Invoked ancestor {Selector} \"{Name}\" via {Pattern} (matched text element was not invokable)",
-                        ancestor.Selector ?? ancestor.Id, ancestor.Name, pattern);
                     if (json)
                     {
                         var result = new UiInvokeResult { ElementId = ancestor.Selector ?? ancestor.Id, Pattern = pattern };
                         ansiConsole.Profile.Out.Writer.WriteLine(
                             JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
+                    }
+                    else
+                    {
+                        logger.LogInformation("Invoked ancestor {Selector} \"{Name}\" via {Pattern} (matched text element was not invokable)",
+                            ancestor.Selector ?? ancestor.Id, ancestor.Name, pattern);
                     }
                     return 0;
                 }
@@ -92,8 +95,11 @@ internal class UiInvokeCommand : Command, IShortDescription
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                 }
+                else
+                {
+                    logger.LogInformation("Invoked {ElementId} via {Pattern}", element.Selector ?? element.Id, pattern);
+                }
 
-                logger.LogInformation("Invoked {ElementId} via {Pattern}", element.Selector ?? element.Id, pattern);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

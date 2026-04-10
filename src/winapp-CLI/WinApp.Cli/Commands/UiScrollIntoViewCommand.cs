@@ -64,7 +64,10 @@ internal class UiScrollIntoViewCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.ScrollIntoViewAsync(session, element, cancellationToken);
-                logger.LogInformation("Scrolled {ElementId} into view", element.Selector ?? element.Id);
+                if (!json)
+                {
+                    logger.LogInformation("Scrolled {ElementId} into view", element.Selector ?? element.Id);
+                }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

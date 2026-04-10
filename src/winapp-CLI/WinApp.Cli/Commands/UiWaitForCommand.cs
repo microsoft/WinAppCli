@@ -125,7 +125,10 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 ansiConsole.Profile.Out.Writer.WriteLine(
                                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                             }
-                            logger.LogInformation("Element disappeared after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            else
+                            {
+                                logger.LogInformation("Element disappeared after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            }
                             return 0;
                         }
                     }
@@ -149,7 +152,10 @@ internal class UiWaitForCommand : Command, IShortDescription
                                     ansiConsole.Profile.Out.Writer.WriteLine(
                                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                                 }
-                                logger.LogInformation("Element found with {Property}=\"{Value}\" after {Elapsed}ms", property, value, sw.ElapsedMilliseconds);
+                                else
+                                {
+                                    logger.LogInformation("Element found with {Property}=\"{Value}\" after {Elapsed}ms", property, value, sw.ElapsedMilliseconds);
+                                }
                                 return 0;
                             }
                             // Property doesn't match yet — keep polling
@@ -167,7 +173,10 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 ansiConsole.Profile.Out.Writer.WriteLine(
                                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                             }
-                            logger.LogInformation("Element found after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            else
+                            {
+                                logger.LogInformation("Element found after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            }
                             return 0;
                         }
                     }

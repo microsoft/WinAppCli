@@ -103,8 +103,11 @@ internal class UiSearchCommand : Command, IShortDescription
                     }
                 }
 
-                var moreText = hasMore ? $" (showing first {maxResults})" : "";
-                logger.LogInformation("Found {Count} matches{MoreText}", matches.Length, moreText);
+                if (!json)
+                {
+                    var moreText = hasMore ? $" (showing first {maxResults})" : "";
+                    logger.LogInformation("Found {Count} matches{MoreText}", matches.Length, moreText);
+                }
                 return matches.Length > 0 ? 0 : 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

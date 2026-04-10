@@ -104,8 +104,11 @@ internal class UiScrollCommand : Command, IShortDescription
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiScrollResult));
                 }
+                else
+                {
+                    logger.LogInformation("Scrolled {Selector}", selectorStr);
+                }
 
-                logger.LogInformation("Scrolled {Selector}", selectorStr);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

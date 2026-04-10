@@ -105,8 +105,6 @@ internal class UiClickCommand : Command, IShortDescription
                 MouseInput.Click(centerX, centerY, doubleClick, rightClick);
 
                 var elementId = element.Selector ?? element.Id;
-                logger.LogInformation("{Symbol} {ClickType} on {ElementId} at ({X}, {Y})",
-                    UiSymbols.Check, clickType, elementId, centerX, centerY);
 
                 if (json)
                 {
@@ -119,6 +117,11 @@ internal class UiClickCommand : Command, IShortDescription
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiClickResult));
+                }
+                else
+                {
+                    logger.LogInformation("{Symbol} {ClickType} on {ElementId} at ({X}, {Y})",
+                        UiSymbols.Check, clickType, elementId, centerX, centerY);
                 }
 
                 return 0;

@@ -147,7 +147,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 return (long)info.Width * info.Height;
             }).ToList();
 
-            ansiConsole.MarkupLine($"[yellow]⚠  {windows.Count} windows detected. Compositing into single image.[/]");
+            if (!json)
+            {
+                ansiConsole.MarkupLine($"[yellow]⚠  {windows.Count} windows detected. Compositing into single image.[/]");
+            }
 
             // Capture each window
             var captures = new List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)>();
@@ -167,13 +170,19 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, ct);
                     captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
 
-                    var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-                    ansiConsole.MarkupLine($"  [green]✓[/] HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" [grey]({info.Label}, {width}x{height}{owner})[/]");
+                    if (!json)
+                    {
+                        var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
+                        ansiConsole.MarkupLine($"  [green]✓[/] HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" [grey]({info.Label}, {width}x{height}{owner})[/]");
+                    }
                 }
                 catch (Exception ex)
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
-                    ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
+                    if (!json)
+                    {
+                        ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
+                    }
                 }
             }
 
@@ -192,7 +201,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
             var compositeWidth = captures.Sum(c => c.Width) + WindowGap * (captures.Count - 1);
             var compositeHeight = captures.Max(c => c.Height) + LabelBarHeight;
 
-            ansiConsole.MarkupLine($"  [green]✓[/] Saved composite: {absolutePath}");
+            if (!json)
+            {
+                ansiConsole.MarkupLine($"  [green]✓[/] Saved composite: {absolutePath}");
+            }
 
             if (json)
             {
