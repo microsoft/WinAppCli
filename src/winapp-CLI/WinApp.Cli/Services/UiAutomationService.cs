@@ -765,7 +765,21 @@ return Task.FromResult<UiElement?>(null);
         }
         catch { }
 
-        // 3. Try SelectionPattern (ComboBox, RadioButton, TabView, ListView — selected item name)
+        // 3. Try TogglePattern (ToggleSwitch, CheckBox — on/off/indeterminate)
+        try
+        {
+            var pattern = (IUIAutomationTogglePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_TogglePatternId);
+            var state = pattern.get_CurrentToggleState();
+            return Task.FromResult<string?>(state switch
+            {
+                Windows.Win32.UI.Accessibility.ToggleState.ToggleState_On => "On",
+                Windows.Win32.UI.Accessibility.ToggleState.ToggleState_Off => "Off",
+                _ => "Indeterminate"
+            });
+        }
+        catch { }
+
+        // 4. Try SelectionPattern (ComboBox, RadioButton, TabView, ListView — selected item name)
         try
         {
             var pattern = (IUIAutomationSelectionPattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_SelectionPatternId);
@@ -782,7 +796,7 @@ return Task.FromResult<UiElement?>(null);
         }
         catch { }
 
-        // 4. Fall back to element Name (static text, labels)
+        // 5. Fall back to element Name (static text, labels)
         if (!string.IsNullOrEmpty(element.Name))
         {
             return Task.FromResult<string?>(element.Name);
@@ -1342,6 +1356,22 @@ return Task.FromResult<UiElement?>(null);
                         {
                             var nextId = 0;
                             found = ToUiElement(matches.GetElement(0), "", ref nextId);
+                        }
+                        else if (matches is not null && matches.get_Length() > 1)
+                        {
+                            // Disambiguate: prefer the only invokable element
+                            IUIAutomationElement? invokable = null;
+                            int invokableCount = 0;
+                            for (int i = 0; i < matches.get_Length(); i++)
+                            {
+                                var m = matches.GetElement(i);
+                                if (IsInvokable(m)) { invokable = m; invokableCount++; }
+                            }
+                            if (invokableCount == 1 && invokable is not null)
+                            {
+                                var nextId = 0;
+                                found = ToUiElement(invokable, "", ref nextId);
+                            }
                         }
                     }
                 }

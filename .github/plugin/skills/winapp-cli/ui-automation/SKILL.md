@@ -102,7 +102,7 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
-# Read text/value content (works for RichEditBox, TextBox, Slider, labels)
+# Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
 winapp ui get-value doc-texteditor-53ad -a notepad
 winapp ui get-value SearchBox -a myapp
 winapp ui get-value CmbTheme -a myapp              # reads ComboBox selected item via SelectionPattern
@@ -263,7 +263,7 @@ Read UIA property values from an element. Specify --property for a single proper
 
 ### `winapp ui get-value`
 
-Read the current value from an element. Uses smart fallback: TextPattern (RichEditBox, Document), ValuePattern (TextBox, Slider), SelectionPattern (ComboBox, RadioButton, TabView), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
+Read the current value from an element. Tries TextPattern (RichEditBox, Document), ValuePattern (TextBox, ComboBox, Slider), then Name (labels). Usage: winapp ui get-value <selector> -a <app>
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
