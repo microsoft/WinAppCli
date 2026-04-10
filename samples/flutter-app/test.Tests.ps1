@@ -51,23 +51,18 @@ Describe "flutter-app sample" {
         BeforeAll {
             $script:tempDir = New-TempTestDirectory -Prefix "flutter-guide"
             Set-Location $script:tempDir
+        }
 
+        It "Should create a new Flutter project" {
             flutter create test_flutter_app --platforms=windows
-            if ($LASTEXITCODE -ne 0) { throw "flutter create failed" }
-
+            $LASTEXITCODE | Should -Be 0
             $script:projectDir = Join-Path $script:tempDir "test_flutter_app"
+            $script:projectDir | Should -Exist
+        }
+
+        It "Should run winapp init successfully" {
             Set-Location $script:projectDir
-
             Invoke-WinappCommand -Arguments "init --use-defaults --setup-sdks=stable"
-
-            flutter build windows
-            if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
-
-            $script:buildOutput = Join-Path $script:projectDir "build\windows\x64\runner\Release"
-            Copy-Item $script:buildOutput -Destination (Join-Path $script:projectDir "dist") -Recurse
-
-            Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
-            Invoke-WinappCommand -Arguments "pack dist --cert devcert.pfx"
         }
 
         It "Should create winapp.yaml after init" {
@@ -82,15 +77,34 @@ Describe "flutter-app sample" {
             Join-Path $script:projectDir ".winapp" | Should -Exist
         }
 
-        It "Should produce Flutter build output" {
+        It "Should build Flutter app for Windows" {
+            Set-Location $script:projectDir
+            flutter build windows
+            $LASTEXITCODE | Should -Be 0
+            $script:buildOutput = Join-Path $script:projectDir "build\windows\x64\runner\Release"
             $script:buildOutput | Should -Exist
         }
 
+        It "Should run app with identity via winapp run" {
+            Set-Location $script:projectDir
+            Invoke-WinappCommand -Arguments "run $($script:buildOutput) --no-launch"
+        }
+
         It "Should generate a dev certificate" {
+            Set-Location $script:projectDir
+            Invoke-WinappCommand -Arguments "cert generate --if-exists skip"
             Join-Path $script:projectDir "devcert.pfx" | Should -Exist
         }
 
-        It "Should produce an MSIX package" {
+        It "Should prepare dist directory" {
+            Set-Location $script:projectDir
+            Copy-Item $script:buildOutput -Destination (Join-Path $script:projectDir "dist") -Recurse
+            Join-Path $script:projectDir "dist" | Should -Exist
+        }
+
+        It "Should package as MSIX" {
+            Set-Location $script:projectDir
+            Invoke-WinappCommand -Arguments "pack dist --cert devcert.pfx"
             Get-ChildItem -Path $script:projectDir -Filter "*.msix" | Should -Not -BeNullOrEmpty
         }
     }
