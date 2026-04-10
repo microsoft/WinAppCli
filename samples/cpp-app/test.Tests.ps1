@@ -76,18 +76,31 @@ add_executable(test-cpp-app main.cpp)
         }
 
         It "winapp init creates config files" -Skip:$script:skip {
-            Invoke-WinappCommand -Arguments "init --use-defaults --setup-sdks=stable"
+            Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
             "winapp.yaml"       | Should -Exist
             "appxmanifest.xml"  | Should -Exist
             ".winapp"           | Should -Exist
         }
 
+        It "adds execution alias to manifest" -Skip:$script:skip {
+            Invoke-WinappCommand -Arguments "manifest add-alias"
+        }
+
         It "CMake configures successfully" -Skip:$script:skip {
-            $output = cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1
+            $output = cmake -B build -DCMAKE_BUILD_TYPE=Debug 2>&1
             $LASTEXITCODE | Should -Be 0 -Because "CMake configure failed: $output"
         }
 
-        It "CMake builds successfully" -Skip:$script:skip {
+        It "CMake builds debug successfully" -Skip:$script:skip {
+            $output = cmake --build build --config Debug 2>&1
+            $LASTEXITCODE | Should -Be 0 -Because "CMake build failed: $output"
+        }
+
+        It "runs app with identity via winapp run" -Skip:$script:skip {
+            Invoke-WinappCommand -Arguments "run build\Debug --unregister-on-exit"
+        }
+
+        It "CMake builds release successfully" -Skip:$script:skip {
             $output = cmake --build build --config Release 2>&1
             $LASTEXITCODE | Should -Be 0 -Because "CMake build failed: $output"
         }
