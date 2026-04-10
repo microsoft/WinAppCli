@@ -203,6 +203,16 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             color: var(--vscode-descriptionForeground);
             margin-bottom: 36px;
         }
+        .page-description a,
+        .doc-link {
+            color: var(--vscode-textLink-foreground, #3794ff);
+            text-decoration: none;
+        }
+        .page-description a:hover,
+        .doc-link:hover {
+            color: var(--vscode-textLink-activeForeground, #3794ff);
+            text-decoration: underline;
+        }
 
         /* ─── Info banner (toast-style, bottom-right) ─────── */
         .info-banner {
@@ -465,8 +475,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         }
         .tile-checkboxes {
             display: flex;
-            flex-wrap: wrap;
-            gap: 12px 24px;
+            flex-direction: column;
+            gap: 8px;
         }
         .custom-cap-row {
             display: flex;
@@ -580,7 +590,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Identity ───── -->
     <div class="tab-content active" id="tab-identity" role="tabpanel">
         <div class="section-header">Package Identity</div>
-        <p class="page-description">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others.</p>
+        <p class="page-description">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-identity">Learn more</a></p>
         <div class="form-group" data-field="identity.name">
             <label for="identity-name">Package Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
@@ -610,7 +620,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">CPU architecture this package targets</div>
             <div class="validation-msg"></div>
         </div>
-        <div id="phone-identity-section" class="mt-12" style="display:none;">
+        <div id="phone-identity-section" class="section-header-spaced" style="display:none;">
             <div class="section-header">Phone Identity</div>
             <p class="page-description">Legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
             <div class="form-group" data-field="phoneIdentity.phoneProductId">
@@ -631,7 +641,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Properties ───── -->
     <div class="tab-content" id="tab-properties" role="tabpanel">
         <div class="section-header">Package Properties</div>
-        <p class="page-description">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell.</p>
+        <p class="page-description">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
@@ -672,7 +682,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Dependencies ───── -->
     <div class="tab-content" id="tab-dependencies" role="tabpanel">
         <div class="section-header">Target Device Families</div>
-        <p class="page-description">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package.</p>
+        <p class="page-description">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-dependencies">Learn more</a></p>
         <div id="target-device-families" class="list-container"></div>
         <div class="custom-dropdown" id="add-family-dropdown">
             <button class="custom-dropdown-btn" id="add-target-family">+ Add Target Device Family</button>
@@ -689,7 +699,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Resources ───── -->
     <div class="tab-content" id="tab-resources" role="tabpanel">
         <div class="section-header">Resources</div>
-        <p class="page-description">Use this page to declare the language resources your app supports.</p>
+        <p class="page-description">Use this page to declare the language resources your app supports. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-resources">Learn more</a></p>
         <div id="resources-list" class="list-container"></div>
         <button class="btn" id="add-resource-btn">+ Add Resource</button>
     </div>
@@ -697,7 +707,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
-        <p class="page-description">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package.</p>
+        <p class="page-description">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-application">Learn more</a></p>
         <div id="applications-list"></div>
         <button class="btn mt-12" id="add-application-btn">+ Add Application</button>
     </div>
@@ -705,7 +715,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Capabilities ───── -->
     <div class="tab-content" id="tab-capabilities" role="tabpanel">
         <div class="section-header">Capabilities</div>
-        <p class="page-description">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Only request capabilities your app actually uses.</p>
+        <p class="page-description">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Only request capabilities your app actually uses. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-capabilities">Learn more</a></p>
         <div class="capabilities-columns">
             <div class="capabilities-left">
                 <div class="cap-category">
@@ -1129,7 +1139,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
                         </div>
                         <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
-                        <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp")</div>
+                        <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp") or "x-generate"</div>
                         <div class="validation-msg"></div>
                     </div>
                 \`;
@@ -1269,6 +1279,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <button class="app-sub-tab \${activeTab === 'visual' ? 'active' : ''}" data-subtab="visual" data-app-idx="\${idx}">Visual Assets</button>
                     </div>
                     <div class="app-sub-content \${activeTab === 'info' ? 'active' : ''}" data-subcontent="info" data-app-idx="\${idx}">
+                        <p class="description mb-12">Configure the core identity and entry point of this application. <a class="doc-link" href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-application">Learn more</a></p>
                         <div class="form-group" data-field="applications.\${idx}.id">
                             <label>Id:</label>
                             <input type="text" data-section="applications" data-field-name="id" data-index="\${idx}" value="\${escapeHtml(app.id)}" />
@@ -1292,12 +1303,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         </div>
                     </div>
                     <div class="app-sub-content \${activeTab === 'extensions' ? 'active' : ''}" data-subcontent="extensions" data-app-idx="\${idx}">
-                        <p class="description mb-12">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases.</p>
+                        <p class="description mb-12">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases. <a class="doc-link" href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-1-extension">Learn more</a></p>
                         \${extListHtml}
                         \${addExtDropdown}
                     </div>
                     <div class="app-sub-content \${activeTab === 'visual' ? 'active' : ''}" data-subcontent="visual" data-app-idx="\${idx}">
-                        <p class="description mb-12">Visual assets define how your app appears in the Start menu, taskbar, and task switcher. Provide high-quality images at the correct sizes for a polished look.</p>
+                        <p class="description mb-12">Visual assets define how your app appears in the Start menu, taskbar, and task switcher. Provide high-quality images at the correct sizes for a polished look. <a class="doc-link" href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-visualelements">Learn more</a></p>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.displayName">
                             <label>Display Name:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.displayName" data-index="\${idx}" value="\${escapeHtml(app.visualElements.displayName)}" />
@@ -1354,7 +1365,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             buildAddVisualAssetMenuHtml(app, idx) +
                             '</div></div>' : ''}
                         \${buildShowNameOnTilesHtml(app, idx)}
-                        <button class="btn btn-secondary update-assets-btn mt-12">Regenerate Assets</button>
+                        <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
@@ -1570,14 +1581,15 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         }
 
         function updateCapabilityCheckboxes(capabilities) {
-            // Uncheck all first
-            document.querySelectorAll('.cap-item input[type="checkbox"]').forEach(cb => {
+            const capContainer = document.getElementById('tab-capabilities');
+            // Uncheck all first (scoped to capabilities tab only)
+            capContainer.querySelectorAll('.cap-item input[type="checkbox"]').forEach(cb => {
                 cb.checked = false;
             });
 
             // Check matching known capabilities
             const knownCapNames = new Set();
-            document.querySelectorAll('.cap-item input[type="checkbox"]').forEach(cb => {
+            capContainer.querySelectorAll('.cap-item input[type="checkbox"]').forEach(cb => {
                 const cap = cb.getAttribute('data-capability');
                 knownCapNames.add(cap);
                 if (capabilities.includes(cap)) {
@@ -1664,7 +1676,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     }
                 };
                 imgEl.onerror = function() { imgEl.classList.remove('loaded'); if (captionEl) captionEl.textContent = ''; };
-                imgEl.src = manifestDirUri + '/' + logoPath.replace(/\\\\/g, '/') + '?t=' + Date.now();
+                imgEl.src = manifestDirUri + '/' + encodeURI(logoPath.replace(/\\\\/g, '/')) + '?t=' + Date.now();
             } else if (imgEl) {
                 imgEl.classList.remove('loaded');
                 imgEl.removeAttribute('alt');

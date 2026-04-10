@@ -12,7 +12,8 @@ const WINDOWS_VERSION_REGEX = /^10\.0\.\d+\.\d+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 // BCP-47: language[-script][-region][-variant] (simplified for common MSIX usage)
-const BCP47_REGEX = /^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*$/;
+// Also accepts private-use tags like "x-generate" used by MSIX tooling
+const BCP47_REGEX = /^(?:x(?:-[a-zA-Z0-9]{1,8})+|[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*)$/;
 
 /** Returns true if a path has a non-.png file extension (i.e. an unsupported image format). */
 function hasNonPngExtension(path: string): boolean {
@@ -135,7 +136,7 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         if (!res.language) {
             errors.push({ field: `resources.${i}.language`, message: 'Language is required.', severity: 'error' });
         } else if (!BCP47_REGEX.test(res.language)) {
-            errors.push({ field: `resources.${i}.language`, message: 'Language must be a valid BCP-47 tag (e.g. en, en-US, zh-Hans-CN).', severity: 'error' });
+            errors.push({ field: `resources.${i}.language`, message: 'Language must be a valid BCP-47 tag (e.g. en, en-US, zh-Hans-CN) or x-generate.', severity: 'error' });
         }
     }
 

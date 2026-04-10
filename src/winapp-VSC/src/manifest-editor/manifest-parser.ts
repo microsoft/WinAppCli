@@ -26,20 +26,6 @@ const NS = {
     desktop: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10',
 };
 
-/** Remove an element and its preceding whitespace text node. */
-function removeElementClean(parent: Element, child: Element): void {
-    const prev = child.previousSibling;
-    if (prev && prev.nodeType === 3 && /^\s*$/.test(prev.nodeValue || '')) {
-        parent.removeChild(prev);
-    }
-    parent.removeChild(child);
-}
-
-/** Collapse consecutive blank lines into a single newline. */
-function cleanupBlankLines(xml: string): string {
-    return xml.replace(/\n[ \t]*\n([ \t]*\n)*/g, '\n');
-}
-
 /**
  * Parse appxmanifest.xml text into a ManifestData object.
  *
@@ -99,157 +85,166 @@ export function applyFieldChange(
 
 /** Add a capability element to the XML. */
 export function addCapability(xmlText: string, capability: string): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    let capsEl = getChildByLocalName(root, 'Capabilities');
+    const { elementName, attrName } = getCapabilityElementInfo(capability);
+    const childXml = `<${elementName} Name="${attrName}" />`;
 
-    if (!capsEl) {
-        capsEl = doc.createElementNS(NS.default, 'Capabilities');
-        root.appendChild(capsEl);
+    let result = xmlText;
+
+    // Ensure rescap namespace is declared if adding a restricted capability
+    if (capability.startsWith('rescap:')) {
+        const rescapDecl = 'xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"';
+        if (!result.includes(rescapDecl)) {
+            result = result.replace(/<Package\b/, '<Package ' + rescapDecl);
+        }
     }
 
-    // Determine namespace and element name
-    const { elementName, ns, attrName } = getCapabilityElementInfo(capability);
-    const el = ns ? doc.createElementNS(ns, elementName) : doc.createElementNS(NS.default, elementName);
-    el.setAttribute('Name', attrName);
-    capsEl.appendChild(doc.createTextNode('  '));
-    capsEl.appendChild(el);
-    capsEl.appendChild(doc.createTextNode('\n  '));
+    const bounds = findParentBounds(result, 'Capabilities');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
 
-    return new XMLSerializer().serializeToString(doc);
+    // No Capabilities element — create one before </Package>
+    const pkgClose = result.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return result; }
+    const pkgIndent = detectIndent(result, pkgClose);
+    const parentIndent = pkgIndent + '  ';
+    const block = parentIndent + '<Capabilities>\n' +
+        parentIndent + '  ' + childXml + '\n' +
+        parentIndent + '</Capabilities>\n';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
+    return result.substring(0, lineStart) + block + result.substring(lineStart);
 }
 
 /** Remove a capability element from the XML. */
 export function removeCapability(xmlText: string, capability: string): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const capsEl = getChildByLocalName(root, 'Capabilities');
-    if (!capsEl) { return xmlText; }
+    const bounds = findParentBounds(xmlText, 'Capabilities');
+    if (!bounds) { return xmlText; }
 
     const { attrName, namespace: capNs } = parseCapabilityString(capability);
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
 
-    const children = capsEl.childNodes;
+    // Search backwards (last match first, same as original behavior)
     for (let i = children.length - 1; i >= 0; i--) {
         const child = children[i];
-        if (child.nodeType === 1) { // ELEMENT_NODE
-            const el = child as Element;
-            if (el.getAttribute('Name') === attrName && matchesCapabilityNamespace(el, capNs)) {
-                removeElementClean(capsEl, el);
-                break;
-            }
-        }
+        const childXml = xmlText.substring(child.start, child.end);
+        if (!matchesCapabilityTag(childXml, capNs)) { continue; }
+        if (!hasNameAttribute(childXml, attrName)) { continue; }
+        return removeElementWithWhitespace(xmlText, child.start, child.end, bounds.contentStart);
     }
 
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    return xmlText;
 }
 
 /** Add a PackageDependency element. */
 export function addPackageDependency(xmlText: string, dep: PackageDependencyData): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    let depsEl = getChildByLocalName(root, 'Dependencies');
+    let attrs = `Name="${dep.name}"`;
+    if (dep.minVersion) { attrs += ` MinVersion="${dep.minVersion}"`; }
+    if (dep.publisher) { attrs += ` Publisher="${dep.publisher}"`; }
+    const childXml = `<PackageDependency ${attrs} />`;
 
-    if (!depsEl) {
-        depsEl = doc.createElementNS(NS.default, 'Dependencies');
-        root.appendChild(depsEl);
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(xmlText, bounds.openStart);
+        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
     }
 
-    const el = doc.createElementNS(NS.default, 'PackageDependency');
-    el.setAttribute('Name', dep.name);
-    if (dep.minVersion) { el.setAttribute('MinVersion', dep.minVersion); }
-    if (dep.publisher) { el.setAttribute('Publisher', dep.publisher); }
-    depsEl.appendChild(doc.createTextNode('  '));
-    depsEl.appendChild(el);
-    depsEl.appendChild(doc.createTextNode('\n  '));
-
-    return new XMLSerializer().serializeToString(doc);
+    // No Dependencies element — create one before </Package>
+    const pkgClose = xmlText.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return xmlText; }
+    const pkgIndent = detectIndent(xmlText, pkgClose);
+    const parentIndent = pkgIndent + '  ';
+    const block = parentIndent + '<Dependencies>\n' +
+        parentIndent + '  ' + childXml + '\n' +
+        parentIndent + '</Dependencies>\n';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
+    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
 }
 
 /** Remove a PackageDependency element by index. */
 export function removePackageDependency(xmlText: string, index: number): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const depsEl = getChildByLocalName(root, 'Dependencies');
-    if (!depsEl) { return xmlText; }
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
 
-    const pkgDeps = getChildrenByLocalName(depsEl, 'PackageDependency');
-    if (index >= 0 && index < pkgDeps.length) {
-        removeElementClean(depsEl, pkgDeps[index]);
-    }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const pkgDeps = children.filter(c => /^<PackageDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= pkgDeps.length) { return xmlText; }
 
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    return removeElementWithWhitespace(xmlText, pkgDeps[index].start, pkgDeps[index].end, bounds.contentStart);
 }
 
 /** Add a TargetDeviceFamily element. */
 export function addTargetDeviceFamily(xmlText: string, family: TargetDeviceFamilyData): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    let depsEl = getChildByLocalName(root, 'Dependencies');
+    const childXml = `<TargetDeviceFamily Name="${family.name}" MinVersion="${family.minVersion}" MaxVersionTested="${family.maxVersionTested}" />`;
 
-    if (!depsEl) {
-        depsEl = doc.createElementNS(NS.default, 'Dependencies');
-        root.appendChild(depsEl);
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(xmlText, bounds.openStart);
+        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
     }
 
-    const el = doc.createElementNS(NS.default, 'TargetDeviceFamily');
-    el.setAttribute('Name', family.name);
-    el.setAttribute('MinVersion', family.minVersion);
-    el.setAttribute('MaxVersionTested', family.maxVersionTested);
-    depsEl.appendChild(doc.createTextNode('  '));
-    depsEl.appendChild(el);
-    depsEl.appendChild(doc.createTextNode('\n  '));
-
-    return new XMLSerializer().serializeToString(doc);
+    // No Dependencies element — create one before </Package>
+    const pkgClose = xmlText.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return xmlText; }
+    const pkgIndent = detectIndent(xmlText, pkgClose);
+    const parentIndent = pkgIndent + '  ';
+    const block = parentIndent + '<Dependencies>\n' +
+        parentIndent + '  ' + childXml + '\n' +
+        parentIndent + '</Dependencies>\n';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
+    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
 }
 
 /** Remove a TargetDeviceFamily element by index. */
 export function removeTargetDeviceFamily(xmlText: string, index: number): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const depsEl = getChildByLocalName(root, 'Dependencies');
-    if (!depsEl) { return xmlText; }
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
 
-    const families = getChildrenByLocalName(depsEl, 'TargetDeviceFamily');
-    if (index >= 0 && index < families.length) {
-        removeElementClean(depsEl, families[index]);
-    }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const families = children.filter(c => /^<TargetDeviceFamily\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= families.length) { return xmlText; }
 
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    return removeElementWithWhitespace(xmlText, families[index].start, families[index].end, bounds.contentStart);
 }
 
 /** Add a Resource element to the XML. */
 export function addResource(xmlText: string, resource: ResourceData): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    let resourcesEl = getChildByLocalName(root, 'Resources');
+    let attrs = '';
+    if (resource.language) { attrs = ` Language="${resource.language}"`; }
+    const childXml = `<Resource${attrs} />`;
 
-    if (!resourcesEl) {
-        resourcesEl = doc.createElementNS(NS.default, 'Resources');
-        root.appendChild(resourcesEl);
+    const bounds = findParentBounds(xmlText, 'Resources');
+    if (bounds) {
+        const parentIndent = detectIndent(xmlText, bounds.openStart);
+        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
     }
 
-    const el = doc.createElementNS(NS.default, 'Resource');
-    if (resource.language) { el.setAttribute('Language', resource.language); }
-    resourcesEl.appendChild(doc.createTextNode('  '));
-    resourcesEl.appendChild(el);
-    resourcesEl.appendChild(doc.createTextNode('\n  '));
-
-    return new XMLSerializer().serializeToString(doc);
+    // No Resources element — create one before </Package>
+    const pkgClose = xmlText.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return xmlText; }
+    const pkgIndent = detectIndent(xmlText, pkgClose);
+    const parentIndent = pkgIndent + '  ';
+    const block = parentIndent + '<Resources>\n' +
+        parentIndent + '  ' + childXml + '\n' +
+        parentIndent + '</Resources>\n';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
+    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
 }
 
 /** Remove a Resource element by index. */
 export function removeResource(xmlText: string, index: number): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const resourcesEl = getChildByLocalName(root, 'Resources');
-    if (!resourcesEl) { return xmlText; }
+    const bounds = findParentBounds(xmlText, 'Resources');
+    if (!bounds) { return xmlText; }
 
-    const resources = getChildrenByLocalName(resourcesEl, 'Resource');
-    if (index >= 0 && index < resources.length) {
-        removeElementClean(resourcesEl, resources[index]);
-    }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const resources = children.filter(c => /^<Resource\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= resources.length) { return xmlText; }
 
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    return removeElementWithWhitespace(xmlText, resources[index].start, resources[index].end, bounds.contentStart);
 }
 
 /** Set the ShowNameOnTiles entries for an application by index.
@@ -283,8 +278,25 @@ export function setShowNameOnTiles(xmlText: string, appIndex: number, tiles: str
     const hasDT = dtPattern.test(veBlock);
 
     if (!hasDT) {
-        // No DefaultTile — nothing to attach ShowNameOnTiles to
-        // (ShowNameOnTiles only makes sense when at least one tile-size asset is defined)
+        if (tiles.length === 0) { return xml; }
+        // No DefaultTile yet — create one with ShowNameOnTiles inside, before </VisualElements>
+        if (!veCloseMatch) { return xml; }
+        const veIndentMatch = xml.substring(0, veStart).match(/([ \t]*)$/);
+        const veIndent = veIndentMatch ? veIndentMatch[1] : '        ';
+        const dtIndent = veIndent + '  ';
+        const childIndent = dtIndent + '  ';
+        const showOnIndent = childIndent + '  ';
+        let showNameXml = childIndent + '<uap:ShowNameOnTiles>\n';
+        for (const tile of tiles) {
+            showNameXml += showOnIndent + `<uap:ShowOn Tile="${tile}" />\n`;
+        }
+        showNameXml += childIndent + '</uap:ShowNameOnTiles>\n';
+        const newDt = dtIndent + '<uap:DefaultTile>\n' + showNameXml + dtIndent + '</uap:DefaultTile>\n';
+        // Insert before the line containing </VisualElements>
+        const closeAbsPos = veStart + veCloseMatch.index;
+        let lineStart = closeAbsPos;
+        while (lineStart > 0 && xml[lineStart - 1] !== '\n') { lineStart--; }
+        xml = xml.substring(0, lineStart) + newDt + xml.substring(lineStart);
         return xml;
     }
 
@@ -320,16 +332,10 @@ export function setShowNameOnTiles(xmlText: string, appIndex: number, tiles: str
     showNameXml += childIndent + '</uap:ShowNameOnTiles>';
 
     if (showNameMatch) {
-        // Replace existing ShowNameOnTiles
+        // Replace existing ShowNameOnTiles — match includes leading [ \t]* and trailing \s*
         const absStart = veStart + showNameMatch.index;
-        // Trim leading whitespace from the match to insert cleanly
-        const trimmedMatch = showNameMatch[0].replace(/^\s*\n?/, '');
-        const trimmedStart = xml.indexOf(trimmedMatch, absStart - 1);
-        if (trimmedStart >= 0) {
-            xml = xml.substring(0, trimmedStart) + showNameXml + xml.substring(trimmedStart + trimmedMatch.length);
-        } else {
-            xml = xml.substring(0, absStart) + '\n' + showNameXml + xml.substring(absStart + showNameMatch[0].length);
-        }
+        const absEnd = absStart + showNameMatch[0].length;
+        xml = xml.substring(0, absStart) + showNameXml + '\n' + dtIndent + xml.substring(absEnd);
     } else {
         // Insert ShowNameOnTiles — need to handle self-closing vs open DefaultTile
         const dtSelfClose = /<([a-zA-Z0-9]*:?DefaultTile)\b([^>]*?)\/>/s;
@@ -423,28 +429,40 @@ export function addApplication(xmlText: string): string {
 
 /** Remove an Application element from the manifest. */
 export function removeApplication(xmlText: string, index: number): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const appsEl = getChildByLocalName(root, 'Applications');
-    if (!appsEl) { return xmlText; }
+    const bounds = findParentBounds(xmlText, 'Applications');
+    if (!bounds) { return xmlText; }
 
-    const apps = getChildrenByLocalName(appsEl, 'Application');
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const apps = children.filter(c => /^<Application\b/.test(xmlText.substring(c.start, c.end)));
     if (index < 0 || index >= apps.length || apps.length <= 1) { return xmlText; }
 
-    removeElementClean(appsEl, apps[index]);
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    return removeElementWithWhitespace(xmlText, apps[index].start, apps[index].end, bounds.contentStart);
 }
 
 export function addExtension(xmlText: string, appIndex: number, extensionXml: string): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const appsEl = getChildByLocalName(root, 'Applications');
-    if (!appsEl) { return xmlText; }
-
-    const apps = getChildrenByLocalName(appsEl, 'Application');
-    if (appIndex >= apps.length) { return xmlText; }
-    const appEl = apps[appIndex];
-    const hasExtensions = getChildByLocalName(appEl, 'Extensions') !== null;
+    // Determine if the target Application has an <Extensions> block (string-based check)
+    let hasExtensions = false;
+    const appOpenRegex = /<Application\b/g;
+    let appOpenMatch: RegExpExecArray | null;
+    let appOpenCount = 0;
+    let targetAppStart = -1;
+    while ((appOpenMatch = appOpenRegex.exec(xmlText)) !== null) {
+        if (appOpenCount === appIndex) { targetAppStart = appOpenMatch.index; break; }
+        appOpenCount++;
+    }
+    if (targetAppStart < 0) { return xmlText; }
+    const appCloseTagStr = '</Application>';
+    let targetAppClose = -1;
+    let acCount = 0;
+    let acFrom = 0;
+    while (acCount <= appIndex) {
+        targetAppClose = xmlText.indexOf(appCloseTagStr, acFrom);
+        if (targetAppClose < 0) { return xmlText; }
+        if (acCount === appIndex) { break; }
+        acFrom = targetAppClose + appCloseTagStr.length;
+        acCount++;
+    }
+    hasExtensions = xmlText.substring(targetAppStart, targetAppClose).includes('<Extensions>');
 
     let result = xmlText;
 
@@ -526,39 +544,212 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     }
 }
 
-/** Remove an extension element from an application. */
+/** Remove an extension element from an application (string-based to preserve formatting). */
 export function removeExtension(xmlText: string, appIndex: number, extIndex: number): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const appsEl = getChildByLocalName(root, 'Applications');
-    if (!appsEl) { return xmlText; }
-
-    const apps = getChildrenByLocalName(appsEl, 'Application');
-    if (appIndex >= apps.length) { return xmlText; }
-    const appEl = apps[appIndex];
-
-    const extEl = getChildByLocalName(appEl, 'Extensions');
-    if (!extEl) { return xmlText; }
-
-    const extChildren: Element[] = [];
-    const nodes = extEl.childNodes;
-    for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].nodeType === 1) { extChildren.push(nodes[i] as Element); }
-    }
-    if (extIndex >= 0 && extIndex < extChildren.length) {
-        removeElementClean(extEl, extChildren[extIndex]);
+    // Find the nth </Application> to scope to the correct application
+    const closeAppTag = '</Application>';
+    let appCloseIdx = -1;
+    let count = 0;
+    let searchFrom = 0;
+    while (count <= appIndex) {
+        appCloseIdx = xmlText.indexOf(closeAppTag, searchFrom);
+        if (appCloseIdx < 0) { return xmlText; }
+        if (count === appIndex) { break; }
+        searchFrom = appCloseIdx + closeAppTag.length;
+        count++;
     }
 
-    // If no extensions remain, remove the empty <Extensions> element
-    let remainingElements = 0;
-    for (let i = 0; i < extEl.childNodes.length; i++) {
-        if (extEl.childNodes[i].nodeType === 1) { remainingElements++; }
+    // Find <Extensions> and </Extensions> within this Application
+    const extOpenTag = '<Extensions>';
+    const extCloseTag = '</Extensions>';
+    const extOpenIdx = xmlText.lastIndexOf(extOpenTag, appCloseIdx);
+    if (extOpenIdx < 0) { return xmlText; }
+    const extCloseIdx = xmlText.indexOf(extCloseTag, extOpenIdx);
+    if (extCloseIdx < 0 || extCloseIdx > appCloseIdx) { return xmlText; }
+
+    const contentStart = extOpenIdx + extOpenTag.length;
+    const contentEnd = extCloseIdx;
+
+    // Find all direct child elements within <Extensions>...</Extensions>
+    const children = findDirectChildElementBounds(xmlText, contentStart, contentEnd);
+    if (extIndex < 0 || extIndex >= children.length) { return xmlText; }
+
+    const target = children[extIndex];
+
+    // Expand removal range to include leading whitespace (indentation) and trailing newline
+    let removeStart = target.start;
+    while (removeStart > contentStart && (xmlText[removeStart - 1] === ' ' || xmlText[removeStart - 1] === '\t')) {
+        removeStart--;
     }
-    if (remainingElements === 0) {
-        removeElementClean(appEl, extEl);
+    // Also consume the preceding newline
+    if (removeStart > contentStart && xmlText[removeStart - 1] === '\n') {
+        removeStart--;
+        if (removeStart > contentStart && xmlText[removeStart - 1] === '\r') {
+            removeStart--;
+        }
     }
 
-    return cleanupBlankLines(new XMLSerializer().serializeToString(doc));
+    let result = xmlText.substring(0, removeStart) + xmlText.substring(target.end);
+
+    // Check if Extensions is now empty (no more child elements)
+    const newExtOpenIdx = result.lastIndexOf(extOpenTag, appCloseIdx);
+    if (newExtOpenIdx >= 0) {
+        const newExtCloseIdx = result.indexOf(extCloseTag, newExtOpenIdx);
+        if (newExtCloseIdx >= 0) {
+            const innerContent = result.substring(newExtOpenIdx + extOpenTag.length, newExtCloseIdx);
+            if (innerContent.trim() === '') {
+                // Remove the entire <Extensions>...</Extensions> block including surrounding whitespace
+                let blockStart = newExtOpenIdx;
+                while (blockStart > 0 && (result[blockStart - 1] === ' ' || result[blockStart - 1] === '\t')) {
+                    blockStart--;
+                }
+                if (blockStart > 0 && result[blockStart - 1] === '\n') {
+                    blockStart--;
+                    if (blockStart > 0 && result[blockStart - 1] === '\r') {
+                        blockStart--;
+                    }
+                }
+                const blockEnd = newExtCloseIdx + extCloseTag.length;
+                result = result.substring(0, blockStart) + result.substring(blockEnd);
+            }
+        }
+    }
+
+    return result;
+}
+
+/** Find the start/end positions of direct child elements within an XML region. */
+function findDirectChildElementBounds(xml: string, regionStart: number, regionEnd: number): Array<{start: number; end: number}> {
+    const elements: Array<{start: number; end: number}> = [];
+    let pos = regionStart;
+
+    while (pos < regionEnd) {
+        const lt = xml.indexOf('<', pos);
+        if (lt === -1 || lt >= regionEnd) { break; }
+
+        // Skip comments
+        if (xml[lt + 1] === '!' && xml[lt + 2] === '-' && xml[lt + 3] === '-') {
+            const commentEnd = xml.indexOf('-->', lt);
+            if (commentEnd === -1) { break; }
+            pos = commentEnd + 3;
+            continue;
+        }
+
+        // Skip closing tags (parent's close tag or unexpected)
+        if (xml[lt + 1] === '/') { break; }
+
+        // Skip processing instructions
+        if (xml[lt + 1] === '?') {
+            const piEnd = xml.indexOf('?>', lt);
+            if (piEnd === -1) { break; }
+            pos = piEnd + 2;
+            continue;
+        }
+
+        // This is an element opening tag
+        const elemStart = lt;
+        const gt = xml.indexOf('>', lt);
+        if (gt === -1) { break; }
+
+        if (xml[gt - 1] === '/') {
+            // Self-closing element
+            elements.push({ start: elemStart, end: gt + 1 });
+            pos = gt + 1;
+            continue;
+        }
+
+        // Non-self-closing — track depth to find matching close
+        let depth = 1;
+        pos = gt + 1;
+        while (pos < xml.length && depth > 0) {
+            const nextLt = xml.indexOf('<', pos);
+            if (nextLt === -1) { break; }
+
+            if (xml[nextLt + 1] === '!' && xml[nextLt + 2] === '-' && xml[nextLt + 3] === '-') {
+                const ce = xml.indexOf('-->', nextLt);
+                if (ce === -1) { break; }
+                pos = ce + 3;
+                continue;
+            }
+
+            if (xml[nextLt + 1] === '/') {
+                depth--;
+                const closeGt = xml.indexOf('>', nextLt);
+                if (closeGt === -1) { break; }
+                pos = closeGt + 1;
+                if (depth === 0) {
+                    elements.push({ start: elemStart, end: closeGt + 1 });
+                }
+            } else {
+                const openGt = xml.indexOf('>', nextLt);
+                if (openGt === -1) { break; }
+                if (xml[openGt - 1] === '/') {
+                    // Self-closing nested element, doesn't change depth
+                    pos = openGt + 1;
+                } else {
+                    depth++;
+                    pos = openGt + 1;
+                }
+            }
+        }
+    }
+
+    return elements;
+}
+
+/** Find the bounds of a parent element by local name (handles optional namespace prefix). */
+function findParentBounds(xml: string, localName: string): { openStart: number; contentStart: number; contentEnd: number; closeEnd: number } | null {
+    const openPattern = new RegExp(`<(?:[a-zA-Z0-9]+:)?${escapeRegex(localName)}\\b`);
+    const openMatch = openPattern.exec(xml);
+    if (!openMatch) { return null; }
+    const openStart = openMatch.index;
+    const gt = xml.indexOf('>', openStart);
+    if (gt === -1) { return null; }
+    if (xml[gt - 1] === '/') { return null; } // self-closing
+    const contentStart = gt + 1;
+    // Find matching close tag
+    const closePattern = new RegExp(`</(?:[a-zA-Z0-9]+:)?${escapeRegex(localName)}\\s*>`);
+    const closeMatch = closePattern.exec(xml.substring(contentStart));
+    if (!closeMatch) { return null; }
+    const contentEnd = contentStart + closeMatch.index;
+    const closeEnd = contentEnd + closeMatch[0].length;
+    return { openStart, contentStart, contentEnd, closeEnd };
+}
+
+/** Remove an element and its leading whitespace/newline from the XML string. */
+function removeElementWithWhitespace(xml: string, elemStart: number, elemEnd: number, containerContentStart: number): string {
+    let removeStart = elemStart;
+    while (removeStart > containerContentStart && (xml[removeStart - 1] === ' ' || xml[removeStart - 1] === '\t')) {
+        removeStart--;
+    }
+    if (removeStart > containerContentStart && xml[removeStart - 1] === '\n') {
+        removeStart--;
+        if (removeStart > containerContentStart && xml[removeStart - 1] === '\r') {
+            removeStart--;
+        }
+    }
+    return xml.substring(0, removeStart) + xml.substring(elemEnd);
+}
+
+/** Insert a child element before a closing tag with proper indentation. */
+function insertChildBeforeClose(xml: string, closeTagPos: number, childXml: string, parentIndent: string): string {
+    const childIndent = parentIndent + '  ';
+    let lineStart = closeTagPos;
+    while (lineStart > 0 && xml[lineStart - 1] !== '\n') { lineStart--; }
+    return xml.substring(0, lineStart) + childIndent + childXml + '\n' + xml.substring(lineStart);
+}
+
+/** Check if an element tag string matches the expected capability namespace prefix. */
+function matchesCapabilityTag(elemXml: string, capNs: string): boolean {
+    if (capNs === 'device') { return /^<DeviceCapability\b/.test(elemXml); }
+    if (capNs === 'rescap') { return /^<rescap:Capability\b/.test(elemXml); }
+    return /^<Capability\b/.test(elemXml);
+}
+
+/** Check if an element tag string has a Name attribute with the given value. */
+function hasNameAttribute(elemXml: string, name: string): boolean {
+    const regex = new RegExp(`\\bName\\s*=\\s*["']${escapeRegex(name)}["']`);
+    return regex.test(elemXml);
 }
 
 /**
@@ -568,60 +759,68 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
 export function updateExtensionField(
     xmlText: string, appIndex: number, extIndex: number, fieldPath: string, value: string, isTextContent?: boolean,
 ): string {
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-    const root = doc.documentElement!;
-    const appsEl = getChildByLocalName(root, 'Applications');
-    if (!appsEl) { return xmlText; }
-
-    const apps = getChildrenByLocalName(appsEl, 'Application');
-    if (appIndex >= apps.length) { return xmlText; }
-    const appEl = apps[appIndex];
-
-    const extEl = getChildByLocalName(appEl, 'Extensions');
-    if (!extEl) { return xmlText; }
-
-    const extChildren: Element[] = [];
-    const nodes = extEl.childNodes;
-    for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].nodeType === 1) { extChildren.push(nodes[i] as Element); }
+    // Find the nth </Application> to scope to the correct application
+    const closeAppTag = '</Application>';
+    let appCloseIdx = -1;
+    let count = 0;
+    let searchFrom = 0;
+    while (count <= appIndex) {
+        appCloseIdx = xmlText.indexOf(closeAppTag, searchFrom);
+        if (appCloseIdx < 0) { return xmlText; }
+        if (count === appIndex) { break; }
+        searchFrom = appCloseIdx + closeAppTag.length;
+        count++;
     }
-    if (extIndex < 0 || extIndex >= extChildren.length) { return xmlText; }
 
-    const extRoot = extChildren[extIndex];
+    // Find <Extensions> and </Extensions> within this Application
+    const extOpenTag = '<Extensions>';
+    const extCloseTag = '</Extensions>';
+    const extOpenIdx = xmlText.lastIndexOf(extOpenTag, appCloseIdx);
+    if (extOpenIdx < 0) { return xmlText; }
+    const extCloseIdx = xmlText.indexOf(extCloseTag, extOpenIdx);
+    if (extCloseIdx < 0 || extCloseIdx > appCloseIdx) { return xmlText; }
 
-    // Find the matching element by walking the extension tree
-    function findElement(el: Element, name: string): Element | null {
-        if ((el.localName || el.nodeName) === name) { return el; }
-        const children = el.childNodes;
-        for (let i = 0; i < children.length; i++) {
-            if (children[i].nodeType === 1) {
-                const found = findElement(children[i] as Element, name);
-                if (found) { return found; }
-            }
-        }
-        return null;
-    }
+    const contentStart = extOpenIdx + extOpenTag.length;
+    const contentEnd = extCloseIdx;
+
+    // Find all direct child elements within <Extensions>
+    const children = findDirectChildElementBounds(xmlText, contentStart, contentEnd);
+    if (extIndex < 0 || extIndex >= children.length) { return xmlText; }
+
+    const target = children[extIndex];
+    let extXml = xmlText.substring(target.start, target.end);
 
     if (isTextContent) {
-        // fieldPath is just the element name (e.g., "Registration")
-        const targetEl = findElement(extRoot, fieldPath);
-        if (targetEl) {
-            // Clear existing text content and set new value
-            while (targetEl.firstChild) { targetEl.removeChild(targetEl.firstChild); }
-            targetEl.appendChild(doc.createTextNode(value));
-        }
+        // fieldPath is just the element name — find <ElementName>text</ElementName>
+        const elemPattern = new RegExp(
+            `(<(?:[a-zA-Z0-9]+:)?${escapeRegex(fieldPath)}\\b[^>]*>)([\\s\\S]*?)(<\\/(?:[a-zA-Z0-9]+:)?${escapeRegex(fieldPath)}\\s*>)`
+        );
+        const match = elemPattern.exec(extXml);
+        if (!match) { return xmlText; }
+        extXml = extXml.substring(0, match.index) + match[1] + value + match[3] + extXml.substring(match.index + match[0].length);
     } else {
         const dotIdx = fieldPath.indexOf('.');
         if (dotIdx < 0) { return xmlText; }
         const elemName = fieldPath.substring(0, dotIdx);
         const attrName = fieldPath.substring(dotIdx + 1);
-        const targetEl = findElement(extRoot, elemName);
-        if (targetEl) {
-            targetEl.setAttribute(attrName, value);
-        }
+
+        // Find the element's opening tag within the extension XML
+        const elemPattern = new RegExp(`<(?:[a-zA-Z0-9]+:)?${escapeRegex(elemName)}\\b[^>]*\\/?>`, 's');
+        const match = elemPattern.exec(extXml);
+        if (!match) { return xmlText; }
+
+        // Replace the attribute value within the matched element tag
+        const attrRegex = new RegExp(`(${escapeRegex(attrName)}\\s*=\\s*)(["'])([^"']*?)\\2`);
+        const attrMatch = attrRegex.exec(match[0]);
+        if (!attrMatch) { return xmlText; }
+
+        const newElem = match[0].substring(0, attrMatch.index)
+            + attrMatch[1] + attrMatch[2] + value + attrMatch[2]
+            + match[0].substring(attrMatch.index + attrMatch[0].length);
+        extXml = extXml.substring(0, match.index) + newElem + extXml.substring(match.index + match[0].length);
     }
 
-    return new XMLSerializer().serializeToString(doc);
+    return xmlText.substring(0, target.start) + extXml + xmlText.substring(target.end);
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────
@@ -822,7 +1021,19 @@ function addAttributeToElement(xml: string, elementPattern: RegExp, attrName: st
     if (!closingMatch) { return xml; }
 
     const insertPos = closingMatch.index;
-    const newElementStr = elementStr.substring(0, insertPos) + ` ${attrName}="${value}"` + elementStr.substring(insertPos);
+
+    // Detect if element is multi-line; if so, match existing attribute indentation
+    const attrIndentMatch = /\n([ \t]+)\w/.exec(elementStr);
+    let attrText: string;
+    if (attrIndentMatch) {
+        // Multi-line element — put new attribute on its own line with same indent
+        attrText = '\n' + attrIndentMatch[1] + `${attrName}="${value}"`;
+    } else {
+        // Single-line element — append with a space
+        attrText = ` ${attrName}="${value}"`;
+    }
+
+    const newElementStr = elementStr.substring(0, insertPos) + attrText + elementStr.substring(insertPos);
     return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
 }
 
@@ -845,7 +1056,12 @@ function applyIdentityChangeString(xml: string, field: string, value: string): s
     const attr = attrMap[field];
     if (!attr) { return xml; }
 
-    return replaceAttribute(xml, /<Identity\b[^>]*>/s, attr, value);
+    const pattern = /<Identity\b[^>]*>/s;
+    const result = replaceAttribute(xml, pattern, attr, value);
+    if (result !== xml) { return result; }
+
+    // Attribute doesn't exist yet — add it
+    return addAttributeToElement(xml, pattern, attr, value);
 }
 
 function applyPhoneIdentityChangeString(xml: string, field: string, value: string): string {
@@ -871,14 +1087,38 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
 
     // Match <Tag>text</Tag> (with any namespace prefix)
     const tagRegex = new RegExp(`(<${tag}>|<[a-zA-Z0-9]+:${tag}>)(.*?)(<\\/${tag}>|<\\/[a-zA-Z0-9]+:${tag}>)`, 's');
+
+    // If value is empty, remove the element entirely
+    if (!value) {
+        const fullTagRegex = new RegExp(`[ \t]*(?:<${tag}>|<[a-zA-Z0-9]+:${tag}>).*?(?:<\\/${tag}>|<\\/[a-zA-Z0-9]+:${tag}>)[ \t]*\\r?\\n?`, 's');
+        const removeMatch = fullTagRegex.exec(xml);
+        if (removeMatch) {
+            return xml.substring(0, removeMatch.index) + xml.substring(removeMatch.index + removeMatch[0].length);
+        }
+        return xml;
+    }
+
     const result = replaceElementText(xml, tagRegex, value);
 
-    // If the element wasn't found and the value is non-empty, fall back to DOM
+    // If the element wasn't found and the value is non-empty, insert it into <Properties>
     if (result === xml && value) {
-        const doc = new DOMParser().parseFromString(xml, 'application/xml');
-        const root = doc.documentElement!;
-        applyPropertiesChange(root, doc, field, value);
-        return new XMLSerializer().serializeToString(doc);
+        let workXml = xml;
+        let propsBounds = findParentBounds(workXml, 'Properties');
+        if (!propsBounds) {
+            // Create <Properties> before </Package>
+            const pkgClose = workXml.lastIndexOf('</Package>');
+            if (pkgClose < 0) { return xml; }
+            const pkgIndent = detectIndent(workXml, pkgClose);
+            const propsIndent = pkgIndent + '  ';
+            const block = propsIndent + '<Properties>\n' + propsIndent + '</Properties>\n';
+            let lineStart = pkgClose;
+            while (lineStart > 0 && workXml[lineStart - 1] !== '\n') { lineStart--; }
+            workXml = workXml.substring(0, lineStart) + block + workXml.substring(lineStart);
+            propsBounds = findParentBounds(workXml, 'Properties');
+            if (!propsBounds) { return xml; }
+        }
+        const propIndent = detectIndent(workXml, propsBounds.openStart);
+        return insertChildBeforeClose(workXml, propsBounds.contentEnd, `<${tag}>${value}</${tag}>`, propIndent);
     }
 
     return result;
@@ -896,12 +1136,14 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
         if (!attr) { return xml; }
 
         // Find the Nth TargetDeviceFamily element
-        const regex = /<TargetDeviceFamily\b[^>]*>/gs;
+        const regex = /<TargetDeviceFamily\b[^>]*\/?>/gs;
         let match: RegExpExecArray | null;
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
             }
             count++;
         }
@@ -915,12 +1157,15 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
         const attr = attrMap[subField];
         if (!attr) { return xml; }
 
-        const regex = /<PackageDependency\b[^>]*>/gs;
+        const regex = /<PackageDependency\b[^>]*\/?>/gs;
         let match: RegExpExecArray | null;
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                if (result !== xml) { return result; }
+                // Attribute doesn't exist yet — add it
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
             }
             count++;
         }
@@ -930,12 +1175,14 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
 
 function applyResourcesChangeString(xml: string, field: string, value: string, index: number): string {
     if (field === 'language') {
-        const regex = /<Resource\b[^>]*>/gs;
+        const regex = /<Resource\b[^>]*\/?>/gs;
         let match: RegExpExecArray | null;
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
             }
             count++;
         }
@@ -956,7 +1203,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                return replaceAttribute(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
             }
             count++;
         }
@@ -1084,173 +1333,6 @@ function buildVisualChildElement(veField: string, value: string): string | null 
     return null;
 }
 
-// ─── DOM-based change helpers (used as fallback for element creation) ─
-
-function applyIdentityChange(root: Element, field: string, value: string): void {
-    const el = getChildByLocalName(root, 'Identity');
-    if (!el) { return; }
-
-    const attrMap: Record<string, string> = {
-        name: 'Name',
-        publisher: 'Publisher',
-        version: 'Version',
-        processorArchitecture: 'ProcessorArchitecture',
-    };
-    const attr = attrMap[field];
-    if (attr) { el.setAttribute(attr, value); }
-}
-
-function applyPropertiesChange(root: Element, doc: Document, field: string, value: string): void {
-    let propsEl = getChildByLocalName(root, 'Properties');
-    if (!propsEl) {
-        propsEl = doc.createElementNS(NS.default, 'Properties');
-        root.appendChild(propsEl);
-    }
-
-    const tagMap: Record<string, string> = {
-        displayName: 'DisplayName',
-        publisherDisplayName: 'PublisherDisplayName',
-        description: 'Description',
-        logo: 'Logo',
-    };
-    const tag = tagMap[field];
-    if (!tag) { return; }
-
-    let child = getChildByLocalName(propsEl, tag);
-
-    // Only remove tags for optional fields when value is cleared
-    const optionalFields = ['Description'];
-    if (!value && child && optionalFields.includes(tag)) {
-        removeElementClean(propsEl, child);
-        return;
-    }
-
-    if (!child) {
-        child = doc.createElementNS(NS.default, tag);
-        // Insert with proper indentation before the closing whitespace of Properties
-        const lastChild = propsEl.lastChild;
-        if (lastChild && lastChild.nodeType === 3 && /^\s*$/.test(lastChild.nodeValue || '')) {
-            // Insert newline + indent before the element, then element, before trailing whitespace
-            propsEl.insertBefore(doc.createTextNode('\n    '), lastChild);
-            propsEl.insertBefore(child, lastChild);
-        } else {
-            propsEl.appendChild(doc.createTextNode('\n    '));
-            propsEl.appendChild(child);
-            propsEl.appendChild(doc.createTextNode('\n  '));
-        }
-    }
-    // Replace text content
-    while (child.firstChild) { child.removeChild(child.firstChild); }
-    child.appendChild(doc.createTextNode(value));
-}
-
-function applyDependenciesChange(root: Element, field: string, value: string, index: number): void {
-    const depsEl = getChildByLocalName(root, 'Dependencies');
-    if (!depsEl) { return; }
-
-    if (field.startsWith('targetDeviceFamily.')) {
-        const subField = field.replace('targetDeviceFamily.', '');
-        const families = getChildrenByLocalName(depsEl, 'TargetDeviceFamily');
-        if (index < families.length) {
-            const attrMap: Record<string, string> = {
-                name: 'Name',
-                minVersion: 'MinVersion',
-                maxVersionTested: 'MaxVersionTested',
-            };
-            const attr = attrMap[subField];
-            if (attr) { families[index].setAttribute(attr, value); }
-        }
-    } else if (field.startsWith('packageDependency.')) {
-        const subField = field.replace('packageDependency.', '');
-        const deps = getChildrenByLocalName(depsEl, 'PackageDependency');
-        if (index < deps.length) {
-            const attrMap: Record<string, string> = {
-                name: 'Name',
-                minVersion: 'MinVersion',
-                publisher: 'Publisher',
-            };
-            const attr = attrMap[subField];
-            if (attr) { deps[index].setAttribute(attr, value); }
-        }
-    }
-}
-
-function applyApplicationChange(root: Element, field: string, value: string, index: number): void {
-    const appsEl = getChildByLocalName(root, 'Applications');
-    if (!appsEl) { return; }
-
-    const apps = getChildrenByLocalName(appsEl, 'Application');
-    if (index >= apps.length) { return; }
-    const appEl = apps[index];
-
-    // Top-level Application attributes
-    const appAttrMap: Record<string, string> = {
-        id: 'Id',
-        executable: 'Executable',
-        entryPoint: 'EntryPoint',
-    };
-    if (appAttrMap[field]) {
-        appEl.setAttribute(appAttrMap[field], value);
-        return;
-    }
-
-    // VisualElements attributes
-    if (field.startsWith('visualElements.')) {
-        const veField = field.replace('visualElements.', '');
-        const visualEl = findChildByLocalNameNS(appEl, 'VisualElements');
-        if (!visualEl) { return; }
-
-        // DefaultTile attributes
-        const defaultTileAttrs: Record<string, string> = {
-            wide310x150Logo: 'Wide310x150Logo',
-            square71x71Logo: 'Square71x71Logo',
-            square310x310Logo: 'Square310x310Logo',
-        };
-        if (defaultTileAttrs[veField]) {
-            let defaultTile = findChildByLocalNameNS(visualEl, 'DefaultTile');
-            if (!defaultTile) {
-                defaultTile = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:DefaultTile');
-                visualEl.appendChild(defaultTile);
-            }
-            defaultTile.setAttribute(defaultTileAttrs[veField], value);
-            return;
-        }
-
-        // LockScreen attribute
-        if (veField === 'badgeLogo') {
-            let lockScreen = findChildByLocalNameNS(visualEl, 'LockScreen');
-            if (!lockScreen) {
-                lockScreen = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:LockScreen');
-                lockScreen.setAttribute('Notification', 'badge');
-                visualEl.appendChild(lockScreen);
-            }
-            lockScreen.setAttribute('BadgeLogo', value);
-            return;
-        }
-
-        // SplashScreen attribute
-        if (veField === 'splashScreenImage') {
-            let splashScreen = findChildByLocalNameNS(visualEl, 'SplashScreen');
-            if (!splashScreen) {
-                splashScreen = visualEl.ownerDocument!.createElementNS(NS.uap, 'uap:SplashScreen');
-                visualEl.appendChild(splashScreen);
-            }
-            splashScreen.setAttribute('Image', value);
-            return;
-        }
-
-        const attrMap: Record<string, string> = {
-            displayName: 'DisplayName',
-            description: 'Description',
-            backgroundColor: 'BackgroundColor',
-            square150x150Logo: 'Square150x150Logo',
-            square44x44Logo: 'Square44x44Logo',
-        };
-        const attr = attrMap[veField];
-        if (attr) { visualEl.setAttribute(attr, value); }
-    }
-}
-
 // ─── DOM utility helpers ────────────────────────────────────────────
 
 function getChildByLocalName(parent: Element | null, localName: string): Element | null {
@@ -1314,11 +1396,4 @@ function parseCapabilityString(capability: string): { attrName: string; namespac
         return { attrName: capability.replace('device:', ''), namespace: 'device' };
     }
     return { attrName: capability, namespace: '' };
-}
-
-/** Check if an element matches the expected capability namespace. */
-function matchesCapabilityNamespace(el: Element, capNs: string): boolean {
-    if (capNs === 'device') { return el.localName === 'DeviceCapability'; }
-    if (capNs === 'rescap') { return (el.prefix ?? '') === 'rescap'; }
-    return el.localName === 'Capability' && (el.prefix ?? '') !== 'rescap';
 }

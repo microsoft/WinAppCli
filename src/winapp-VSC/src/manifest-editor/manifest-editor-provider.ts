@@ -44,9 +44,16 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         const manifestDir = vscode.Uri.file(path.dirname(document.uri.fsPath));
+        const resourceRoots: vscode.Uri[] = [this.context.extensionUri, manifestDir];
+        // Include workspace folder roots so relative paths with ".." can resolve
+        if (vscode.workspace.workspaceFolders) {
+            for (const wf of vscode.workspace.workspaceFolders) {
+                resourceRoots.push(wf.uri);
+            }
+        }
         webviewPanel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.context.extensionUri, manifestDir],
+            localResourceRoots: resourceRoots,
         };
 
         const nonce = crypto.randomBytes(16).toString('hex');
