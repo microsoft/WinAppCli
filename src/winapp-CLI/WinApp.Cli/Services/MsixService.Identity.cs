@@ -173,7 +173,11 @@ internal partial class MsixService
 
         SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
 
-        var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name));
+        // SyncFilesToOutputDirectory renames Package.appxmanifest → appxmanifest.xml
+        var copiedManifestName = string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase)
+            ? "appxmanifest.xml"
+            : appxManifestPath.Name;
+        var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
         manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
         var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
             .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
