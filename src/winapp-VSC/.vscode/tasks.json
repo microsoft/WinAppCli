@@ -7,7 +7,17 @@
 			"group": "build",
 			"isBackground": true,
 			"label": "npm: watch",
-			"problemMatcher": []
+			"problemMatcher": {
+				"pattern": {
+					"regexp": "^✘ \\[ERROR\\] (.+)$",
+					"message": 1
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": "^\\[esbuild\\] watching for changes",
+					"endsPattern": "^\\[esbuild\\] build finished"
+				}
+			}
 		},
 		{
 			"type": "npm",

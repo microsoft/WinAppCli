@@ -54,6 +54,7 @@ async function runWinappCommand(extensionPath: string, command: string, cwd: str
 	const terminal = vscode.window.createTerminal({
 		name: 'WinApp CLI',
 		cwd: cwd,
+		shellPath: 'powershell.exe',
 		env: { WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE }
 	});
 

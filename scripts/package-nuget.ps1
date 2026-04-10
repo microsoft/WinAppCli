@@ -23,7 +23,10 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory=$false)]
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipTemplates = $false
 )
 
 # Ensure we're running from the project root
