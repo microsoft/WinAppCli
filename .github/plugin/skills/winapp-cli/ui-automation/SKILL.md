@@ -427,6 +427,7 @@ Wait for an element to appear, disappear, or have a property reach a target valu
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--contains` | Use substring matching for --value instead of exact match | (none) |
 | `--gone` | Wait for element to disappear instead of appear | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--property` | Property name to read or filter on | (none) |

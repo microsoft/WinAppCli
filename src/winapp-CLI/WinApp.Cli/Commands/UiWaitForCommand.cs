@@ -20,6 +20,7 @@ internal class UiWaitForCommand : Command, IShortDescription
 
     public static Option<bool> GoneOption { get; }
     public static Option<string?> ValueOption { get; }
+    public static Option<bool> ContainsOption { get; }
 
     static UiWaitForCommand()
     {
@@ -31,6 +32,11 @@ internal class UiWaitForCommand : Command, IShortDescription
         ValueOption = new Option<string?>("--value")
         {
             Description = "Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead."
+        };
+
+        ContainsOption = new Option<bool>("--contains")
+        {
+            Description = "Use substring matching for --value instead of exact match"
         };
     }
 
@@ -47,6 +53,7 @@ internal class UiWaitForCommand : Command, IShortDescription
         Options.Add(SharedUiOptions.PropertyOption);
         Options.Add(GoneOption);
         Options.Add(ValueOption);
+        Options.Add(ContainsOption);
     }
 
     public class Handler(
@@ -71,6 +78,7 @@ internal class UiWaitForCommand : Command, IShortDescription
             var gone = parseResult.GetValue(GoneOption);
             var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
             var value = parseResult.GetValue(ValueOption);
+            var contains = parseResult.GetValue(ContainsOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
@@ -144,7 +152,11 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 currentValue = await uiAutomation.GetTextAsync(session, element, cancellationToken);
                             }
 
-                            if (string.Equals(currentValue, value, StringComparison.OrdinalIgnoreCase))
+                            var valueMatches = contains
+                                ? currentValue?.Contains(value!, StringComparison.OrdinalIgnoreCase) == true
+                                : string.Equals(currentValue, value, StringComparison.OrdinalIgnoreCase);
+
+                            if (valueMatches)
                             {
                                 if (json)
                                 {

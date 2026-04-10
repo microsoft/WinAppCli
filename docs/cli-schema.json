@@ -3136,6 +3136,19 @@
               "required": false,
               "recursive": false
             },
+            "--contains": {
+              "description": "Use substring matching for --value instead of exact match",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--gone": {
               "description": "Wait for element to disappear instead of appear",
               "hidden": false,

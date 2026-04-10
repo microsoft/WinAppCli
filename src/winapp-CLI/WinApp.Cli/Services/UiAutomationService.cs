@@ -316,47 +316,113 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             return Task.FromResult<UiElement[]>([]);
         }
 
-        var condition = BuildCondition(selector);
-        if (condition is null)
-        {
-            return Task.FromResult<UiElement[]>([]);
-        }
+        var mainResults = new List<UiElement>();
 
-        IUIAutomationElementArray? found;
-        try
+        // Try exact AutomationId match first (some UIA providers don't support substring matching on AutomationId)
+        if (selector.Query is not null)
         {
-            found = root.FindAll(TreeScope.TreeScope_Descendants, condition);
-        }
-        finally
-        {
-        }
-
-        if (found is null)
-        {
-            return Task.FromResult<UiElement[]>([]);
-        }
-
-        var length = found.get_Length();
-        var count = Math.Min(length, maxResults);
-        var results = new UiElement[count];
-        for (var i = 0; i < count; i++)
-        {
-            var el = found.GetElement(i);
-            results[i] = ToUiElement(el, "", ref nextElementId);
-
-            // For any non-invokable match, find the nearest invokable ancestor
-            if (!IsInvokable(el))
+            var exactAidCondition = _automation.CreatePropertyCondition(
+                UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                ComVariant.Create(selector.Query));
+            var exactMatches = root.FindAll(TreeScope.TreeScope_Descendants, exactAidCondition);
+            if (exactMatches is not null)
             {
-                var ancestor = FindInvokableAncestor(el, root);
-                if (ancestor is not null)
+                for (var i = 0; i < Math.Min(exactMatches.get_Length(), maxResults); i++)
                 {
-                    results[i].InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                    var el = exactMatches.GetElement(i);
+                    var uiEl = ToUiElement(el, "", ref nextElementId);
+                    uiEl.WindowHandle = session.WindowHandle;
+                    mainResults.Add(uiEl);
                 }
             }
         }
 
+        // Then do substring search on Name OR AutomationId (if exact didn't find enough)
+        if (mainResults.Count == 0)
+        {
+            var condition = BuildCondition(selector);
+            if (condition is not null)
+            {
+                var found = root.FindAll(TreeScope.TreeScope_Descendants, condition);
+                if (found is not null)
+                {
+                    var count = Math.Min(found.get_Length(), maxResults);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var el = found.GetElement(i);
+                        var uiEl = ToUiElement(el, "", ref nextElementId);
+                        uiEl.WindowHandle = session.WindowHandle;
+
+                        if (!IsInvokable(el))
+                        {
+                            var ancestor = FindInvokableAncestor(el, root);
+                            if (ancestor is not null)
+                            {
+                                uiEl.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                            }
+                        }
+                        mainResults.Add(uiEl);
+                    }
+                }
+            }
+        }
+
+        // If no results on main window, search popup/owned windows
+        if (mainResults.Count == 0)
+        {
+            var allWindows = GetAllAppWindows(session);
+            var mainHwnd = (nint)session.WindowHandle;
+            foreach (var (hwnd, pid, title) in allWindows)
+            {
+                if (hwnd == mainHwnd) { continue; }
+                try
+                {
+                    var windowRoot = GetRootElementForHwnd(hwnd);
+                    if (windowRoot is null) { continue; }
+
+                    // Try exact AutomationId first on popup window
+                    IUIAutomationElementArray? windowFound = null;
+                    if (selector.Query is not null)
+                    {
+                        var exactAidCondition = _automation.CreatePropertyCondition(
+                            UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                            ComVariant.Create(selector.Query));
+                        windowFound = windowRoot.FindAll(TreeScope.TreeScope_Descendants, exactAidCondition);
+                    }
+
+                    // Fall back to substring search
+                    if (windowFound is null || windowFound.get_Length() == 0)
+                    {
+                        var condition = BuildCondition(selector);
+                        if (condition is not null)
+                        {
+                            windowFound = windowRoot.FindAll(TreeScope.TreeScope_Descendants, condition);
+                        }
+                    }
+
+                    if (windowFound is not null)
+                    {
+                        for (var i = 0; i < Math.Min(windowFound.get_Length(), maxResults - mainResults.Count); i++)
+                        {
+                            var el = windowFound.GetElement(i);
+                            var uiEl = ToUiElement(el, "", ref nextElementId);
+                            uiEl.WindowHandle = hwnd;
+                            mainResults.Add(uiEl);
+                        }
+                    }
+                }
+                catch (System.Runtime.InteropServices.COMException ex)
+                {
+                    _logger.LogDebug("COM error searching HWND {Hwnd}: {Message}", hwnd, ex.Message);
+                }
+                if (mainResults.Count >= maxResults) { break; }
+            }
+        }
+
+        var results = mainResults.ToArray();
+
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, results);
+        PromoteUniqueAutomationIds(root, results, session.WindowHandle);
 
         return Task.FromResult(results);
     }
