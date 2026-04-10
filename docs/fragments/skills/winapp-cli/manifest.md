@@ -114,8 +114,6 @@ winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
 
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
 
-> **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
-
 ## Manifest structure overview
 
 A typical `appxmanifest.xml` looks like:
