@@ -31,7 +31,7 @@ internal class UiWaitForCommand : Command, IShortDescription
 
         ValueOption = new Option<string?>("--value")
         {
-            Description = "Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead."
+            Description = "Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead."
         };
 
         ContainsOption = new Option<bool>("--contains")

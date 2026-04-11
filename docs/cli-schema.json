@@ -3223,7 +3223,7 @@
               "recursive": false
             },
             "--value": {
-              "description": "Wait for element value to equal this string. Uses smart fallback (TextPattern ΓåÆ ValuePattern ΓåÆ Name). Combine with --property to check a specific property instead.",
+              "description": "Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
