@@ -367,6 +367,27 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             }
         }
 
+        // If FindAll missed elements (WebView2 can stall UIA tree traversal), try manual tree walk
+        if (mainResults.Count == 0 && selector.Query is not null)
+        {
+            _logger.LogDebug("FindAll returned 0 results, trying manual tree walk fallback");
+            var manualResults = ManualTreeSearch(root, selector.Query, maxResults);
+            foreach (var el in manualResults)
+            {
+                var uiEl = ToUiElement(el, "", ref nextElementId);
+                uiEl.WindowHandle = session.WindowHandle;
+                if (!IsInvokable(el))
+                {
+                    var ancestor = FindInvokableAncestor(el, root);
+                    if (ancestor is not null)
+                    {
+                        uiEl.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                    }
+                }
+                mainResults.Add(uiEl);
+            }
+        }
+
         // If no results on main window, search popup/owned windows
         if (mainResults.Count == 0)
         {
@@ -489,6 +510,20 @@ return Task.FromResult<UiElement?>(null);
 
         if (found is null || found.get_Length() == 0)
         {
+            // FindAll may miss elements after WebView2 controls — try manual tree walk
+            if (selector.Query is not null)
+            {
+                _logger.LogDebug("FindAll returned 0 results, trying manual tree walk fallback");
+                var manualResults = ManualTreeSearch(root, selector.Query, 1);
+                if (manualResults.Count > 0)
+                {
+                    var nextId = 0;
+                    var manualResult = ToUiElement(manualResults[0], "", ref nextId);
+                    manualResult.WindowHandle = session.WindowHandle;
+                    return Task.FromResult<UiElement?>(manualResult);
+                }
+            }
+
             // Element not found on main window — search popup/owned windows
             var otherResult = FindElementOnOtherWindows(session, selector);
             if (otherResult is not null)
@@ -1568,6 +1603,48 @@ return Task.FromResult<UiElement?>(null);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Manual tree walk search using TreeWalker. Slower than FindAll but reliable —
+    /// works around UIA FindAll bugs where WebView2 controls stall the tree traversal
+    /// and cause sibling elements after the WebView to be skipped.
+    /// </summary>
+    private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
+    {
+        var walker = _automation.get_ControlViewWalker();
+        var results = new List<IUIAutomationElement>();
+        ManualTreeSearchRecursive(walker, root, query, maxResults, maxDepth, 0, results);
+        return results;
+    }
+
+    private static void ManualTreeSearchRecursive(IUIAutomationTreeWalker walker, IUIAutomationElement element,
+        string query, int maxResults, int maxDepth, int depth, List<IUIAutomationElement> results)
+    {
+        if (depth > maxDepth || results.Count >= maxResults) { return; }
+
+        IUIAutomationElement? child;
+        try { child = walker.GetFirstChildElement(element); }
+        catch { return; }
+
+        while (child is not null && results.Count < maxResults)
+        {
+            try
+            {
+                var name = SafeGetBstr(() => child.get_CurrentName());
+                var aid = SafeGetBstr(() => child.get_CurrentAutomationId());
+
+                if ((aid is not null && aid.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                    (name is not null && name.Contains(query, StringComparison.OrdinalIgnoreCase)))
+                {
+                    results.Add(child);
+                }
+
+                ManualTreeSearchRecursive(walker, child, query, maxResults, maxDepth, depth + 1, results);
+                child = walker.GetNextSiblingElement(child);
+            }
+            catch { break; }
+        }
     }
 
     private IUIAutomationCondition? BuildCondition(SelectorExpression selector)
