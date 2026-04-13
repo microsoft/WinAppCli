@@ -45,6 +45,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
+            .AddSingleton<ICliUpgradeService, CliUpgradeService>()
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
@@ -63,6 +64,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<ManifestUpdateAssetsCommand, ManifestUpdateAssetsCommand.Handler>()
                 .UseCommandHandler<ManifestAddAliasCommand, ManifestAddAliasCommand.Handler>()
                 .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
+                .UseCommandHandler<UpgradeCommand, UpgradeCommand.Handler>()
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
                 .UseCommandHandler<RunCommand, RunCommand.Handler>()
                 .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()

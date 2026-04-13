@@ -94,3 +94,4 @@ OpenThread
 GetThreadContext
 CONTEXT
 CONTEXT_FLAGS
+GetCurrentPackageFullName

@@ -87,6 +87,13 @@ internal static class Program
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
+
+            // Check for CLI updates (at most once per day, silent on failure)
+            if (!quiet)
+            {
+                var cliUpgradeService = serviceProvider.GetRequiredService<ICliUpgradeService>();
+                await cliUpgradeService.CheckAndNotifyAsync();
+            }
         }
 
         var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();

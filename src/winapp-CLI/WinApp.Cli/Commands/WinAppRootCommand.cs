@@ -60,6 +60,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         PackageCommand packageCommand,
         ManifestCommand manifestCommand,
         UpdateCommand updateCommand,
+        UpgradeCommand upgradeCommand,
         CreateDebugIdentityCommand createDebugIdentityCommand,
         RunCommand runCommand,
         UnregisterCommand unregisterCommand,
@@ -77,6 +78,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(packageCommand);
         Subcommands.Add(manifestCommand);
         Subcommands.Add(updateCommand);
+        Subcommands.Add(upgradeCommand);
         Subcommands.Add(createDebugIdentityCommand);
         Subcommands.Add(runCommand);
         Subcommands.Add(unregisterCommand);
@@ -97,7 +99,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
-            ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
+            ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand), typeof(UpgradeCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
             ("UI Automation", [typeof(UiCommand)])
