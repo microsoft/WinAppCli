@@ -99,7 +99,8 @@ namespace csAddon
 }
 ```
 
-> **📝 Note:** Phi Silica requires Windows 11 with an NPU-equipped device (Copilot+ PC). If you don't have compatible hardware, the API will return a message indicating the model is not available. You can still complete this tutorial and package the app - it will gracefully handle devices without NPU support.
+> [!NOTE]
+> Phi Silica requires Windows 11 with an NPU-equipped device (Copilot+ PC). If you don't have compatible hardware, the API will return a message indicating the model is not available. You can still complete this tutorial and package the app - it will gracefully handle devices without NPU support.
 
 ## Step 3: Build the C# Addon
 
@@ -162,7 +163,8 @@ Before you can use the Phi Silica API, you need to declare the required capabili
 </Capabilities>
 ```
 
-> **💡 Tip:** Different Windows APIs require different capabilities. Always check the API documentation to see what capabilities are needed. Common ones include `microphone`, `webcam`, `location`, and `bluetooth`.
+> [!TIP]
+> Different Windows APIs require different capabilities. Always check the API documentation to see what capabilities are needed. Common ones include `microphone`, `webcam`, `location`, and `bluetooth`.
 
 ## Step 6: Update Debug Identity
 
@@ -177,7 +179,8 @@ This command:
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without full MSIX packaging
 
-> **📝 Note:** This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
+> [!NOTE]
+> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
 > - Modify `appxmanifest.xml` (change capabilities, identity, or properties)
 > - Update app assets (icons, logos, etc.)
 > - Reinstall or update dependencies

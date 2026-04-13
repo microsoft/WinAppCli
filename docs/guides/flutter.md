@@ -184,7 +184,8 @@ Run the executable directly (replace `flutter_app` with your project name if dif
 .\build\windows\x64\runner\Release\flutter_app.exe
 ```
 
-> **Tip**: The build output is in the `x64` folder regardless of your machine's architecture — this is expected for Flutter's Windows build.
+> [!TIP]
+> The build output is in the `x64` folder regardless of your machine's architecture — this is expected for Flutter's Windows build.
 
 You should see the app with an orange "Not packaged" indicator. This confirms that the standard executable is running without any package identity.
 

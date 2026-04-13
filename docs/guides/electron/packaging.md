@@ -11,15 +11,17 @@ Before packaging, make sure you've:
 
 ## Prepare for Packaging
 
-> **📝 Note:** Before packaging, make sure to configure your build tool (Electron Forge, webpack, etc.) to exclude temporary files from the final build:
+> [!NOTE]
+> Before packaging, make sure to configure your build tool (Electron Forge, webpack, etc.) to exclude temporary files from the final build:
 > - `.winapp/` folder
 > - `winapp.yaml`
 > - Certificate files (`.pfx`)
 > - Debug symbols (`.pdb`)
 > - C# build artifacts (`obj/`, `bin/` folders)
 > - MSIX packages (*.msix)
-> 
-> **⚠️ Important:** Verify that your `appxmanifest.xml` matches your packaged app structure:
+
+> [!IMPORTANT]
+> Verify that your `appxmanifest.xml` matches your packaged app structure:
 > - The `Executable` attribute should point to the correct .exe file in your packaged output
 
 ## Packaging Options
@@ -66,7 +68,8 @@ The `--out` option is also optional. If not provided, the current directory will
 
 The MSIX package will be created as `./out/<your-app-name>.msix`.
 
-> **💡 Tip:** You can add these commands to your `package.json` scripts for convenience:
+> [!TIP]
+> You can add these commands to your `package.json` scripts for convenience:
 > ```json
 > {
 >   "scripts": {
@@ -137,7 +140,8 @@ npm run make
 
 The MSIX package will be created in the `./out/make/msix/` folder.
 
-> **💡 Tip:** This approach is more integrated with the Electron Forge workflow and automatically handles packaging and MSIX creation in one step.
+> [!TIP]
+> This approach is more integrated with the Electron Forge workflow and automatically handles packaging and MSIX creation in one step.
 
 ## Install and Test the MSIX
 
