@@ -18,7 +18,8 @@ internal class RestoreCommand : Command, IShortDescription
         BaseDirectoryArgument = new Argument<DirectoryInfo>("base-directory")
         {
             Description = "Base/root directory for the winapp workspace",
-            Arity = ArgumentArity.ZeroOrOne
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => new DirectoryInfo(Environment.CurrentDirectory)
         };
         BaseDirectoryArgument.AcceptExistingOnly();
 

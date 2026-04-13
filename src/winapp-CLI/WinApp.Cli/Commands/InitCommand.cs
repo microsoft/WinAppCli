@@ -24,7 +24,8 @@ internal class InitCommand : Command, IShortDescription
         BaseDirectoryArgument = new Argument<DirectoryInfo>("base-directory")
         {
             Description = "Base/root directory for the winapp workspace, for consumption or installation.",
-            Arity = ArgumentArity.ZeroOrOne
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => new DirectoryInfo(Environment.CurrentDirectory)
         };
         BaseDirectoryArgument.AcceptExistingOnly();
         ConfigDirOption = new Option<DirectoryInfo>("--config-dir")
