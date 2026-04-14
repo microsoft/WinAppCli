@@ -78,16 +78,16 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 
 ## Recommended workflow
 
-1. **Generate cert** — `winapp cert generate` (auto-infers publisher from manifest)
-2. **Trust cert** (one-time) — `winapp cert install ./devcert.pfx` (run as admin)
-3. **Package + sign** — `winapp package ./dist --cert ./devcert.pfx`
-4. **Distribute** — share the `.msix`; recipients must also trust the cert, or use a trusted CA cert
+1. **Generate cert** â€” `winapp cert generate` (auto-infers publisher from manifest)
+2. **Trust cert** (one-time) â€” `winapp cert install ./devcert.pfx` (run as admin)
+3. **Package + sign** â€” `winapp package ./dist --cert ./devcert.pfx`
+4. **Distribute** â€” share the `.msix`; recipients must also trust the cert, or use a trusted CA cert
 
 ## Tips
 
 - Always use `--manifest` (or have `appxmanifest.xml` in the working directory) when generating certs to ensure the publisher matches automatically
 - For CI/CD, store the PFX as a secret and pass the password via `--password` rather than using the default
-- `winapp cert install` modifies the machine certificate store — it persists across reboots and user sessions
+- `winapp cert install` modifies the machine certificate store â€” it persists across reboots and user sessions
 - Use `--timestamp` when signing production builds so the signature survives certificate expiration
 - You can also use the shorthand: `winapp package ./dist --generate-cert --install-cert` to do everything in one command
 
@@ -99,7 +99,7 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Publisher mismatch" | Cert publisher ≠ manifest publisher | `winapp cert generate --manifest ./appxmanifest.xml` to re-generate with correct publisher |
+| "Publisher mismatch" | Cert publisher â‰  manifest publisher | `winapp cert generate --manifest ./appxmanifest.xml` to re-generate with correct publisher |
 | "Access denied" / "elevation required" | `cert install` needs admin | Run your terminal as Administrator |
 | "Certificate not trusted" | Cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `--if-exists overwrite` or `--if-exists skip` |
