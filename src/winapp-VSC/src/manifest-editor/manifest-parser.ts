@@ -13,6 +13,12 @@ import {
     DependenciesData,
     TargetDeviceFamilyData,
     PackageDependencyData,
+    MainPackageDependencyData,
+    DriverDependencyData,
+    DriverConstraintData,
+    OSPackageDependencyData,
+    HostRuntimeDependencyData,
+    ExternalDependencyData,
     ApplicationData,
     VisualElementsData,
     ResourceData,
@@ -22,8 +28,26 @@ import {
 const NS = {
     default: 'http://schemas.microsoft.com/appx/manifest/foundation/windows10',
     uap: 'http://schemas.microsoft.com/appx/manifest/uap/windows10',
+    uap3: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/3',
+    uap5: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/5',
+    uap7: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/7',
+    uap10: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/10',
     rescap: 'http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities',
     desktop: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10',
+    win32dependencies: 'http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10',
+};
+
+/** Namespace URIs for capability prefixes. */
+const CAPABILITY_NS_URIS: Record<string, string> = {
+    uap: NS.uap,
+    uap2: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/2',
+    uap3: NS.uap3,
+    uap4: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/4',
+    uap5: NS.uap5,
+    uap6: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6',
+    uap7: NS.uap7,
+    rescap: NS.rescap,
+    iot: 'http://schemas.microsoft.com/appx/manifest/iot/windows10',
 };
 
 /**
@@ -62,6 +86,7 @@ export function applyFieldChange(
     field: string,
     value: string,
     index?: number,
+    subIndex?: number,
 ): string {
     const idx = index ?? 0;
 
@@ -73,7 +98,7 @@ export function applyFieldChange(
         case 'properties':
             return applyPropertiesChangeString(xmlText, field, value);
         case 'dependencies':
-            return applyDependenciesChangeString(xmlText, field, value, idx);
+            return applyDependenciesChangeString(xmlText, field, value, idx, subIndex);
         case 'applications':
             return applyApplicationChangeString(xmlText, field, value, idx);
         case 'resources':
@@ -90,11 +115,13 @@ export function addCapability(xmlText: string, capability: string): string {
 
     let result = xmlText;
 
-    // Ensure rescap namespace is declared if adding a restricted capability
-    if (capability.startsWith('rescap:')) {
-        const rescapDecl = 'xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"';
-        if (!result.includes(rescapDecl)) {
-            result = result.replace(/<Package\b/, '<Package ' + rescapDecl);
+    // Ensure namespace is declared for prefixed capabilities
+    const colonIdx = capability.indexOf(':');
+    if (colonIdx > 0 && !capability.startsWith('device:')) {
+        const prefix = capability.substring(0, colonIdx);
+        const nsUri = CAPABILITY_NS_URIS[prefix];
+        if (nsUri) {
+            result = ensureNamespace(result, prefix, nsUri);
         }
     }
 
@@ -139,9 +166,14 @@ export function removeCapability(xmlText: string, capability: string): string {
 
 /** Ensure the uap6 namespace declaration is present on the Package element. */
 function ensureUap6Namespace(xmlText: string): string {
-    const uap6Decl = 'xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6"';
-    if (xmlText.includes(uap6Decl)) { return xmlText; }
-    return xmlText.replace(/<Package\b/, '<Package ' + uap6Decl);
+    return ensureNamespace(xmlText, 'uap6', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6');
+}
+
+/** Ensure a namespace declaration is present on the Package element. */
+function ensureNamespace(xmlText: string, prefix: string, uri: string): string {
+    const decl = `xmlns:${prefix}="${uri}"`;
+    if (xmlText.includes(decl)) { return xmlText; }
+    return xmlText.replace(/<Package\b/, '<Package ' + decl);
 }
 
 /** Add a PackageDependency element. */
@@ -220,6 +252,209 @@ export function removeTargetDeviceFamily(xmlText: string, index: number): string
     if (index < 0 || index >= families.length) { return xmlText; }
 
     return removeElementWithWhitespace(xmlText, families[index].start, families[index].end, bounds.contentStart);
+}
+
+/** Swap two adjacent sibling elements in the XML text (preserves whitespace/formatting). */
+function swapAdjacentElements(xmlText: string, a: { start: number; end: number }, b: { start: number; end: number }): string {
+    // a must come before b
+    const first = a.start < b.start ? a : b;
+    const second = a.start < b.start ? b : a;
+    const firstText = xmlText.substring(first.start, first.end);
+    const secondText = xmlText.substring(second.start, second.end);
+    return xmlText.substring(0, first.start) + secondText + xmlText.substring(first.end, second.start) + firstText + xmlText.substring(second.end);
+}
+
+/** Move a TargetDeviceFamily element up or down by one position. */
+export function moveTargetDeviceFamily(xmlText: string, index: number, direction: 'up' | 'down'): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const families = children.filter(c => /^<TargetDeviceFamily\b/.test(xmlText.substring(c.start, c.end)));
+    const swapIdx = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || index >= families.length || swapIdx < 0 || swapIdx >= families.length) { return xmlText; }
+    return swapAdjacentElements(xmlText, families[index], families[swapIdx]);
+}
+
+/** Move a PackageDependency element up or down by one position. */
+export function movePackageDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const pkgDeps = children.filter(c => /^<PackageDependency\b/.test(xmlText.substring(c.start, c.end)));
+    const swapIdx = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || index >= pkgDeps.length || swapIdx < 0 || swapIdx >= pkgDeps.length) { return xmlText; }
+    return swapAdjacentElements(xmlText, pkgDeps[index], pkgDeps[swapIdx]);
+}
+
+// ── MainPackageDependency (uap3) ──
+
+/** Add a uap3:MainPackageDependency element. */
+export function addMainPackageDependency(xmlText: string, dep: MainPackageDependencyData): string {
+    let result = ensureNamespace(xmlText, 'uap3', NS.uap3);
+    const childXml = `<uap3:MainPackageDependency Name="${escapeXmlAttr(dep.name)}" />`;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    return result;
+}
+
+/** Remove a uap3:MainPackageDependency by index. */
+export function removeMainPackageDependency(xmlText: string, index: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => /^<uap3:MainPackageDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
+}
+
+// ── DriverDependency (uap5) ──
+
+/** Add a uap5:DriverDependency element (empty, with no constraints yet). */
+export function addDriverDependency(xmlText: string): string {
+    let result = ensureNamespace(xmlText, 'uap5', NS.uap5);
+    const childXml = `<uap5:DriverDependency>\n      </uap5:DriverDependency>`;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    return result;
+}
+
+/** Remove a uap5:DriverDependency by index. */
+export function removeDriverDependency(xmlText: string, index: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
+}
+
+/** Add a uap5:DriverConstraint child to a uap5:DriverDependency. */
+export function addDriverConstraint(xmlText: string, depIndex: number, constraint: DriverConstraintData): string {
+    let result = xmlText;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (!bounds) { return result; }
+    const children = findDirectChildElementBounds(result, bounds.contentStart, bounds.contentEnd);
+    const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(result.substring(c.start, c.end)));
+    if (depIndex < 0 || depIndex >= driverDeps.length) { return result; }
+
+    let attrs = `Name="${escapeXmlAttr(constraint.name)}"`;
+    if (constraint.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(constraint.minVersion)}"`; }
+    if (constraint.minDate) { attrs += ` MinDate="${escapeXmlAttr(constraint.minDate)}"`; }
+    const constraintXml = `<uap5:DriverConstraint ${attrs} />`;
+
+    const ddText = result.substring(driverDeps[depIndex].start, driverDeps[depIndex].end);
+    const closeTag = '</uap5:DriverDependency>';
+    const closeIdx = ddText.lastIndexOf(closeTag);
+    if (closeIdx < 0) { return result; }
+    const insertPos = driverDeps[depIndex].start + closeIdx;
+    const indent = detectIndent(result, driverDeps[depIndex].start) + '  ';
+    return result.substring(0, insertPos) + indent + '  ' + constraintXml + '\n' + indent + result.substring(insertPos);
+}
+
+/** Remove a uap5:DriverConstraint from a uap5:DriverDependency. */
+export function removeDriverConstraint(xmlText: string, depIndex: number, constraintIndex: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (depIndex < 0 || depIndex >= driverDeps.length) { return xmlText; }
+
+    const dd = driverDeps[depIndex];
+    const ddContentStart = xmlText.indexOf('>', dd.start) + 1;
+    const ddContentEnd = xmlText.lastIndexOf('</uap5:DriverDependency>', dd.end);
+    if (ddContentEnd < 0) { return xmlText; }
+
+    const constraints = findDirectChildElementBounds(xmlText, ddContentStart, ddContentEnd);
+    const dcItems = constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end)));
+    if (constraintIndex < 0 || constraintIndex >= dcItems.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, dcItems[constraintIndex].start, dcItems[constraintIndex].end, ddContentStart);
+}
+
+// ── OSPackageDependency (uap7) ──
+
+/** Add a uap7:OSPackageDependency element. */
+export function addOSPackageDependency(xmlText: string, dep: OSPackageDependencyData): string {
+    let result = ensureNamespace(xmlText, 'uap7', NS.uap7);
+    let attrs = `Name="${escapeXmlAttr(dep.name)}"`;
+    if (dep.version) { attrs += ` Version="${escapeXmlAttr(dep.version)}"`; }
+    const childXml = `<uap7:OSPackageDependency ${attrs} />`;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    return result;
+}
+
+/** Remove a uap7:OSPackageDependency by index. */
+export function removeOSPackageDependency(xmlText: string, index: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => /^<uap7:OSPackageDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
+}
+
+// ── HostRuntimeDependency (uap10) ──
+
+/** Add a uap10:HostRuntimeDependency element. */
+export function addHostRuntimeDependency(xmlText: string, dep: HostRuntimeDependencyData): string {
+    let result = ensureNamespace(xmlText, 'uap10', NS.uap10);
+    let attrs = `Name="${escapeXmlAttr(dep.name)}"`;
+    if (dep.publisher) { attrs += ` Publisher="${escapeXmlAttr(dep.publisher)}"`; }
+    if (dep.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(dep.minVersion)}"`; }
+    const childXml = `<uap10:HostRuntimeDependency ${attrs} />`;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    return result;
+}
+
+/** Remove a uap10:HostRuntimeDependency by index. */
+export function removeHostRuntimeDependency(xmlText: string, index: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => /^<uap10:HostRuntimeDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
+}
+
+// ── ExternalDependency (win32dependencies) ──
+
+/** Add a win32dependencies:ExternalDependency element. */
+export function addExternalDependency(xmlText: string, dep: ExternalDependencyData): string {
+    let result = ensureNamespace(xmlText, 'win32dependencies', NS.win32dependencies);
+    let attrs = `Name="${escapeXmlAttr(dep.name)}"`;
+    if (dep.publisher) { attrs += ` Publisher="${escapeXmlAttr(dep.publisher)}"`; }
+    if (dep.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(dep.minVersion)}"`; }
+    if (dep.optional === 'true' || dep.optional === 'false') { attrs += ` Optional="${dep.optional}"`; }
+    const childXml = `<win32dependencies:ExternalDependency ${attrs} />`;
+    const bounds = findParentBounds(result, 'Dependencies');
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    return result;
+}
+
+/** Remove a win32dependencies:ExternalDependency by index. */
+export function removeExternalDependency(xmlText: string, index: number): string {
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => /^<win32dependencies:ExternalDependency\b/.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
 }
 
 /** Add a Resource element to the XML. */
@@ -754,8 +989,9 @@ function insertChildBeforeClose(xml: string, closeTagPos: number, childXml: stri
 /** Check if an element tag string matches the expected capability namespace prefix. */
 function matchesCapabilityTag(elemXml: string, capNs: string): boolean {
     if (capNs === 'device') { return /^<DeviceCapability\b/.test(elemXml); }
-    if (capNs === 'rescap') { return /^<rescap:Capability\b/.test(elemXml); }
-    return /^<Capability\b/.test(elemXml);
+    if (capNs === '') { return /^<Capability\b/.test(elemXml); }
+    const prefixPattern = new RegExp(`^<${escapeRegex(capNs)}:Capability\\b`);
+    return prefixPattern.test(elemXml);
 }
 
 /** Check if an element tag string has a Name attribute with the given value. */
@@ -863,6 +1099,14 @@ function parseProperties(root: Element): PropertiesData {
         publisherDisplayName: getChildTextContent(el, 'PublisherDisplayName'),
         description: getChildTextContent(el, 'Description'),
         logo: getChildTextContent(el, 'Logo'),
+        framework: getChildTextContent(el, 'Framework').toLowerCase(),
+        resourcePackage: getChildTextContent(el, 'ResourcePackage').toLowerCase(),
+        supportedUsers: getChildTextContent(el, 'SupportedUsers'),
+        allowExecution: getChildTextContent(el, 'AllowExecution'),
+        fileSystemWriteVirtualization: getChildTextContent(el, 'FileSystemWriteVirtualization'),
+        registryWriteVirtualization: getChildTextContent(el, 'RegistryWriteVirtualization'),
+        modificationPackage: getChildTextContent(el, 'ModificationPackage').toLowerCase(),
+        allowExternalContent: getChildTextContent(el, 'AllowExternalContent'),
     };
 }
 
@@ -870,6 +1114,11 @@ function parseDependencies(root: Element): DependenciesData {
     const el = getChildByLocalName(root, 'Dependencies');
     const targetDeviceFamilies: TargetDeviceFamilyData[] = [];
     const packageDependencies: PackageDependencyData[] = [];
+    const mainPackageDependencies: MainPackageDependencyData[] = [];
+    const driverDependencies: DriverDependencyData[] = [];
+    const osPackageDependencies: OSPackageDependencyData[] = [];
+    const hostRuntimeDependencies: HostRuntimeDependencyData[] = [];
+    const externalDependencies: ExternalDependencyData[] = [];
 
     if (el) {
         for (const child of getChildrenByLocalName(el, 'TargetDeviceFamily')) {
@@ -887,9 +1136,50 @@ function parseDependencies(root: Element): DependenciesData {
                 optional: child.getAttribute('uap6:Optional') ?? '',
             });
         }
+        for (const child of getChildrenByLocalName(el, 'MainPackageDependency')) {
+            mainPackageDependencies.push({
+                name: child.getAttribute('Name') ?? '',
+            });
+        }
+        for (const child of getChildrenByLocalName(el, 'DriverDependency')) {
+            const constraints: DriverConstraintData[] = [];
+            for (const dc of getChildrenByLocalName(child, 'DriverConstraint')) {
+                constraints.push({
+                    name: dc.getAttribute('Name') ?? '',
+                    minVersion: dc.getAttribute('MinVersion') ?? '',
+                    minDate: dc.getAttribute('MinDate') ?? '',
+                });
+            }
+            driverDependencies.push({ driverConstraints: constraints });
+        }
+        for (const child of getChildrenByLocalName(el, 'OSPackageDependency')) {
+            osPackageDependencies.push({
+                name: child.getAttribute('Name') ?? '',
+                version: child.getAttribute('Version') ?? '',
+            });
+        }
+        for (const child of getChildrenByLocalName(el, 'HostRuntimeDependency')) {
+            hostRuntimeDependencies.push({
+                name: child.getAttribute('Name') ?? '',
+                publisher: child.getAttribute('Publisher') ?? '',
+                minVersion: child.getAttribute('MinVersion') ?? '',
+            });
+        }
+        for (const child of getChildrenByLocalName(el, 'ExternalDependency')) {
+            externalDependencies.push({
+                name: child.getAttribute('Name') ?? '',
+                publisher: child.getAttribute('Publisher') ?? '',
+                minVersion: child.getAttribute('MinVersion') ?? '',
+                optional: child.getAttribute('Optional') ?? '',
+            });
+        }
     }
 
-    return { targetDeviceFamilies, packageDependencies };
+    return {
+        targetDeviceFamilies, packageDependencies,
+        mainPackageDependencies, driverDependencies, osPackageDependencies,
+        hostRuntimeDependencies, externalDependencies,
+    };
 }
 
 function parseApplications(root: Element): ApplicationData[] {
@@ -971,8 +1261,8 @@ function parseCapabilities(root: Element): string[] {
 
         if (localName === 'DeviceCapability') {
             capabilities.push(`device:${name}`);
-        } else if (prefix === 'rescap') {
-            capabilities.push(`rescap:${name}`);
+        } else if (prefix) {
+            capabilities.push(`${prefix}:${name}`);
         } else {
             capabilities.push(name);
         }
@@ -1004,8 +1294,18 @@ function escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Escape XML-special characters for use in attribute values. */
+function escapeXmlAttr(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+function escapeXmlText(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /** Replace an XML attribute value in-place. Returns the original string if not found. */
 function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string, newValue: string): string {
+    const escaped = escapeXmlAttr(newValue);
     // Find the element in the XML
     const elementMatch = elementPattern.exec(xml);
     if (!elementMatch) { return xml; }
@@ -1017,7 +1317,7 @@ function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string,
     if (!attrMatch) { return xml; }
 
     const newElementStr = elementStr.substring(0, attrMatch.index)
-        + attrMatch[1] + attrMatch[2] + newValue + attrMatch[2]
+        + attrMatch[1] + attrMatch[2] + escaped + attrMatch[2]
         + elementStr.substring(attrMatch.index + attrMatch[0].length);
 
     return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
@@ -1040,6 +1340,7 @@ function removeAttribute(xml: string, elementPattern: RegExp, attrName: string):
 
 /** Add a new attribute to an existing XML element. Returns the original string if element not found. */
 function addAttributeToElement(xml: string, elementPattern: RegExp, attrName: string, value: string): string {
+    const escaped = escapeXmlAttr(value);
     const elementMatch = elementPattern.exec(xml);
     if (!elementMatch) { return xml; }
 
@@ -1055,10 +1356,10 @@ function addAttributeToElement(xml: string, elementPattern: RegExp, attrName: st
     let attrText: string;
     if (attrIndentMatch) {
         // Multi-line element — put new attribute on its own line with same indent
-        attrText = '\n' + attrIndentMatch[1] + `${attrName}="${value}"`;
+        attrText = '\n' + attrIndentMatch[1] + `${attrName}="${escaped}"`;
     } else {
         // Single-line element — append with a space
-        attrText = ` ${attrName}="${value}"`;
+        attrText = ` ${attrName}="${escaped}"`;
     }
 
     const newElementStr = elementStr.substring(0, insertPos) + attrText + elementStr.substring(insertPos);
@@ -1070,8 +1371,10 @@ function replaceElementText(xml: string, tagPattern: RegExp, newValue: string): 
     const match = tagPattern.exec(xml);
     if (!match) { return xml; }
 
+    // Escape XML-special characters in text content
+    const escaped = newValue.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     // match[0] is the full match including tags, match[1] is the opening tag, match[2] is the old text
-    return xml.substring(0, match.index) + match[1] + newValue + match[3] + xml.substring(match.index + match[0].length);
+    return xml.substring(0, match.index) + match[1] + escaped + match[3] + xml.substring(match.index + match[0].length);
 }
 
 function applyIdentityChangeString(xml: string, field: string, value: string): string {
@@ -1109,7 +1412,26 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
         publisherDisplayName: 'PublisherDisplayName',
         description: 'Description',
         logo: 'Logo',
+        framework: 'Framework',
+        resourcePackage: 'ResourcePackage',
+        supportedUsers: 'SupportedUsers',
+        allowExecution: 'AllowExecution',
+        fileSystemWriteVirtualization: 'FileSystemWriteVirtualization',
+        registryWriteVirtualization: 'RegistryWriteVirtualization',
+        modificationPackage: 'ModificationPackage',
+        allowExternalContent: 'AllowExternalContent',
     };
+
+    // Map of fields that need namespace prefixes when inserting new elements
+    const nsPrefix: Record<string, { prefix: string; uri: string }> = {
+        supportedUsers: { prefix: 'uap', uri: NS.uap },
+        allowExecution: { prefix: 'uap6', uri: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6' },
+        fileSystemWriteVirtualization: { prefix: 'desktop6', uri: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/6' },
+        registryWriteVirtualization: { prefix: 'desktop6', uri: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/6' },
+        modificationPackage: { prefix: 'rescap6', uri: 'http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/6' },
+        allowExternalContent: { prefix: 'uap10', uri: NS.uap10 },
+    };
+
     const tag = tagMap[field];
     if (!tag) { return xml; }
 
@@ -1131,6 +1453,13 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
     // If the element wasn't found and the value is non-empty, insert it into <Properties>
     if (result === xml && value) {
         let workXml = xml;
+
+        // Ensure namespace for prefixed elements
+        const ns = nsPrefix[field];
+        if (ns) {
+            workXml = ensureNamespace(workXml, ns.prefix, ns.uri);
+        }
+
         let propsBounds = findParentBounds(workXml, 'Properties');
         if (!propsBounds) {
             // Create <Properties> before </Package>
@@ -1146,13 +1475,14 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
             if (!propsBounds) { return xml; }
         }
         const propIndent = detectIndent(workXml, propsBounds.openStart);
-        return insertChildBeforeClose(workXml, propsBounds.contentEnd, `<${tag}>${value}</${tag}>`, propIndent);
+        const elemTag = ns ? `${ns.prefix}:${tag}` : tag;
+        return insertChildBeforeClose(workXml, propsBounds.contentEnd, `<${elemTag}>${escapeXmlText(value)}</${elemTag}>`, propIndent);
     }
 
     return result;
 }
 
-function applyDependenciesChangeString(xml: string, field: string, value: string, index: number): string {
+function applyDependenciesChangeString(xml: string, field: string, value: string, index: number, subIndex?: number): string {
     if (field.startsWith('targetDeviceFamily.')) {
         const subField = field.replace('targetDeviceFamily.', '');
         const attrMap: Record<string, string> = {
@@ -1220,6 +1550,107 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
                 return addAttributeToElement(xml, elementRegex, attr, value);
             }
             count++;
+        }
+    } else if (field.startsWith('mainPackageDependency.')) {
+        const subField = field.replace('mainPackageDependency.', '');
+        const attrMap: Record<string, string> = { name: 'Name' };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+        const regex = /<uap3:MainPackageDependency\b[^>]*\/?>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
+            }
+            count++;
+        }
+    } else if (field.startsWith('osPackageDependency.')) {
+        const subField = field.replace('osPackageDependency.', '');
+        const attrMap: Record<string, string> = { name: 'Name', version: 'Version' };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+        const regex = /<uap7:OSPackageDependency\b[^>]*\/?>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
+            }
+            count++;
+        }
+    } else if (field.startsWith('hostRuntimeDependency.')) {
+        const subField = field.replace('hostRuntimeDependency.', '');
+        const attrMap: Record<string, string> = { name: 'Name', publisher: 'Publisher', minVersion: 'MinVersion' };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+        const regex = /<uap10:HostRuntimeDependency\b[^>]*\/?>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
+            }
+            count++;
+        }
+    } else if (field.startsWith('externalDependency.')) {
+        const subField = field.replace('externalDependency.', '');
+        const attrMap: Record<string, string> = { name: 'Name', publisher: 'Publisher', minVersion: 'MinVersion', optional: 'Optional' };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+        const regex = /<win32dependencies:ExternalDependency\b[^>]*\/?>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = regex.exec(xml)) !== null) {
+            if (count === index) {
+                const elemRegex = new RegExp(escapeRegex(match[0]));
+                if (!value && subField === 'optional') {
+                    return removeAttribute(xml, elemRegex, attr);
+                }
+                const result = replaceAttribute(xml, elemRegex, attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, elemRegex, attr, value);
+            }
+            count++;
+        }
+    } else if (field.startsWith('driverConstraint.')) {
+        const subField = field.replace('driverConstraint.', '');
+        const attrMap: Record<string, string> = { name: 'Name', minVersion: 'MinVersion', minDate: 'MinDate' };
+        const attr = attrMap[subField];
+        if (!attr) { return xml; }
+        const constraintIdx = subIndex ?? 0;
+
+        // Find the Nth uap5:DriverDependency (by depIndex = `index`)
+        const depRegex = /<uap5:DriverDependency\b[^]*?<\/uap5:DriverDependency>/gs;
+        let depMatch: RegExpExecArray | null;
+        let depCount = 0;
+        while ((depMatch = depRegex.exec(xml)) !== null) {
+            if (depCount === index) {
+                // Within this DriverDependency, find the Nth DriverConstraint
+                const depContent = depMatch[0];
+                const dcRegex = /<uap5:DriverConstraint\b[^>]*\/?>/gs;
+                let dcMatch: RegExpExecArray | null;
+                let dcCount = 0;
+                while ((dcMatch = dcRegex.exec(depContent)) !== null) {
+                    if (dcCount === constraintIdx) {
+                        const fullOffset = depMatch.index + dcMatch.index;
+                        const elemStr = dcMatch[0];
+                        const elemRegex = new RegExp(escapeRegex(elemStr));
+                        const result = replaceAttribute(xml, elemRegex, attr, value);
+                        if (result !== xml) { return result; }
+                        return addAttributeToElement(xml, elemRegex, attr, value);
+                    }
+                    dcCount++;
+                }
+                break;
+            }
+            depCount++;
         }
     }
     return xml;
@@ -1430,22 +1861,26 @@ function getChildTextContent(parent: Element | null, localName: string): string 
 
 /** Determine the element info for creating a capability XML element. */
 function getCapabilityElementInfo(capability: string): { elementName: string; ns: string | null; attrName: string } {
-    if (capability.startsWith('rescap:')) {
-        return { elementName: 'rescap:Capability', ns: NS.rescap, attrName: capability.replace('rescap:', '') };
-    }
     if (capability.startsWith('device:')) {
         return { elementName: 'DeviceCapability', ns: NS.default, attrName: capability.replace('device:', '') };
+    }
+    const colonIdx = capability.indexOf(':');
+    if (colonIdx > 0) {
+        const prefix = capability.substring(0, colonIdx);
+        const name = capability.substring(colonIdx + 1);
+        return { elementName: `${prefix}:Capability`, ns: null, attrName: name };
     }
     return { elementName: 'Capability', ns: NS.default, attrName: capability };
 }
 
 /** Parse a capability string into its namespace and name parts. */
 function parseCapabilityString(capability: string): { attrName: string; namespace: string } {
-    if (capability.startsWith('rescap:')) {
-        return { attrName: capability.replace('rescap:', ''), namespace: 'rescap' };
-    }
     if (capability.startsWith('device:')) {
         return { attrName: capability.replace('device:', ''), namespace: 'device' };
+    }
+    const colonIdx = capability.indexOf(':');
+    if (colonIdx > 0) {
+        return { attrName: capability.substring(colonIdx + 1), namespace: capability.substring(0, colonIdx) };
     }
     return { attrName: capability, namespace: '' };
 }

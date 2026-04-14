@@ -30,11 +30,24 @@ export interface PropertiesData {
     publisherDisplayName: string;
     description: string;
     logo: string;
+    framework: string;
+    resourcePackage: string;
+    supportedUsers: string;
+    allowExecution: string;
+    fileSystemWriteVirtualization: string;
+    registryWriteVirtualization: string;
+    modificationPackage: string;
+    allowExternalContent: string;
 }
 
 export interface DependenciesData {
     targetDeviceFamilies: TargetDeviceFamilyData[];
     packageDependencies: PackageDependencyData[];
+    mainPackageDependencies: MainPackageDependencyData[];
+    driverDependencies: DriverDependencyData[];
+    osPackageDependencies: OSPackageDependencyData[];
+    hostRuntimeDependencies: HostRuntimeDependencyData[];
+    externalDependencies: ExternalDependencyData[];
 }
 
 export interface TargetDeviceFamilyData {
@@ -47,6 +60,38 @@ export interface PackageDependencyData {
     name: string;
     minVersion: string;
     publisher: string;
+    optional: string;
+}
+
+export interface MainPackageDependencyData {
+    name: string;
+}
+
+export interface DriverDependencyData {
+    driverConstraints: DriverConstraintData[];
+}
+
+export interface DriverConstraintData {
+    name: string;
+    minVersion: string;
+    minDate: string;
+}
+
+export interface OSPackageDependencyData {
+    name: string;
+    version: string;
+}
+
+export interface HostRuntimeDependencyData {
+    name: string;
+    publisher: string;
+    minVersion: string;
+}
+
+export interface ExternalDependencyData {
+    name: string;
+    publisher: string;
+    minVersion: string;
     optional: string;
 }
 
@@ -91,7 +136,7 @@ export type ExtensionToWebviewMessage =
 
 /** Message types sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
-    | { type: 'fieldChanged'; section: string; field: string; value: string; index?: number }
+    | { type: 'fieldChanged'; section: string; field: string; value: string; index?: number; subIndex?: number }
     | { type: 'setShowNameOnTiles'; appIndex: number; tiles: string[] }
     | { type: 'addResource'; resource: ResourceData }
     | { type: 'removeResource'; index: number }
@@ -101,6 +146,7 @@ export type WebviewToExtensionMessage =
     | { type: 'removePackageDependency'; index: number }
     | { type: 'addTargetDeviceFamily'; family: TargetDeviceFamilyData }
     | { type: 'removeTargetDeviceFamily'; index: number }
+    | { type: 'moveTargetDeviceFamily'; index: number; direction: 'up' | 'down' }
     | { type: 'addApplication' }
     | { type: 'removeApplication'; index: number }
     | { type: 'addExtension'; index: number; xml: string }
@@ -109,6 +155,19 @@ export type WebviewToExtensionMessage =
     | { type: 'browseFile'; appIndex: number; extIndex: number; fieldPath: string }
     | { type: 'browseImage'; section: string; field: string; index?: number }
     | { type: 'browseExe'; section: string; field: string; index?: number }
+    | { type: 'movePackageDependency'; index: number; direction: 'up' | 'down' }
+    | { type: 'addMainPackageDependency'; dependency: MainPackageDependencyData }
+    | { type: 'removeMainPackageDependency'; index: number }
+    | { type: 'addDriverDependency' }
+    | { type: 'removeDriverDependency'; index: number }
+    | { type: 'addDriverConstraint'; depIndex: number; constraint: DriverConstraintData }
+    | { type: 'removeDriverConstraint'; depIndex: number; constraintIndex: number }
+    | { type: 'addOSPackageDependency'; dependency: OSPackageDependencyData }
+    | { type: 'removeOSPackageDependency'; index: number }
+    | { type: 'addHostRuntimeDependency'; dependency: HostRuntimeDependencyData }
+    | { type: 'removeHostRuntimeDependency'; index: number }
+    | { type: 'addExternalDependency'; dependency: ExternalDependencyData }
+    | { type: 'removeExternalDependency'; index: number }
     | { type: 'updateAssets' }
     | { type: 'openAsText' }
     | { type: 'ready' };
@@ -120,18 +179,58 @@ export const KNOWN_CAPABILITIES = {
         { name: 'internetClientServer', label: 'Internet (Client & Server)', namespace: '' },
         { name: 'privateNetworkClientServer', label: 'Private Networks (Client & Server)', namespace: '' },
         { name: 'codeGeneration', label: 'Code Generation', namespace: '' },
+        { name: 'musicLibrary', label: 'Music Library', namespace: 'uap' },
+        { name: 'picturesLibrary', label: 'Pictures Library', namespace: 'uap' },
+        { name: 'videosLibrary', label: 'Videos Library', namespace: 'uap' },
+        { name: 'removableStorage', label: 'Removable Storage', namespace: 'uap' },
+        { name: 'appointments', label: 'Appointments', namespace: 'uap' },
+        { name: 'contacts', label: 'Contacts', namespace: 'uap' },
+        { name: 'enterpriseAuthentication', label: 'Enterprise Authentication', namespace: '' },
+        { name: 'sharedUserCertificates', label: 'Shared User Certificates', namespace: '' },
+        { name: 'phoneCall', label: 'Phone Call', namespace: 'uap' },
+        { name: 'userAccountInformation', label: 'User Account Information', namespace: 'uap' },
+        { name: 'voipCall', label: 'VoIP Call', namespace: 'uap' },
+        { name: 'objects3D', label: '3D Objects', namespace: 'uap' },
+        { name: 'chat', label: 'Chat', namespace: 'uap' },
+        { name: 'blockedChatMessages', label: 'Blocked Chat Messages', namespace: 'uap' },
+        { name: 'backgroundMediaPlayback', label: 'Background Media Playback', namespace: 'uap3' },
+        { name: 'remoteSystem', label: 'Remote System', namespace: 'uap4' },
+        { name: 'spatialPerception', label: 'Spatial Perception', namespace: 'uap2' },
+        { name: 'globalMediaControl', label: 'Global Media Control', namespace: 'uap7' },
+        { name: 'graphicsCapture', label: 'Graphics Capture', namespace: 'uap6' },
+        { name: 'userDataTasks', label: 'User Data Tasks', namespace: 'uap4' },
+        { name: 'userNotificationListener', label: 'User Notification Listener', namespace: 'uap3' },
     ],
     restricted: [
         { name: 'runFullTrust', label: 'Run Full Trust', namespace: 'rescap' },
         { name: 'allowElevation', label: 'Allow Elevation', namespace: 'rescap' },
         { name: 'unvirtualizedResources', label: 'Unvirtualized Resources', namespace: 'rescap' },
         { name: 'packagedShellExtension', label: 'Packaged Shell Extension', namespace: 'rescap' },
+        { name: 'appDiagnostics', label: 'App Diagnostics', namespace: 'rescap' },
+        { name: 'broadFileSystemAccess', label: 'Broad File System Access', namespace: 'rescap' },
+        { name: 'packageManagement', label: 'Package Management', namespace: 'rescap' },
+        { name: 'packageQuery', label: 'Package Query', namespace: 'rescap' },
+        { name: 'localSystemServices', label: 'Local System Services', namespace: 'rescap' },
+        { name: 'inputForegroundObservation', label: 'Input Foreground Observation', namespace: 'rescap' },
+        { name: 'confirmAppClose', label: 'Confirm App Close', namespace: 'rescap' },
     ],
     device: [
         { name: 'microphone', label: 'Microphone', namespace: 'device' },
         { name: 'webcam', label: 'Webcam', namespace: 'device' },
         { name: 'location', label: 'Location', namespace: 'device' },
         { name: 'bluetooth', label: 'Bluetooth', namespace: 'device' },
+        { name: 'proximity', label: 'Proximity', namespace: 'device' },
+        { name: 'usb', label: 'USB', namespace: 'device' },
+        { name: 'humaninterfacedevice', label: 'Human Interface Device (HID)', namespace: 'device' },
+        { name: 'pointOfService', label: 'Point of Service', namespace: 'device' },
+        { name: 'wiFiControl', label: 'Wi-Fi Control', namespace: 'device' },
+        { name: 'radios', label: 'Radios', namespace: 'device' },
+        { name: 'optical', label: 'Optical', namespace: 'device' },
+        { name: 'activity', label: 'Activity', namespace: 'device' },
+        { name: 'serialcommunication', label: 'Serial Communication', namespace: 'device' },
+        { name: 'gazeInput', label: 'Gaze Input', namespace: 'device' },
+        { name: 'lowLevelDevices', label: 'Low Level Devices', namespace: 'device' },
+        { name: 'lowLevel', label: 'Low Level', namespace: 'device' },
     ],
 } as const;
 
@@ -195,14 +294,54 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
     internetClientServer: 'Provides inbound and outbound access to the internet and networks in public places.',
     privateNetworkClientServer: 'Provides inbound and outbound access to home and work networks through the firewall.',
     codeGeneration: 'Allows the app to generate code dynamically using JIT compilation.',
+    musicLibrary: 'Provides access to the user\'s music library.',
+    picturesLibrary: 'Provides access to the user\'s pictures library.',
+    videosLibrary: 'Provides access to the user\'s videos library.',
+    removableStorage: 'Provides access to files on removable storage (USB drives, external hard drives).',
+    appointments: 'Provides access to the user\'s appointment store.',
+    contacts: 'Provides access to the user\'s contacts.',
+    enterpriseAuthentication: 'Allows the app to use Windows integrated authentication (Kerberos/NTLM).',
+    sharedUserCertificates: 'Provides access to software and hardware certificates (smart cards, etc.).',
+    phoneCall: 'Allows the app to access phone lines and place calls.',
+    userAccountInformation: 'Provides access to the user\'s name and picture.',
+    voipCall: 'Allows the app to access VoIP calling APIs.',
+    objects3D: 'Provides programmatic access to the user\'s 3D Objects folder.',
+    chat: 'Allows the app to read and delete text messages.',
+    blockedChatMessages: 'Allows the app to read chat messages blocked by the spam filter.',
+    backgroundMediaPlayback: 'Allows audio and video playback while the app is in the background.',
+    remoteSystem: 'Allows the app to discover and connect to remote devices.',
+    spatialPerception: 'Provides access to spatial mapping data for mixed-reality apps.',
+    globalMediaControl: 'Allows the app to access system media transport controls.',
+    graphicsCapture: 'Allows the app to capture screen, window, or display content.',
+    userDataTasks: 'Provides access to user data tasks (to-do items).',
+    userNotificationListener: 'Provides access to user notifications in the action center.',
     runFullTrust: 'Allows a desktop app to run with full trust permissions outside the app container.',
     allowElevation: 'Allows a packaged app to request elevated (admin) privileges at launch.',
     unvirtualizedResources: 'Allows the app to access file system and registry locations without virtualization.',
     packagedShellExtension: 'Allows the app to register shell extensions (context menu handlers, preview handlers, etc.).',
+    appDiagnostics: 'Allows the app to access diagnostic information about other running apps.',
+    broadFileSystemAccess: 'Provides broad access to the file system (beyond specific libraries).',
+    packageManagement: 'Allows the app to manage other packages (install, remove, etc.).',
+    packageQuery: 'Allows the app to query information about installed packages.',
+    localSystemServices: 'Allows the app to communicate with local system services.',
+    inputForegroundObservation: 'Allows the app to observe foreground input even when not in the foreground.',
+    confirmAppClose: 'Allows the app to intercept and confirm close operations.',
     microphone: 'Provides access to the microphone for audio capture.',
     webcam: 'Provides access to the webcam for video capture.',
     location: 'Provides access to the device location (GPS, Wi-Fi, etc.).',
     bluetooth: 'Provides access to Bluetooth devices for communication.',
+    proximity: 'Provides access to Near Field Communication (NFC) devices.',
+    usb: 'Provides access to USB devices.',
+    humaninterfacedevice: 'Provides access to Human Interface Devices (HID).',
+    pointOfService: 'Provides access to point-of-service peripherals (barcode scanners, etc.).',
+    wiFiControl: 'Allows the app to scan for and connect to Wi-Fi networks.',
+    radios: 'Allows the app to toggle device radios (Wi-Fi, Bluetooth, etc.).',
+    optical: 'Provides access to optical disc drives.',
+    activity: 'Provides access to activity sensors (accelerometer, pedometer).',
+    serialcommunication: 'Provides access to serial communication ports.',
+    gazeInput: 'Provides access to eye-tracking/gaze input devices.',
+    lowLevelDevices: 'Provides low-level access to GPIO, I2C, SPI, and PWM devices.',
+    lowLevel: 'Provides access to low-level device resources.',
 };
 
 /** Processor architecture dropdown options. */

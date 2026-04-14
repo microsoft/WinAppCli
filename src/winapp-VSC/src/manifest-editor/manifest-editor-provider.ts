@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, setShowNameOnTiles } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, addDriverDependency, removeDriverDependency, addDriverConstraint, removeDriverConstraint, addOSPackageDependency, removeOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, addExternalDependency, removeExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, setShowNameOnTiles } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -139,7 +139,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         return;
 
                     case 'fieldChanged':
-                        newText = applyFieldChange(text, message.section, message.field, message.value, message.index);
+                        newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
                         break;
 
                     case 'addCapability':
@@ -176,6 +176,55 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
                     case 'removeTargetDeviceFamily':
                         newText = removeTargetDeviceFamily(text, message.index);
+                        break;
+
+                    case 'moveTargetDeviceFamily':
+                        newText = moveTargetDeviceFamily(text, message.index, message.direction);
+                        break;
+
+                    case 'movePackageDependency':
+                        newText = movePackageDependency(text, message.index, message.direction);
+                        break;
+
+                    case 'addMainPackageDependency':
+                        newText = addMainPackageDependency(text, message.dependency);
+                        break;
+                    case 'removeMainPackageDependency':
+                        newText = removeMainPackageDependency(text, message.index);
+                        break;
+
+                    case 'addDriverDependency':
+                        newText = addDriverDependency(text);
+                        break;
+                    case 'removeDriverDependency':
+                        newText = removeDriverDependency(text, message.index);
+                        break;
+                    case 'addDriverConstraint':
+                        newText = addDriverConstraint(text, message.depIndex, message.constraint);
+                        break;
+                    case 'removeDriverConstraint':
+                        newText = removeDriverConstraint(text, message.depIndex, message.constraintIndex);
+                        break;
+
+                    case 'addOSPackageDependency':
+                        newText = addOSPackageDependency(text, message.dependency);
+                        break;
+                    case 'removeOSPackageDependency':
+                        newText = removeOSPackageDependency(text, message.index);
+                        break;
+
+                    case 'addHostRuntimeDependency':
+                        newText = addHostRuntimeDependency(text, message.dependency);
+                        break;
+                    case 'removeHostRuntimeDependency':
+                        newText = removeHostRuntimeDependency(text, message.index);
+                        break;
+
+                    case 'addExternalDependency':
+                        newText = addExternalDependency(text, message.dependency);
+                        break;
+                    case 'removeExternalDependency':
+                        newText = removeExternalDependency(text, message.index);
                         break;
 
                     case 'addApplication':

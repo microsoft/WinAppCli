@@ -87,11 +87,12 @@ export function getParseErrorContent(webview: vscode.Webview, nonce: string, err
 export function getWebviewContent(webview: vscode.Webview, nonce: string, manifestDirUri: string): string {
     const archOptionItems = ARCHITECTURE_OPTIONS.map(a => `<div class="custom-select-option" data-value="${a}">${a}</div>`).join('');
 
-    const generalCaps= KNOWN_CAPABILITIES.general.map(c =>
-        `<label class="cap-item" data-cap="${c.name}">
-            <input type="checkbox" data-capability="${c.name}" /><span>${c.label}</span>
-        </label>`
-    ).join('');
+    const generalCaps= KNOWN_CAPABILITIES.general.map(c => {
+        const capKey = c.namespace ? `${c.namespace}:${c.name}` : c.name;
+        return `<label class="cap-item" data-cap="${capKey}">
+            <input type="checkbox" data-capability="${capKey}" /><span>${c.label}</span>
+        </label>`;
+    }).join('');
 
     const restrictedCaps = KNOWN_CAPABILITIES.restricted.map(c =>
         `<label class="cap-item" data-cap="rescap:${c.name}">
@@ -386,6 +387,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             align-items: center;
             margin-bottom: 8px;
         }
+        .item-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .hidden-tab {
+            display: none !important;
+        }
         .list-item .item-title {
             font-weight: 600;
             font-size: 13px;
@@ -677,6 +686,83 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 </div>
             </div>
         </div>
+
+        <div class="section-header section-header-spaced">Package Type Properties</div>
+        <p class="page-description">These properties control how Windows treats your package. Most apps should leave these at their defaults. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
+        <div class="form-group" data-field="properties.framework">
+            <label>Framework:</label>
+            <select id="props-framework" data-section="properties" data-field-name="framework">
+                <option value="">(omit)</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+            </select>
+            <div class="description">Set to true if this is a framework package (shared runtime libraries consumed by other packages)</div>
+        </div>
+        <div class="form-group" data-field="properties.resourcePackage">
+            <label>Resource Package:</label>
+            <select id="props-resourcePackage" data-section="properties" data-field-name="resourcePackage">
+                <option value="">(omit)</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+            </select>
+            <div class="description">Set to true if this package contains only resources (language/scale assets) and no executable code</div>
+        </div>
+        <div class="form-group" data-field="properties.modificationPackage">
+            <label>Modification Package (rescap6):</label>
+            <select id="props-modificationPackage" data-section="properties" data-field-name="modificationPackage">
+                <option value="">(omit)</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+            </select>
+            <div class="description">Set to true if this is a modification package that customizes the main package</div>
+        </div>
+
+        <div class="section-header section-header-spaced">Advanced Properties</div>
+        <div class="form-group" data-field="properties.supportedUsers">
+            <label>Supported Users (uap):</label>
+            <select id="props-supportedUsers" data-section="properties" data-field-name="supportedUsers">
+                <option value="">(omit)</option>
+                <option value="multiple">multiple</option>
+                <option value="single">single</option>
+            </select>
+            <div class="description">Whether the app supports multiple user sessions or only a single user</div>
+        </div>
+        <div class="form-group" data-field="properties.allowExecution">
+            <label>Allow Execution (uap6):</label>
+            <select id="props-allowExecution" data-section="properties" data-field-name="allowExecution">
+                <option value="">(omit)</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+            </select>
+            <div class="description">Whether executables in the package can be launched (set to false for content-only packages)</div>
+        </div>
+        <div class="form-group" data-field="properties.allowExternalContent">
+            <label>Allow External Content (uap10):</label>
+            <select id="props-allowExternalContent" data-section="properties" data-field-name="allowExternalContent">
+                <option value="">(omit)</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+            </select>
+            <div class="description">Whether the package allows content outside its install directory to be treated as package content</div>
+        </div>
+        <div class="form-group" data-field="properties.fileSystemWriteVirtualization">
+            <label>File System Write Virtualization (desktop6):</label>
+            <select id="props-fsWriteVirt" data-section="properties" data-field-name="fileSystemWriteVirtualization">
+                <option value="">(omit)</option>
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+            </select>
+            <div class="description">Controls whether file system write operations are virtualized or written to the real file system</div>
+        </div>
+        <div class="form-group" data-field="properties.registryWriteVirtualization">
+            <label>Registry Write Virtualization (desktop6):</label>
+            <select id="props-regWriteVirt" data-section="properties" data-field-name="registryWriteVirtualization">
+                <option value="">(omit)</option>
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+            </select>
+            <div class="description">Controls whether registry write operations are virtualized or written to the real registry</div>
+        </div>
     </div>
 
     <!-- ───── Dependencies ───── -->
@@ -694,6 +780,31 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="section-header section-header-spaced">Package Dependencies</div>
         <div id="package-dependencies" class="list-container"></div>
         <button class="btn" id="add-package-dep">+ Add Package Dependency</button>
+
+        <div class="section-header section-header-spaced">Main Package Dependencies (uap3)</div>
+        <p class="page-description">Declares a dependency on a main package for optional packages. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap3-mainpackagedependency2">Learn more</a></p>
+        <div id="main-package-dependencies" class="list-container"></div>
+        <button class="btn" id="add-main-pkg-dep">+ Add Main Package Dependency</button>
+
+        <div class="section-header section-header-spaced">Driver Dependencies (uap5)</div>
+        <p class="page-description">Declares a dependency on a driver with constraints. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-driverdependency">Learn more</a></p>
+        <div id="driver-dependencies" class="list-container"></div>
+        <button class="btn" id="add-driver-dep">+ Add Driver Dependency</button>
+
+        <div class="section-header section-header-spaced">OS Package Dependencies (uap7)</div>
+        <p class="page-description">Declares a dependency on an OS package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap7-ospackagedependency">Learn more</a></p>
+        <div id="os-package-dependencies" class="list-container"></div>
+        <button class="btn" id="add-os-pkg-dep">+ Add OS Package Dependency</button>
+
+        <div class="section-header section-header-spaced">Host Runtime Dependencies (uap10)</div>
+        <p class="page-description">Declares a dependency on a host runtime. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap10-hostruntimedependency">Learn more</a></p>
+        <div id="host-runtime-dependencies" class="list-container"></div>
+        <button class="btn" id="add-host-runtime-dep">+ Add Host Runtime Dependency</button>
+
+        <div class="section-header section-header-spaced">External Dependencies (win32dependencies)</div>
+        <p class="page-description">Declares a dependency on an external Win32 component. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-win32dependencies-externaldependency">Learn more</a></p>
+        <div id="external-dependencies" class="list-container"></div>
+        <button class="btn" id="add-external-dep">+ Add External Dependency</button>
     </div>
 
     <!-- ───── Resources ───── -->
@@ -791,15 +902,26 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function onFieldChange(el) {
             const section = el.getAttribute('data-section');
             const field = el.getAttribute('data-field-name');
-            const index = parseInt(el.getAttribute('data-index') || '0', 10);
             const value = el.value;
-            vscode.postMessage({ type: 'fieldChanged', section, field, value, index });
+            // Driver constraint fields use data-dep-index + data-constraint-index instead of data-index
+            if (field && field.startsWith('driverConstraint.')) {
+                const depIndex = parseInt(el.getAttribute('data-dep-index') || '0', 10);
+                const subIndex = parseInt(el.getAttribute('data-constraint-index') || '0', 10);
+                vscode.postMessage({ type: 'fieldChanged', section, field, value, index: depIndex, subIndex });
+            } else {
+                const index = parseInt(el.getAttribute('data-index') || '0', 10);
+                vscode.postMessage({ type: 'fieldChanged', section, field, value, index });
+            }
         }
 
         // Debounce helper for text inputs
         let debounceTimers = {};
         function debouncedFieldChange(el) {
-            const key = el.id || el.getAttribute('data-field-name');
+            const field = el.getAttribute('data-field-name') || '';
+            const depIdx = el.getAttribute('data-dep-index') || '';
+            const conIdx = el.getAttribute('data-constraint-index') || '';
+            const idx = el.getAttribute('data-index') || '';
+            const key = el.id || (field + ':' + depIdx + ':' + conIdx + ':' + idx);
             clearTimeout(debounceTimers[key]);
             debounceTimers[key] = setTimeout(() => onFieldChange(el), 300);
         }
@@ -917,6 +1039,22 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             });
         });
 
+        document.getElementById('add-main-pkg-dep').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addMainPackageDependency', dependency: { name: '' } });
+        });
+        document.getElementById('add-driver-dep').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addDriverDependency' });
+        });
+        document.getElementById('add-os-pkg-dep').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addOSPackageDependency', dependency: { name: '', version: '' } });
+        });
+        document.getElementById('add-host-runtime-dep').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addHostRuntimeDependency', dependency: { name: '', publisher: '', minVersion: '' } });
+        });
+        document.getElementById('add-external-dep').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addExternalDependency', dependency: { name: '', publisher: '', minVersion: '', optional: '' } });
+        });
+
         // ─── Add application ────────────────────────────────
         document.getElementById('add-application-btn').addEventListener('click', () => {
             vscode.postMessage({ type: 'addApplication' });
@@ -988,11 +1126,40 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 document.getElementById('store-logo-caption')
             );
 
+            // Properties - select fields
+            setSelectValue('props-framework', data.properties.framework);
+            setSelectValue('props-resourcePackage', data.properties.resourcePackage);
+            setSelectValue('props-modificationPackage', data.properties.modificationPackage);
+            setSelectValue('props-supportedUsers', data.properties.supportedUsers);
+            setSelectValue('props-allowExecution', data.properties.allowExecution);
+            setSelectValue('props-allowExternalContent', data.properties.allowExternalContent);
+            setSelectValue('props-fsWriteVirt', data.properties.fileSystemWriteVirtualization);
+            setSelectValue('props-regWriteVirt', data.properties.registryWriteVirtualization);
+
             // Dependencies - Target Device Families
             renderTargetDeviceFamilies(data.dependencies.targetDeviceFamilies);
             renderPackageDependencies(data.dependencies.packageDependencies);
+            renderMainPackageDependencies(data.dependencies.mainPackageDependencies);
+            renderDriverDependencies(data.dependencies.driverDependencies);
+            renderOSPackageDependencies(data.dependencies.osPackageDependencies);
+            renderHostRuntimeDependencies(data.dependencies.hostRuntimeDependencies);
+            renderExternalDependencies(data.dependencies.externalDependencies);
 
-            // Applications
+            // Applications — hide tab for framework and resource packages
+            const isNonAppPackage = data.properties.framework === 'true' || data.properties.resourcePackage === 'true';
+            const appsTab = document.querySelector('.tab-btn[data-tab="applications"]');
+            const appsContent = document.getElementById('tab-applications');
+            if (appsTab) {
+                if (isNonAppPackage) { appsTab.classList.add('hidden-tab'); } else { appsTab.classList.remove('hidden-tab'); }
+            }
+            if (appsContent && isNonAppPackage) {
+                appsContent.classList.remove('active');
+                // If the hidden tab was active, switch to Identity
+                if (!document.querySelector('.tab-content.active')) {
+                    document.getElementById('tab-identity').classList.add('active');
+                    document.querySelector('.tab-btn[data-tab="identity"]').setAttribute('aria-selected', 'true');
+                }
+            }
             renderApplications(data.applications);
 
             // Capabilities
@@ -1012,6 +1179,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             if (el && el !== focusedEl) {
                 el.value = value;
             }
+        }
+
+        function setSelectValue(elementId, value) {
+            const el = document.getElementById(elementId);
+            if (el) { el.value = value || ''; }
         }
 
         function restoreFocus(info) {
@@ -1060,7 +1232,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">Target Device: \${escapeHtml(fam.name)}</span>
-                        <button class="btn btn-danger btn-sm remove-family" data-index="\${idx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-family-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-family-down" data-index="\${idx}" \${idx === families.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-family" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
                     <div class="form-group" data-field="dependencies.targetDeviceFamily.\${idx}.minVersion">
                         <label>Min Version:</label>
@@ -1083,6 +1259,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.querySelector('.remove-family').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeTargetDeviceFamily', index: idx });
                 });
+                item.querySelector('.move-family-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveTargetDeviceFamily', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-family-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveTargetDeviceFamily', index: idx, direction: 'down' });
+                });
             });
         }
 
@@ -1095,7 +1277,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">Package Dependency:</span>
-                        <button class="btn btn-danger btn-sm remove-pkg-dep" data-index="\${idx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-pkg-dep" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="packageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="Microsoft.VCLibs.140.00" />
@@ -1143,6 +1329,216 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-pkg-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removePackageDependency', index: idx });
+                });
+                item.querySelector('.move-pkg-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'movePackageDependency', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-pkg-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'movePackageDependency', index: idx, direction: 'down' });
+                });
+            });
+        }
+
+        function renderMainPackageDependencies(deps) {
+            const container = document.getElementById('main-package-dependencies');
+            container.innerHTML = '';
+            deps.forEach((dep, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">Main Package Dependency</span>
+                        <button class="btn btn-danger btn-sm remove-main-pkg-dep" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Name:</label>
+                        <input type="text" data-section="dependencies" data-field-name="mainPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="MainPackageName" />
+                        <div class="description">Package identity name of the main package</div>
+                    </div>
+                \`;
+                container.appendChild(item);
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelector('.remove-main-pkg-dep').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeMainPackageDependency', index: idx });
+                });
+            });
+        }
+
+        function renderDriverDependencies(deps) {
+            const container = document.getElementById('driver-dependencies');
+            container.innerHTML = '';
+            deps.forEach((dep, depIdx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                let constraintsHtml = '';
+                dep.driverConstraints.forEach((dc, cIdx) => {
+                    constraintsHtml += \`
+                        <div class="list-item" style="margin-left: 16px;">
+                            <div class="item-header">
+                                <span class="item-title">Driver Constraint</span>
+                                <button class="btn btn-danger btn-sm remove-driver-constraint" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}">Remove</button>
+                            </div>
+                            <div class="form-group">
+                                <label>Name:</label>
+                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.name" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.name)}" />
+                            </div>
+                            <div class="form-group">
+                                <label>Min Version:</label>
+                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.minVersion" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minVersion)}" placeholder="1.0.0.0" />
+                            </div>
+                            <div class="form-group">
+                                <label>Min Date:</label>
+                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.minDate" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minDate)}" placeholder="2020-01-01" />
+                            </div>
+                        </div>
+                    \`;
+                });
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">Driver Dependency #\${depIdx + 1}</span>
+                        <button class="btn btn-danger btn-sm remove-driver-dep" data-index="\${depIdx}">Remove</button>
+                    </div>
+                    <div class="driver-constraints">\${constraintsHtml}</div>
+                    <button class="btn btn-sm add-driver-constraint" data-dep-index="\${depIdx}">+ Add Driver Constraint</button>
+                \`;
+                container.appendChild(item);
+                item.querySelector('.remove-driver-dep').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeDriverDependency', index: depIdx });
+                });
+                item.querySelectorAll('.remove-driver-constraint').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        vscode.postMessage({
+                            type: 'removeDriverConstraint',
+                            depIndex: parseInt(btn.getAttribute('data-dep-index'), 10),
+                            constraintIndex: parseInt(btn.getAttribute('data-constraint-index'), 10)
+                        });
+                    });
+                });
+                item.querySelector('.add-driver-constraint').addEventListener('click', () => {
+                    vscode.postMessage({
+                        type: 'addDriverConstraint',
+                        depIndex: depIdx,
+                        constraint: { name: 'DriverName', minVersion: '', minDate: '' }
+                    });
+                });
+            });
+        }
+
+        function renderOSPackageDependencies(deps) {
+            const container = document.getElementById('os-package-dependencies');
+            container.innerHTML = '';
+            deps.forEach((dep, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">OS Package Dependency</span>
+                        <button class="btn btn-danger btn-sm remove-os-pkg-dep" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Name:</label>
+                        <input type="text" data-section="dependencies" data-field-name="osPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                    </div>
+                    <div class="form-group">
+                        <label>Version:</label>
+                        <input type="text" data-section="dependencies" data-field-name="osPackageDependency.version" data-index="\${idx}" value="\${escapeHtml(dep.version)}" placeholder="10.0.0.0" />
+                    </div>
+                \`;
+                container.appendChild(item);
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelector('.remove-os-pkg-dep').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeOSPackageDependency', index: idx });
+                });
+            });
+        }
+
+        function renderHostRuntimeDependencies(deps) {
+            const container = document.getElementById('host-runtime-dependencies');
+            container.innerHTML = '';
+            deps.forEach((dep, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">Host Runtime Dependency</span>
+                        <button class="btn btn-danger btn-sm remove-host-runtime-dep" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Name:</label>
+                        <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                    </div>
+                    <div class="form-group">
+                        <label>Publisher:</label>
+                        <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.publisher" data-index="\${idx}" value="\${escapeHtml(dep.publisher)}" placeholder="CN=..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Min Version:</label>
+                        <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="1.0.0.0" />
+                    </div>
+                \`;
+                container.appendChild(item);
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelector('.remove-host-runtime-dep').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeHostRuntimeDependency', index: idx });
+                });
+            });
+        }
+
+        function renderExternalDependencies(deps) {
+            const container = document.getElementById('external-dependencies');
+            container.innerHTML = '';
+            deps.forEach((dep, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = \`
+                    <div class="item-header">
+                        <span class="item-title">External Dependency</span>
+                        <button class="btn btn-danger btn-sm remove-external-dep" data-index="\${idx}">Remove</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Name:</label>
+                        <input type="text" data-section="dependencies" data-field-name="externalDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                    </div>
+                    <div class="form-group">
+                        <label>Publisher:</label>
+                        <input type="text" data-section="dependencies" data-field-name="externalDependency.publisher" data-index="\${idx}" value="\${escapeHtml(dep.publisher)}" placeholder="CN=..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Min Version:</label>
+                        <input type="text" data-section="dependencies" data-field-name="externalDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="1.0.0.0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Optional:</label>
+                        <select data-section="dependencies" data-field-name="externalDependency.optional" data-index="\${idx}">
+                            <option value=""\${dep.optional === '' ? ' selected' : ''}>(omit)</option>
+                            <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
+                            <option value="false"\${dep.optional === 'false' ? ' selected' : ''}>false</option>
+                        </select>
+                    </div>
+                \`;
+                container.appendChild(item);
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelectorAll('select[data-section]').forEach(sel => {
+                    sel.addEventListener('change', () => {
+                        vscode.postMessage({
+                            type: 'fieldChanged',
+                            section: sel.getAttribute('data-section'),
+                            field: sel.getAttribute('data-field-name'),
+                            value: sel.value,
+                            index: parseInt(sel.getAttribute('data-index'), 10)
+                        });
+                    });
+                });
+                item.querySelector('.remove-external-dep').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeExternalDependency', index: idx });
                 });
             });
         }
