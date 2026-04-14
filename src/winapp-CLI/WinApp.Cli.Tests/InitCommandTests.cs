@@ -19,6 +19,22 @@ public class InitCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InitCommand_WithoutBaseDirectory_UsesCurrentDirectory()
+    {
+        // Arrange
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Init command should complete successfully");
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath), $"winapp.yaml should be created at {configPath}");
+    }
+
+    [TestMethod]
     public async Task InitCommand_WithConfigOnly_CreatesConfigFile()
     {
         // Arrange
