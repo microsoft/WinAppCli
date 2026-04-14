@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -30,7 +31,8 @@ internal class CliUpgradeService(
 
         // Check caller env var (set by wrapper scripts via --caller option)
         var caller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
-        if (string.Equals(caller, "npm", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(caller, "npm", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(caller, "nodejs-package", StringComparison.OrdinalIgnoreCase))
         {
             return InstallChannel.Npm;
         }
@@ -104,8 +106,8 @@ internal class CliUpgradeService(
             {
                 var lines = await File.ReadAllLinesAsync(cacheFile.FullName, cancellationToken);
                 if (lines.Length >= 1
-                    && DateTime.TryParse(lines[0], out var lastCheck)
-                    && (DateTime.UtcNow - lastCheck).TotalHours < CheckIntervalHours)
+                    && DateTimeOffset.TryParse(lines[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var lastCheck)
+                    && (DateTimeOffset.UtcNow - lastCheck).TotalHours < CheckIntervalHours)
                 {
                     // Already checked and notified within the last 24 hours — skip
                     return;
@@ -139,7 +141,7 @@ internal class CliUpgradeService(
         {
             case InstallChannel.Npm:
                 logger.LogInformation("winapp was installed via npm. To upgrade, run:");
-                logger.LogInformation("  npm update -g @anthropic-ai/winappcli");
+                logger.LogInformation("  npm update -g @microsoft/winappcli");
                 return 0;
 
             case InstallChannel.NuGet:
@@ -326,7 +328,7 @@ internal class CliUpgradeService(
         var channel = DetectInstallChannel();
         var upgradeHint = channel switch
         {
-            InstallChannel.Npm => "npm update -g @anthropic-ai/winappcli",
+            InstallChannel.Npm => "npm update -g @microsoft/winappcli",
             InstallChannel.NuGet => "update the Microsoft.Windows.SDK.BuildTools.WinApp NuGet package",
             _ => "winapp upgrade"
         };
@@ -366,10 +368,13 @@ internal class CliUpgradeService(
         try
         {
             uint length = 0;
-            var result = Windows.Win32.PInvoke.GetCurrentPackageFullName(ref length, null);
-            // ERROR_INSUFFICIENT_BUFFER (122) means the app has package identity
-            // APPMODEL_ERROR_NO_PACKAGE (15700) means it does not
-            return result == Windows.Win32.Foundation.WIN32_ERROR.ERROR_INSUFFICIENT_BUFFER;
+            unsafe
+            {
+                var result = Windows.Win32.PInvoke.GetCurrentPackageFullName(ref length, null);
+                // ERROR_INSUFFICIENT_BUFFER (122) means the app has package identity
+                // APPMODEL_ERROR_NO_PACKAGE (15700) means it does not
+                return result == Windows.Win32.Foundation.WIN32_ERROR.ERROR_INSUFFICIENT_BUFFER;
+            }
         }
         catch
         {

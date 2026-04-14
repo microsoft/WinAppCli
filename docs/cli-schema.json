@@ -1409,7 +1409,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)",
+          "description": "Path to the app manifest file, such as appxmanifest.xml or Package.appxmanifest (default: auto-detect from input folder or current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
@@ -3287,7 +3287,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml (default: auto-detect from current directory)",
+          "description": "Path to the app manifest file, such as Package.appxmanifest or appxmanifest.xml (default: auto-detect from current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,

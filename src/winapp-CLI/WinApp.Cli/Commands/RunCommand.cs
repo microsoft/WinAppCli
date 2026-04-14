@@ -41,7 +41,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)"
+            Description = "Path to the app manifest file, such as appxmanifest.xml or Package.appxmanifest (default: auto-detect from input folder or current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using System.Globalization;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
 
@@ -13,6 +14,7 @@ public class CliUpgradeServiceTests : BaseCommandTests
 {
     private ICliUpgradeService _cliUpgradeService = null!;
     private string? _originalCaller;
+    private string? _originalLatestVersion;
 
     [TestInitialize]
     public void Setup()
@@ -20,13 +22,16 @@ public class CliUpgradeServiceTests : BaseCommandTests
         _cliUpgradeService = GetRequiredService<ICliUpgradeService>();
         // Save and clear env var to avoid interference from parallel tests
         _originalCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
+        _originalLatestVersion = Environment.GetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION");
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
+        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "0.0.0");
     }
 
     [TestCleanup]
     public void Cleanup()
     {
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", _originalCaller);
+        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", _originalLatestVersion);
     }
 
     [TestMethod]
@@ -43,6 +48,16 @@ public class CliUpgradeServiceTests : BaseCommandTests
     public void DetectInstallChannel_WhenCallerIsNpm_ReturnsNpm()
     {
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "npm");
+
+        var channel = _cliUpgradeService.DetectInstallChannel();
+
+        Assert.AreEqual(InstallChannel.Npm, channel);
+    }
+
+    [TestMethod]
+    public void DetectInstallChannel_WhenCallerIsNodejsPackage_ReturnsNpm()
+    {
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
 
         var channel = _cliUpgradeService.DetectInstallChannel();
 
@@ -107,7 +122,7 @@ public class CliUpgradeServiceTests : BaseCommandTests
     {
         // Arrange - Write a cache file with an old timestamp (> 24 hours ago)
         var cachePath = Path.Combine(_testCacheDirectory.FullName, ".update-check");
-        var staleTime = DateTime.UtcNow.AddHours(-25);
+        var staleTime = DateTimeOffset.UtcNow.AddHours(-25);
         await File.WriteAllTextAsync(cachePath, $"{staleTime:O}\n");
 
         // Act - Should check for update since cache is stale
@@ -116,7 +131,7 @@ public class CliUpgradeServiceTests : BaseCommandTests
         // Assert - Cache file should be updated with a new timestamp
         var lines = await File.ReadAllLinesAsync(cachePath);
         Assert.IsTrue(lines.Length >= 1, "Cache file should have at least one line");
-        Assert.IsTrue(DateTime.TryParse(lines[0], out var newTimestamp), "Cache should contain a valid timestamp");
+        Assert.IsTrue(DateTimeOffset.TryParse(lines[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var newTimestamp), "Cache should contain a valid timestamp");
         Assert.IsTrue(newTimestamp > staleTime, "Timestamp should be updated to a more recent time");
     }
 

@@ -280,25 +280,29 @@ function generate(schema) {
     L();
 
     // --- Options interface ---
-    L(`export interface ${ifaceName} extends CommonOptions {`);
-    // positional args first
-    for (const arg of positionalArgs) {
-      const required = arg.def.arity?.minimum >= 1;
-      L(`  /** ${cleanDesc(arg.def.description)} */`);
-      L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+    if (positionalArgs.length === 0 && opts.length === 0 && !passthrough) {
+      L(`export type ${ifaceName} = CommonOptions;`);
+    } else {
+      L(`export interface ${ifaceName} extends CommonOptions {`);
+      // positional args first
+      for (const arg of positionalArgs) {
+        const required = arg.def.arity?.minimum >= 1;
+        L(`  /** ${cleanDesc(arg.def.description)} */`);
+        L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+      }
+      // then named options
+      for (const opt of opts) {
+        const tp = tsType(opt.def.valueType, opt.def.helpName);
+        L(`  /** ${cleanDesc(opt.def.description)} */`);
+        L(`  ${opt.propName}?: ${tp};`);
+      }
+      // passthrough args property
+      if (passthrough) {
+        L(`  /** ${passthrough.description} */`);
+        L(`  ${passthrough.propName}?: string[];`);
+      }
+      L('}');
     }
-    // then named options
-    for (const opt of opts) {
-      const tp = tsType(opt.def.valueType, opt.def.helpName);
-      L(`  /** ${cleanDesc(opt.def.description)} */`);
-      L(`  ${opt.propName}?: ${tp};`);
-    }
-    // passthrough args property
-    if (passthrough) {
-      L(`  /** ${passthrough.description} */`);
-      L(`  ${passthrough.propName}?: string[];`);
-    }
-    L('}');
     L();
 
     // --- Wrapper function ---
