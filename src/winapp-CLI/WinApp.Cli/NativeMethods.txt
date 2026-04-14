@@ -86,3 +86,11 @@ GetWindow
 GetClassName
 IUIAutomationTextPattern
 IUIAutomationTextRange
+MiniDumpWriteDump
+MINIDUMP_TYPE
+MINIDUMP_EXCEPTION_INFORMATION
+EXCEPTION_POINTERS
+OpenThread
+GetThreadContext
+CONTEXT
+CONTEXT_FLAGS

@@ -28,6 +28,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> UnregisterOnExitOption { get; }
     public static Option<bool> DetachOption { get; }
     public static Option<bool> CleanOption { get; }
+    public static Option<bool> SymbolsOption { get; }
 
     static RunCommand()
     {
@@ -83,6 +84,11 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments."
         };
+
+        SymbolsOption = new Option<bool>("--symbols")
+        {
+            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -97,6 +103,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(UnregisterOnExitOption);
         Options.Add(DetachOption);
         Options.Add(CleanOption);
+        Options.Add(SymbolsOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -122,6 +129,7 @@ internal partial class RunCommand : Command, IShortDescription
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
             var detach = parseResult.GetValue(DetachOption);
             var clean = parseResult.GetValue(CleanOption);
+            var useSymbols = parseResult.GetValue(SymbolsOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -323,7 +331,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -340,7 +348,8 @@ internal partial class RunCommand : Command, IShortDescription
             // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
             if (debugOutput)
             {
-                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken, useSymbols,
+                    symbolSearchPaths: [inputFolder.FullName]);
                 if (cancellationToken.IsCancellationRequested)
                 {
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
@@ -437,8 +446,10 @@ internal partial class RunCommand : Command, IShortDescription
         /// </summary>
         private async Task<int> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
+            DirectoryInfo inputFolder,
             string? appArgs,
             bool debugOutput,
+            bool useSymbols,
             string? packageFullName,
             CancellationToken cancellationToken)
         {
@@ -487,7 +498,8 @@ internal partial class RunCommand : Command, IShortDescription
 
                 if (debugOutput)
                 {
-                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken,
+                        useSymbols, symbolSearchPaths: [inputFolder.FullName]);
                     if (cancellationToken.IsCancellationRequested)
                     {
                         appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));

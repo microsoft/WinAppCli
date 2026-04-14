@@ -68,7 +68,7 @@ Does the project have an appxmanifest.xml?
 | Attach debugger to running app | `winapp run .\build\Debug` → attach to PID | Misses startup code |
 | Register identity, launch manually | `winapp run .\build\Debug --no-launch` | Launch via `start shell:AppsFolder\<AUMID>` or execution alias — **not** the exe directly |
 | F5 startup debugging (IDE launches exe) | `winapp create-debug-identity .\bin\myapp.exe` | Exe has identity regardless of how it's launched; best for debugging activation/startup code |
-| Capture OutputDebugString | `winapp run .\build\Debug --debug-output` | **Blocks other debuggers** — use `--no-launch` if you need VS Code/WinDbg |
+| Capture OutputDebugString + crash dump | `winapp run .\build\Debug --debug-output` | On crash, writes minidump and shows exception type, message, and faulting methods. **Blocks other debuggers** — use `--no-launch` if you need VS Code/WinDbg |
 | Run and auto-clean | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
 | Launch and detach (CI) | `winapp run .\build\Debug --detach` | Returns immediately after launch; use `--json` to get PID for scripting |
 | Clean up stale registration | `winapp unregister` | Removes dev-mode packages for the current project |
