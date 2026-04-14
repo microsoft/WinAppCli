@@ -455,6 +455,8 @@ export interface RunOptions extends CommonOptions {
   noLaunch?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
   outputAppxDirectory?: string;
+  /** Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
+  symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
@@ -475,6 +477,7 @@ export async function run(options: RunOptions): Promise<WinappResult> {
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
   return execCommand(args, options);

@@ -132,7 +132,6 @@ Describe "Electron Sample" {
         It "Should build the C++ addon" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
-                # Use --verbose to capture full MSBuild output for CI diagnostics
                 $output = Invoke-Expression "npx node-gyp clean configure build --directory=testCppAddon --verbose 2>&1"
                 $output | ForEach-Object { Write-Host $_ }
                 $LASTEXITCODE | Should -Be 0
