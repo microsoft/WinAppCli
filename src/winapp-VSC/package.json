@@ -15,7 +15,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onDebug",
+    "onDebugResolve:winapp",
     "onCommand:winapp.init",
     "onCommand:winapp.restore",
     "onCommand:winapp.update",

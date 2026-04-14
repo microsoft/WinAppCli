@@ -160,7 +160,7 @@ Understanding the architecture helps when troubleshooting or customizing your se
 
 ### The `winapp run` command
 
-`winapp run` is the core primitive that the other tools build on. Given a path to an `AppxManifest.xml`, it:
+`winapp run` is the core primitive that the other tools build on. Given a build output folder containing your app files (and, optionally, a manifest specified via `--manifest`), it:
 
 1. Creates a **loose-layout package** — a folder structure with your app binaries and manifest, registered with Windows via the same APIs that Visual Studio uses.
 2. Registers the package identity with the system using the Windows app deployment APIs.

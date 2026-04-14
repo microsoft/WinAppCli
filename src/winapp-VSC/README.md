@@ -33,7 +33,7 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 **How it works:**
 
 1. You press **F5** (or start a debug session).
-2. The extension locates your build output directories and `AppxManifest.xml`.
+2. The extension locates your build output directories (by scanning for `.exe` files) and optionally uses a manifest specified via `manifest` in `launch.json` or auto-detected by the CLI.
 3. You'll then have the option to select the build directory you'd like to run.
 4. It launches your app via `winapp run` to give it package identity.
 5. A child debug session attaches to the running process using the debugger you specified.
