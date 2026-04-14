@@ -47,6 +47,7 @@ export interface PackageDependencyData {
     name: string;
     minVersion: string;
     publisher: string;
+    optional: string;
 }
 
 export interface ApplicationData {
@@ -205,7 +206,7 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
 };
 
 /** Processor architecture dropdown options. */
-export const ARCHITECTURE_OPTIONS = ['x86', 'x64', 'arm', 'arm64', 'neutral'] as const;
+export const ARCHITECTURE_OPTIONS = ['x86', 'x64', 'arm', 'arm64', 'x86a64', 'neutral'] as const;
 
 /** Target device family dropdown options. */
 export const DEVICE_FAMILY_OPTIONS = [

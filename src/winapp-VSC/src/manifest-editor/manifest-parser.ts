@@ -137,30 +137,42 @@ export function removeCapability(xmlText: string, capability: string): string {
     return xmlText;
 }
 
+/** Ensure the uap6 namespace declaration is present on the Package element. */
+function ensureUap6Namespace(xmlText: string): string {
+    const uap6Decl = 'xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6"';
+    if (xmlText.includes(uap6Decl)) { return xmlText; }
+    return xmlText.replace(/<Package\b/, '<Package ' + uap6Decl);
+}
+
 /** Add a PackageDependency element. */
 export function addPackageDependency(xmlText: string, dep: PackageDependencyData): string {
+    let result = xmlText;
     let attrs = `Name="${dep.name}"`;
     if (dep.minVersion) { attrs += ` MinVersion="${dep.minVersion}"`; }
     if (dep.publisher) { attrs += ` Publisher="${dep.publisher}"`; }
+    if (dep.optional === 'true' || dep.optional === 'false') {
+        attrs += ` uap6:Optional="${dep.optional}"`;
+        result = ensureUap6Namespace(result);
+    }
     const childXml = `<PackageDependency ${attrs} />`;
 
-    const bounds = findParentBounds(xmlText, 'Dependencies');
+    const bounds = findParentBounds(result, 'Dependencies');
     if (bounds) {
-        const parentIndent = detectIndent(xmlText, bounds.openStart);
-        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
     }
 
     // No Dependencies element — create one before </Package>
-    const pkgClose = xmlText.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return xmlText; }
-    const pkgIndent = detectIndent(xmlText, pkgClose);
+    const pkgClose = result.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return result; }
+    const pkgIndent = detectIndent(result, pkgClose);
     const parentIndent = pkgIndent + '  ';
     const block = parentIndent + '<Dependencies>\n' +
         parentIndent + '  ' + childXml + '\n' +
         parentIndent + '</Dependencies>\n';
     let lineStart = pkgClose;
-    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
-    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
+    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
+    return result.substring(0, lineStart) + block + result.substring(lineStart);
 }
 
 /** Remove a PackageDependency element by index. */
@@ -872,6 +884,7 @@ function parseDependencies(root: Element): DependenciesData {
                 name: child.getAttribute('Name') ?? '',
                 minVersion: child.getAttribute('MinVersion') ?? '',
                 publisher: child.getAttribute('Publisher') ?? '',
+                optional: child.getAttribute('uap6:Optional') ?? '',
             });
         }
     }
@@ -1007,6 +1020,21 @@ function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string,
         + attrMatch[1] + attrMatch[2] + newValue + attrMatch[2]
         + elementStr.substring(attrMatch.index + attrMatch[0].length);
 
+    return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
+}
+
+/** Remove an XML attribute from an element in-place. Returns the original string if not found. */
+function removeAttribute(xml: string, elementPattern: RegExp, attrName: string): string {
+    const elementMatch = elementPattern.exec(xml);
+    if (!elementMatch) { return xml; }
+
+    const elementStr = elementMatch[0];
+    // Match the attribute with surrounding whitespace (consume leading space)
+    const attrRegex = new RegExp(`\\s+${escapeRegex(attrName)}\\s*=\\s*(["'])[^"']*?\\1`);
+    const attrMatch = attrRegex.exec(elementStr);
+    if (!attrMatch) { return xml; }
+
+    const newElementStr = elementStr.substring(0, attrMatch.index) + elementStr.substring(attrMatch.index + attrMatch[0].length);
     return xml.substring(0, elementMatch.index) + newElementStr + xml.substring(elementMatch.index + elementStr.length);
 }
 
@@ -1153,6 +1181,7 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
             name: 'Name',
             minVersion: 'MinVersion',
             publisher: 'Publisher',
+            optional: 'uap6:Optional',
         };
         const attr = attrMap[subField];
         if (!attr) { return xml; }
@@ -1162,10 +1191,33 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                const elementRegex = new RegExp(escapeRegex(match[0]));
+                // Empty value for optional attributes like uap6:Optional means remove the attribute
+                if (!value && subField === 'optional') {
+                    return removeAttribute(xml, elementRegex, attr);
+                }
+                // Ensure uap6 namespace when setting uap6:Optional
+                if (subField === 'optional') {
+                    xml = ensureUap6Namespace(xml);
+                    // Re-find after potential namespace insertion
+                    const regex2 = /<PackageDependency\b[^>]*\/?>/gs;
+                    let m2: RegExpExecArray | null;
+                    let c2 = 0;
+                    while ((m2 = regex2.exec(xml)) !== null) {
+                        if (c2 === index) {
+                            const elemRegex2 = new RegExp(escapeRegex(m2[0]));
+                            const result = replaceAttribute(xml, elemRegex2, attr, value);
+                            if (result !== xml) { return result; }
+                            return addAttributeToElement(xml, elemRegex2, attr, value);
+                        }
+                        c2++;
+                    }
+                    return xml;
+                }
+                const result = replaceAttribute(xml, elementRegex, attr, value);
                 if (result !== xml) { return result; }
                 // Attribute doesn't exist yet — add it
-                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), attr, value);
+                return addAttributeToElement(xml, elementRegex, attr, value);
             }
             count++;
         }

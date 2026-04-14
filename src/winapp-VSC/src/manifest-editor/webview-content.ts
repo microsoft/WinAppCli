@@ -592,7 +592,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="section-header">Package Identity</div>
         <p class="page-description">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-identity">Learn more</a></p>
         <div class="form-group" data-field="identity.name">
-            <label for="identity-name">Package Name:</label>
+            <label for="identity-name">Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
             <div class="description">Unique identifier for your package in reverse-domain style (e.g. com.company.app), used internally by Windows and the Store</div>
             <div class="validation-msg"></div>
@@ -645,13 +645,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
-            <div class="description">App name shown to users in the Start menu and Store, max 256 characters</div>
+            <div class="description">Package name shown in Settings (Installed apps), the Microsoft Store, and other system surfaces, max 256 characters</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.publisherDisplayName">
             <label for="props-pubdisplayname">Publisher Display Name:</label>
             <input type="text" id="props-pubdisplayname" data-section="properties" data-field-name="publisherDisplayName" placeholder="Contoso" />
-            <div class="description">Publisher name shown in the Store and app info, max 256 characters</div>
+            <div class="description">Publisher name shown in Settings (Installed apps), the Microsoft Store, and app info, max 256 characters</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.description">
@@ -668,7 +668,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <input type="text" id="props-logo" data-section="properties" data-field-name="logo" placeholder="Assets\\StoreLogo.png" />
                         <button class="btn btn-sm browse-image-btn" data-section="properties" data-field-name="logo">Choose file</button>
                     </div>
-                    <div class="description">Relative path to the image displayed in the Microsoft Store and app installer, should be a 50×50 pixel PNG path relative to the manifest file location</div>
+                    <div class="description">Package-relative path or key in resources.pri for the image displayed in the Microsoft Store and app installer, should be a PNG file</div>
                     <div class="validation-msg"></div>
                 </div>
                 <div class="logo-preview-col">
@@ -913,7 +913,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         document.getElementById('add-package-dep').addEventListener('click', () => {
             vscode.postMessage({
                 type: 'addPackageDependency',
-                dependency: { name: '', minVersion: '', publisher: '' }
+                dependency: { name: '', minVersion: '', publisher: '', optional: '' }
             });
         });
 
@@ -1114,11 +1114,32 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="description">X.500 distinguished name of the package publisher</div>
                         <div class="validation-msg"></div>
                     </div>
+                    <div class="form-group" data-field="dependencies.packageDependency.\${idx}.optional">
+                        <label>uap6:Optional:</label>
+                        <select data-section="dependencies" data-field-name="packageDependency.optional" data-index="\${idx}">
+                            <option value=""\${dep.optional === '' ? ' selected' : ''}>(omit)</option>
+                            <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
+                            <option value="false"\${dep.optional === 'false' ? ' selected' : ''}>false</option>
+                        </select>
+                        <div class="description">Whether this dependency is optional (requires uap6 namespace)</div>
+                        <div class="validation-msg"></div>
+                    </div>
                 \`;
                 container.appendChild(item);
 
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelectorAll('select[data-section]').forEach(sel => {
+                    sel.addEventListener('change', () => {
+                        vscode.postMessage({
+                            type: 'fieldChanged',
+                            section: sel.getAttribute('data-section'),
+                            field: sel.getAttribute('data-field-name'),
+                            value: sel.value,
+                            index: parseInt(sel.getAttribute('data-index'), 10)
+                        });
+                    });
                 });
                 item.querySelector('.remove-pkg-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removePackageDependency', index: idx });

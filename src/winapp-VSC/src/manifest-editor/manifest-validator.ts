@@ -6,14 +6,25 @@
 import { ManifestData, ValidationError } from './manifest-types';
 
 const VERSION_REGEX = /^\d+\.\d+\.\d+\.\d+$/;
-const PUBLISHER_DN_REGEX = /^CN\s*=\s*.+/i;
+// Full X.500 DN pattern matching the appxmanifest schema constraint.
+// Allowed RDN aliases: CN, L, O, OU, E, C, S, STREET, T, G, I, SN, DC, SERIALNUMBER,
+// Description, PostalCode, POBox, Phone, X21Address, dnQualifier, or OID.x.y.z...
+const PUBLISHER_DN_REGEX = /^(CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=(([^,+="<>#;])+|".*?")(,\s*((CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=(([^,+="<>#;])+|".*?")))*$/;
 const IDENTITY_NAME_REGEX = /^[a-zA-Z0-9.\-]+$/;
-const WINDOWS_VERSION_REGEX = /^10\.0\.\d+\.\d+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 // BCP-47: language[-script][-region][-variant] (simplified for common MSIX usage)
 // Also accepts private-use tags like "x-generate" used by MSIX tooling
 const BCP47_REGEX = /^(?:x(?:-[a-zA-Z0-9]{1,8})+|[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*)$/;
+
+/** Validate a DotQuadNumber: four dot-separated integers each 0–65535. */
+function isValidDotQuadNumber(value: string): boolean {
+    if (!VERSION_REGEX.test(value)) { return false; }
+    return value.split('.').every(part => {
+        const n = parseInt(part, 10);
+        return n >= 0 && n <= 65535;
+    });
+}
 
 /** Returns true if a path has a non-.png file extension (i.e. an unsupported image format). */
 function hasNonPngExtension(path: string): boolean {
@@ -43,18 +54,22 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         errors.push({ field: 'identity.name', message: 'Package name is required.', severity: 'error' });
     } else if (!IDENTITY_NAME_REGEX.test(data.identity.name)) {
         errors.push({ field: 'identity.name', message: 'Package name can only contain letters, numbers, dots, and hyphens.', severity: 'error' });
+    } else if (data.identity.name.length < 3) {
+        errors.push({ field: 'identity.name', message: 'Package name must be at least 3 characters.', severity: 'error' });
+    } else if (data.identity.name.length > 50) {
+        errors.push({ field: 'identity.name', message: 'Package name must be 50 characters or fewer.', severity: 'error' });
     }
 
     if (!data.identity.publisher) {
         errors.push({ field: 'identity.publisher', message: 'Publisher is required.', severity: 'error' });
     } else if (!PUBLISHER_DN_REGEX.test(data.identity.publisher)) {
-        errors.push({ field: 'identity.publisher', message: 'Publisher must be a valid X.500 distinguished name starting with CN=.', severity: 'error' });
+        errors.push({ field: 'identity.publisher', message: 'Publisher must be a valid X.500 distinguished name (e.g. CN=Contoso, O=Contoso Ltd).', severity: 'error' });
     }
 
     if (!data.identity.version) {
         errors.push({ field: 'identity.version', message: 'Version is required.', severity: 'error' });
-    } else if (!VERSION_REGEX.test(data.identity.version)) {
-        errors.push({ field: 'identity.version', message: 'Version must be in Major.Minor.Build.Revision format (e.g. 1.0.0.0).', severity: 'error' });
+    } else if (!isValidDotQuadNumber(data.identity.version)) {
+        errors.push({ field: 'identity.version', message: 'Version must be a DotQuadNumber in Major.Minor.Build.Revision format (e.g. 1.0.0.0), each part 0–65535.', severity: 'error' });
     }
 
     // Phone Identity validation
@@ -94,18 +109,18 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
         if (!family.minVersion) {
             errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion is required.', severity: 'error' });
-        } else if (!WINDOWS_VERSION_REGEX.test(family.minVersion)) {
-            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be in 10.0.XXXXX.0 format.', severity: 'error' });
+        } else if (!isValidDotQuadNumber(family.minVersion)) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be a DotQuadNumber (e.g. 10.0.17763.0), each part 0–65535.', severity: 'error' });
         }
 
         if (!family.maxVersionTested) {
             errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested is required.', severity: 'error' });
-        } else if (!WINDOWS_VERSION_REGEX.test(family.maxVersionTested)) {
-            errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested must be in 10.0.XXXXX.0 format.', severity: 'error' });
+        } else if (!isValidDotQuadNumber(family.maxVersionTested)) {
+            errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested must be a DotQuadNumber (e.g. 10.0.26100.0), each part 0–65535.', severity: 'error' });
         }
 
         if (family.minVersion && family.maxVersionTested &&
-            WINDOWS_VERSION_REGEX.test(family.minVersion) && WINDOWS_VERSION_REGEX.test(family.maxVersionTested)) {
+            isValidDotQuadNumber(family.minVersion) && isValidDotQuadNumber(family.maxVersionTested)) {
             if (compareVersions(family.maxVersionTested, family.minVersion) < 0) {
                 errors.push({ field: `${prefix}.maxVersionTested`, message: 'MaxVersionTested must be greater than or equal to MinVersion.', severity: 'error' });
             }
@@ -123,10 +138,14 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
         if (!dep.minVersion) {
             errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion is required.', severity: 'error' });
+        } else if (!isValidDotQuadNumber(dep.minVersion)) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be a 4-part dotted version (e.g. 14.0.0.0), each part 0–65535.', severity: 'error' });
         }
 
         if (!dep.publisher) {
             errors.push({ field: `${prefix}.publisher`, message: 'Publisher is required.', severity: 'error' });
+        } else if (!PUBLISHER_DN_REGEX.test(dep.publisher)) {
+            errors.push({ field: `${prefix}.publisher`, message: 'Publisher must be a valid X.500 distinguished name (e.g. CN=Microsoft Corporation, O=Microsoft Corporation).', severity: 'error' });
         }
     }
 
