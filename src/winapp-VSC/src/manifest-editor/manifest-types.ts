@@ -18,6 +18,7 @@ export interface IdentityData {
     publisher: string;
     version: string;
     processorArchitecture: string;
+    resourceId: string;
 }
 
 export interface PhoneIdentityData {
@@ -38,6 +39,9 @@ export interface PropertiesData {
     registryWriteVirtualization: string;
     modificationPackage: string;
     allowExternalContent: string;
+    autoUpdateUri: string;
+    packageIntegrityEnforcement: string;
+    updateWhileInUse: string;
 }
 
 export interface DependenciesData {
@@ -99,6 +103,10 @@ export interface ApplicationData {
     id: string;
     executable: string;
     entryPoint: string;
+    trustLevel: string;
+    runtimeBehavior: string;
+    supportsMultipleInstances: string;
+    parameters: string;
     visualElements: VisualElementsData;
     extensions: string[];
 }
@@ -109,17 +117,26 @@ export interface VisualElementsData {
     backgroundColor: string;
     square150x150Logo: string;
     square44x44Logo: string;
+    appListEntry: string;
     wide310x150Logo: string | null;
     square71x71Logo: string | null;
     square310x310Logo: string | null;
     badgeLogo: string | null;
     splashScreenImage: string | null;
+    splashScreenBackgroundColor: string;
+    lockScreenNotification: string;
+    shortName: string;
     showNameOnTiles: string[];
 }
 
 export interface ResourceData {
     language: string;
+    scale: string;
+    dxFeatureLevel: string;
 }
+
+export const RESOURCE_SCALE_OPTIONS = ['', '80', '100', '120', '125', '140', '150', '160', '175', '180', '200', '225', '250', '300', '350', '400', '450'] as const;
+export const RESOURCE_DX_OPTIONS = ['', 'dx9', 'dx10', 'dx11', 'dx12'] as const;
 
 /** Validation error for a single field. */
 export interface ValidationError {

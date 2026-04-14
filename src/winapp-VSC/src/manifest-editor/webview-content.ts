@@ -395,6 +395,53 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .hidden-tab {
             display: none !important;
         }
+        .optional-field.hidden-optional {
+            display: none !important;
+        }
+        .btn-add-field.hidden-optional {
+            display: none !important;
+        }
+        .btn-add-field {
+            display: inline-block;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--vscode-textLink-foreground, #3794ff);
+            background: transparent;
+            border: 1px dashed var(--vscode-textLink-foreground, #3794ff);
+            border-radius: 4px;
+            margin-bottom: 12px;
+        }
+        .btn-add-field:hover {
+            background: var(--vscode-list-hoverBackground, rgba(55,148,255,0.1));
+        }
+        .optional-field-content {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .optional-field-content input,
+        .optional-field-content select {
+            flex: 1;
+        }
+        .btn-remove-field {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: var(--vscode-errorForeground, #f44747);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-remove-field:hover {
+            background: var(--vscode-list-hoverBackground, rgba(244,71,71,0.1));
+        }
         .list-item .item-title {
             font-weight: 600;
             font-size: 13px;
@@ -629,6 +676,16 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">CPU architecture this package targets</div>
             <div class="validation-msg"></div>
         </div>
+        <div class="form-group optional-field" data-field="identity.resourceId" id="identity-resourceid-group">
+            <label for="identity-resourceid">Resource ID:</label>
+            <div class="optional-field-content">
+                <input type="text" id="identity-resourceid" data-section="identity" data-field-name="resourceId" placeholder="e.g. SplitConfig" />
+                <button class="btn-remove-field" type="button" data-target="identity-resourceid-group" title="Remove Resource ID">✕</button>
+            </div>
+            <div class="description">Optional string used to differentiate packages that are part of a resource bundle or bundle optional packages (max 30 chars, alphanumeric/period/dash only)</div>
+            <div class="validation-msg"></div>
+        </div>
+        <button class="btn-add-field" type="button" id="add-identity-resourceid" title="Add Resource ID attribute">+ Add Resource ID</button>
         <div id="phone-identity-section" class="section-header-spaced" style="display:none;">
             <div class="section-header">Phone Identity</div>
             <p class="page-description">Legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
@@ -763,6 +820,44 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             </select>
             <div class="description">Controls whether registry write operations are virtualized or written to the real registry</div>
         </div>
+        <div class="section-header section-header-spaced">Update &amp; Integrity</div>
+        <div class="form-group optional-field" data-field="properties.autoUpdateUri" id="props-autoupdate-group">
+            <label>Auto Update URI (uap13):</label>
+            <div class="optional-field-content">
+                <input type="text" id="props-autoUpdateUri" data-section="properties" data-field-name="autoUpdateUri" placeholder="https://example.com/install/MyApp.appinstaller" />
+                <button class="btn-remove-field" type="button" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" title="Remove Auto Update URI">✕</button>
+            </div>
+            <div class="description">URI to an .appinstaller file that enables automatic updates for sideloaded apps</div>
+            <div class="validation-msg"></div>
+        </div>
+        <button class="btn-add-field" type="button" id="add-props-autoupdate" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" data-default="" title="Add Auto Update URI">+ Add Auto Update URI</button>
+        <div class="form-group optional-field" data-field="properties.packageIntegrityEnforcement" id="props-pkgintegrity-group">
+            <label>Package Integrity Enforcement (uap10):</label>
+            <div class="optional-field-content">
+                <select id="props-packageIntegrityEnforcement" data-section="properties" data-field-name="packageIntegrityEnforcement">
+                    <option value="on">on</option>
+                    <option value="off">off</option>
+                    <option value="default">default</option>
+                </select>
+                <button class="btn-remove-field" type="button" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" title="Remove Package Integrity Enforcement">✕</button>
+            </div>
+            <div class="description">Controls whether Windows enforces content integrity checks for the package — "on", "off", or "default"</div>
+            <div class="validation-msg"></div>
+        </div>
+        <button class="btn-add-field" type="button" id="add-props-pkgintegrity" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" data-default="default" title="Add Package Integrity Enforcement">+ Add Package Integrity Enforcement</button>
+        <div class="form-group optional-field" data-field="properties.updateWhileInUse" id="props-updatewhileinuse-group">
+            <label>Update While In Use (uap17):</label>
+            <div class="optional-field-content">
+                <select id="props-updateWhileInUse" data-section="properties" data-field-name="updateWhileInUse">
+                    <option value="allow">allow</option>
+                    <option value="defer">defer</option>
+                </select>
+                <button class="btn-remove-field" type="button" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" title="Remove Update While In Use">✕</button>
+            </div>
+            <div class="description">Whether the package can be updated while it is running — "allow" applies updates immediately, "defer" waits until the app closes</div>
+            <div class="validation-msg"></div>
+        </div>
+        <button class="btn-add-field" type="button" id="add-props-updatewhileinuse" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" data-default="defer" title="Add Update While In Use">+ Add Update While In Use</button>
     </div>
 
     <!-- ───── Dependencies ───── -->
@@ -1064,8 +1159,60 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         document.getElementById('add-resource-btn').addEventListener('click', () => {
             vscode.postMessage({
                 type: 'addResource',
-                resource: { language: '' }
+                resource: { language: '', scale: '', dxFeatureLevel: '' }
             });
+        });
+
+        // ─── Optional field Add/Remove buttons ─────────────
+        document.addEventListener('click', (e) => {
+            const addBtn = e.target.closest('.btn-add-field');
+            if (addBtn) {
+                const targetId = addBtn.getAttribute('data-target');
+                const group = document.getElementById(targetId);
+                if (group) {
+                    group.classList.remove('hidden-optional');
+                    addBtn.classList.add('hidden-optional');
+                    // Set default value and trigger change
+                    const defaultVal = addBtn.getAttribute('data-default') || '';
+                    const input = group.querySelector('input[data-section], select[data-section]');
+                    if (input) {
+                        if (input.tagName === 'SELECT') {
+                            // For selects, pick the first option or the default
+                            if (defaultVal) { input.value = defaultVal; }
+                        } else {
+                            input.value = defaultVal;
+                        }
+                        input.focus();
+                        // Trigger the change only for selects (they need immediate send), text inputs will fire on user typing
+                        if (input.tagName === 'SELECT') {
+                            debouncedFieldChange(input);
+                        }
+                    }
+                }
+                return;
+            }
+
+            const removeBtn = e.target.closest('.btn-remove-field');
+            if (removeBtn) {
+                const targetId = removeBtn.getAttribute('data-target');
+                const group = document.getElementById(targetId);
+                if (group) {
+                    group.classList.add('hidden-optional');
+                    // Find the corresponding add button
+                    const addBtnForGroup = document.querySelector('.btn-add-field[data-target="' + targetId + '"]');
+                    if (addBtnForGroup) addBtnForGroup.classList.remove('hidden-optional');
+                    // Send empty value to remove the attribute
+                    const section = removeBtn.getAttribute('data-section');
+                    const fieldName = removeBtn.getAttribute('data-field-name');
+                    const index = removeBtn.getAttribute('data-index');
+                    if (section && fieldName) {
+                        const msg = { type: 'fieldChanged', section: section, field: fieldName, value: '' };
+                        if (index !== null && index !== undefined) { msg.index = parseInt(index, 10); }
+                        vscode.postMessage(msg);
+                    }
+                }
+                return;
+            }
         });
 
         // ─── Populate form from data ────────────────────────
@@ -1094,6 +1241,10 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             setValueIfNotFocused('identity-name', data.identity.name, focused);
             setValueIfNotFocused('identity-publisher', data.identity.publisher, focused);
             setValueIfNotFocused('identity-version', data.identity.version, focused);
+
+            // Identity - optional ResourceId
+            toggleOptionalField('identity-resourceid-group', 'add-identity-resourceid', data.identity.resourceId);
+            setValueIfNotFocused('identity-resourceid', data.identity.resourceId || '', focused);
 
             // Update architecture custom select
             const archTrigger = document.getElementById('arch-select-trigger');
@@ -1135,6 +1286,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             setSelectValue('props-allowExternalContent', data.properties.allowExternalContent);
             setSelectValue('props-fsWriteVirt', data.properties.fileSystemWriteVirtualization);
             setSelectValue('props-regWriteVirt', data.properties.registryWriteVirtualization);
+
+            // Properties - optional new fields
+            toggleOptionalField('props-autoupdate-group', 'add-props-autoupdate', data.properties.autoUpdateUri);
+            setValueIfNotFocused('props-autoUpdateUri', data.properties.autoUpdateUri || '', focused);
+            toggleOptionalField('props-pkgintegrity-group', 'add-props-pkgintegrity', data.properties.packageIntegrityEnforcement);
+            setSelectValue('props-packageIntegrityEnforcement', data.properties.packageIntegrityEnforcement);
+            toggleOptionalField('props-updatewhileinuse-group', 'add-props-updatewhileinuse', data.properties.updateWhileInUse);
+            setSelectValue('props-updateWhileInUse', data.properties.updateWhileInUse);
 
             // Dependencies - Target Device Families
             renderTargetDeviceFamilies(data.dependencies.targetDeviceFamilies);
@@ -1184,6 +1343,19 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function setSelectValue(elementId, value) {
             const el = document.getElementById(elementId);
             if (el) { el.value = value || ''; }
+        }
+
+        function toggleOptionalField(groupId, addBtnId, value) {
+            const group = document.getElementById(groupId);
+            const addBtn = document.getElementById(addBtnId);
+            if (!group) return;
+            if (value) {
+                group.classList.remove('hidden-optional');
+                if (addBtn) addBtn.classList.add('hidden-optional');
+            } else {
+                group.classList.add('hidden-optional');
+                if (addBtn) addBtn.classList.remove('hidden-optional');
+            }
         }
 
         function restoreFocus(info) {
@@ -1546,24 +1718,52 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         function renderResources(resources) {
             const container = document.getElementById('resources-list');
             container.innerHTML = '';
+            const scaleOptions = ['', '80', '100', '120', '125', '140', '150', '160', '175', '180', '200', '225', '250', '300', '350', '400', '450'];
+            const dxOptions = ['', 'dx9', 'dx10', 'dx11', 'dx12'];
             resources.forEach((res, idx) => {
                 const item = document.createElement('div');
                 item.className = 'list-item';
+
+                const scaleOptionsHtml = scaleOptions.map(s =>
+                    '<option value="' + s + '"' + (res.scale === s ? ' selected' : '') + '>' + (s || '(none)') + '</option>'
+                ).join('');
+                const dxOptionsHtml = dxOptions.map(d =>
+                    '<option value="' + d + '"' + (res.dxFeatureLevel === d ? ' selected' : '') + '>' + (d || '(none)') + '</option>'
+                ).join('');
+
                 item.innerHTML = \`
+                    <div class="item-header">
+                        <label><strong>Resource \${idx + 1}</strong></label>
+                        <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                    </div>
                     <div class="form-group" data-field="resources.\${idx}.language">
-                        <div class="item-header">
-                            <label>Language:</label>
-                            <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
-                        </div>
+                        <label>Language:</label>
                         <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
                         <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp") or "x-generate"</div>
                         <div class="validation-msg"></div>
+                    </div>
+                    <div class="form-group" data-field="resources.\${idx}.scale">
+                        <label>Scale:</label>
+                        <select data-section="resources" data-field-name="scale" data-index="\${idx}">
+                            \${scaleOptionsHtml}
+                        </select>
+                        <div class="description">Resolution scale for resource selection (e.g. 100, 200, 400)</div>
+                    </div>
+                    <div class="form-group" data-field="resources.\${idx}.dxFeatureLevel">
+                        <label>DirectX Feature Level:</label>
+                        <select data-section="resources" data-field-name="dxFeatureLevel" data-index="\${idx}">
+                            \${dxOptionsHtml}
+                        </select>
+                        <div class="description">DirectX feature level for resource selection</div>
                     </div>
                 \`;
                 container.appendChild(item);
 
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                item.querySelectorAll('select[data-section]').forEach(sel => {
+                    sel.addEventListener('change', () => onFieldChange(sel));
                 });
                 item.querySelector('.remove-resource').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeResource', index: idx });
@@ -1718,6 +1918,58 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Activation type or runtime class, use 'Windows.FullTrustApplication' for desktop (Win32) apps</div>
                             <div class="validation-msg"></div>
                         </div>
+                        <div class="section-header-spaced">Advanced Attributes</div>
+                        <p class="description mb-12">Optional advanced attributes for this application entry. These control trust level, runtime behavior, and multi-instance support.</p>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.trustLevel" id="app-\${idx}-trustlevel-group">
+                            <label>Trust Level:</label>
+                            <div class="optional-field-content">
+                                <select data-section="applications" data-field-name="trustLevel" data-index="\${idx}">
+                                    <option value="appContainer"\${app.trustLevel === 'appContainer' ? ' selected' : ''}>appContainer</option>
+                                    <option value="mediumIL"\${app.trustLevel === 'mediumIL' ? ' selected' : ''}>mediumIL</option>
+                                </select>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-trustlevel-group" data-section="applications" data-field-name="trustLevel" data-index="\${idx}" title="Remove Trust Level">✕</button>
+                            </div>
+                            <div class="description">App trust level — appContainer (sandboxed UWP) or mediumIL (classic desktop, requires runFullTrust capability)</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-trustlevel" data-target="app-\${idx}-trustlevel-group" data-section="applications" data-field-name="trustLevel" data-index="\${idx}" data-default="appContainer" title="Add Trust Level attribute">+ Add Trust Level</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.runtimeBehavior" id="app-\${idx}-runtimebehavior-group">
+                            <label>Runtime Behavior:</label>
+                            <div class="optional-field-content">
+                                <select data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}">
+                                    <option value="windowsApp"\${app.runtimeBehavior === 'windowsApp' ? ' selected' : ''}>windowsApp</option>
+                                    <option value="packagedClassicApp"\${app.runtimeBehavior === 'packagedClassicApp' ? ' selected' : ''}>packagedClassicApp</option>
+                                    <option value="win32App"\${app.runtimeBehavior === 'win32App' ? ' selected' : ''}>win32App</option>
+                                </select>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-runtimebehavior-group" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}" title="Remove Runtime Behavior">✕</button>
+                            </div>
+                            <div class="description">Runtime model — windowsApp (UWP), packagedClassicApp (packaged desktop), or win32App (unpackaged desktop)</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-runtimebehavior" data-target="app-\${idx}-runtimebehavior-group" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}" data-default="windowsApp" title="Add Runtime Behavior attribute">+ Add Runtime Behavior</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.supportsMultipleInstances" id="app-\${idx}-multiinstance-group">
+                            <label>Supports Multiple Instances:</label>
+                            <div class="optional-field-content">
+                                <select data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}">
+                                    <option value="true"\${app.supportsMultipleInstances === 'true' ? ' selected' : ''}>true</option>
+                                    <option value="false"\${app.supportsMultipleInstances === 'false' ? ' selected' : ''}>false</option>
+                                </select>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-multiinstance-group" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}" title="Remove Supports Multiple Instances">✕</button>
+                            </div>
+                            <div class="description">Whether multiple instances of this app can run simultaneously</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-multiinstance" data-target="app-\${idx}-multiinstance-group" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}" data-default="true" title="Add Supports Multiple Instances">+ Add Supports Multiple Instances</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.parameters" id="app-\${idx}-parameters-group">
+                            <label>Parameters:</label>
+                            <div class="optional-field-content">
+                                <input type="text" data-section="applications" data-field-name="parameters" data-index="\${idx}" value="\${escapeHtml(app.parameters || '')}" placeholder="e.g. --flag value" />
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-parameters-group" data-section="applications" data-field-name="parameters" data-index="\${idx}" title="Remove Parameters">✕</button>
+                            </div>
+                            <div class="description">Command-line parameters passed to the executable at launch</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-parameters" data-target="app-\${idx}-parameters-group" data-section="applications" data-field-name="parameters" data-index="\${idx}" data-default="" title="Add Parameters attribute">+ Add Parameters</button>
                     </div>
                     <div class="app-sub-content \${activeTab === 'extensions' ? 'active' : ''}" data-subcontent="extensions" data-app-idx="\${idx}">
                         <p class="description mb-12">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases. <a class="doc-link" href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-1-extension">Learn more</a></p>
@@ -1782,10 +2034,70 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             buildAddVisualAssetMenuHtml(app, idx) +
                             '</div></div>' : ''}
                         \${buildShowNameOnTilesHtml(app, idx)}
+                        <div class="section-header-spaced">Additional Visual Properties</div>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.appListEntry" id="app-\${idx}-applistentry-group">
+                            <label>App List Entry:</label>
+                            <div class="optional-field-content">
+                                <select data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}">
+                                    <option value="default"\${app.visualElements.appListEntry === 'default' ? ' selected' : ''}>default</option>
+                                    <option value="none"\${app.visualElements.appListEntry === 'none' ? ' selected' : ''}>none</option>
+                                </select>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-applistentry-group" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}" title="Remove App List Entry">✕</button>
+                            </div>
+                            <div class="description">Whether the app appears in the All Apps list — "default" shows it, "none" hides it (e.g. for background tasks)</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-applistentry" data-target="app-\${idx}-applistentry-group" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}" data-default="default" title="Add App List Entry">+ Add App List Entry</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.shortName" id="app-\${idx}-shortname-group">
+                            <label>Short Name:</label>
+                            <div class="optional-field-content">
+                                <input type="text" data-section="applications" data-field-name="visualElements.shortName" data-index="\${idx}" value="\${escapeHtml(app.visualElements.shortName || '')}" placeholder="Short display name (max 40 chars)" />
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-shortname-group" data-section="applications" data-field-name="visualElements.shortName" data-index="\${idx}" title="Remove Short Name">✕</button>
+                            </div>
+                            <div class="description">Abbreviated name shown on the app tile when space is limited (1–40 characters, on uap:DefaultTile)</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-shortname" data-target="app-\${idx}-shortname-group" data-section="applications" data-field-name="visualElements.shortName" data-index="\${idx}" data-default="" title="Add Short Name">+ Add Short Name</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.splashScreenBackgroundColor" id="app-\${idx}-splashbgcolor-group">
+                            <label>Splash Screen Background Color:</label>
+                            <div class="optional-field-content">
+                                <div class="color-row">
+                                    <input type="color" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" value="\${toColorValue(app.visualElements.splashScreenBackgroundColor || '#FFFFFF')}" />
+                                    <input type="text" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" value="\${escapeHtml(app.visualElements.splashScreenBackgroundColor || '')}" placeholder="#FFFFFF or transparent" />
+                                </div>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-splashbgcolor-group" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" title="Remove Splash Screen Background Color">✕</button>
+                            </div>
+                            <div class="description">Background color for the splash screen, displayed behind the SplashScreen image</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-splashbgcolor" data-target="app-\${idx}-splashbgcolor-group" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" data-default="" title="Add Splash Screen Background Color">+ Add Splash Screen Background Color</button>
+                        <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.lockScreenNotification" id="app-\${idx}-lockscreennotif-group">
+                            <label>Lock Screen Notification:</label>
+                            <div class="optional-field-content">
+                                <select data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}">
+                                    <option value="badge"\${app.visualElements.lockScreenNotification === 'badge' ? ' selected' : ''}>badge</option>
+                                    <option value="badgeAndTileText"\${app.visualElements.lockScreenNotification === 'badgeAndTileText' ? ' selected' : ''}>badgeAndTileText</option>
+                                </select>
+                                <button class="btn-remove-field" type="button" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" title="Remove Lock Screen Notification">✕</button>
+                            </div>
+                            <div class="description">Lock screen notification style — "badge" (icon only) or "badgeAndTileText" (icon + text). Requires BadgeLogo and lock screen capability.</div>
+                            <div class="validation-msg"></div>
+                        </div>
+                        <button class="btn-add-field" type="button" id="add-app-\${idx}-lockscreennotif" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" data-default="badge" title="Add Lock Screen Notification">+ Add Lock Screen Notification</button>
                         <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
+
+                // Toggle optional fields visibility in this app card
+                toggleOptionalField('app-' + idx + '-trustlevel-group', 'add-app-' + idx + '-trustlevel', app.trustLevel);
+                toggleOptionalField('app-' + idx + '-runtimebehavior-group', 'add-app-' + idx + '-runtimebehavior', app.runtimeBehavior);
+                toggleOptionalField('app-' + idx + '-multiinstance-group', 'add-app-' + idx + '-multiinstance', app.supportsMultipleInstances);
+                toggleOptionalField('app-' + idx + '-parameters-group', 'add-app-' + idx + '-parameters', app.parameters);
+                toggleOptionalField('app-' + idx + '-applistentry-group', 'add-app-' + idx + '-applistentry', app.visualElements.appListEntry);
+                toggleOptionalField('app-' + idx + '-shortname-group', 'add-app-' + idx + '-shortname', app.visualElements.shortName);
+                toggleOptionalField('app-' + idx + '-splashbgcolor-group', 'add-app-' + idx + '-splashbgcolor', app.visualElements.splashScreenBackgroundColor);
+                toggleOptionalField('app-' + idx + '-lockscreennotif-group', 'add-app-' + idx + '-lockscreennotif', app.visualElements.lockScreenNotification);
 
                 // Bind sub-tab switching
                 card.querySelectorAll('.app-sub-tab').forEach(tab => {

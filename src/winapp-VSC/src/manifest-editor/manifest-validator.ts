@@ -16,6 +16,40 @@ const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 // BCP-47: language[-script][-region][-variant] (simplified for common MSIX usage)
 // Also accepts private-use tags like "x-generate" used by MSIX tooling
 const BCP47_REGEX = /^(?:x(?:-[a-zA-Z0-9]{1,8})+|[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-[a-zA-Z]{2}|\d{3})?(-[a-zA-Z0-9]{5,8})*)$/;
+// Application.Id: ASCII, alpha-numeric fields separated by periods, each field starts with a letter
+const APP_ID_REGEX = /^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)*$/;
+
+/** Reserved device names that cannot be used as Identity Name, ResourceId, or Application Id fields. */
+const RESERVED_NAMES = new Set([
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+]);
+
+/** Named colors accepted by the appxmanifest schema for BackgroundColor. */
+const NAMED_COLORS = new Set([
+    'aliceBlue', 'antiqueWhite', 'aqua', 'aquamarine', 'azure', 'beige', 'bisque', 'black',
+    'blanchedAlmond', 'blue', 'blueViolet', 'brown', 'burlyWood', 'cadetBlue', 'chartreuse',
+    'chocolate', 'coral', 'cornflowerBlue', 'cornsilk', 'crimson', 'cyan', 'darkBlue', 'darkCyan',
+    'darkGoldenrod', 'darkGray', 'darkGreen', 'darkKhaki', 'darkMagenta', 'darkOliveGreen',
+    'darkOrange', 'darkOrchid', 'darkRed', 'darkSalmon', 'darkSeaGreen', 'darkSlateBlue',
+    'darkSlateGray', 'darkTurquoise', 'darkViolet', 'deepPink', 'deepSkyBlue', 'dimGray',
+    'dodgerBlue', 'firebrick', 'floralWhite', 'forestGreen', 'fuchsia', 'gainsboro', 'ghostWhite',
+    'gold', 'goldenrod', 'gray', 'green', 'greenYellow', 'honeydew', 'hotPink', 'indianRed',
+    'indigo', 'ivory', 'khaki', 'lavender', 'lavenderBlush', 'lawnGreen', 'lemonChiffon',
+    'lightBlue', 'lightCoral', 'lightCyan', 'lightGoldenrodYellow', 'lightGray', 'lightGreen',
+    'lightPink', 'lightSalmon', 'lightSeaGreen', 'lightSkyBlue', 'lightSlateGray', 'lightSteelBlue',
+    'lightYellow', 'lime', 'limeGreen', 'linen', 'magenta', 'maroon', 'mediumAquamarine',
+    'mediumBlue', 'mediumOrchid', 'mediumPurple', 'mediumSeaGreen', 'mediumSlateBlue',
+    'mediumSpringGreen', 'mediumTurquoise', 'mediumVioletRed', 'midnightBlue', 'mintCream',
+    'mistyRose', 'moccasin', 'navajoWhite', 'navy', 'oldLace', 'olive', 'oliveDrab', 'orange',
+    'orangeRed', 'orchid', 'paleGoldenrod', 'paleGreen', 'paleTurquoise', 'paleVioletRed',
+    'papayaWhip', 'peachPuff', 'peru', 'pink', 'plum', 'powderBlue', 'purple', 'red', 'rosyBrown',
+    'royalBlue', 'saddleBrown', 'salmon', 'sandyBrown', 'seaGreen', 'seaShell', 'sienna', 'silver',
+    'skyBlue', 'slateBlue', 'slateGray', 'snow', 'springGreen', 'steelBlue', 'tan', 'teal',
+    'thistle', 'tomato', 'transparent', 'turquoise', 'violet', 'wheat', 'white', 'whiteSmoke',
+    'yellow', 'yellowGreen',
+]);
 
 /** Validate a DotQuadNumber: four dot-separated integers each 0–65535. */
 function isValidDotQuadNumber(value: string): boolean {
@@ -26,22 +60,23 @@ function isValidDotQuadNumber(value: string): boolean {
     });
 }
 
-/** Returns true if a path has a non-.png file extension (i.e. an unsupported image format). */
-function hasNonPngExtension(path: string): boolean {
+/** Returns true if a path has an unsupported image file extension. Schema allows .png, .jpg, .jpeg. */
+function hasUnsupportedImageExtension(path: string): boolean {
     const filename = path.split(/[\\/]/).pop() || '';
     const dotIdx = filename.lastIndexOf('.');
     if (dotIdx < 0) { return false; } // no extension — valid (could be scale-qualified)
-    return filename.substring(dotIdx).toLowerCase() !== '.png';
+    const ext = filename.substring(dotIdx).toLowerCase();
+    return ext !== '.png' && ext !== '.jpg' && ext !== '.jpeg';
 }
 
-const PNG_ERROR = 'Visual assets must be PNG files (.png).';
+const IMAGE_FORMAT_ERROR = 'Visual assets must be .png, .jpg, or .jpeg files.';
 
-/** Validate an image field: error if blank (but present in manifest) or non-.png extension. */
+/** Validate an image field: error if blank (but present in manifest) or unsupported extension. */
 function validateImageField(errors: ValidationError[], field: string, value: string | null | undefined): void {
     if (value === '') {
         errors.push({ field, message: 'Image path cannot be empty.', severity: 'error' });
-    } else if (value && hasNonPngExtension(value)) {
-        errors.push({ field, message: PNG_ERROR, severity: 'error' });
+    } else if (value && hasUnsupportedImageExtension(value)) {
+        errors.push({ field, message: IMAGE_FORMAT_ERROR, severity: 'error' });
     }
 }
 
@@ -58,6 +93,8 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         errors.push({ field: 'identity.name', message: 'Package name must be at least 3 characters.', severity: 'error' });
     } else if (data.identity.name.length > 50) {
         errors.push({ field: 'identity.name', message: 'Package name must be 50 characters or fewer.', severity: 'error' });
+    } else if (RESERVED_NAMES.has(data.identity.name.toUpperCase())) {
+        errors.push({ field: 'identity.name', message: 'Package name cannot be a reserved device name (CON, PRN, AUX, NUL, COM1–9, LPT1–9).', severity: 'error' });
     }
 
     if (!data.identity.publisher) {
@@ -91,6 +128,8 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
     if (!data.properties.publisherDisplayName) {
         errors.push({ field: 'properties.publisherDisplayName', message: 'Publisher display name is required.', severity: 'error' });
+    } else if (data.properties.publisherDisplayName.length > 256) {
+        errors.push({ field: 'properties.publisherDisplayName', message: 'Publisher display name must be 256 characters or fewer.', severity: 'error' });
     }
 
     if (!data.properties.logo) {
@@ -100,6 +139,8 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
     if (data.properties.description && data.properties.description.length > 2048) {
         errors.push({ field: 'properties.description', message: 'Description must be 2048 characters or fewer.', severity: 'error' });
+    } else if (data.properties.description && /[\t\r\n]/.test(data.properties.description)) {
+        errors.push({ field: 'properties.description', message: 'Description cannot contain tabs, carriage returns, or line feeds.', severity: 'error' });
     }
 
     // Dependencies validation
@@ -166,6 +207,16 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
         if (!app.id) {
             errors.push({ field: `${prefix}.id`, message: 'Application Id is required.', severity: 'error' });
+        } else if (!APP_ID_REGEX.test(app.id)) {
+            errors.push({ field: `${prefix}.id`, message: 'Application Id must contain alpha-numeric fields separated by periods, each starting with a letter.', severity: 'error' });
+        } else if (app.id.length > 64) {
+            errors.push({ field: `${prefix}.id`, message: 'Application Id must be 64 characters or fewer.', severity: 'error' });
+        } else {
+            const idFields = app.id.split('.');
+            const reservedField = idFields.find(f => RESERVED_NAMES.has(f.toUpperCase()));
+            if (reservedField) {
+                errors.push({ field: `${prefix}.id`, message: `Application Id cannot use reserved name "${reservedField}" as a field value.`, severity: 'error' });
+            }
         }
 
         if (!app.executable) {
@@ -186,12 +237,14 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
         if (app.visualElements.description && app.visualElements.description.length > 2048) {
             errors.push({ field: `${prefix}.visualElements.description`, message: 'Description must be 2048 characters or fewer.', severity: 'error' });
+        } else if (app.visualElements.description && /[\t\r\n]/.test(app.visualElements.description)) {
+            errors.push({ field: `${prefix}.visualElements.description`, message: 'Description cannot contain tabs, carriage returns, or line feeds.', severity: 'error' });
         }
 
         if (app.visualElements.backgroundColor &&
-            app.visualElements.backgroundColor.toLowerCase() !== 'transparent' &&
-            !HEX_COLOR_REGEX.test(app.visualElements.backgroundColor)) {
-            errors.push({ field: `${prefix}.visualElements.backgroundColor`, message: 'Background color must be a hex color (e.g. #FFFFFF) or "transparent".', severity: 'error' });
+            !HEX_COLOR_REGEX.test(app.visualElements.backgroundColor) &&
+            !NAMED_COLORS.has(app.visualElements.backgroundColor)) {
+            errors.push({ field: `${prefix}.visualElements.backgroundColor`, message: 'Background color must be a hex color (e.g. #FFFFFF), "transparent", or a named color (e.g. cornflowerBlue).', severity: 'error' });
         }
 
         // Visual asset PNG validation

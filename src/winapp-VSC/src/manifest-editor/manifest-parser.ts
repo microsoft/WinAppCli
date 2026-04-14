@@ -460,7 +460,9 @@ export function removeExternalDependency(xmlText: string, index: number): string
 /** Add a Resource element to the XML. */
 export function addResource(xmlText: string, resource: ResourceData): string {
     let attrs = '';
-    if (resource.language) { attrs = ` Language="${resource.language}"`; }
+    if (resource.language) { attrs += ` Language="${resource.language}"`; }
+    if (resource.scale) { attrs += ` uap:Scale="${resource.scale}"`; }
+    if (resource.dxFeatureLevel) { attrs += ` uap:DXFeatureLevel="${resource.dxFeatureLevel}"`; }
     const childXml = `<Resource${attrs} />`;
 
     const bounds = findParentBounds(xmlText, 'Resources');
@@ -1080,6 +1082,7 @@ function parseIdentity(root: Element): IdentityData {
         publisher: el?.getAttribute('Publisher') ?? '',
         version: el?.getAttribute('Version') ?? '',
         processorArchitecture: el?.getAttribute('ProcessorArchitecture') ?? 'neutral',
+        resourceId: el?.getAttribute('ResourceId') ?? '',
     };
 }
 
@@ -1094,6 +1097,34 @@ function parsePhoneIdentity(root: Element): PhoneIdentityData | null {
 
 function parseProperties(root: Element): PropertiesData {
     const el = getChildByLocalName(root, 'Properties');
+
+    // Parse uap13:AutoUpdate → AppInstaller Uri
+    let autoUpdateUri = '';
+    if (el) {
+        const autoUpdateEl = findChildByLocalNameNS(el, 'AutoUpdate');
+        if (autoUpdateEl) {
+            const appInstallerEl = findChildByLocalNameNS(autoUpdateEl, 'AppInstaller');
+            if (appInstallerEl) {
+                autoUpdateUri = appInstallerEl.getAttribute('Uri') ?? '';
+            }
+        }
+    }
+
+    // Parse uap10:PackageIntegrity → Content Enforcement
+    let packageIntegrityEnforcement = '';
+    if (el) {
+        const pkgIntEl = findChildByLocalNameNS(el, 'PackageIntegrity');
+        if (pkgIntEl) {
+            const contentEl = findChildByLocalNameNS(pkgIntEl, 'Content');
+            if (contentEl) {
+                packageIntegrityEnforcement = contentEl.getAttribute('Enforcement') ?? '';
+            } else {
+                // PackageIntegrity exists but no Content child — mark as present but not enforced
+                packageIntegrityEnforcement = 'false';
+            }
+        }
+    }
+
     return {
         displayName: getChildTextContent(el, 'DisplayName'),
         publisherDisplayName: getChildTextContent(el, 'PublisherDisplayName'),
@@ -1107,6 +1138,9 @@ function parseProperties(root: Element): PropertiesData {
         registryWriteVirtualization: getChildTextContent(el, 'RegistryWriteVirtualization'),
         modificationPackage: getChildTextContent(el, 'ModificationPackage').toLowerCase(),
         allowExternalContent: getChildTextContent(el, 'AllowExternalContent'),
+        autoUpdateUri,
+        packageIntegrityEnforcement,
+        updateWhileInUse: getChildTextContent(el, 'UpdateWhileInUse'),
     };
 }
 
@@ -1224,17 +1258,25 @@ function parseApplications(root: Element): ApplicationData[] {
             id: appEl.getAttribute('Id') ?? '',
             executable: appEl.getAttribute('Executable') ?? '',
             entryPoint: appEl.getAttribute('EntryPoint') ?? '',
+            trustLevel: appEl.getAttribute('uap10:TrustLevel') ?? appEl.getAttribute('TrustLevel') ?? '',
+            runtimeBehavior: appEl.getAttribute('uap10:RuntimeBehavior') ?? appEl.getAttribute('RuntimeBehavior') ?? '',
+            supportsMultipleInstances: appEl.getAttribute('uap10:SupportsMultipleInstances') ?? appEl.getAttribute('desktop4:SupportsMultipleInstances') ?? '',
+            parameters: appEl.getAttribute('uap10:Parameters') ?? '',
             visualElements: {
                 displayName: visualEl?.getAttribute('DisplayName') ?? '',
                 description: visualEl?.getAttribute('Description') ?? '',
                 backgroundColor: visualEl?.getAttribute('BackgroundColor') ?? '',
                 square150x150Logo: visualEl?.getAttribute('Square150x150Logo') ?? '',
                 square44x44Logo: visualEl?.getAttribute('Square44x44Logo') ?? '',
+                appListEntry: visualEl?.getAttribute('AppListEntry') ?? '',
                 wide310x150Logo: defaultTile?.getAttribute('Wide310x150Logo') ?? null,
                 square71x71Logo: defaultTile?.getAttribute('Square71x71Logo') ?? null,
                 square310x310Logo: defaultTile?.getAttribute('Square310x310Logo') ?? null,
+                shortName: defaultTile?.getAttribute('ShortName') ?? '',
                 badgeLogo: lockScreen?.getAttribute('BadgeLogo') ?? null,
+                lockScreenNotification: lockScreen?.getAttribute('Notification') ?? '',
                 splashScreenImage: splashScreen?.getAttribute('Image') ?? null,
+                splashScreenBackgroundColor: splashScreen?.getAttribute('BackgroundColor') ?? '',
                 showNameOnTiles,
             },
             extensions,
@@ -1278,6 +1320,8 @@ function parseResources(root: Element): ResourceData[] {
     for (const child of getChildrenByLocalName(resourcesEl, 'Resource')) {
         resources.push({
             language: child.getAttribute('Language') ?? '',
+            scale: child.getAttribute('uap:Scale') ?? child.getAttribute('Scale') ?? '',
+            dxFeatureLevel: child.getAttribute('uap:DXFeatureLevel') ?? child.getAttribute('DXFeatureLevel') ?? '',
         });
     }
     return resources;
@@ -1383,11 +1427,16 @@ function applyIdentityChangeString(xml: string, field: string, value: string): s
         publisher: 'Publisher',
         version: 'Version',
         processorArchitecture: 'ProcessorArchitecture',
+        resourceId: 'ResourceId',
     };
     const attr = attrMap[field];
     if (!attr) { return xml; }
 
     const pattern = /<Identity\b[^>]*>/s;
+    // For optional fields, empty value means remove the attribute
+    if (!value && field === 'resourceId') {
+        return removeAttribute(xml, pattern, attr);
+    }
     const result = replaceAttribute(xml, pattern, attr, value);
     if (result !== xml) { return result; }
 
@@ -1420,6 +1469,7 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
         registryWriteVirtualization: 'RegistryWriteVirtualization',
         modificationPackage: 'ModificationPackage',
         allowExternalContent: 'AllowExternalContent',
+        updateWhileInUse: 'UpdateWhileInUse',
     };
 
     // Map of fields that need namespace prefixes when inserting new elements
@@ -1430,7 +1480,18 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
         registryWriteVirtualization: { prefix: 'desktop6', uri: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/6' },
         modificationPackage: { prefix: 'rescap6', uri: 'http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/6' },
         allowExternalContent: { prefix: 'uap10', uri: NS.uap10 },
+        updateWhileInUse: { prefix: 'uap17', uri: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/17' },
     };
+
+    // Special handling for autoUpdateUri (nested: uap13:AutoUpdate > uap13:AppInstaller Uri="...")
+    if (field === 'autoUpdateUri') {
+        return applyAutoUpdateUri(xml, value);
+    }
+
+    // Special handling for packageIntegrityEnforcement (nested: uap10:PackageIntegrity > uap10:Content Enforcement="...")
+    if (field === 'packageIntegrityEnforcement') {
+        return applyPackageIntegrityEnforcement(xml, value);
+    }
 
     const tag = tagMap[field];
     if (!tag) { return xml; }
@@ -1480,6 +1541,60 @@ function applyPropertiesChangeString(xml: string, field: string, value: string):
     }
 
     return result;
+}
+
+/** Handle autoUpdateUri: manages uap13:AutoUpdate > uap13:AppInstaller Uri="..." */
+function applyAutoUpdateUri(xml: string, value: string): string {
+    const autoUpdateRegex = /[ \t]*<[a-zA-Z0-9]*:?AutoUpdate\b[^>]*>[\s\S]*?<\/[a-zA-Z0-9]*:?AutoUpdate\s*>[ \t]*\r?\n?/s;
+    if (!value) {
+        // Remove entire AutoUpdate block
+        const match = autoUpdateRegex.exec(xml);
+        if (match) {
+            return xml.substring(0, match.index) + xml.substring(match.index + match[0].length);
+        }
+        return xml;
+    }
+
+    // Try to update existing AppInstaller Uri attribute
+    const appInstallerRegex = /<[a-zA-Z0-9]*:?AppInstaller\b[^>]*\/?>/s;
+    const result = replaceAttribute(xml, appInstallerRegex, 'Uri', value);
+    if (result !== xml) { return result; }
+
+    // No AutoUpdate element — insert one into Properties
+    let workXml = ensureNamespace(xml, 'uap13', 'http://schemas.microsoft.com/appx/manifest/uap/windows/10/13');
+    const propsBounds = findParentBounds(workXml, 'Properties');
+    if (!propsBounds) { return xml; }
+    const propIndent = detectIndent(workXml, propsBounds.openStart);
+    const childIndent = propIndent + '  ';
+    const block = `<uap13:AutoUpdate>\n${childIndent}  <uap13:AppInstaller Uri="${escapeXmlAttr(value)}" />\n${childIndent}</uap13:AutoUpdate>`;
+    return insertChildBeforeClose(workXml, propsBounds.contentEnd, block, propIndent);
+}
+
+/** Handle packageIntegrityEnforcement: manages uap10:PackageIntegrity > uap10:Content Enforcement="..." */
+function applyPackageIntegrityEnforcement(xml: string, value: string): string {
+    const pkgIntRegex = /[ \t]*<[a-zA-Z0-9]*:?PackageIntegrity\b[^>]*>[\s\S]*?<\/[a-zA-Z0-9]*:?PackageIntegrity\s*>[ \t]*\r?\n?/s;
+    if (!value) {
+        // Remove entire PackageIntegrity block
+        const match = pkgIntRegex.exec(xml);
+        if (match) {
+            return xml.substring(0, match.index) + xml.substring(match.index + match[0].length);
+        }
+        return xml;
+    }
+
+    // Try to update existing Content Enforcement attribute
+    const contentRegex = /<[a-zA-Z0-9]*:?Content\b[^>]*\/?>/s;
+    const result = replaceAttribute(xml, contentRegex, 'Enforcement', value);
+    if (result !== xml) { return result; }
+
+    // No PackageIntegrity element — insert one into Properties
+    let workXml = ensureNamespace(xml, 'uap10', NS.uap10);
+    const propsBounds = findParentBounds(workXml, 'Properties');
+    if (!propsBounds) { return xml; }
+    const propIndent = detectIndent(workXml, propsBounds.openStart);
+    const childIndent = propIndent + '  ';
+    const block = `<uap10:PackageIntegrity>\n${childIndent}  <uap10:Content Enforcement="${escapeXmlAttr(value)}" />\n${childIndent}</uap10:PackageIntegrity>`;
+    return insertChildBeforeClose(workXml, propsBounds.contentEnd, block, propIndent);
 }
 
 function applyDependenciesChangeString(xml: string, field: string, value: string, index: number, subIndex?: number): string {
@@ -1657,18 +1772,28 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
 }
 
 function applyResourcesChangeString(xml: string, field: string, value: string, index: number): string {
-    if (field === 'language') {
-        const regex = /<Resource\b[^>]*\/?>/gs;
-        let match: RegExpExecArray | null;
-        let count = 0;
-        while ((match = regex.exec(xml)) !== null) {
-            if (count === index) {
-                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
-                if (result !== xml) { return result; }
-                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), 'Language', value);
+    const attrMap: Record<string, string> = {
+        language: 'Language',
+        scale: 'uap:Scale',
+        dxFeatureLevel: 'uap:DXFeatureLevel',
+    };
+    const attr = attrMap[field];
+    if (!attr) { return xml; }
+
+    const regex = /<Resource\b[^>]*\/?>/gs;
+    let match: RegExpExecArray | null;
+    let count = 0;
+    while ((match = regex.exec(xml)) !== null) {
+        if (count === index) {
+            const elemRegex = new RegExp(escapeRegex(match[0]));
+            if (!value) {
+                return removeAttribute(xml, elemRegex, attr);
             }
-            count++;
+            const result = replaceAttribute(xml, elemRegex, attr, value);
+            if (result !== xml) { return result; }
+            return addAttributeToElement(xml, elemRegex, attr, value);
         }
+        count++;
     }
     return xml;
 }
@@ -1680,15 +1805,46 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         executable: 'Executable',
         entryPoint: 'EntryPoint',
     };
-    if (appAttrMap[field]) {
+    // Optional Application attributes that should be removed when empty
+    const optionalAppAttrs: Record<string, string> = {
+        trustLevel: 'uap10:TrustLevel',
+        runtimeBehavior: 'uap10:RuntimeBehavior',
+        supportsMultipleInstances: 'uap10:SupportsMultipleInstances',
+        parameters: 'uap10:Parameters',
+    };
+    if (appAttrMap[field] || optionalAppAttrs[field]) {
+        const attr = appAttrMap[field] || optionalAppAttrs[field];
         const regex = /<Application\b[^>]*>/gs;
         let match: RegExpExecArray | null;
         let count = 0;
         while ((match = regex.exec(xml)) !== null) {
             if (count === index) {
-                const result = replaceAttribute(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
+                const elemRegex = new RegExp(escapeRegex(match[0]));
+                // Optional attrs: remove when empty
+                if (optionalAppAttrs[field] && !value) {
+                    return removeAttribute(xml, elemRegex, attr);
+                }
+                // Ensure uap10 namespace for uap10: attributes
+                if (optionalAppAttrs[field]?.startsWith('uap10:')) {
+                    xml = ensureNamespace(xml, 'uap10', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/10');
+                    // Re-find after namespace insertion
+                    const regex2 = /<Application\b[^>]*>/gs;
+                    let m2: RegExpExecArray | null;
+                    let c2 = 0;
+                    while ((m2 = regex2.exec(xml)) !== null) {
+                        if (c2 === index) {
+                            const elemRegex2 = new RegExp(escapeRegex(m2[0]));
+                            const result = replaceAttribute(xml, elemRegex2, attr, value);
+                            if (result !== xml) { return result; }
+                            return addAttributeToElement(xml, elemRegex2, attr, value);
+                        }
+                        c2++;
+                    }
+                    return xml;
+                }
+                const result = replaceAttribute(xml, elemRegex, attr, value);
                 if (result !== xml) { return result; }
-                return addAttributeToElement(xml, new RegExp(escapeRegex(match[0])), appAttrMap[field], value);
+                return addAttributeToElement(xml, elemRegex, attr, value);
             }
             count++;
         }
@@ -1704,40 +1860,57 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             wide310x150Logo: 'Wide310x150Logo',
             square71x71Logo: 'Square71x71Logo',
             square310x310Logo: 'Square310x310Logo',
+            shortName: 'ShortName',
         };
         if (defaultTileAttrs[veField]) {
+            if (!value && veField === 'shortName') {
+                return removeAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField]);
+            }
             const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], value);
             if (result !== xml) { return result; }
-            // Element exists but attribute doesn't — add the attribute
             const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField], value);
             if (addResult !== xml) { return addResult; }
         }
 
-        // Attribute on LockScreen
-        if (veField === 'badgeLogo') {
-            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, 'BadgeLogo', value);
+        // Attributes on LockScreen
+        if (veField === 'badgeLogo' || veField === 'lockScreenNotification') {
+            const lockAttr = veField === 'badgeLogo' ? 'BadgeLogo' : 'Notification';
+            if (!value && veField === 'lockScreenNotification') {
+                return removeAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr);
+            }
+            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, value);
             if (result !== xml) { return result; }
-            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, 'BadgeLogo', value);
+            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr, value);
             if (addResult !== xml) { return addResult; }
         }
 
-        // Attribute on SplashScreen
-        if (veField === 'splashScreenImage') {
-            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, 'Image', value);
+        // Attributes on SplashScreen
+        if (veField === 'splashScreenImage' || veField === 'splashScreenBackgroundColor') {
+            const splashAttr = veField === 'splashScreenImage' ? 'Image' : 'BackgroundColor';
+            if (!value && veField === 'splashScreenBackgroundColor') {
+                return removeAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr);
+            }
+            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, value);
             if (result !== xml) { return result; }
-            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, 'Image', value);
+            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr, value);
             if (addResult !== xml) { return addResult; }
         }
 
+        // AppListEntry on VisualElements
         const attrMap: Record<string, string> = {
             displayName: 'DisplayName',
             description: 'Description',
             backgroundColor: 'BackgroundColor',
             square150x150Logo: 'Square150x150Logo',
             square44x44Logo: 'Square44x44Logo',
+            appListEntry: 'AppListEntry',
         };
         if (attrMap[veField]) {
-            return replaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], value);
+            const vePattern = /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s;
+            if (!value && veField === 'appListEntry') {
+                return removeAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField]);
+            }
+            return replaceAttribute(xml, vePattern, attrMap[veField], value);
         }
 
         // Fallback: surgically insert new child element inside VisualElements
