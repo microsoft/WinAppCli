@@ -139,8 +139,7 @@
     <Exec Command="&quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           IgnoreExitCode="false"
-          ConsoleToMSBuild="false"
-          EnvironmentVariables="WINAPP_CLI_CALLER=nuget-package">
+          ConsoleToMSBuild="false">
       <Output TaskParameter="ExitCode" PropertyName="_WinAppRunExitCode" />
     </Exec>
     
