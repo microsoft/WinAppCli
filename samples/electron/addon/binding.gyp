@@ -11,7 +11,7 @@
       "msvs_settings": {
         "VCCLCompilerTool": {
           "ExceptionHandling": 1,
-          "DebugInformationFormat": "OldStyle",
+          "DebugInformationFormat": 1,
           "AdditionalOptions": [
             "/FS"
           ]

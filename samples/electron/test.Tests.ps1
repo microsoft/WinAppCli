@@ -4,7 +4,7 @@ Pester 5.x tests for the Electron sample and guide workflow.
 
 .DESCRIPTION
 Phase 1: Follows the Electron guide from scratch — scaffolds an Electron app,
-  installs winapp, initializes workspace, creates and builds C++/C# addons,
+  installs winapp, initializes workspace, creates and builds C#/C++ addons,
   packages the app, and creates a signed MSIX package.
 Phase 2: Quick install of the existing sample to verify it is not stale.
 
@@ -71,7 +71,7 @@ Describe "Electron Sample" {
                         Invoke-Expression "npm cache clean --force" 2>$null
                         Start-Sleep -Seconds 2
                     }
-                    Invoke-Expression "npx -y create-electron-app@7.11.1 electron-app --template=webpack"
+                    Invoke-Expression "npx -y create-electron-app@latest electron-app"
                     if ($LASTEXITCODE -eq 0) { $created = $true; break }
                 }
                 $created | Should -Be $true -Because "Electron app creation should succeed within $maxRetries attempts"
@@ -164,6 +164,13 @@ Describe "Electron Sample" {
             } finally { Pop-Location }
         }
 
+        It "Should register app with winapp run --no-launch" -Skip:$script:skip {
+            Push-Location $script:appDir
+            try {
+                Invoke-WinappCommand -Arguments "run `"$($script:appPackageDir)`" --no-launch"
+            } finally { Pop-Location }
+        }
+
         It "Should generate a development certificate" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
@@ -205,6 +212,14 @@ Describe "Electron Sample" {
 
         It "Should have appxmanifest.xml" -Skip:$script:skip {
             Join-Path $script:sampleDir 'appxmanifest.xml' | Should -Exist
+        }
+
+        It "Should build the C# addon" -Skip:$script:skip {
+            Push-Location $script:sampleDir
+            try {
+                Invoke-Expression "npm run build-csAddon"
+                $LASTEXITCODE | Should -Be 0
+            } finally { Pop-Location }
         }
     }
 }
