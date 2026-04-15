@@ -49,7 +49,10 @@ internal class UiGetFocusedCommand : Command, IShortDescription
 
                 if (element is null)
                 {
-                    logger.LogInformation("No element has keyboard focus in this app");
+                    if (!json)
+                    {
+                        logger.LogInformation("No element has keyboard focus in this app");
+                    }
                     return 0;
                 }
 
@@ -70,7 +73,10 @@ internal class UiGetFocusedCommand : Command, IShortDescription
                     ansiConsole.MarkupLine($"[bold cyan]{Markup.Escape(sel)}[/] {element.Type}{name}{value}{bounds}");
                 }
 
-                logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");
+                if (!json)
+                {
+                    logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");
+                }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

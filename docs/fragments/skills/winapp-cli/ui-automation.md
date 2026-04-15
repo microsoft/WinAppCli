@@ -72,7 +72,7 @@ winapp ui status -a myapp; winapp ui inspect -a myapp --interactive
 ### Inspect element tree
 ```powershell
 winapp ui inspect -a myapp --interactive      # invokable elements only, auto-depth 8
-winapp ui inspect -a myapp --depth 5          # full tree at depth 5
+winapp ui inspect -a myapp --depth 5          # deeper tree at depth 5
 winapp ui inspect txt-searchbox-e5f6 -a myapp  # subtree rooted at element
 winapp ui inspect btn-settings-a1b2 -a myapp --ancestors  # walk up from element to root
 winapp ui inspect -a myapp --hide-offscreen   # hide offscreen elements
@@ -97,9 +97,10 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
-# Read text/value content (works for RichEditBox, TextBox, Slider, labels)
+# Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
 winapp ui get-value doc-texteditor-53ad -a notepad
 winapp ui get-value SearchBox -a myapp
+winapp ui get-value CmbTheme -a myapp              # reads ComboBox selected item via SelectionPattern
 
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
@@ -131,7 +132,7 @@ winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search 
 ### Wait for UI state
 ```powershell
 winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
-winapp ui wait-for itm-status-c3d4 -a myapp --property Name --value "Complete" --timeout 5000
+winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
 ## Tips

@@ -99,13 +99,17 @@ internal class UiScrollCommand : Command, IShortDescription
                     {
                         ElementId = element.Selector ?? element.Id,
                         Direction = direction,
-                        To = to
+                        To = to,
+                        Hwnd = session.WindowHandle
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiScrollResult));
                 }
+                else
+                {
+                    logger.LogInformation("Scrolled {Selector}", selectorStr);
+                }
 
-                logger.LogInformation("Scrolled {Selector}", selectorStr);
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
