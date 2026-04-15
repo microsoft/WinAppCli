@@ -25,85 +25,19 @@ The script will prompt for administrator elevation (required to trust the MSIX s
 
 - **WinApp CLI** (`winapp`) — installed as an MSIX package, available system-wide. Initialize projects, run apps as packaged, generate manifests, manage certificates, and create MSIX packages.
 - **WinApp VS Code Extension** — Command Palette integration and a `winapp` debug configuration for F5 launch-and-attach (.NET, C++, Node.js).
-- **dotnet templates** — `dotnet new winui` for WinUI 3 apps pre-configured for packaged development. (This is a temporary template — Niels and Gordon's team are working on updated dotnet templates to replace it.)
 - **MSIX Extras NuGet package** — registered as a local NuGet feed. MSBuild targets that make `dotnet run` launch with package identity automatically.
 
 After the script finishes, verify the installation:
 
 ```powershell
 winapp --version         # should print the CLI version
-dotnet new list winui    # should list the WinUI template
 ```
 
 > **Note:** This guide walks through .NET scenarios first. Support for Electron, Flutter, C++, and other stacks is actively being built using the same underlying CLI.
 
 ---
 
-## Scenario 1: WinUI App from Template (.NET)
-
-This is the fastest path for .NET developers. The `dotnet new winui` template comes pre-configured with the MSIX Extras package, an `appxmanifest.xml`, and the correct target framework. No additional initialization is needed.
-
-### Create and run
-
-```powershell
-mkdir MyWinUIApp
-cd MyWinUIApp
-
-dotnet new winui
-dotnet run
-```
-
-That's it. `dotnet run` builds the project, then the MSIX Extras package automatically calls `winapp run` under the hood. Your app launches with full package identity — you can call any Windows SDK or Windows App SDK API that requires it.
-
-### Debug with F5 in VS Code
-
-1. Open the project folder in VS Code:
-   ```powershell
-   code .
-   ```
-
-2. Open the **Run and Debug** panel (Ctrl+Shift+D) and click **create a launch.json file**.
-
-3. Select **WinApp** from the debugger list. This generates a `launch.json` with the following configuration:
-
-   ```jsonc
-   {
-     "version": "0.2.0",
-     "configurations": [
-       {
-         "type": "winapp",
-         "request": "launch",
-         "name": "WinApp: Launch and Attach"
-       }
-     ]
-   }
-   ```
-
-   Optionally, set `inputFolder` to point directly at your build output to skip the folder picker:
-
-   ```jsonc
-   {
-     "version": "0.2.0",
-     "configurations": [
-       {
-         "type": "winapp",
-         "request": "launch",
-         "name": "WinApp: Launch and Attach",
-         "inputFolder": "${workspaceFolder}\\bin\\Debug\\net10.0-windows10.0.26100.0"
-       }
-     ]
-   }
-   ```
-
-4. Press **F5**. If `inputFolder` is not set, the extension scans the workspace for folders containing `.exe` files and lets you pick the build output. It then registers a loose-layout package, launches the app, and attaches the debugger.
-
-You get the full debugging experience: breakpoints, call stack, locals, watch — all running as a packaged app. The `debuggerType` launch option controls which debugger is used (default is `coreclr` for .NET; set it to `cppvsdbg` for native C++ or `node` for Node.js/Electron apps).
-
-> **Multiple build configurations:** If you have build output for more than one configuration (e.g., `Debug` and `Release`, or `win-arm64` and `win-x64`), the extension shows a picker so you can choose which one to launch.
-
----
-
-## Scenario 2: WPF App with WinApp Init (.NET)
+## Scenario 1: WPF App with WinApp Init (.NET)
 
 The `winapp init` command detects your technology stack and configures the project for packaged development automatically.
 
@@ -118,7 +52,7 @@ winapp init
 dotnet run
 ```
 
-`winapp init` detects the `.csproj`, updates the target framework, adds the required NuGet packages (Windows App SDK, SDK Build Tools, MSIX Extras), generates an `appxmanifest.xml` with icon assets, and installs the Windows App SDK runtime. After that, `dotnet run` launches your WPF app with full package identity — just like Scenario 1.
+`winapp init` detects the `.csproj`, updates the target framework, adds the required NuGet packages (Windows App SDK, SDK Build Tools, MSIX Extras), generates an `appxmanifest.xml` with icon assets, and installs the Windows App SDK runtime. After that, `dotnet run` launches your WPF app with full package identity.
 
 The `init` command is interactive by default. To accept all defaults:
 
@@ -128,7 +62,7 @@ winapp init --use-defaults
 
 ### Debug with F5
 
-The same VS Code debugging setup from Scenario 1 applies. Open the folder in VS Code, create a `launch.json` with the **WinApp** configuration, and press F5.
+Open the folder in VS Code, create a `launch.json` with the **WinApp** configuration, and press F5. See the [VS Code Extension Features](#vs-code-extension-features) section below for details.
 
 ---
 
