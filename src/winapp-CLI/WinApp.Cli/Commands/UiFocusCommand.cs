@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
@@ -30,6 +31,7 @@ internal class UiFocusCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IAnsiConsole ansiConsole,
         ILogger<UiFocusCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -64,7 +66,16 @@ internal class UiFocusCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.FocusAsync(session, element, cancellationToken);
-                logger.LogInformation("Focused {ElementId}", element.Selector ?? element.Id);
+                if (json)
+                {
+                    var result = new UiFocusResult { ElementId = element.Selector ?? element.Id, Hwnd = session.WindowHandle };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiFocusResult));
+                }
+                else
+                {
+                    logger.LogInformation("Focused {ElementId}", element.Selector ?? element.Id);
+                }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
