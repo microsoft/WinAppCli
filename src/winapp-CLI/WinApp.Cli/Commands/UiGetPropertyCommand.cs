@@ -93,7 +93,10 @@ internal class UiGetPropertyCommand : Command, IShortDescription
                     }
                 }
 
-                logger.LogInformation("{ElementId}: {Count} properties", element.Selector ?? element.Id, props.Count);
+                if (!json)
+                {
+                    logger.LogInformation("{ElementId}: {Count} properties", element.Selector ?? element.Id, props.Count);
+                }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

@@ -3,15 +3,12 @@
 
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using Spectre.Console;
-using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
 internal sealed class UiSessionService(
     IUiAutomationService uiAutomation,
-    Spectre.Console.IAnsiConsole ansiConsole,
     ILogger<UiSessionService> logger) : IUiSessionService
 {
 
@@ -69,39 +66,17 @@ internal sealed class UiSessionService(
     }
 
     /// <summary>
-    /// Auto-selects the best window from multiple candidates and warns about the others.
+    /// Auto-selects the best window from multiple candidates silently.
     /// Heuristic: prefer foreground window → prefer largest window.
     /// </summary>
     private UiSessionInfo AutoSelectWindow(List<(nint Hwnd, int Pid, string Title)> windows, string app)
     {
-        logger.LogDebug("Auto-selecting from {Count} windows for '{App}'", windows.Count, app);
         var foregroundHwnd = Windows.Win32.PInvoke.GetForegroundWindow();
         var foreground = windows.FirstOrDefault(w => w.Hwnd == (nint)foregroundHwnd);
         var selected = foreground != default ? foreground : PickLargestWindow(windows);
 
-        // Build colored warning with metadata for each window
-        var reason = foreground != default ? "Auto-selected the foreground window" : "Auto-selected the largest window";
-        ansiConsole.MarkupLine($"[yellow]⚠  Multiple windows for '{Markup.Escape(app)}'. {reason}.[/]");
-
-        foreach (var w in windows)
-        {
-            var info = GetWindowInfo(w.Hwnd);
-            var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
-            var fg = w.Hwnd == (nint)foregroundHwnd ? ", [green]foreground[/]" : "";
-            var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-
-            if (w.Hwnd == selected.Hwnd)
-            {
-                ansiConsole.MarkupLine($"  [bold]→ HWND [cyan]{w.Hwnd}[/] (selected): \"{title}\"[/] [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]][/]");
-            }
-            else
-            {
-                ansiConsole.MarkupLine($"    HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]][/]");
-            }
-        }
-
-        ansiConsole.MarkupLine($"  [grey]Use -w <HWND> to target a specific window.[/]");
-        ansiConsole.WriteLine();
+        var reason = foreground != default ? "foreground" : "largest";
+        logger.LogDebug("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}'", selected.Hwnd, reason, windows.Count, app);
 
         return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
     }
@@ -144,7 +119,7 @@ internal sealed class UiSessionService(
         };
     }
 
-    private static string? GetWindowClassName(nint hwnd)
+    internal static string? GetWindowClassName(nint hwnd)
     {
         try
         {

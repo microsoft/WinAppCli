@@ -965,6 +965,8 @@ export interface UiWaitForOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
+  /** Use substring matching for --value instead of exact match */
+  contains?: boolean;
   /** Wait for element to disappear instead of appear */
   gone?: boolean;
   /** Format output as JSON */
@@ -973,7 +975,7 @@ export interface UiWaitForOptions extends CommonOptions {
   property?: string;
   /** Timeout in milliseconds */
   timeout?: number;
-  /** Wait for property to equal this value (use with --property) */
+  /** Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. */
   value?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -986,6 +988,7 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
   const args: string[] = ['ui', 'wait-for'];
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
+  if (options.contains) args.push('--contains');
   if (options.gone) args.push('--gone');
   if (options.json) args.push('--json');
   if (options.property) args.push('--property', options.property);
