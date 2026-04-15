@@ -93,12 +93,23 @@ internal class UiListWindowsCommand : Command, IShortDescription
 
                 if (json)
                 {
-                    var results = windows.Select(w => new WindowInfo
+                    var foregroundHwnd = (long)Windows.Win32.PInvoke.GetForegroundWindow();
+                    var results = windows.Select(w =>
                     {
-                        Hwnd = w.Hwnd,
-                        ProcessId = w.Pid,
-                        ProcessName = GetProcessNameSafe(w.Pid),
-                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title
+                        var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                        return new WindowInfo
+                        {
+                            Hwnd = w.Hwnd,
+                            ProcessId = w.Pid,
+                            ProcessName = GetProcessNameSafe(w.Pid),
+                            Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                            Label = info.Label,
+                            Width = info.Width,
+                            Height = info.Height,
+                            OwnerHwnd = (long)info.OwnerHwnd,
+                            ClassName = info.ClassName,
+                            IsForeground = w.Hwnd == foregroundHwnd
+                        };
                     }).ToArray();
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(results, UiJsonContext.Default.WindowInfoArray));
@@ -106,13 +117,13 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 }
 
                 // Human-readable output with metadata
-                var foregroundHwnd = (nint)Windows.Win32.PInvoke.GetForegroundWindow();
+                var fgHwnd = (nint)Windows.Win32.PInvoke.GetForegroundWindow();
                 foreach (var w in windows)
                 {
                     var procName = GetProcessNameSafe(w.Pid);
                     var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
-                    var fg = w.Hwnd == foregroundHwnd ? ", [green]foreground[/]" : "";
+                    var fg = w.Hwnd == fgHwnd ? ", [green]foreground[/]" : "";
                     var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
                     ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]] ({procName}, PID {w.Pid})[/]");
                 }

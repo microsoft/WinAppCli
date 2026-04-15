@@ -20,6 +20,7 @@ internal class UiWaitForCommand : Command, IShortDescription
 
     public static Option<bool> GoneOption { get; }
     public static Option<string?> ValueOption { get; }
+    public static Option<bool> ContainsOption { get; }
 
     static UiWaitForCommand()
     {
@@ -30,7 +31,12 @@ internal class UiWaitForCommand : Command, IShortDescription
 
         ValueOption = new Option<string?>("--value")
         {
-            Description = "Wait for property to equal this value (use with --property)"
+            Description = "Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead."
+        };
+
+        ContainsOption = new Option<bool>("--contains")
+        {
+            Description = "Use substring matching for --value instead of exact match"
         };
     }
 
@@ -47,6 +53,7 @@ internal class UiWaitForCommand : Command, IShortDescription
         Options.Add(SharedUiOptions.PropertyOption);
         Options.Add(GoneOption);
         Options.Add(ValueOption);
+        Options.Add(ContainsOption);
     }
 
     public class Handler(
@@ -71,6 +78,7 @@ internal class UiWaitForCommand : Command, IShortDescription
             var gone = parseResult.GetValue(GoneOption);
             var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
             var value = parseResult.GetValue(ValueOption);
+            var contains = parseResult.GetValue(ContainsOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
@@ -81,8 +89,8 @@ internal class UiWaitForCommand : Command, IShortDescription
 
             if (value != null && string.IsNullOrWhiteSpace(property))
             {
-                logger.LogError("{Symbol} --value requires --property to specify which property to check.", UiSymbols.Error);
-                return 1;
+                // --value without --property: use smart get-value fallback (TextPattern → ValuePattern → Name)
+                // No error — this is the recommended usage
             }
 
             try
@@ -98,17 +106,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                     Models.UiElement? element;
                     try
                     {
-                        if (selector.IsSlug)
-                        {
-                            // Slug resolution via FindSingleElementAsync (walks tree + validates hash)
-                            element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
-                        }
-                        else
-                        {
-                            // Use SearchAsync for legacy selectors
-                            var matches = await uiAutomation.SearchAsync(session, selector, 1, cancellationToken);
-                            element = matches.Length > 0 ? matches[0] : null;
-                        }
+                        element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
                     }
                     catch
                     {
@@ -125,18 +123,40 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 ansiConsole.Profile.Out.Writer.WriteLine(
                                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                             }
-                            logger.LogInformation("Element disappeared after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            else
+                            {
+                                logger.LogInformation("Element disappeared after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            }
                             return 0;
                         }
                     }
                     else if (element is not null)
                     {
-                        // Check property+value condition if specified
-                        if (property is not null && value is not null)
+                        // Check value condition
+                        if (value is not null)
                         {
-                            var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
-                            if (props.TryGetValue(property, out var propValue) &&
-                                string.Equals(propValue?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+                            string? currentValue = null;
+
+                            if (property is not null)
+                            {
+                                // --property specified: check raw UIA property
+                                var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
+                                if (props.TryGetValue(property, out var propValue))
+                                {
+                                    currentValue = propValue?.ToString();
+                                }
+                            }
+                            else
+                            {
+                                // No --property: use smart fallback (TextPattern → ValuePattern → Name)
+                                currentValue = await uiAutomation.GetTextAsync(session, element, cancellationToken);
+                            }
+
+                            var valueMatches = contains
+                                ? currentValue?.Contains(value!, StringComparison.OrdinalIgnoreCase) == true
+                                : string.Equals(currentValue, value, StringComparison.OrdinalIgnoreCase);
+
+                            if (valueMatches)
                             {
                                 if (json)
                                 {
@@ -149,10 +169,14 @@ internal class UiWaitForCommand : Command, IShortDescription
                                     ansiConsole.Profile.Out.Writer.WriteLine(
                                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                                 }
-                                logger.LogInformation("Element found with {Property}=\"{Value}\" after {Elapsed}ms", property, value, sw.ElapsedMilliseconds);
+                                else
+                                {
+                                    var source = property is not null ? $"{property}=" : "value=";
+                                    logger.LogInformation("Element found with {Source}\"{Value}\" after {Elapsed}ms", source, value, sw.ElapsedMilliseconds);
+                                }
                                 return 0;
                             }
-                            // Property doesn't match yet — keep polling
+                            // Value doesn't match yet — keep polling
                         }
                         else
                         {
@@ -167,7 +191,10 @@ internal class UiWaitForCommand : Command, IShortDescription
                                 ansiConsole.Profile.Out.Writer.WriteLine(
                                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
                             }
-                            logger.LogInformation("Element found after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            else
+                            {
+                                logger.LogInformation("Element found after {Elapsed}ms", sw.ElapsedMilliseconds);
+                            }
                             return 0;
                         }
                     }

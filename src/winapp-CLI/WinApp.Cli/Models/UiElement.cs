@@ -40,6 +40,9 @@ internal sealed class UiElement
     [System.Text.Json.Serialization.JsonIgnore]
     public int Depth { get; set; }
 
+    /// <summary>HWND of the window this element belongs to. Used for cross-window element resolution.</summary>
+    public long WindowHandle { get; set; }
+
     /// <summary>
     /// Nearest ancestor that supports an invoke pattern (InvokePattern, TogglePattern, etc.).
     /// Populated during search when the matched element itself is not invokable.
