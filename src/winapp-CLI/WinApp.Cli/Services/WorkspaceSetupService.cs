@@ -230,7 +230,7 @@ internal class WorkspaceSetupService(
             {
                 installWinAppPackage = await ShowConfirmationPromptAsync(
                     ansiConsole,
-                    $"Add package {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Required to run the app packaged via 'dotnet run')",
+                    $"Add package {DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE}? (Enables running the app packaged via 'dotnet run')",
                     cancellationToken);
                 if (!installWinAppPackage)
                 {
