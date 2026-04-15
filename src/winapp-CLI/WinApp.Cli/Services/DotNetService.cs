@@ -259,7 +259,7 @@ internal partial class DotNetService : IDotNetService
         // Insert a RuntimeIdentifier with a Condition so it only applies when not already set
         // (e.g. via command-line -r or Directory.Build.props)
         const string runtimeIdentifierComment =
-            "<!-- Added by winapp: default RuntimeIdentifier for MSIX packaging. Only applies when not set via -r or Directory.Build.props. -->";
+            "<!-- Added by winapp: default RuntimeIdentifier to current architecture when not specified. Only applies when not set via -r or Directory.Build.props. -->";
         const string runtimeIdentifierProperty =
             "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
         var runtimeIdentifierElement = runtimeIdentifierComment + Environment.NewLine + "    " + runtimeIdentifierProperty;
