@@ -126,8 +126,87 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         var elements = new List<UiElement>();
         WalkTree(startElement, depth, 0, "", elements, ref nextElementId);
 
+        // Set WindowHandle on all elements from main window
+        foreach (var el in elements)
+        {
+            el.WindowHandle = session.WindowHandle;
+        }
+
+        // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
+        if (string.IsNullOrEmpty(elementId))
+        {
+            var mainHwnd = (nint)session.WindowHandle;
+            var allWindows = GetAllAppWindows(session);
+
+            // Filter out windows whose UIA root is already in the main tree (e.g., modal dialogs)
+            var independentWindows = new List<(nint Hwnd, int Pid, string Title)>();
+            foreach (var (hwnd, pid, title) in allWindows)
+            {
+                if (hwnd == mainHwnd) { continue; }
+
+                // Skip internal system windows (PseudoConsoleWindow, IME, etc.)
+                var className = UiSessionService.GetWindowClassName(hwnd);
+                if (IsInternalWindow(className)) { continue; }
+
+                try
+                {
+                    var hwndCondition = _automation.CreatePropertyCondition(
+                        UIA_PROPERTY_ID.UIA_NativeWindowHandlePropertyId, ComVariant.Create((int)hwnd));
+                    var alreadyInMain = root!.FindFirst(TreeScope.TreeScope_Descendants, hwndCondition);
+                    if (alreadyInMain is not null)
+                    {
+                        _logger.LogDebug("Skipping HWND {Hwnd} \"{Title}\" — already in main window tree", hwnd, title);
+                        continue;
+                    }
+                }
+                catch { /* COM errors are non-fatal, include the window */ }
+                independentWindows.Add((hwnd, pid, title));
+            }
+
+            // Add header for main window when there are other independent windows
+            if (independentWindows.Count > 0)
+            {
+                var mainInfo = UiSessionService.GetWindowInfo(mainHwnd);
+                var mainTitle = session.WindowTitle ?? "";
+                elements.Insert(0, new UiElement
+                {
+                    Id = $"--- HWND {mainHwnd}",
+                    Type = "---",
+                    Name = $"HWND {mainHwnd}: \"{mainTitle}\" ({mainInfo.Label}, {mainInfo.ClassName})",
+                    Depth = 0,
+                    WindowHandle = mainHwnd
+                });
+            }
+
+            foreach (var (hwnd, pid, title) in independentWindows)
+            {
+                var windowRoot = GetRootElementForHwnd(hwnd);
+                if (windowRoot is null) { continue; }
+
+                // Add a separator element to visually distinguish windows
+                var info = UiSessionService.GetWindowInfo(hwnd);
+                var ownerSuffix = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
+                elements.Add(new UiElement
+                {
+                    Id = $"--- HWND {hwnd}",
+                    Type = "---",
+                    Name = $"HWND {hwnd}: \"{title}\" ({info.Label}, {info.ClassName}{ownerSuffix})",
+                    Depth = 0,
+                    WindowHandle = hwnd
+                });
+
+                var popupElements = new List<UiElement>();
+                WalkTree(windowRoot, depth, 0, "", popupElements, ref nextElementId);
+                foreach (var el in popupElements)
+                {
+                    el.WindowHandle = hwnd;
+                }
+                elements.AddRange(popupElements);
+            }
+        }
+
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, elements);
+        PromoteUniqueAutomationIds(root, elements, session.WindowHandle);
 
         var result = elements.ToArray();
         return Task.FromResult(result);
@@ -237,47 +316,134 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             return Task.FromResult<UiElement[]>([]);
         }
 
-        var condition = BuildCondition(selector);
-        if (condition is null)
-        {
-            return Task.FromResult<UiElement[]>([]);
-        }
+        var mainResults = new List<UiElement>();
 
-        IUIAutomationElementArray? found;
-        try
+        // Try exact AutomationId match first (some UIA providers don't support substring matching on AutomationId)
+        if (selector.Query is not null)
         {
-            found = root.FindAll(TreeScope.TreeScope_Descendants, condition);
-        }
-        finally
-        {
-        }
-
-        if (found is null)
-        {
-            return Task.FromResult<UiElement[]>([]);
-        }
-
-        var length = found.get_Length();
-        var count = Math.Min(length, maxResults);
-        var results = new UiElement[count];
-        for (var i = 0; i < count; i++)
-        {
-            var el = found.GetElement(i);
-            results[i] = ToUiElement(el, "", ref nextElementId);
-
-            // For any non-invokable match, find the nearest invokable ancestor
-            if (!IsInvokable(el))
+            var exactAidCondition = _automation.CreatePropertyCondition(
+                UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                ComVariant.Create(selector.Query));
+            var exactMatches = root.FindAll(TreeScope.TreeScope_Descendants, exactAidCondition);
+            if (exactMatches is not null)
             {
-                var ancestor = FindInvokableAncestor(el, root);
-                if (ancestor is not null)
+                for (var i = 0; i < Math.Min(exactMatches.get_Length(), maxResults); i++)
                 {
-                    results[i].InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                    var el = exactMatches.GetElement(i);
+                    var uiEl = ToUiElement(el, "", ref nextElementId);
+                    uiEl.WindowHandle = session.WindowHandle;
+                    mainResults.Add(uiEl);
                 }
             }
         }
 
+        // Then do substring search on Name OR AutomationId (if exact didn't find enough)
+        if (mainResults.Count == 0)
+        {
+            var condition = BuildCondition(selector);
+            if (condition is not null)
+            {
+                var found = root.FindAll(TreeScope.TreeScope_Descendants, condition);
+                if (found is not null)
+                {
+                    var count = Math.Min(found.get_Length(), maxResults);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var el = found.GetElement(i);
+                        var uiEl = ToUiElement(el, "", ref nextElementId);
+                        uiEl.WindowHandle = session.WindowHandle;
+
+                        if (!IsInvokable(el))
+                        {
+                            var ancestor = FindInvokableAncestor(el, root);
+                            if (ancestor is not null)
+                            {
+                                uiEl.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                            }
+                        }
+                        mainResults.Add(uiEl);
+                    }
+                }
+            }
+        }
+
+        // If FindAll missed elements (WebView2 can stall UIA tree traversal), try manual tree walk
+        if (mainResults.Count == 0 && selector.Query is not null)
+        {
+            _logger.LogDebug("FindAll returned 0 results, trying manual tree walk fallback");
+            var manualResults = ManualTreeSearch(root, selector.Query, maxResults);
+            foreach (var el in manualResults)
+            {
+                var uiEl = ToUiElement(el, "", ref nextElementId);
+                uiEl.WindowHandle = session.WindowHandle;
+                if (!IsInvokable(el))
+                {
+                    var ancestor = FindInvokableAncestor(el, root);
+                    if (ancestor is not null)
+                    {
+                        uiEl.InvokableAncestor = ToUiElement(ancestor, "", ref nextElementId);
+                    }
+                }
+                mainResults.Add(uiEl);
+            }
+        }
+
+        // If no results on main window, search popup/owned windows
+        if (mainResults.Count == 0)
+        {
+            var allWindows = GetAllAppWindows(session);
+            var mainHwnd = (nint)session.WindowHandle;
+            foreach (var (hwnd, pid, title) in allWindows)
+            {
+                if (hwnd == mainHwnd) { continue; }
+                try
+                {
+                    var windowRoot = GetRootElementForHwnd(hwnd);
+                    if (windowRoot is null) { continue; }
+
+                    // Try exact AutomationId first on popup window
+                    IUIAutomationElementArray? windowFound = null;
+                    if (selector.Query is not null)
+                    {
+                        var exactAidCondition = _automation.CreatePropertyCondition(
+                            UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                            ComVariant.Create(selector.Query));
+                        windowFound = windowRoot.FindAll(TreeScope.TreeScope_Descendants, exactAidCondition);
+                    }
+
+                    // Fall back to substring search
+                    if (windowFound is null || windowFound.get_Length() == 0)
+                    {
+                        var condition = BuildCondition(selector);
+                        if (condition is not null)
+                        {
+                            windowFound = windowRoot.FindAll(TreeScope.TreeScope_Descendants, condition);
+                        }
+                    }
+
+                    if (windowFound is not null)
+                    {
+                        for (var i = 0; i < Math.Min(windowFound.get_Length(), maxResults - mainResults.Count); i++)
+                        {
+                            var el = windowFound.GetElement(i);
+                            var uiEl = ToUiElement(el, "", ref nextElementId);
+                            uiEl.WindowHandle = hwnd;
+                            mainResults.Add(uiEl);
+                        }
+                    }
+                }
+                catch (System.Runtime.InteropServices.COMException ex)
+                {
+                    _logger.LogDebug("COM error searching HWND {Hwnd}: {Message}", hwnd, ex.Message);
+                }
+                if (mainResults.Count >= maxResults) { break; }
+            }
+        }
+
+        var results = mainResults.ToArray();
+
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, results);
+        PromoteUniqueAutomationIds(root, results, session.WindowHandle);
 
         return Task.FromResult(results);
     }
@@ -295,7 +461,19 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         // Slug resolution: walk tree, regenerate slugs, match and validate hash
         if (selector.IsSlug)
         {
-            return Task.FromResult(FindElementBySlug(selector.Slug!, root));
+            var slugResult = FindElementBySlug(selector.Slug!, root);
+            if (slugResult is not null)
+            {
+                slugResult.WindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(slugResult);
+            }
+            // Not found on main window — search other windows
+            var otherResult = FindElementOnOtherWindows(session, selector);
+            if (otherResult is not null)
+            {
+                return Task.FromResult<UiElement?>(otherResult);
+            }
+            return Task.FromResult<UiElement?>(null);
         }
 
         // Try exact AutomationId match first (fast, unambiguous — used when inspect promoted a unique AutomationId)
@@ -308,7 +486,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             if (exactMatch is not null)
             {
                 var nextId = 0;
-                return Task.FromResult<UiElement?>(ToUiElement(exactMatch, "", ref nextId));
+                var exactResult = ToUiElement(exactMatch, "", ref nextId);
+                exactResult.WindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(exactResult);
             }
         }
 
@@ -330,11 +510,54 @@ return Task.FromResult<UiElement?>(null);
 
         if (found is null || found.get_Length() == 0)
         {
+            // FindAll may miss elements after WebView2 controls — try manual tree walk
+            if (selector.Query is not null)
+            {
+                _logger.LogDebug("FindAll returned 0 results, trying manual tree walk fallback");
+                var manualResults = ManualTreeSearch(root, selector.Query, 1);
+                if (manualResults.Count > 0)
+                {
+                    var nextId = 0;
+                    var manualResult = ToUiElement(manualResults[0], "", ref nextId);
+                    manualResult.WindowHandle = session.WindowHandle;
+                    return Task.FromResult<UiElement?>(manualResult);
+                }
+            }
+
+            // Element not found on main window — search popup/owned windows
+            var otherResult = FindElementOnOtherWindows(session, selector);
+            if (otherResult is not null)
+            {
+                return Task.FromResult<UiElement?>(otherResult);
+            }
             return Task.FromResult<UiElement?>(null);
         }
 
         if (found.get_Length() > 1)
         {
+            // When multiple elements match, prefer the invokable one (e.g., Button over Group/Text
+            // in SettingsExpander where all children share the same Name)
+            IUIAutomationElement? invokableMatch = null;
+            int invokableCount = 0;
+            for (int i = 0; i < found.get_Length(); i++)
+            {
+                var m = found.GetElement(i);
+                if (IsInvokable(m))
+                {
+                    invokableMatch = m;
+                    invokableCount++;
+                }
+            }
+
+            if (invokableCount == 1 && invokableMatch is not null)
+            {
+                _logger.LogDebug("Disambiguated {Count} matches by picking the only invokable element", found.get_Length());
+                var nextId = 0;
+                var invokableResult = ToUiElement(invokableMatch, "", ref nextId);
+                invokableResult.WindowHandle = session.WindowHandle;
+                return Task.FromResult<UiElement?>(invokableResult);
+            }
+
             var matchCount = found.get_Length();
             var listing = new System.Text.StringBuilder();
             listing.AppendLine($"Selector matched {matchCount} elements:");
@@ -371,6 +594,7 @@ return Task.FromResult<UiElement?>(null);
         var element = found.GetElement(0);
         var nextElementId = 0;
         var result = ToUiElement(element, "", ref nextElementId);
+        result.WindowHandle = session.WindowHandle;
 
         // Surface invokable ancestor for non-invokable elements
         if (!IsInvokable(element))
@@ -642,7 +866,38 @@ return Task.FromResult<UiElement?>(null);
         }
         catch { }
 
-        // 3. Fall back to element Name (static text, labels)
+        // 3. Try TogglePattern (ToggleSwitch, CheckBox — on/off/indeterminate)
+        try
+        {
+            var pattern = (IUIAutomationTogglePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_TogglePatternId);
+            var state = pattern.get_CurrentToggleState();
+            return Task.FromResult<string?>(state switch
+            {
+                Windows.Win32.UI.Accessibility.ToggleState.ToggleState_On => "On",
+                Windows.Win32.UI.Accessibility.ToggleState.ToggleState_Off => "Off",
+                _ => "Indeterminate"
+            });
+        }
+        catch { }
+
+        // 4. Try SelectionPattern (ComboBox, RadioButton, TabView, ListView — selected item name)
+        try
+        {
+            var pattern = (IUIAutomationSelectionPattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_SelectionPatternId);
+            var selection = pattern.GetCurrentSelection();
+            if (selection.get_Length() > 0)
+            {
+                var selected = selection.GetElement(0);
+                var name = selected.get_CurrentName();
+                if (!string.IsNullOrEmpty(name.ToString()))
+                {
+                    return Task.FromResult<string?>(name.ToString());
+                }
+            }
+        }
+        catch { }
+
+        // 5. Fall back to element Name (static text, labels)
         if (!string.IsNullOrEmpty(element.Name))
         {
             return Task.FromResult<string?>(element.Name);
@@ -1012,7 +1267,18 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private IUIAutomationElement? ResolveComElement(UiSessionInfo session, UiElement element)
     {
-        var root = GetRootElement(session);
+        // Use the element's source HWND if it came from a different window (popup/dialog)
+        IUIAutomationElement? root;
+        if (element.WindowHandle != 0 && element.WindowHandle != session.WindowHandle)
+        {
+            root = GetRootElementForHwnd((nint)element.WindowHandle);
+            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.WindowHandle);
+        }
+        else
+        {
+            root = GetRootElement(session);
+        }
+
         if (root is null)
         {
             return null;
@@ -1066,6 +1332,164 @@ return Task.FromResult<UiElement?>(null);
             if (found is not null)
             {
                 return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Get all windows associated with an app: same-PID windows + cross-process owned windows.
+    /// Excludes internal system windows (PseudoConsoleWindow, IME, etc.).
+    /// </summary>
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
+    {
+        var windows = FindWindowsByPid(session.ProcessId);
+
+        // Remove internal system windows from same-PID results
+        windows.RemoveAll(w => IsInternalWindow(UiSessionService.GetWindowClassName(w.Hwnd)));
+
+        // Find cross-process owned windows (file pickers, system dialogs)
+        var appHwnds = new HashSet<nint>(windows.Select(w => w.Hwnd));
+        var hwnd = Windows.Win32.Foundation.HWND.Null;
+        while (true)
+        {
+            hwnd = Windows.Win32.PInvoke.FindWindowEx(
+                Windows.Win32.Foundation.HWND.Null, hwnd, null, (string?)null);
+            if (hwnd.IsNull) { break; }
+            if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd)) { continue; }
+            if (appHwnds.Contains((nint)hwnd)) { continue; }
+
+            var owner = Windows.Win32.PInvoke.GetWindow(hwnd,
+                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
+            if (!owner.IsNull && appHwnds.Contains((nint)owner))
+            {
+                // Skip internal system windows
+                var className = UiSessionService.GetWindowClassName((nint)hwnd);
+                if (IsInternalWindow(className)) { continue; }
+
+                unsafe
+                {
+                    uint pid = 0;
+                    Windows.Win32.PInvoke.GetWindowThreadProcessId(hwnd, &pid);
+                    var titleChars = new char[512];
+                    fixed (char* buffer = titleChars)
+                    {
+                        var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
+                        var title = len > 0 ? new string(buffer, 0, len) : "";
+                        windows.Add(((nint)hwnd, (int)pid, title));
+                    }
+                }
+            }
+        }
+
+        return windows;
+    }
+
+    /// <summary>Window classes that are internal system/framework windows with no useful UI elements.</summary>
+    private static readonly HashSet<string> InternalWindowClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PseudoConsoleWindow",
+        "IME",
+        "MSCTFIME UI",
+    };
+
+    private static bool IsInternalWindow(string? className) =>
+        className is not null && InternalWindowClasses.Contains(className);
+
+    /// <summary>Get UIA root element for a specific HWND.</summary>
+    private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
+    {
+        try
+        {
+            return _automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Search for an element across all popup/owned windows of the app.
+    /// Called when FindSingleElementAsync fails to find the element on the main window.
+    /// </summary>
+    private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
+    {
+        var allWindows = GetAllAppWindows(session);
+        var mainHwnd = (nint)session.WindowHandle;
+
+        foreach (var (hwnd, pid, title) in allWindows)
+        {
+            if (hwnd == mainHwnd) { continue; }
+
+            try
+            {
+            var windowRoot = GetRootElementForHwnd(hwnd);
+            if (windowRoot is null) { continue; }
+
+            _logger.LogDebug("Searching popup/owned window HWND {Hwnd} \"{Title}\"", hwnd, title);
+
+            UiElement? found = null;
+
+            if (selector.IsSlug)
+            {
+                found = FindElementBySlug(selector.Slug!, windowRoot);
+            }
+            else if (selector.Query is not null)
+            {
+                // Try exact AutomationId first
+                var exactAidCondition = _automation.CreatePropertyCondition(
+                    UIA_PROPERTY_ID.UIA_AutomationIdPropertyId,
+                    ComVariant.Create(selector.Query));
+                var exactMatch = windowRoot.FindFirst(TreeScope.TreeScope_Descendants, exactAidCondition);
+                if (exactMatch is not null)
+                {
+                    var nextId = 0;
+                    found = ToUiElement(exactMatch, "", ref nextId);
+                }
+                else
+                {
+                    // Substring search
+                    var condition = BuildCondition(selector);
+                    if (condition is not null)
+                    {
+                        var matches = windowRoot.FindAll(TreeScope.TreeScope_Descendants, condition);
+                        if (matches is not null && matches.get_Length() == 1)
+                        {
+                            var nextId = 0;
+                            found = ToUiElement(matches.GetElement(0), "", ref nextId);
+                        }
+                        else if (matches is not null && matches.get_Length() > 1)
+                        {
+                            // Disambiguate: prefer the only invokable element
+                            IUIAutomationElement? invokable = null;
+                            int invokableCount = 0;
+                            for (int i = 0; i < matches.get_Length(); i++)
+                            {
+                                var m = matches.GetElement(i);
+                                if (IsInvokable(m)) { invokable = m; invokableCount++; }
+                            }
+                            if (invokableCount == 1 && invokable is not null)
+                            {
+                                var nextId = 0;
+                                found = ToUiElement(invokable, "", ref nextId);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (found is not null)
+            {
+                found.WindowHandle = hwnd;
+                _logger.LogDebug("Found element on HWND {Hwnd} \"{Title}\"", hwnd, title);
+                return found;
+            }
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                _logger.LogDebug("COM error searching HWND {Hwnd}: {Message}", hwnd, ex.Message);
             }
         }
 
@@ -1181,6 +1605,48 @@ return Task.FromResult<UiElement?>(null);
         return null;
     }
 
+    /// <summary>
+    /// Manual tree walk search using TreeWalker. Slower than FindAll but reliable —
+    /// works around UIA FindAll bugs where WebView2 controls stall the tree traversal
+    /// and cause sibling elements after the WebView to be skipped.
+    /// </summary>
+    private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
+    {
+        var walker = _automation.get_ControlViewWalker();
+        var results = new List<IUIAutomationElement>();
+        ManualTreeSearchRecursive(walker, root, query, maxResults, maxDepth, 0, results);
+        return results;
+    }
+
+    private static void ManualTreeSearchRecursive(IUIAutomationTreeWalker walker, IUIAutomationElement element,
+        string query, int maxResults, int maxDepth, int depth, List<IUIAutomationElement> results)
+    {
+        if (depth > maxDepth || results.Count >= maxResults) { return; }
+
+        IUIAutomationElement? child;
+        try { child = walker.GetFirstChildElement(element); }
+        catch { return; }
+
+        while (child is not null && results.Count < maxResults)
+        {
+            try
+            {
+                var name = SafeGetBstr(() => child.get_CurrentName());
+                var aid = SafeGetBstr(() => child.get_CurrentAutomationId());
+
+                if ((aid is not null && aid.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                    (name is not null && name.Contains(query, StringComparison.OrdinalIgnoreCase)))
+                {
+                    results.Add(child);
+                }
+
+                ManualTreeSearchRecursive(walker, child, query, maxResults, maxDepth, depth + 1, results);
+                child = walker.GetNextSiblingElement(child);
+            }
+            catch { break; }
+        }
+    }
+
     private IUIAutomationCondition? BuildCondition(SelectorExpression selector)
     {
         if (selector.Query is not null)
@@ -1201,7 +1667,8 @@ return Task.FromResult<UiElement?>(null);
 
         return null;
     }
-
+
+
     /// <summary>
     /// Checks if an element supports any invokable pattern (Invoke, Toggle, SelectionItem, ExpandCollapse).
     /// </summary>
@@ -1423,7 +1890,7 @@ child = next;
     /// across the full UIA tree, use it directly as the selector instead of a generated slug.
     /// AutomationIds are developer-set, stable across layout changes, and more readable.
     /// </summary>
-    private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements)
+    private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements, long mainWindowHandle = 0)
     {
         // Collect AutomationIds from the inspected elements that could be promoted
         var candidateAids = new HashSet<string>();
@@ -1472,9 +1939,11 @@ child = next;
         }
 
         // Promote elements with globally unique AutomationIds
+        // Skip elements from other windows — the frequency map only covers the main window tree
         foreach (var el in elements)
         {
             if (el.AutomationId is not null &&
+                (mainWindowHandle == 0 || el.WindowHandle == mainWindowHandle) &&
                 aidCounts.TryGetValue(el.AutomationId, out var count) && count == 1)
             {
                 el.Selector = el.AutomationId;

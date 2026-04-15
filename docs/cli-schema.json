@@ -2205,7 +2205,7 @@
               ],
               "valueType": "System.Int32",
               "hasDefaultValue": true,
-              "defaultValue": 5,
+              "defaultValue": 4,
               "arity": {
                 "minimum": 1,
                 "maximum": 1
@@ -3136,6 +3136,19 @@
               "required": false,
               "recursive": false
             },
+            "--contains": {
+              "description": "Use substring matching for --value instead of exact match",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--gone": {
               "description": "Wait for element to disappear instead of appear",
               "hidden": false,
@@ -3210,7 +3223,7 @@
               "recursive": false
             },
             "--value": {
-              "description": "Wait for property to equal this value (use with --property)",
+              "description": "Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,

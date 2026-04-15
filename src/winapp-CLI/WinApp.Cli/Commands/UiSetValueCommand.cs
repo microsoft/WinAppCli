@@ -4,7 +4,9 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -31,6 +33,7 @@ internal class UiSetValueCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IAnsiConsole ansiConsole,
         ILogger<UiSetValueCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -71,7 +74,16 @@ internal class UiSetValueCommand : Command, IShortDescription
                 }
 
                 await uiAutomation.SetValueAsync(session, element, value, cancellationToken);
-                logger.LogInformation("Set value on {ElementId}", element.Selector ?? element.Id);
+                if (json)
+                {
+                    var result = new UiSetValueResult { ElementId = element.Selector ?? element.Id, Hwnd = session.WindowHandle };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiSetValueResult));
+                }
+                else
+                {
+                    logger.LogInformation("Set value on {ElementId}", element.Selector ?? element.Id);
+                }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

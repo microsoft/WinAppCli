@@ -70,7 +70,10 @@ internal class UiStatusCommand : Command, IShortDescription
                     }
                 }
 
-                logger.LogInformation("Connected to {ProcessName} (PID {ProcessId})", session.ProcessName, session.ProcessId);
+                if (!json)
+                {
+                    logger.LogInformation("Connected to {ProcessName} (PID {ProcessId})", session.ProcessName, session.ProcessId);
+                }
                 return 0;
             }
             catch (Exception ex)
