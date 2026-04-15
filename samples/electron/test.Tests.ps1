@@ -101,15 +101,7 @@ Describe "Electron Sample" {
         It "Should initialize winapp workspace" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
-                Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable --verbose"
-                # Diagnostic: list what libs were copied
-                $libDir = Join-Path $script:appDir ".winapp\lib\x64"
-                if (Test-Path $libDir) {
-                    Write-Host "=== .winapp/lib/x64 contents ==="
-                    Get-ChildItem $libDir | ForEach-Object { Write-Host "  $($_.Name)" }
-                } else {
-                    Write-Host "=== .winapp/lib/x64 does NOT exist ==="
-                }
+                Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
             } finally { Pop-Location }
         }
 
