@@ -25,6 +25,8 @@ internal partial class DotNetService : IDotNetService
     /// </summary>
     private const string RecommendedTfm = "net10.0-windows10.0.26100.0";
 
+    private const string MSIXInfoComment = "<!-- Enables targets that generate package layout, required for running with winapp run or msix packaging -->";
+
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
@@ -485,7 +487,7 @@ internal partial class DotNetService : IDotNetService
                     // Detect indentation from the EnableMsixTooling line
                     var lastNewline = beforeMatch.LastIndexOf('\n');
                     var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
-                    replacement = $"{indent}<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
+                    replacement = $"{indent}{MSIXInfoComment}"
                         + Environment.NewLine + replacement;
                     // Replace including the leading whitespace on this line
                     content = content[..(lastNewline + 1)]
@@ -508,7 +510,7 @@ internal partial class DotNetService : IDotNetService
 
         // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
         var element =
-            "<!-- Enables MSIX packaging support. Remove to build without MSIX packaging. -->"
+            MSIXInfoComment
             + Environment.NewLine + "    <EnableMsixTooling>true</EnableMsixTooling>";
 
         var modified = false;
