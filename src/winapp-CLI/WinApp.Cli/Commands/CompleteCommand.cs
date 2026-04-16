@@ -85,11 +85,18 @@ internal class CompleteCommand : Command, IShortDescription
         var lastSpaceIndex = textToComplete.LastIndexOf(' ');
         var currentWord = lastSpaceIndex >= 0 ? textToComplete[(lastSpaceIndex + 1)..] : textToComplete;
 
+        // System.CommandLine uses substring matching by default. Apply prefix matching
+        // for a more intuitive shell experience (e.g., "i" should match "init", not "sign").
+        var filteredCompletions = completions
+            .Where(c => c.Label.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase));
+
         // Only include options (starting with - or /) when the user has started typing
         // a prefix character, otherwise just show commands/arguments for cleaner completions.
-        var filteredCompletions = currentWord.StartsWith('-') || currentWord.StartsWith('/')
-            ? completions
-            : completions.Where(c => !c.Label.StartsWith('-') && !c.Label.StartsWith('/'));
+        if (!currentWord.StartsWith('-') && !currentWord.StartsWith('/'))
+        {
+            filteredCompletions = filteredCompletions
+                .Where(c => !c.Label.StartsWith('-') && !c.Label.StartsWith('/'));
+        }
 
         var output = parseResult.InvocationConfiguration.Output;
         foreach (var item in filteredCompletions)
