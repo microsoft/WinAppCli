@@ -114,6 +114,31 @@ internal class CompleteCommand : Command, IShortDescription
         var completionParseResult = rootCommand.Parse(argsText);
         var completions = completionParseResult.GetCompletions(argsPosition);
 
+        // Build a set of alias names to exclude from completions.
+        // System.CommandLine returns both primary names and aliases — we only want primary names.
+        var currentCommand = completionParseResult.CommandResult.Command;
+        var aliasNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sub in currentCommand.Subcommands)
+        {
+            // The first alias is the primary name (same as sub.Name); skip it, collect the rest
+            foreach (var alias in sub.Aliases.Where(a => a != sub.Name))
+            {
+                aliasNames.Add(alias);
+            }
+        }
+        foreach (var opt in currentCommand.Options)
+        {
+            foreach (var alias in opt.Aliases.Where(a => a != opt.Name))
+            {
+                aliasNames.Add(alias);
+            }
+        }
+        // Also exclude short-form help aliases like -h, -?, /h, /?
+        aliasNames.Add("-?");
+        aliasNames.Add("-h");
+        aliasNames.Add("/?");
+        aliasNames.Add("/h");
+
         // Determine the partial word being typed (text after last space up to cursor)
         var lastSpaceIndex = argsText.LastIndexOf(' ');
         var currentWord = lastSpaceIndex >= 0 ? argsText[(lastSpaceIndex + 1)..] : argsText;
@@ -127,8 +152,10 @@ internal class CompleteCommand : Command, IShortDescription
 
         // System.CommandLine uses substring matching by default. Apply prefix matching
         // for a more intuitive shell experience (e.g., "i" should match "init", not "sign").
+        // Also filter out aliases — only show the primary command/option name.
         var filteredCompletions = completions
-            .Where(c => c.Label.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase));
+            .Where(c => c.Label.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase))
+            .Where(c => !aliasNames.Contains(c.Label));
 
         // When the user hasn't typed a dash prefix, prefer showing only commands/arguments.
         // But if hiding flags would leave zero results (e.g., "winapp init " has no
