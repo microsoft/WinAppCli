@@ -62,6 +62,7 @@ param(
     [switch]$SkipAll = $false,
     [Alias("DocsOnly")]
     [switch]$OnlyDocs = $false,
+    [Alias("TestsOnly")]
     [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
