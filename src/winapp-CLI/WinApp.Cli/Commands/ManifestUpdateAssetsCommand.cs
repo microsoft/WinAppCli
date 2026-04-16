@@ -27,7 +27,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)"
+            Description = "Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 
@@ -38,7 +38,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
         LightImageOption.AcceptExistingOnly();
     }
 
-    public ManifestUpdateAssetsCommand() : base("update-assets", "Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.")
+    public ManifestUpdateAssetsCommand() : base("update-assets", "Generate new assets for images referenced in a Package.appxmanifest from a single source image. Source image should be at least 400x400 pixels.")
     {
         Arguments.Add(ImageArgument);
         Options.Add(ManifestOption);

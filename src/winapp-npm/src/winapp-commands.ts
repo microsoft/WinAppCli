@@ -79,7 +79,7 @@ export interface CertGenerateOptions extends CommonOptions {
   install?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from */
+  /** Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from */
   manifest?: string;
   /** Output path for the generated PFX file */
   output?: string;
@@ -92,7 +92,7 @@ export interface CertGenerateOptions extends CommonOptions {
 }
 
 /**
- * Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
+ * Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
  */
 export async function certGenerate(options: CertGenerateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['cert', 'generate'];
@@ -165,14 +165,14 @@ export interface CreateDebugIdentityOptions extends CommonOptions {
   entrypoint?: string;
   /** Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. */
   keepIdentity?: boolean;
-  /** Path to the appxmanifest.xml */
+  /** Path to the Package.appxmanifest or appxmanifest.xml */
   manifest?: string;
   /** Do not install the package after creation. */
   noInstall?: boolean;
 }
 
 /**
- * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.
+ * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
  */
 export async function createDebugIdentity(options: CreateDebugIdentityOptions = {}): Promise<WinappResult> {
   const args: string[] = ['create-debug-identity'];
@@ -256,7 +256,7 @@ export interface InitOptions extends CommonOptions {
 }
 
 /**
- * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+ * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
@@ -277,14 +277,14 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
 export interface ManifestAddAliasOptions extends CommonOptions {
   /** Application Id to add the alias to (default: first Application element) */
   appId?: string;
-  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
+  /** Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) */
   manifest?: string;
   /** Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. */
   name?: string;
 }
 
 /**
- * Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+ * Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
  */
 export async function manifestAddAlias(options: ManifestAddAliasOptions = {}): Promise<WinappResult> {
   const args: string[] = ['manifest', 'add-alias'];
@@ -320,7 +320,7 @@ export interface ManifestGenerateOptions extends CommonOptions {
 }
 
 /**
- * Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
+ * Create Package.appxmanifest without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
  */
 export async function manifestGenerate(options: ManifestGenerateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['manifest', 'generate'];
@@ -345,12 +345,12 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
   imagePath: string;
   /** Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) */
   lightImage?: string;
-  /** Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) */
+  /** Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) */
   manifest?: string;
 }
 
 /**
- * Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.
+ * Generate new assets for images referenced in a Package.appxmanifest from a single source image. Source image should be at least 400x400 pixels.
  */
 export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<WinappResult> {
   const args: string[] = ['manifest', 'update-assets'];
@@ -392,7 +392,7 @@ export interface PackageOptions extends CommonOptions {
 }
 
 /**
- * Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx
+ * Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];
@@ -449,7 +449,7 @@ export interface RunOptions extends CommonOptions {
   detach?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) */
+  /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
@@ -1007,7 +1007,7 @@ export interface UnregisterOptions extends CommonOptions {
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the appxmanifest.xml (default: auto-detect from current directory) */
+  /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
 }
 

@@ -2,7 +2,7 @@
   "name": "winapp",
   "version": "0.2.2",
   "schemaVersion": "1.0",
-  "description": "CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
+  "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
   "options": {
     "--cli-schema": {
@@ -55,7 +55,7 @@
       "hidden": false,
       "subcommands": {
         "generate": {
-          "description": "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.",
+          "description": "Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.",
           "hidden": false,
           "options": {
             "--export-cer": {
@@ -112,7 +112,7 @@
               "recursive": false
             },
             "--manifest": {
-              "description": "Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from",
+              "description": "Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -364,7 +364,7 @@
       }
     },
     "create-debug-identity": {
-      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.",
+      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.",
       "hidden": false,
       "arguments": {
         "entrypoint": {
@@ -394,7 +394,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml",
+          "description": "Path to the Package.appxmanifest or appxmanifest.xml",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
@@ -626,7 +626,7 @@
       }
     },
     "init": {
-      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
+      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -760,11 +760,11 @@
       }
     },
     "manifest": {
-      "description": "Create and modify appxmanifest.xml files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, 'manifest update-assets' to regenerate app icons, or 'manifest add-alias' to add an execution alias.",
+      "description": "Create and modify Package.appxmanifest files for package identity and MSIX packaging. Use 'manifest generate' to create a new manifest, 'manifest update-assets' to regenerate app icons, or 'manifest add-alias' to add an execution alias.",
       "hidden": false,
       "subcommands": {
         "add-alias": {
-          "description": "Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).",
+          "description": "Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).",
           "hidden": false,
           "options": {
             "--app-id": {
@@ -780,7 +780,7 @@
               "recursive": false
             },
             "--manifest": {
-              "description": "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)",
+              "description": "Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory)",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -838,7 +838,7 @@
           }
         },
         "generate": {
-          "description": "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).",
+          "description": "Create Package.appxmanifest without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -994,7 +994,7 @@
           }
         },
         "update-assets": {
-          "description": "Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.",
+          "description": "Generate new assets for images referenced in a Package.appxmanifest from a single source image. Source image should be at least 400x400 pixels.",
           "hidden": false,
           "arguments": {
             "image-path": {
@@ -1023,7 +1023,7 @@
               "recursive": false
             },
             "--manifest": {
-              "description": "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)",
+              "description": "Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory)",
               "hidden": false,
               "valueType": "System.IO.FileInfo",
               "hasDefaultValue": false,
@@ -1071,7 +1071,7 @@
       }
     },
     "package": {
-      "description": "Create MSIX installer from your built app. Run after building your app. A manifest (appxmanifest.xml or package.appxmanifest) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest appxmanifest.xml --cert ./devcert.pfx",
+      "description": "Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx",
       "hidden": false,
       "aliases": [
         "pack"
@@ -1409,7 +1409,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)",
+          "description": "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
@@ -3300,7 +3300,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the appxmanifest.xml (default: auto-detect from current directory)",
+          "description": "Path to the Package.appxmanifest (default: auto-detect from current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,

@@ -56,7 +56,14 @@ Write-Host "Docs path: $DocsPath" -ForegroundColor Gray
 
 # Step 1: Generate CLI schema JSON
 Write-Host "[DOCS] Extracting CLI schema..." -ForegroundColor Blue
-$SchemaJsonLines = & $CliPath --cli-schema
+$prevEncoding = [Console]::OutputEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $SchemaJsonLines = & $CliPath --cli-schema
+}
+finally {
+    [Console]::OutputEncoding = $prevEncoding
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to extract CLI schema"
     exit 1
@@ -252,7 +259,7 @@ foreach ($skillName in $SkillNames) {
         continue
     }
     
-    $templateContent = Get-Content $templatePath -Raw
+    $templateContent = [System.IO.File]::ReadAllText($templatePath, [System.Text.UTF8Encoding]::new($false))
     $commandPaths = $SkillCommandMap[$skillName]
     $description = $SkillDescriptions[$skillName]
     
@@ -296,7 +303,7 @@ $DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
 if ($SkillsDir -eq $DefaultSkillsPath) {
     $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
     if (Test-Path $PluginJsonPath) {
-        $pluginJson = Get-Content $PluginJsonPath -Raw | ConvertFrom-Json
+        $pluginJson = [System.IO.File]::ReadAllText($PluginJsonPath, [System.Text.UTF8Encoding]::new($false)) | ConvertFrom-Json
         $pluginJson.version = $CliVersion
         $pluginJsonContent = $pluginJson | ConvertTo-Json -Depth 10
         # Normalize line endings
