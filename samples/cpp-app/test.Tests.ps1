@@ -78,7 +78,7 @@ add_executable(test-cpp-app main.cpp)
         It "winapp init creates config files" -Skip:$script:skip {
             Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
             "winapp.yaml"       | Should -Exist
-            "appxmanifest.xml"  | Should -Exist
+            "Package.appxmanifest"  | Should -Exist
             ".winapp"           | Should -Exist
         }
 
@@ -111,7 +111,7 @@ add_executable(test-cpp-app main.cpp)
         }
 
         It "packages as MSIX" -Skip:$script:skip {
-            Invoke-WinappCommand -Arguments "pack build\Release --manifest appxmanifest.xml --cert devcert.pfx"
+            Invoke-WinappCommand -Arguments "pack build\Release --manifest Package.appxmanifest --cert devcert.pfx"
             Get-ChildItem -Filter "*.msix" | Should -Not -BeNullOrEmpty -Because "MSIX package should be created"
         }
     }

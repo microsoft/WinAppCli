@@ -69,8 +69,8 @@ Describe "flutter-app sample" {
             Join-Path $script:projectDir "winapp.yaml" | Should -Exist
         }
 
-        It "Should create appxmanifest.xml after init" {
-            Join-Path $script:projectDir "appxmanifest.xml" | Should -Exist
+        It "Should create Package.appxmanifest after init" {
+            Join-Path $script:projectDir "Package.appxmanifest" | Should -Exist
         }
 
         It "Should create .winapp directory after init" {

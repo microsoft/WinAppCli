@@ -57,8 +57,8 @@ Describe "Rust App Sample" {
             } finally { Pop-Location }
         }
 
-        It "Should have created appxmanifest.xml" -Skip:$script:skip {
-            Join-Path $script:rustProjectDir "appxmanifest.xml" | Should -Exist
+        It "Should have created Package.appxmanifest" -Skip:$script:skip {
+            Join-Path $script:rustProjectDir "Package.appxmanifest" | Should -Exist
         }
 
         It "Should add execution alias to manifest" -Skip:$script:skip {
@@ -124,7 +124,7 @@ Describe "Rust App Sample" {
         It "Should package as MSIX" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-WinappCommand -Arguments "pack dist --manifest appxmanifest.xml --cert devcert.pfx"
+                Invoke-WinappCommand -Arguments "pack dist --manifest Package.appxmanifest --cert devcert.pfx"
             } finally { Pop-Location }
         }
 

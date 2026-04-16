@@ -108,7 +108,7 @@ Describe "Electron Sample" {
         It "Should create workspace files" -Skip:$script:skip {
             Join-Path $script:appDir ".winapp" | Should -Exist
             Join-Path $script:appDir "winapp.yaml" | Should -Exist
-            Join-Path $script:appDir "appxmanifest.xml" | Should -Exist
+            Join-Path $script:appDir "Package.appxmanifest" | Should -Exist
         }
 
         It "Should create a C++ native addon" -Skip:$script:skip {

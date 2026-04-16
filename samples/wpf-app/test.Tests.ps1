@@ -64,8 +64,8 @@ Describe 'wpf-app sample' {
             Invoke-WinappCommand -Arguments 'init --use-defaults'
         }
 
-        It 'Generates appxmanifest.xml from winapp init' -Skip:$script:skip {
-            'appxmanifest.xml' | Should -Exist
+        It 'Generates Package.appxmanifest from winapp init' -Skip:$script:skip {
+            'Package.appxmanifest' | Should -Exist
         }
 
         It 'Builds in Debug mode' -Skip:$script:skip {
@@ -104,7 +104,7 @@ Describe 'wpf-app sample' {
             $exeFile | Should -Not -BeNullOrEmpty -Because 'Release build should produce an .exe'
             $script:outputDir = $exeFile.DirectoryName
 
-            Invoke-WinappCommand -Arguments "pack `"$($script:outputDir)`" --manifest appxmanifest.xml --cert devcert.pfx"
+            Invoke-WinappCommand -Arguments "pack `"$($script:outputDir)`" --manifest Package.appxmanifest --cert devcert.pfx"
         }
 
         It 'Produces an MSIX file' -Skip:$script:skip {

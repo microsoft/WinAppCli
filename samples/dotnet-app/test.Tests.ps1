@@ -67,8 +67,8 @@ Describe ".NET App Guide Workflow" {
                 } finally { Pop-Location }
             }
 
-            It "Should have created appxmanifest.xml" -Skip:$script:skip {
-                Join-Path $script:projectDir "appxmanifest.xml" | Should -Exist
+            It "Should have created Package.appxmanifest" -Skip:$script:skip {
+                Join-Path $script:projectDir "Package.appxmanifest" | Should -Exist
             }
         }
 
@@ -148,7 +148,7 @@ Describe ".NET App Guide Workflow" {
             It "Should package MSIX with winapp pack" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-WinappCommand -Arguments "pack `"$($script:outputDir)`" --manifest appxmanifest.xml --cert devcert.pfx"
+                    Invoke-WinappCommand -Arguments "pack `"$($script:outputDir)`" --manifest Package.appxmanifest --cert devcert.pfx"
                 } finally { Pop-Location }
             }
 

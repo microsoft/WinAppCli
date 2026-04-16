@@ -48,8 +48,8 @@ Describe "Packaging CLI Guide Workflow" {
             } finally { Pop-Location }
         }
 
-        It "Should have created appxmanifest.xml" -Skip:$script:skip {
-            Join-Path $script:packageDir "appxmanifest.xml" | Should -Exist
+        It "Should have created Package.appxmanifest" -Skip:$script:skip {
+            Join-Path $script:packageDir "Package.appxmanifest" | Should -Exist
         }
     }
 
