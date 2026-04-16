@@ -19,6 +19,12 @@
     Skip MSIX packages creation
 .PARAMETER SkipDocs
     Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
+.PARAMETER SkipAll
+    Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
+.PARAMETER OnlyDocs
+    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs)
+.PARAMETER OnlyTests
+    Skip NuGet, MSIX, npm, and docs (builds the CLI and runs tests)
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -32,6 +38,12 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipMsix
 .EXAMPLE
+    .\scripts\build-cli.ps1 -SkipAll
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyDocs
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyTests
+.EXAMPLE
     .\scripts\build-cli.ps1 -Stable
 #>
 
@@ -43,8 +55,32 @@ param(
     [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
+    [switch]$SkipAll = $false,
+    [switch]$OnlyDocs = $false,
+    [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
+
+# Apply compound skip flags
+if ($SkipAll) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+    $SkipDocs = $true
+}
+if ($OnlyDocs) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+}
+if ($OnlyTests) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipDocs = $true
+}
 
 # Ensure we're running from the project root
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
