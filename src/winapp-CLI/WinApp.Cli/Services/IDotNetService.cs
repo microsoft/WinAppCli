@@ -97,4 +97,28 @@ internal interface IDotNetService
     /// <param name="includeTransitive">When true, includes transitive package references in the output.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the .csproj has <c>&lt;EnableMsixTooling&gt;true&lt;/EnableMsixTooling&gt;</c>.
+    /// Adds the element with an explanatory XML comment if missing, or updates it to <c>true</c> if set to <c>false</c>.
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if it already had the correct setting.</returns>
+    Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes <c>&lt;WindowsPackageType&gt;None&lt;/WindowsPackageType&gt;</c> if found in the .csproj,
+    /// since this property prevents the app from running as a packaged application.
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if the element was not found.</returns>
+    Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Adds XML comments above <c>&lt;PackageReference&gt;</c> elements in the .csproj to describe
+    /// what each package provides. Skips packages that already have a comment above them.
+    /// </summary>
+    /// <param name="csprojPath">The project file to annotate.</param>
+    /// <param name="packageComments">A dictionary mapping package names to their descriptive comments.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if any comments were added, false if all packages already had comments or were not found.</returns>
+    Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default);
 }

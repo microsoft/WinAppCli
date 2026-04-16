@@ -24,7 +24,6 @@
     <PackageReference Include="Microsoft.JavaScript.NodeApi" />
     <PackageReference Include="Microsoft.JavaScript.NodeApi.Generator" />
 
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.WindowsAppSDK" />
   </ItemGroup>
 </Project>

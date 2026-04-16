@@ -150,7 +150,7 @@ For full details including IDE setup examples, see the [Debugging Guide](https:/
 
 ### `winapp create-debug-identity`
 
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.
+Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -163,5 +163,5 @@ Enable package identity for debugging without creating full MSIX. Required for t
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--keep-identity` | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. | (none) |
-| `--manifest` | Path to the appxmanifest.xml | (none) |
+| `--manifest` | Path to the Package.appxmanifest or appxmanifest.xml | (none) |
 | `--no-install` | Do not install the package after creation. | (none) |

@@ -69,12 +69,12 @@ function Write-TestStep {
 
 function Write-TestSuccess {
     param([string]$Message)
-    Write-Host "✓ $Message" -ForegroundColor Green
+    Write-Host "[PASS] $Message" -ForegroundColor Green
 }
 
 function Write-TestError {
     param([string]$Message)
-    Write-Host "✗ $Message" -ForegroundColor Red
+    Write-Host "[FAIL] $Message" -ForegroundColor Red
 }
 
 function Assert-Command {
@@ -315,7 +315,7 @@ try {
     # Verify workspace was created
     Assert-DirectoryExists ".winapp" ".winapp directory"
     Assert-FileExists "winapp.yaml" "winapp.yaml configuration file"
-    Assert-FileExists "appxmanifest.xml" "appxmanifest.xml manifest file"
+    Assert-FileExists "Package.appxmanifest" "Package.appxmanifest manifest file"
 
     # ========================================================================
     # Create Native Addons

@@ -258,7 +258,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             description);
 
         // Write manifest file
-        var manifestPath = Path.Combine(outputDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(outputDirectory.FullName, "Package.appxmanifest");
         await File.WriteAllTextAsync(manifestPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
         // Generate default assets

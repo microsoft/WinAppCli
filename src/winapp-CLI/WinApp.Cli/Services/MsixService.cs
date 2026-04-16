@@ -700,20 +700,20 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Checks a single directory for a manifest file (appxmanifest.xml or package.appxmanifest).
+    /// Checks a single directory for a manifest file (Package.appxmanifest or appxmanifest.xml).
     /// </summary>
     internal static FileInfo? FindManifestInDirectory(DirectoryInfo directory)
     {
+        var packageManifest = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+        if (packageManifest.Exists)
+        {
+            return packageManifest;
+        }
+
         var appxManifest = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
         if (appxManifest.Exists)
         {
             return appxManifest;
-        }
-
-        var packageManifest = new FileInfo(Path.Combine(directory.FullName, "package.appxmanifest"));
-        if (packageManifest.Exists)
-        {
-            return packageManifest;
         }
 
         return null;

@@ -54,6 +54,7 @@ IUIAutomationTreeWalker
 IUIAutomationInvokePattern
 IUIAutomationTogglePattern
 IUIAutomationSelectionItemPattern
+IUIAutomationSelectionPattern
 IUIAutomationExpandCollapsePattern
 IUIAutomationValuePattern
 IUIAutomationScrollItemPattern

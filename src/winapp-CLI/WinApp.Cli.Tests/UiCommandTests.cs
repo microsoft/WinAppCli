@@ -184,7 +184,7 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task WaitFor_ExistingElement_ReturnsSuccess()
     {
-        _fakeUia.SearchResult = [new UiElement { Id = "e0", Type = "Button", Name = "Submit" }];
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Name = "Submit" };
 
         var command = GetRequiredService<UiWaitForCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["Button", "-a", "TestApp", "--timeout", "1000"]);

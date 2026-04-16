@@ -82,7 +82,6 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     public static readonly string[] SDK_PACKAGES =
     [
         "Microsoft.Windows.CppWinRT",
-        BuildToolsService.BUILD_TOOLS_PACKAGE,
         BuildToolsService.WINAPP_SDK_PACKAGE,
         "Microsoft.Windows.ImplementationLibrary",
         BuildToolsService.CPP_SDK_PACKAGE,

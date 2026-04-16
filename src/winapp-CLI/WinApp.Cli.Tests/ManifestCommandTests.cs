@@ -57,8 +57,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
 
         // Verify manifest was created
-        var expectedManifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(expectedManifestPath), "AppxManifest.xml should be created");
+        var expectedManifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(expectedManifestPath), "Package.appxmanifest should be created");
 
         // Verify Assets directory was created
         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
@@ -91,8 +91,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
 
         // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
 
         // Verify manifest content contains our custom values
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
@@ -122,10 +122,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
 
         // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
-
-        // Verify sparse package specific content
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
         Assert.Contains("uap10:AllowExternalContent", manifestContent, "Sparse manifest should contain AllowExternalContent");
         Assert.Contains("packagedClassicApp", manifestContent, "Sparse manifest should contain packagedClassicApp");
@@ -150,10 +148,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
 
         // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
-
-        // Verify Assets directory was created with generated asset files
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
         Assert.IsTrue(Directory.Exists(assetsDir), "Assets directory should be created");
 
@@ -306,8 +302,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully even with non-existent logo");
 
         // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
 
         // Verify no logo was copied (since it doesn't exist)
         var assetsDir = Path.Combine(_tempDirectory.FullName, "Assets");
@@ -507,8 +503,8 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "Generate command should complete successfully");
 
         // Verify manifest was created
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "AppxManifest.xml should be created");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
 

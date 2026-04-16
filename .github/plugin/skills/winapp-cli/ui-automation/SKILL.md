@@ -77,7 +77,7 @@ winapp ui status -a myapp; winapp ui inspect -a myapp --interactive
 ### Inspect element tree
 ```powershell
 winapp ui inspect -a myapp --interactive      # invokable elements only, auto-depth 8
-winapp ui inspect -a myapp --depth 5          # full tree at depth 5
+winapp ui inspect -a myapp --depth 5          # deeper tree at depth 5
 winapp ui inspect txt-searchbox-e5f6 -a myapp  # subtree rooted at element
 winapp ui inspect btn-settings-a1b2 -a myapp --ancestors  # walk up from element to root
 winapp ui inspect -a myapp --hide-offscreen   # hide offscreen elements
@@ -102,9 +102,10 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 
 ### Read element state
 ```powershell
-# Read text/value content (works for RichEditBox, TextBox, Slider, labels)
+# Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
 winapp ui get-value doc-texteditor-53ad -a notepad
 winapp ui get-value SearchBox -a myapp
+winapp ui get-value CmbTheme -a myapp              # reads ComboBox selected item via SelectionPattern
 
 # Check toggle/selection state, value, scroll position
 winapp ui get-property chk-agreecheckbox-b2c3 -a myapp --property ToggleState
@@ -136,7 +137,7 @@ winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search 
 ### Wait for UI state
 ```powershell
 winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
-winapp ui wait-for itm-status-c3d4 -a myapp --property Name --value "Complete" --timeout 5000
+winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
 ## Tips
@@ -215,7 +216,7 @@ View the UI element tree with semantic slugs, element types, names, and bounds.
 |--------|-------------|---------|
 | `--ancestors` | Walk up the tree from the specified element to the root | (none) |
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--depth` | Tree inspection depth | `5` |
+| `--depth` | Tree inspection depth | `4` |
 | `--hide-disabled` | Hide disabled elements from output | (none) |
 | `--hide-offscreen` | Hide offscreen elements from output | (none) |
 | `--interactive` | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. | (none) |
@@ -426,11 +427,12 @@ Wait for an element to appear, disappear, or have a property reach a target valu
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--contains` | Use substring matching for --value instead of exact match | (none) |
 | `--gone` | Wait for element to disappear instead of appear | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--property` | Property name to read or filter on | (none) |
 | `--timeout` | Timeout in milliseconds | `5000` |
-| `--value` | Wait for property to equal this value (use with --property) | (none) |
+| `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern ΓåÆ ValuePattern ΓåÆ Name). Combine with --property to check a specific property instead. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui list-windows`

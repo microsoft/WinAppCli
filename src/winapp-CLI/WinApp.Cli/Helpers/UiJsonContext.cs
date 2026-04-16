@@ -25,6 +25,9 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiGetValueResult))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(UiScrollResult))]
+[JsonSerializable(typeof(UiSetValueResult))]
+[JsonSerializable(typeof(UiFocusResult))]
+[JsonSerializable(typeof(UiScrollIntoViewResult))]
 [JsonSerializable(typeof(WindowInfo))]
 [JsonSerializable(typeof(WindowInfo[]))]
 [JsonSourceGenerationOptions(
@@ -66,6 +69,7 @@ internal sealed class UiInvokeResult
 {
     public string ElementId { get; set; } = "";
     public string Pattern { get; set; } = "";
+    public long Hwnd { get; set; }
 }
 
 internal sealed class UiClickResult
@@ -74,6 +78,7 @@ internal sealed class UiClickResult
     public string ClickType { get; set; } = "";
     public int X { get; set; }
     public int Y { get; set; }
+    public long Hwnd { get; set; }
 }
 
 internal sealed class UiScreenshotResult
@@ -84,6 +89,7 @@ internal sealed class UiScreenshotResult
     public int Height { get; set; }
     public int ProcessId { get; set; }
     public string? WindowTitle { get; set; }
+    public long Hwnd { get; set; }
 }
 
 internal sealed class UiWaitForResult
@@ -99,6 +105,12 @@ internal sealed class WindowInfo
     public int ProcessId { get; set; }
     public string ProcessName { get; set; } = "";
     public string? Title { get; set; }
+    public string? Label { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public long OwnerHwnd { get; set; }
+    public string? ClassName { get; set; }
+    public bool IsForeground { get; set; }
 }
 
 internal sealed class UiGetValueResult
@@ -112,4 +124,23 @@ internal sealed class UiScrollResult
     public string ElementId { get; set; } = "";
     public string? Direction { get; set; }
     public string? To { get; set; }
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiSetValueResult
+{
+    public string ElementId { get; set; } = "";
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiFocusResult
+{
+    public string ElementId { get; set; } = "";
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiScrollIntoViewResult
+{
+    public string ElementId { get; set; } = "";
+    public long Hwnd { get; set; }
 }
