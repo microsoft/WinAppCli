@@ -86,11 +86,7 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
 
 // Node.js wrapper-only commands that should appear in completions
 const NODE_WRAPPER_COMMANDS = ['node'];
-const NODE_SUBCOMMANDS = [
-  'create-addon',
-  'add-electron-debug-identity',
-  'clear-electron-debug-identity',
-];
+const NODE_SUBCOMMANDS = ['create-addon', 'add-electron-debug-identity', 'clear-electron-debug-identity'];
 
 /**
  * Handle completion requests by forwarding to the native CLI and augmenting
