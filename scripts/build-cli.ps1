@@ -22,13 +22,9 @@
 .PARAMETER SkipAll
     Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
 .PARAMETER OnlyDocs
-    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs)
-.PARAMETER DocsOnly
-    Alias of OnlyDocs
+    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs). Alias: DocsOnly
 .PARAMETER OnlyTests
-    Skip NuGet, MSIX, and docs (builds the CLI, npm, and runs tests)
-.PARAMETER TestsOnly
-    Alias of OnlyTests
+    Skip NuGet, MSIX, and docs (builds the CLI, npm, and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
