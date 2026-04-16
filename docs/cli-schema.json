@@ -626,7 +626,7 @@
       }
     },
     "init": {
-      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
+      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -1409,7 +1409,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)",
+          "description": "Path to the app manifest file, such as appxmanifest.xml or Package.appxmanifest (default: auto-detect from input folder or current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
@@ -3300,7 +3300,7 @@
           "recursive": false
         },
         "--manifest": {
-          "description": "Path to the Package.appxmanifest (default: auto-detect from current directory)",
+          "description": "Path to the app manifest file, such as Package.appxmanifest or appxmanifest.xml (default: auto-detect from current directory)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,

@@ -256,7 +256,7 @@ export interface InitOptions extends CommonOptions {
 }
 
 /**
- * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+ * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
@@ -449,7 +449,7 @@ export interface RunOptions extends CommonOptions {
   detach?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
+  /** Path to the app manifest file, such as appxmanifest.xml or Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
@@ -975,7 +975,7 @@ export interface UiWaitForOptions extends CommonOptions {
   property?: string;
   /** Timeout in milliseconds */
   timeout?: number;
-  /** Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. */
+  /** Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. */
   value?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1007,7 +1007,7 @@ export interface UnregisterOptions extends CommonOptions {
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
+  /** Path to the app manifest file, such as Package.appxmanifest or appxmanifest.xml (default: auto-detect from current directory) */
   manifest?: string;
 }
 
