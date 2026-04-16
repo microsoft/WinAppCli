@@ -3,7 +3,7 @@
 import { generateCppAddonFiles } from './cpp-addon-utils';
 import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
-import { getWinappCliPath, callWinappCli, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 
@@ -53,6 +53,12 @@ export async function main(): Promise<void> {
       return;
     }
 
+    // Handle completion requests — augment native CLI completions with wrapper-only commands
+    if (command === 'complete') {
+      await handleComplete(commandArgs);
+      return;
+    }
+
     // Route Node.js-only commands to local handlers
     if (NODE_ONLY_COMMANDS.has(command)) {
       await handleNodeCommand(command, commandArgs);
@@ -75,6 +81,80 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
     default:
       console.error(`Unknown Node.js command: ${command}`);
       process.exit(1);
+  }
+}
+
+// Node.js wrapper-only commands that should appear in completions
+const NODE_WRAPPER_COMMANDS = ['node'];
+const NODE_SUBCOMMANDS = [
+  'create-addon',
+  'add-electron-debug-identity',
+  'clear-electron-debug-identity',
+];
+
+/**
+ * Handle completion requests by forwarding to the native CLI and augmenting
+ * with wrapper-only commands (node, node subcommands).
+ */
+async function handleComplete(args: string[]): Promise<void> {
+  // If --setup is requested, forward directly to native CLI
+  const setupIdx = args.indexOf('--setup');
+  if (setupIdx !== -1) {
+    await callWinappCli(['complete', ...args], { exitOnError: true });
+    return;
+  }
+
+  // Parse --commandline and --position from args
+  let commandLine = '';
+  let position = 0;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--commandline' && i + 1 < args.length) {
+      commandLine = args[i + 1];
+      i++;
+    } else if (args[i] === '--position' && i + 1 < args.length) {
+      position = parseInt(args[i + 1], 10) || 0;
+      i++;
+    }
+  }
+
+  // Get completions from native CLI
+  let nativeCompletions: string[] = [];
+  try {
+    const result = await callWinappCliCapture(['complete', ...args]);
+    nativeCompletions = result.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    // Native CLI may not be available; continue with wrapper-only completions
+  }
+
+  // Determine context from the command line to decide whether to add wrapper commands
+  const textBeforeCursor = commandLine.slice(0, position);
+  const tokens = textBeforeCursor.trim().split(/\s+/);
+  // tokens[0] is "winapp", tokens[1] is the first subcommand if present, etc.
+
+  if (tokens.length <= 2) {
+    // User is completing a top-level command — add wrapper-only commands
+    const partial = tokens.length === 2 ? tokens[1] : '';
+    for (const cmd of NODE_WRAPPER_COMMANDS) {
+      if (cmd.startsWith(partial) && !nativeCompletions.includes(cmd)) {
+        nativeCompletions.push(cmd);
+      }
+    }
+  } else if (tokens.length <= 3 && tokens[1] === 'node') {
+    // User is completing a node subcommand
+    const partial = tokens.length === 3 ? tokens[2] : '';
+    for (const sub of NODE_SUBCOMMANDS) {
+      if (sub.startsWith(partial)) {
+        nativeCompletions.push(sub);
+      }
+    }
+  }
+
+  // Output all completions
+  for (const completion of nativeCompletions) {
+    console.log(completion);
   }
 }
 

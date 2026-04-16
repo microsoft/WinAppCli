@@ -91,7 +91,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiScrollCommand, UiScrollCommand.Handler>()
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
-                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>();
+                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                .ConfigureCommand<CompleteCommand>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)
