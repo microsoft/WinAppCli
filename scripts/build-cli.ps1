@@ -23,6 +23,8 @@
     Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
 .PARAMETER OnlyDocs
     Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs)
+.PARAMETER DocsOnly
+    Alias of OnlyDocs
 .PARAMETER OnlyTests
     Skip NuGet, MSIX, npm, and docs (builds the CLI and runs tests)
 .PARAMETER Stable
@@ -42,6 +44,8 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -OnlyDocs
 .EXAMPLE
+    .\scripts\build-cli.ps1 -DocsOnly
+.EXAMPLE
     .\scripts\build-cli.ps1 -OnlyTests
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
@@ -56,10 +60,18 @@ param(
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
     [switch]$SkipAll = $false,
+    [Alias("DocsOnly")]
     [switch]$OnlyDocs = $false,
     [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
+
+# Validate compound flag usage
+$CompoundFlagsCount = @($SkipAll, $OnlyDocs, $OnlyTests | Where-Object { $_ }).Count
+if ($CompoundFlagsCount -gt 1) {
+    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests can be specified."
+    exit 1
+}
 
 # Apply compound skip flags
 if ($SkipAll) {
@@ -68,14 +80,12 @@ if ($SkipAll) {
     $SkipNpm = $true
     $SkipTests = $true
     $SkipDocs = $true
-}
-if ($OnlyDocs) {
+} elseif ($OnlyDocs) {
     $SkipNuGet = $true
     $SkipMsix = $true
     $SkipNpm = $true
     $SkipTests = $true
-}
-if ($OnlyTests) {
+} elseif ($OnlyTests) {
     $SkipNuGet = $true
     $SkipMsix = $true
     $SkipNpm = $true
@@ -203,7 +213,7 @@ try
     }
 
     # Step 4: Build Node CLI so E2E tests that invoke node cli.js can run
-    if (-not $SkipNpm) {
+    if ((-not $SkipNpm) -or (-not $SkipTests)) {
         Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
         Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
         try {
