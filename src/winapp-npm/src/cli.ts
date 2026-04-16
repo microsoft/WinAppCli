@@ -104,16 +104,18 @@ async function handleComplete(args: string[]): Promise<void> {
     return;
   }
 
-  // Parse --commandline and --position from args
+  // Parse --commandline and --position from args (supports both --key value and --key=value syntax)
   let commandLine = '';
   let position = 0;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--commandline' && i + 1 < args.length) {
-      commandLine = args[i + 1];
-      i++;
+    if (args[i].startsWith('--commandline=')) {
+      commandLine = args[i].slice('--commandline='.length);
+    } else if (args[i] === '--commandline' && i + 1 < args.length) {
+      commandLine = args[++i];
+    } else if (args[i].startsWith('--position=')) {
+      position = parseInt(args[i].slice('--position='.length), 10) || 0;
     } else if (args[i] === '--position' && i + 1 < args.length) {
-      position = parseInt(args[i + 1], 10) || 0;
-      i++;
+      position = parseInt(args[++i], 10) || 0;
     }
   }
 
