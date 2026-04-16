@@ -54,9 +54,13 @@ if (-not (Test-Path $SchemaPath)) {
 # Generate fresh schema and compare
 Write-Host "[VALIDATE] Generating fresh schema from CLI..." -ForegroundColor Blue
 $prevEncoding = [Console]::OutputEncoding
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$FreshSchemaLines = & $CliPath --cli-schema
-[Console]::OutputEncoding = $prevEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $FreshSchemaLines = & $CliPath --cli-schema
+}
+finally {
+    [Console]::OutputEncoding = $prevEncoding
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to extract CLI schema"
     exit 1

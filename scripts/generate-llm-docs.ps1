@@ -57,9 +57,13 @@ Write-Host "Docs path: $DocsPath" -ForegroundColor Gray
 # Step 1: Generate CLI schema JSON
 Write-Host "[DOCS] Extracting CLI schema..." -ForegroundColor Blue
 $prevEncoding = [Console]::OutputEncoding
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$SchemaJsonLines = & $CliPath --cli-schema
-[Console]::OutputEncoding = $prevEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $SchemaJsonLines = & $CliPath --cli-schema
+}
+finally {
+    [Console]::OutputEncoding = $prevEncoding
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to extract CLI schema"
     exit 1
