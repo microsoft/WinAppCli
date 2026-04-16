@@ -68,8 +68,9 @@ Describe "Tauri App Sample" {
             } finally { Pop-Location }
         }
 
-        It "Should have created Package.appxmanifest" -Skip:$script:skip {
-            Join-Path $script:tempApp "Package.appxmanifest" | Should -Exist
+        It "Should have appxmanifest" -Skip:$script:skip {
+            # winapp init preserves the existing appxmanifest.xml copied from the sample
+            Join-Path $script:tempApp "appxmanifest.xml" | Should -Exist
         }
 
         It "Should build Tauri app in debug mode" -Skip:$script:skip {
@@ -116,7 +117,7 @@ Describe "Tauri App Sample" {
         It "Should generate dev certificate" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-WinappCommand -Arguments "cert generate --if-exists skip --manifest Package.appxmanifest"
+                Invoke-WinappCommand -Arguments "cert generate --if-exists skip --manifest appxmanifest.xml"
             } finally { Pop-Location }
         }
 
@@ -127,7 +128,7 @@ Describe "Tauri App Sample" {
         It "Should package as MSIX" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-WinappCommand -Arguments "pack msix-layout --manifest Package.appxmanifest --cert devcert.pfx"
+                Invoke-WinappCommand -Arguments "pack msix-layout --manifest appxmanifest.xml --cert devcert.pfx"
             } finally { Pop-Location }
         }
 
