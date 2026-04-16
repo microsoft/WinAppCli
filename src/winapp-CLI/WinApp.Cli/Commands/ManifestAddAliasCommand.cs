@@ -27,7 +27,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory)"
+            Description = "Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 
@@ -37,7 +37,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
         };
     }
 
-    public ManifestAddAliasCommand() : base("add-alias", "Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. " +
+    public ManifestAddAliasCommand() : base("add-alias", "Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. " +
         "This allows launching the packaged app from the command line by typing the alias name. " +
         "By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).")
     {
@@ -61,7 +61,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
                 resolvedManifest = MsixService.FindProjectManifest(currentDirectoryProvider);
                 if (resolvedManifest == null || !resolvedManifest.Exists)
                 {
-                    logger.LogError("{UISymbol} Could not find appxmanifest.xml in the current directory. Use --manifest to specify the path.", UiSymbols.Error);
+                    logger.LogError("{UISymbol} Could not find Package.appxmanifest in the current directory. Use --manifest to specify the path.", UiSymbols.Error);
                     return 1;
                 }
             }

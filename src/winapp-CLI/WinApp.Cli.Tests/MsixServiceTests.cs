@@ -697,29 +697,29 @@ public class MsixServiceTests
     public void FindManifestInDirectory_FindsPackageAppxManifest()
     {
         // Arrange
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "Package.appxmanifest"), "<Package/>");
 
         // Act
         var result = MsixService.FindManifestInDirectory(_tempDir);
 
         // Assert
         Assert.IsNotNull(result);
-        Assert.AreEqual("package.appxmanifest", result.Name);
+        Assert.AreEqual("Package.appxmanifest", result.Name);
     }
 
     [TestMethod]
-    public void FindManifestInDirectory_PrefersAppxManifestXml_WhenBothExist()
+    public void FindManifestInDirectory_PrefersPackageAppxManifest_WhenBothExist()
     {
         // Arrange
         File.WriteAllText(Path.Combine(_tempDir.FullName, "appxmanifest.xml"), "<Package/>");
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "package.appxmanifest"), "<Package/>");
+        File.WriteAllText(Path.Combine(_tempDir.FullName, "Package.appxmanifest"), "<Package/>");
 
         // Act
         var result = MsixService.FindManifestInDirectory(_tempDir);
 
         // Assert
         Assert.IsNotNull(result);
-        Assert.AreEqual("appxmanifest.xml", result.Name);
+        Assert.AreEqual("Package.appxmanifest", result.Name);
     }
 
     [TestMethod]

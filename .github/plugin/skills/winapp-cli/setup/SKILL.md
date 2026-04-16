@@ -154,7 +154,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -218,7 +218,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
 | `--detach` | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--manifest` | Path to the appxmanifest.xml (default: auto-detect from input folder or current directory) | (none) |
+| `--manifest` | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
 | `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
 | `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |
