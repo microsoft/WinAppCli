@@ -1,6 +1,6 @@
 # Shell Completion
 
-Enable tab completion for `winapp` in your terminal. Once activated, pressing Tab will suggest commands, options, and argument values as you type.
+Enable tab completion for `winapp` in your terminal. Once activated, pressing Tab will show an interactive menu of commands, options, and argument values as you type.
 
 ## PowerShell
 
@@ -23,6 +23,8 @@ To try it in the current session without modifying your profile:
 ```powershell
 winapp complete --setup powershell | Out-String | Invoke-Expression
 ```
+
+The setup script enables `MenuComplete` mode, which shows an interactive list of completions with descriptions when you press Tab. You can navigate the list with arrow keys.
 
 ### What it does
 

@@ -66,36 +66,76 @@ internal class CompleteCommand : Command, IShortDescription
 
         // When the cursor is past the end of the text (e.g., PowerShell sends
         // position=12 for "winapp cert" which is 11 chars), the user has a trailing
-        // space after the last token. Append a space so System.CommandLine knows to
-        // complete the NEXT token rather than the current one.
+        // space after the last token. Treat as exactly one trailing space.
         if (position > commandLine.Length)
         {
+            position = commandLine.Length + 1;
             commandLine += " ";
         }
 
-        // Re-parse the user's command line using the root command,
+        // Strip the leading command name (e.g., "winapp" or "winapp-dev") from the
+        // command line before parsing. System.CommandLine's GetCompletions() works
+        // on the arguments only, and including the exe name can cause position
+        // mismatches when the first token matches the root command name.
+        var textToComplete = commandLine[..position];
+        var firstSpaceIndex = textToComplete.IndexOf(' ');
+        string argsText;
+        int argsPosition;
+        if (firstSpaceIndex >= 0)
+        {
+            argsText = textToComplete[(firstSpaceIndex + 1)..];
+            argsPosition = argsText.Length;
+        }
+        else
+        {
+            // Just the command name, no args yet — complete subcommands
+            argsText = "";
+            argsPosition = 0;
+        }
+
+        // Re-parse the arguments using the root command,
         // then ask System.CommandLine for completions at that position.
         var rootCommand = parseResult.RootCommandResult.Command;
-        var textToComplete = commandLine[..position];
 
-        var completionParseResult = rootCommand.Parse(textToComplete);
-        var completions = completionParseResult.GetCompletions(position);
+        // If "-- " (end-of-options followed by space) appears before the cursor,
+        // everything after it is positional — don't offer option completions.
+        var endOfOptionsMarker = argsText.IndexOf("-- ", StringComparison.Ordinal);
+        if (endOfOptionsMarker >= 0 && endOfOptionsMarker + 3 <= argsPosition)
+        {
+            return 0;
+        }
+
+        var completionParseResult = rootCommand.Parse(argsText);
+        var completions = completionParseResult.GetCompletions(argsPosition);
 
         // Determine the partial word being typed (text after last space up to cursor)
-        var lastSpaceIndex = textToComplete.LastIndexOf(' ');
-        var currentWord = lastSpaceIndex >= 0 ? textToComplete[(lastSpaceIndex + 1)..] : textToComplete;
+        var lastSpaceIndex = argsText.LastIndexOf(' ');
+        var currentWord = lastSpaceIndex >= 0 ? argsText[(lastSpaceIndex + 1)..] : argsText;
+
+        // If the user is typing a path (starts with . or / or \), return nothing
+        // and let the shell's built-in file completion handle it.
+        if (currentWord.StartsWith('.') || currentWord.StartsWith('\\'))
+        {
+            return 0;
+        }
 
         // System.CommandLine uses substring matching by default. Apply prefix matching
         // for a more intuitive shell experience (e.g., "i" should match "init", not "sign").
         var filteredCompletions = completions
             .Where(c => c.Label.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase));
 
-        // Only include options (starting with - or /) when the user has started typing
-        // a prefix character, otherwise just show commands/arguments for cleaner completions.
+        // When the user hasn't typed a dash prefix, prefer showing only commands/arguments.
+        // But if hiding flags would leave zero results (e.g., "winapp init " has no
+        // subcommands), show everything so the user discovers available options.
         if (!currentWord.StartsWith('-') && !currentWord.StartsWith('/'))
         {
-            filteredCompletions = filteredCompletions
-                .Where(c => !c.Label.StartsWith('-') && !c.Label.StartsWith('/'));
+            var commandsOnly = filteredCompletions
+                .Where(c => !c.Label.StartsWith('-') && !c.Label.StartsWith('/'))
+                .ToList();
+            if (commandsOnly.Count > 0)
+            {
+                filteredCompletions = commandsOnly;
+            }
         }
 
         var output = parseResult.InvocationConfiguration.Output;
@@ -140,16 +180,19 @@ internal class CompleteCommand : Command, IShortDescription
 
     private static string GetPowerShellScript() =>
         """
+        Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
         Register-ArgumentCompleter -Native -CommandName winapp -ScriptBlock {
             param($wordToComplete, $commandAst, $cursorPosition)
-            $completions = @(winapp complete --commandline "$commandAst" --position $cursorPosition 2>$null)
-            if ($completions.Count -gt 0) {
-                $completions | ForEach-Object {
-                    $parts = $_ -split "`t", 2
-                    $label = $parts[0]
-                    $tooltip = if ($parts.Count -gt 1) { $parts[1] } else { $label }
-                    [System.Management.Automation.CompletionResult]::new($label, $label, 'ParameterValue', $tooltip)
-                }
+            if ($wordToComplete -like '.*' -or $wordToComplete -like '\*' -or $wordToComplete -like '[A-Z]:\*') { return }
+            if ($wordToComplete -eq '--') {
+                [System.Management.Automation.CompletionResult]::new('-- ', '-- ', 'Text', 'End of options')
+                return
+            }
+            winapp complete "--commandline=$commandAst" "--position=$cursorPosition" 2>$null | ForEach-Object {
+                $parts = $_ -split "`t", 2
+                $label = $parts[0]
+                $tooltip = if ($parts.Count -gt 1) { $parts[1] } else { $label }
+                [System.Management.Automation.CompletionResult]::new($label, $label, 'ParameterValue', $tooltip)
             }
         }
         """;
@@ -159,10 +202,10 @@ internal class CompleteCommand : Command, IShortDescription
         _winapp_completions() {
             local IFS=$'\n'
             local completions
-            completions=$(winapp complete --commandline "${COMP_LINE}" --position "${COMP_POINT}" 2>/dev/null)
+            completions=$(winapp complete "--commandline=${COMP_LINE}" "--position=${COMP_POINT}" 2>/dev/null)
             COMPREPLY=()
             while IFS= read -r line; do
-                COMPREPLY+=("$line")
+                COMPREPLY+=("${line%%	*}")
             done <<< "$completions"
         }
         complete -o default -F _winapp_completions winapp
@@ -172,8 +215,12 @@ internal class CompleteCommand : Command, IShortDescription
         """
         _winapp() {
             local completions
-            completions=("${(@f)$(winapp complete --commandline "${words[*]}" --position $CURSOR 2>/dev/null)}")
-            compadd -a completions
+            completions=("${(@f)$(winapp complete "--commandline=${words[*]}" "--position=$CURSOR" 2>/dev/null)}")
+            local labels=()
+            for c in $completions; do
+                labels+=("${c%%	*}")
+            done
+            compadd -a labels
         }
         compdef _winapp winapp
         """;
