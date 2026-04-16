@@ -71,8 +71,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify manifest generated the necessary files
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create Package.appxmanifest");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");
         Assert.IsTrue(Directory.Exists(assetsDir), "Manifest generate should create Assets directory");
@@ -151,7 +151,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify custom options were applied
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
@@ -211,8 +211,8 @@ public class EndToEndTests : BaseCommandTests
         var winAppSdkVersion = ExtractPackageVersion(csprojContent, "Microsoft.WindowsAppSDK");
         Assert.IsNotNull(winAppSdkVersion, "csproj should contain WindowsAppSDK version after init");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         // Step 3: Build
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
@@ -285,8 +285,8 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
@@ -358,8 +358,8 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
@@ -455,7 +455,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
 
         // Step 4: Manifest should still be created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
 
         Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
@@ -501,11 +501,6 @@ public class EndToEndTests : BaseCommandTests
             updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
             "csproj should contain Microsoft.WindowsAppSDK package reference");
 
-        // The init command should add BuildTools package reference
-        Assert.IsTrue(
-            updatedCsprojContent.Contains("Microsoft.Windows.SDK.BuildTools", StringComparison.OrdinalIgnoreCase),
-            "csproj should contain Microsoft.Windows.SDK.BuildTools package reference");
-
         // Step 4: Verify the TargetFramework was updated to a Windows TFM while preserving the .NET version
         Assert.IsTrue(
             updatedCsprojContent.Contains("-windows", StringComparison.OrdinalIgnoreCase),
@@ -520,7 +515,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj TargetFramework should preserve the .NET version with Windows SDK version added");
 
         // Step 5: Verify manifest and assets were created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");

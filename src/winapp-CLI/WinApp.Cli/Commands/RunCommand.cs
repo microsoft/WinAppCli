@@ -41,7 +41,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)"
+            Description = "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 
@@ -454,7 +454,7 @@ internal partial class RunCommand : Command, IShortDescription
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
-            var processedManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
+            var processedManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
             if (!processedManifest.Exists)
             {
                 logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName);

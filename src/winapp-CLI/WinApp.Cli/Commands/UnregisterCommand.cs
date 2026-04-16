@@ -24,7 +24,7 @@ internal class UnregisterCommand : Command, IShortDescription
     {
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the appxmanifest.xml (default: auto-detect from current directory)"
+            Description = "Path to the Package.appxmanifest (default: auto-detect from current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 

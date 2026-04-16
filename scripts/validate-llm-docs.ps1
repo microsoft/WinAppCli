@@ -53,7 +53,14 @@ if (-not (Test-Path $SchemaPath)) {
 
 # Generate fresh schema and compare
 Write-Host "[VALIDATE] Generating fresh schema from CLI..." -ForegroundColor Blue
-$FreshSchemaLines = & $CliPath --cli-schema
+$prevEncoding = [Console]::OutputEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $FreshSchemaLines = & $CliPath --cli-schema
+}
+finally {
+    [Console]::OutputEncoding = $prevEncoding
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to extract CLI schema"
     exit 1
@@ -62,7 +69,7 @@ if ($LASTEXITCODE -ne 0) {
 # Join array lines into single string (CLI outputs pretty-printed JSON with newlines)
 $FreshSchema = $FreshSchemaLines -join "`n"
 
-$CommittedSchema = Get-Content $SchemaPath -Raw
+$CommittedSchema = [System.IO.File]::ReadAllText($SchemaPath, [System.Text.UTF8Encoding]::new($false))
 
 # Normalize line endings for comparison
 $FreshSchemaNormalized = $FreshSchema -replace "`r`n", "`n"
@@ -165,11 +172,11 @@ try {
     # which may legitimately contain the same string (e.g. "MyApp_1.0.0_x64").
     $TempSchemaPath = Join-Path $TempDocsPath "cli-schema.json"
     if (Test-Path $TempSchemaPath) {
-        $tempSchemaObj = (Get-Content $TempSchemaPath -Raw) | ConvertFrom-Json -Depth 100
+        $tempSchemaObj = ([System.IO.File]::ReadAllText($TempSchemaPath, [System.Text.UTF8Encoding]::new($false))) | ConvertFrom-Json -Depth 100
         $freshCliVersion = $tempSchemaObj.version
         if ($freshCliVersion -and $freshCliVersion -ne $BaseVersion) {
             Get-ChildItem -Path $TempSkills -Filter "*.md" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-                $content = Get-Content $_.FullName -Raw
+                $content = [System.IO.File]::ReadAllText($_.FullName, [System.Text.UTF8Encoding]::new($false))
                 $content = $content -replace "(?m)^(version:\s*)$([regex]::Escape($freshCliVersion))$", "`${1}$BaseVersion"
                 [System.IO.File]::WriteAllText($_.FullName, $content)
             }
@@ -190,8 +197,8 @@ try {
         }
         
         if (Test-Path $FreshSkill) {
-            $freshContent = (Get-Content $FreshSkill -Raw) -replace "`r`n", "`n"
-            $committedContent = (Get-Content $CommittedSkill -Raw) -replace "`r`n", "`n"
+            $freshContent = ([System.IO.File]::ReadAllText($FreshSkill, [System.Text.UTF8Encoding]::new($false))) -replace "`r`n", "`n"
+            $committedContent = ([System.IO.File]::ReadAllText($CommittedSkill, [System.Text.UTF8Encoding]::new($false))) -replace "`r`n", "`n"
             
             if ($freshContent -ne $committedContent) {
                 Write-Host "::error::skill '$skillName' is out of sync!" -ForegroundColor Red
