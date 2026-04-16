@@ -50,6 +50,8 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -OnlyTests
 .EXAMPLE
+    .\scripts\build-cli.ps1 -TestsOnly
+.EXAMPLE
     .\scripts\build-cli.ps1 -Stable
 #>
 
