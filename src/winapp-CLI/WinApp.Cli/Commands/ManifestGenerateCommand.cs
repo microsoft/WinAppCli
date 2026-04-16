@@ -12,7 +12,7 @@ namespace WinApp.Cli.Commands;
 
 internal class ManifestGenerateCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Create appxmanifest.xml and required image assets";
+    public string ShortDescription => "Create Package.appxmanifest and required image assets";
 
     public static Argument<DirectoryInfo> DirectoryArgument { get; }
     public static Option<string> PackageNameOption { get; }
@@ -72,7 +72,7 @@ internal class ManifestGenerateCommand : Command, IShortDescription
         };
     }
 
-    public ManifestGenerateCommand() : base("generate", "Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).")
+    public ManifestGenerateCommand() : base("generate", "Create Package.appxmanifest without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).")
     {
         Arguments.Add(DirectoryArgument);
         Options.Add(PackageNameOption);

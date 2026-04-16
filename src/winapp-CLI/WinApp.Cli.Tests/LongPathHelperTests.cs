@@ -104,7 +104,7 @@ public class LongPathHelperTests
         {
             var ex = Assert.ThrowsExactly<InvalidOperationException>(() => LongPathHelper.ValidatePathLength(path));
             Assert.IsTrue(ex.Message.Contains("MAX_PATH"), "Error message should mention MAX_PATH");
-            Assert.IsTrue(ex.Message.Contains("LongPathsEnabled") || ex.Message.Contains("reg add"),
+            Assert.IsTrue(ex.Message.Contains("aka.ms") || ex.Message.Contains("enable-long-paths"),
                 "Error message should include actionable guidance");
         }
         else

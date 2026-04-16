@@ -165,7 +165,7 @@ Key fields to edit:
 
 ### `winapp manifest generate`
 
-Create appxmanifest.xml without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
+Create Package.appxmanifest without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -188,7 +188,7 @@ Create appxmanifest.xml without full project setup. Use when you only need a man
 
 ### `winapp manifest update-assets`
 
-Generate new assets for images referenced in an appxmanifest.xml from a single source image. Source image should be at least 400x400 pixels.
+Generate new assets for images referenced in a Package.appxmanifest from a single source image. Source image should be at least 400x400 pixels.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -201,16 +201,16 @@ Generate new assets for images referenced in an appxmanifest.xml from a single s
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--light-image` | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) | (none) |
-| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) | (none) |
 
 ### `winapp manifest add-alias`
 
-Add an execution alias (uap5:AppExecutionAlias) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
+Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
-| `--manifest` | Path to AppxManifest.xml or Package.appxmanifest file (default: search current directory) | (none) |
+| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) | (none) |
 | `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |

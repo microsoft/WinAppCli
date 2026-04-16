@@ -34,7 +34,7 @@ internal class CertGenerateCommand : Command, IShortDescription
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to appxmanifest.xml or Package.appxmanifest file to extract publisher information from"
+            Description = "Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from"
         };
         ManifestOption.AcceptExistingOnly();
         ManifestOption.AcceptLegalFilePathsOnly();
@@ -69,7 +69,7 @@ internal class CertGenerateCommand : Command, IShortDescription
     }
 
     public CertGenerateCommand()
-        : base("generate", "Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.")
+        : base("generate", "Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.")
     {
         Options.Add(PublisherOption);
         Options.Add(ManifestOption);

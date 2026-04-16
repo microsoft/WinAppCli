@@ -783,7 +783,8 @@ public class DotNetServiceTests : BaseCommandTests
         Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
         // Nothing but whitespace between them
         var between = content[(ridsEnd + "</RuntimeIdentifiers>".Length)..ridStart];
-        Assert.IsTrue(string.IsNullOrWhiteSpace(between), $"Only whitespace expected between elements, got: '{between}'");
+        // The comment is expected between the elements
+        Assert.IsTrue(between.Contains("<!-- Added by winapp"), $"Expected comment between elements, got: '{between}'");
     }
 
     [TestMethod]

@@ -153,10 +153,10 @@ internal partial class ManifestService(
         // If logo path is provided, update manifest assets
         if (logoPath?.Exists == true)
         {
-            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
+            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
             if (!manifestPath.Exists)
             {
-                manifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+                manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
             }
             if (manifestPath.Exists)
             {
