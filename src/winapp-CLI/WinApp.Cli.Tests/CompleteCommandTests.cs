@@ -243,7 +243,7 @@ public class CompleteCommandTests : BaseCommandTests
         Assert.IsTrue(linesWithDescriptions.Length > 0, "Completions should include descriptions");
 
         // Verify a known command has its description
-        var initLine = linesWithDescriptions.FirstOrDefault(l => l.StartsWith("init\t"));
+        var initLine = linesWithDescriptions.FirstOrDefault(l => l.StartsWith("init\t", StringComparison.Ordinal));
         Assert.IsNotNull(initLine, "init command should have a description");
     }
 
