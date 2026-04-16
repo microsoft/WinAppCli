@@ -133,20 +133,23 @@ async function handleComplete(args: string[]): Promise<void> {
 
   // Determine context from the command line to decide whether to add wrapper commands
   const textBeforeCursor = commandLine.slice(0, position);
+  const hasTrailingSpace = textBeforeCursor.endsWith(' ');
   const tokens = textBeforeCursor.trim().split(/\s+/);
   // tokens[0] is "winapp", tokens[1] is the first subcommand if present, etc.
+  // tokenCount accounts for trailing space meaning the user is starting a new token
+  const tokenCount = hasTrailingSpace ? tokens.length + 1 : tokens.length;
 
-  if (tokens.length <= 2) {
+  if (tokenCount <= 2) {
     // User is completing a top-level command — add wrapper-only commands
-    const partial = tokens.length === 2 ? tokens[1] : '';
+    const partial = tokenCount === 2 && !hasTrailingSpace ? tokens[1] : '';
     for (const cmd of NODE_WRAPPER_COMMANDS) {
       if (cmd.startsWith(partial) && !nativeCompletions.includes(cmd)) {
         nativeCompletions.push(cmd);
       }
     }
-  } else if (tokens.length <= 3 && tokens[1] === 'node') {
+  } else if (tokenCount <= 3 && tokens[1] === 'node') {
     // User is completing a node subcommand
-    const partial = tokens.length === 3 ? tokens[2] : '';
+    const partial = tokenCount === 3 && !hasTrailingSpace ? tokens[2] : '';
     for (const sub of NODE_SUBCOMMANDS) {
       if (sub.startsWith(partial)) {
         nativeCompletions.push(sub);

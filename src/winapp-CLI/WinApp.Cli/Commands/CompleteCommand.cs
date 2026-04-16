@@ -35,7 +35,7 @@ internal class CompleteCommand : Command, IShortDescription
     internal static readonly Option<string?> SetupOption = new("--setup")
     {
         Description = "Print the shell registration script for the specified shell",
-        HelpName = "powershell|bash|zsh"
+        HelpName = "powershell|pwsh|bash|zsh"
     };
 
     public CompleteCommand() : base("complete", "Provide shell tab-completion candidates. Used by shell argument completers to suggest commands, options, and values.")
@@ -62,6 +62,12 @@ internal class CompleteCommand : Command, IShortDescription
         if (string.IsNullOrEmpty(commandLine))
         {
             return 0;
+        }
+
+        // Clamp position to valid range
+        if (position < 0)
+        {
+            position = 0;
         }
 
         // When the cursor is past the end of the text (e.g., PowerShell sends
