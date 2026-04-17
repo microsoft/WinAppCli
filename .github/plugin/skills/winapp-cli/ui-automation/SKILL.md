@@ -432,7 +432,7 @@ Wait for an element to appear, disappear, or have a property reach a target valu
 | `--json` | Format output as JSON | (none) |
 | `--property` | Property name to read or filter on | (none) |
 | `--timeout` | Timeout in milliseconds | `5000` |
-| `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern ΓåÆ ValuePattern ΓåÆ Name). Combine with --property to check a specific property instead. | (none) |
+| `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui list-windows`
