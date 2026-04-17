@@ -151,6 +151,9 @@ internal sealed class Telemetry : ITelemetry
             innerException = innerException.InnerException;
         }
 
+        var (senderOrigin, agentName) = AgentEnvironmentDetector.Detect();
+        var sanitizedAgentName = agentName != null ? this.ReplaceSensitiveStrings(agentName) : null;
+
         this.LogInternal(
             ExceptionThrownEventName,
             LogLevel.Critical,
@@ -165,8 +168,8 @@ internal sealed class Telemetry : ITelemetry
                 message = this.ReplaceSensitiveStrings(e.Message),
                 PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
                 PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
-                AgentEnvironmentDetector.Detect().SenderOrigin,
-                AgentEnvironmentDetector.Detect().AgentName,
+                SenderOrigin = senderOrigin,
+                AgentName = sanitizedAgentName,
             },
             relatedActivityId,
             isError: true);
@@ -180,6 +183,9 @@ internal sealed class Telemetry : ITelemetry
     /// <param name="relatedActivityId">Optional relatedActivityId which will allow to correlate this telemetry with other telemetry in the same action/activity or thread and corelate them</param>
     public void LogTimeTaken(string eventName, uint timeTakenMilliseconds, Guid? relatedActivityId = null)
     {
+        var (senderOrigin, agentName) = AgentEnvironmentDetector.Detect();
+        var sanitizedAgentName = agentName != null ? this.ReplaceSensitiveStrings(agentName) : null;
+
         this.LogInternal(
             TimeTakenEventName,
             LogLevel.Critical,
@@ -189,8 +195,8 @@ internal sealed class Telemetry : ITelemetry
                 timeTakenMilliseconds,
                 PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
                 PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
-                AgentEnvironmentDetector.Detect().SenderOrigin,
-                AgentEnvironmentDetector.Detect().AgentName,
+                SenderOrigin = senderOrigin,
+                AgentName = sanitizedAgentName,
             },
             relatedActivityId,
             isError: false);

@@ -62,6 +62,7 @@ internal sealed class AgentEnvironmentDetector
         ("CLINE_ACTIVE", "cline"),
     ];
 
+    private static readonly Lock CacheLock = new();
     private static (string SenderOrigin, string? AgentName)? cachedResult;
 
     /// <summary>
@@ -79,9 +80,17 @@ internal sealed class AgentEnvironmentDetector
             return cachedResult.Value;
         }
 
-        var result = DetectInternal();
-        cachedResult = result;
-        return result;
+        lock (CacheLock)
+        {
+            if (cachedResult.HasValue)
+            {
+                return cachedResult.Value;
+            }
+
+            var result = DetectInternal();
+            cachedResult = result;
+            return result;
+        }
     }
 
     /// <summary>
@@ -89,7 +98,20 @@ internal sealed class AgentEnvironmentDetector
     /// </summary>
     internal static void ResetCache()
     {
-        cachedResult = null;
+        lock (CacheLock)
+        {
+            cachedResult = null;
+        }
+    }
+
+    private static string? NormalizeAgentName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToLowerInvariant();
     }
 
     private static (string SenderOrigin, string? AgentName) DetectInternal()
@@ -98,9 +120,10 @@ internal sealed class AgentEnvironmentDetector
         foreach (string variable in GenericAgentVariables)
         {
             var value = Environment.GetEnvironmentVariable(variable);
-            if (!string.IsNullOrEmpty(value))
+            var normalizedAgentName = NormalizeAgentName(value);
+            if (normalizedAgentName is not null)
             {
-                return (SenderOrigins.Agent, value.ToLowerInvariant());
+                return (SenderOrigins.Agent, normalizedAgentName);
             }
         }
 

@@ -29,15 +29,23 @@ public class AgentEnvironmentDetectorTests
         "CLINE_ACTIVE",
     ];
 
-    // CI env vars that CIEnvironmentDetectorForTelemetry checks
+    // CI env vars that CIEnvironmentDetectorForTelemetry checks (must stay in sync)
     private static readonly string[] CIEnvVars =
     [
+        // BooleanVariables
         "TF_BUILD",
         "GITHUB_ACTIONS",
         "APPVEYOR",
         "CI",
         "TRAVIS",
         "CIRCLECI",
+        // AllNotNullVariables
+        "CODEBUILD_BUILD_ID",
+        "AWS_REGION",
+        "BUILD_ID",
+        "BUILD_URL",
+        "PROJECT_ID",
+        // IfNonNullVariables
         "TEAMCITY_VERSION",
         "JB_SPACE_API_URL",
     ];
@@ -100,6 +108,17 @@ public class AgentEnvironmentDetectorTests
     public void Detect_AI_AGENT_NormalizesToLowercase()
     {
         Environment.SetEnvironmentVariable("AI_AGENT", "Claude-Code");
+
+        var (senderOrigin, agentName) = AgentEnvironmentDetector.Detect();
+
+        Assert.AreEqual("agent", senderOrigin);
+        Assert.AreEqual("claude-code", agentName);
+    }
+
+    [TestMethod]
+    public void Detect_AI_AGENT_TrimsWhitespace()
+    {
+        Environment.SetEnvironmentVariable("AI_AGENT", "  claude-code  ");
 
         var (senderOrigin, agentName) = AgentEnvironmentDetector.Detect();
 
