@@ -165,6 +165,8 @@ internal sealed class Telemetry : ITelemetry
                 message = this.ReplaceSensitiveStrings(e.Message),
                 PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
                 PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
+                AgentEnvironmentDetector.Detect().SenderOrigin,
+                AgentEnvironmentDetector.Detect().AgentName,
             },
             relatedActivityId,
             isError: true);
@@ -187,6 +189,8 @@ internal sealed class Telemetry : ITelemetry
                 timeTakenMilliseconds,
                 PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
                 PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
+                AgentEnvironmentDetector.Detect().SenderOrigin,
+                AgentEnvironmentDetector.Detect().AgentName,
             },
             relatedActivityId,
             isError: false);
@@ -216,6 +220,7 @@ internal sealed class Telemetry : ITelemetry
     {
         data.ReplaceSensitiveStrings(this.ReplaceSensitiveStrings);
         data.Caller = data.Caller != null ? this.ReplaceSensitiveStrings(data.Caller) : null;
+        data.AgentName = data.AgentName != null ? this.ReplaceSensitiveStrings(data.AgentName) : null;
         this.LogInternal(eventName, level, data, relatedActivityId, isError: false);
     }
 
@@ -232,6 +237,7 @@ internal sealed class Telemetry : ITelemetry
     {
         data.ReplaceSensitiveStrings(this.ReplaceSensitiveStrings);
         data.Caller = data.Caller != null ? this.ReplaceSensitiveStrings(data.Caller) : null;
+        data.AgentName = data.AgentName != null ? this.ReplaceSensitiveStrings(data.AgentName) : null;
         this.LogInternal(eventName, level, data, relatedActivityId, isError: true);
     }
 
