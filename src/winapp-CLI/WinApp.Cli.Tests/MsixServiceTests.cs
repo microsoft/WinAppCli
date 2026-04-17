@@ -3,7 +3,6 @@
 
 using System.Reflection;
 using System.Text;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
