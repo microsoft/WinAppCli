@@ -48,7 +48,7 @@ export interface DependenciesData {
     targetDeviceFamilies: TargetDeviceFamilyData[];
     packageDependencies: PackageDependencyData[];
     mainPackageDependencies: MainPackageDependencyData[];
-    driverDependencies: DriverDependencyData[];
+    driverConstraints: DriverConstraintData[];
     osPackageDependencies: OSPackageDependencyData[];
     hostRuntimeDependencies: HostRuntimeDependencyData[];
     externalDependencies: ExternalDependencyData[];
@@ -69,10 +69,6 @@ export interface PackageDependencyData {
 
 export interface MainPackageDependencyData {
     name: string;
-}
-
-export interface DriverDependencyData {
-    driverConstraints: DriverConstraintData[];
 }
 
 export interface DriverConstraintData {
@@ -177,11 +173,9 @@ export type WebviewToExtensionMessage =
     | { type: 'addMainPackageDependency'; dependency: MainPackageDependencyData }
     | { type: 'removeMainPackageDependency'; index: number }
     | { type: 'moveMainPackageDependency'; index: number; direction: 'up' | 'down' }
-    | { type: 'addDriverDependency' }
-    | { type: 'removeDriverDependency'; index: number }
-    | { type: 'moveDriverDependency'; index: number; direction: 'up' | 'down' }
-    | { type: 'addDriverConstraint'; depIndex: number; constraint: DriverConstraintData }
-    | { type: 'removeDriverConstraint'; depIndex: number; constraintIndex: number }
+    | { type: 'addDriverConstraint'; constraint: DriverConstraintData }
+    | { type: 'removeDriverConstraint'; index: number }
+    | { type: 'moveDriverConstraint'; index: number; direction: 'up' | 'down' }
     | { type: 'addOSPackageDependency'; dependency: OSPackageDependencyData }
     | { type: 'removeOSPackageDependency'; index: number }
     | { type: 'moveOSPackageDependency'; index: number; direction: 'up' | 'down' }
@@ -193,6 +187,7 @@ export type WebviewToExtensionMessage =
     | { type: 'moveExternalDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'updateAssets' }
     | { type: 'openAsText' }
+    | { type: 'packageTypeChanged'; value: string }
     | { type: 'ready' };
 
 /** Known capabilities organized by category for the checklist UI. */

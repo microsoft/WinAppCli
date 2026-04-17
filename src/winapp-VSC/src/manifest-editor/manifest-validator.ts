@@ -191,6 +191,13 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
+    // Resource packages must use neutral architecture
+    if (data.properties.resourcePackage === 'true' &&
+        data.identity.processorArchitecture &&
+        data.identity.processorArchitecture.toLowerCase() !== 'neutral') {
+        errors.push({ field: 'identity.processorArchitecture', message: 'Resource packages must use neutral processor architecture.', severity: 'error' });
+    }
+
     // Phone Identity validation
     if (data.phoneIdentity) {
         if (data.phoneIdentity.phoneProductId && !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
@@ -290,28 +297,25 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Driver dependencies validation
-    for (let i = 0; i < data.dependencies.driverDependencies.length; i++) {
-        const dep = data.dependencies.driverDependencies[i];
-        for (let j = 0; j < dep.driverConstraints.length; j++) {
-            const constraint = dep.driverConstraints[j];
-            const prefix = `dependencies.driverDependency.${i}.driverConstraint.${j}`;
+    // Driver constraints validation
+    for (let i = 0; i < data.dependencies.driverConstraints.length; i++) {
+        const constraint = data.dependencies.driverConstraints[i];
+        const prefix = `dependencies.driverConstraint.${i}`;
 
-            if (!constraint.name) {
-                errors.push({ field: `${prefix}.name`, message: 'Driver constraint name is required.', severity: 'error' });
-            }
+        if (!constraint.name) {
+            errors.push({ field: `${prefix}.name`, message: 'Driver constraint name is required.', severity: 'error' });
+        }
 
-            if (!constraint.minVersion) {
-                errors.push({ field: `${prefix}.minVersion`, message: 'Driver constraint MinVersion is required.', severity: 'error' });
-            } else if (!isValidDotQuadNumber(constraint.minVersion)) {
-                errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be a DotQuadNumber (e.g. 1.0.0.0), each part 0–65535.', severity: 'error' });
-            }
+        if (!constraint.minVersion) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'Driver constraint MinVersion is required.', severity: 'error' });
+        } else if (!isValidDotQuadNumber(constraint.minVersion)) {
+            errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be a DotQuadNumber (e.g. 1.0.0.0), each part 0–65535.', severity: 'error' });
+        }
 
-            if (!constraint.minDate) {
-                errors.push({ field: `${prefix}.minDate`, message: 'Driver constraint MinDate is required.', severity: 'error' });
-            } else if (!/^\d{4}-\d{2}-\d{2}$/.test(constraint.minDate)) {
-                errors.push({ field: `${prefix}.minDate`, message: 'MinDate must be in YYYY-MM-DD format (e.g. 2020-01-01).', severity: 'error' });
-            }
+        if (!constraint.minDate) {
+            errors.push({ field: `${prefix}.minDate`, message: 'Driver constraint MinDate is required.', severity: 'error' });
+        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(constraint.minDate)) {
+            errors.push({ field: `${prefix}.minDate`, message: 'MinDate must be in YYYY-MM-DD format (e.g. 2020-01-01).', severity: 'error' });
         }
     }
 
@@ -380,12 +384,25 @@ export function validateManifest(data: ManifestData): ValidationError[] {
     }
 
     // Resources validation
+    const isResourcePackage = data.properties.resourcePackage?.toLowerCase() === 'true';
     for (let i = 0; i < data.resources.length; i++) {
         const res = data.resources[i];
-        if (!res.language) {
-            errors.push({ field: `resources.${i}.language`, message: 'Language is required.', severity: 'error' });
-        } else if (!BCP47_REGEX.test(res.language)) {
+        if (res.language && !BCP47_REGEX.test(res.language)) {
             errors.push({ field: `resources.${i}.language`, message: 'Language must be a valid BCP-47 tag (e.g. en, en-US, zh-Hans-CN) or x-generate.', severity: 'error' });
+        }
+
+        if (isResourcePackage) {
+            const filledAttrs = [
+                res.language ? 'Language' : '',
+                res.scale ? 'Scale' : '',
+                res.dxFeatureLevel ? 'DXFeatureLevel' : '',
+            ].filter(Boolean);
+            if (filledAttrs.length > 1) {
+                const msg = 'Resource package resources must define only one attribute type (Language, Scale, or DXFeatureLevel).';
+                if (res.language) errors.push({ field: `resources.${i}.language`, message: msg, severity: 'error' });
+                if (res.scale) errors.push({ field: `resources.${i}.scale`, message: msg, severity: 'error' });
+                if (res.dxFeatureLevel) errors.push({ field: `resources.${i}.dxFeatureLevel`, message: msg, severity: 'error' });
+            }
         }
     }
 

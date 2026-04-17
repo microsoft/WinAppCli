@@ -26,7 +26,7 @@ function makeValidManifest(): ManifestData {
         },
         dependencies: {
             targetDeviceFamilies: [{ name: 'Windows.Desktop', minVersion: '10.0.17763.0', maxVersionTested: '10.0.22621.0' }],
-            packageDependencies: [], mainPackageDependencies: [], driverDependencies: [],
+            packageDependencies: [], mainPackageDependencies: [], driverConstraints: [],
             osPackageDependencies: [], hostRuntimeDependencies: [], externalDependencies: [],
         },
         applications: [{
@@ -730,45 +730,45 @@ describe('Dependencies - Main Package Dependencies', () => {
     });
 });
 
-// ─── 7. Dependencies — Driver Dependencies ─────────────────────────────────
+// ─── 7. Dependencies — Driver Constraints ─────────────────────────────────
 
-describe('Dependencies - Driver Dependencies', () => {
+describe('Dependencies - Driver Constraints', () => {
     function withDriverConstraint(m: ManifestData, overrides: Partial<{ name: string; minVersion: string; minDate: string }>): ManifestData {
-        m.dependencies.driverDependencies = [{ driverConstraints: [{ name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2020-01-01', ...overrides }] }];
+        m.dependencies.driverConstraints = [{ name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2020-01-01', ...overrides }];
         return m;
     }
 
     it('should error when constraint name is empty', () => {
         const m = withDriverConstraint(makeValidManifest(), { name: '' });
-        expectError(validateManifest(m), 'dependencies.driverDependency.0.driverConstraint.0.name');
+        expectError(validateManifest(m), 'dependencies.driverConstraint.0.name');
     });
 
     it('should error when constraint minVersion is empty', () => {
         const m = withDriverConstraint(makeValidManifest(), { minVersion: '' });
-        expectError(validateManifest(m), 'dependencies.driverDependency.0.driverConstraint.0.minVersion');
+        expectError(validateManifest(m), 'dependencies.driverConstraint.0.minVersion');
     });
 
     it('should error when constraint minVersion is not DotQuadNumber', () => {
         const m = withDriverConstraint(makeValidManifest(), { minVersion: '1.0' });
-        expectError(validateManifest(m), 'dependencies.driverDependency.0.driverConstraint.0.minVersion');
+        expectError(validateManifest(m), 'dependencies.driverConstraint.0.minVersion');
     });
 
     it('should error when constraint minDate is empty', () => {
         const m = withDriverConstraint(makeValidManifest(), { minDate: '' });
-        expectError(validateManifest(m), 'dependencies.driverDependency.0.driverConstraint.0.minDate');
+        expectError(validateManifest(m), 'dependencies.driverConstraint.0.minDate');
     });
 
     it('should error when constraint minDate is not YYYY-MM-DD', () => {
         const m = withDriverConstraint(makeValidManifest(), { minDate: '01/01/2020' });
-        expectError(validateManifest(m), 'dependencies.driverDependency.0.driverConstraint.0.minDate');
+        expectError(validateManifest(m), 'dependencies.driverConstraint.0.minDate');
     });
 
     it('should accept valid driver constraint', () => {
         const m = withDriverConstraint(makeValidManifest(), {});
         const errors = validateManifest(m);
-        expectNoError(errors, 'dependencies.driverDependency.0.driverConstraint.0.name');
-        expectNoError(errors, 'dependencies.driverDependency.0.driverConstraint.0.minVersion');
-        expectNoError(errors, 'dependencies.driverDependency.0.driverConstraint.0.minDate');
+        expectNoError(errors, 'dependencies.driverConstraint.0.name');
+        expectNoError(errors, 'dependencies.driverConstraint.0.minVersion');
+        expectNoError(errors, 'dependencies.driverConstraint.0.minDate');
     });
 });
 
@@ -905,10 +905,10 @@ describe('Dependencies - External Dependencies', () => {
 // ─── 11. Resources Validation ──────────────────────────────────────────────
 
 describe('Resources Validation', () => {
-    it('should error when language is empty', () => {
+    it('should not error when language is empty', () => {
         const m = makeValidManifest();
         m.resources[0].language = '';
-        expectError(validateManifest(m), 'resources.0.language');
+        expectNoError(validateManifest(m), 'resources.0.language');
     });
 
     it('should error when language is numeric only', () => {
@@ -945,10 +945,40 @@ describe('Resources Validation', () => {
         const m = makeValidManifest();
         m.resources = [
             { language: 'en', scale: '', dxFeatureLevel: '' },
-            { language: '', scale: '', dxFeatureLevel: '' },
+            { language: '123', scale: '', dxFeatureLevel: '' },
         ];
         expectNoError(validateManifest(m), 'resources.0.language');
         expectError(validateManifest(m), 'resources.1.language');
+    });
+
+    it('should error when resource package resource defines more than one attribute type', () => {
+        const m = makeValidManifest();
+        m.properties.resourcePackage = 'true';
+        m.resources = [{ language: 'en-us', scale: '100', dxFeatureLevel: '' }];
+        expectError(validateManifest(m), 'resources.0.language');
+        expectError(validateManifest(m), 'resources.0.scale');
+    });
+
+    it('should allow resource package resource with only language', () => {
+        const m = makeValidManifest();
+        m.properties.resourcePackage = 'true';
+        m.resources = [{ language: 'en-us', scale: '', dxFeatureLevel: '' }];
+        expectNoError(validateManifest(m), 'resources.0.language');
+        expectNoError(validateManifest(m), 'resources.0.scale');
+    });
+
+    it('should allow resource package resource with only scale', () => {
+        const m = makeValidManifest();
+        m.properties.resourcePackage = 'true';
+        m.resources = [{ language: '', scale: '100', dxFeatureLevel: '' }];
+        expectNoError(validateManifest(m), 'resources.0.scale');
+    });
+
+    it('should allow multiple attributes on non-resource packages', () => {
+        const m = makeValidManifest();
+        m.properties.resourcePackage = '';
+        m.resources = [{ language: 'en-us', scale: '100', dxFeatureLevel: '' }];
+        expectNoError(validateManifest(m), 'resources.0.scale');
     });
 });
 
@@ -1275,7 +1305,7 @@ describe('Full valid manifest', () => {
         m.applications[0].visualElements.splashScreenImage = 'Assets\\Splash.png';
         m.dependencies.packageDependencies = [{ name: 'Some.Package', minVersion: '1.0.0.0', publisher: 'CN=Pub', optional: '' }];
         m.dependencies.mainPackageDependencies = [{ name: 'Main.Pkg' }];
-        m.dependencies.driverDependencies = [{ driverConstraints: [{ name: 'Driver1', minVersion: '2.0.0.0', minDate: '2023-06-15' }] }];
+        m.dependencies.driverConstraints = [{ name: 'Driver1', minVersion: '2.0.0.0', minDate: '2023-06-15' }];
         m.dependencies.osPackageDependencies = [{ name: 'OS.Pkg.Dep', version: '10.0.0.0' }];
         m.dependencies.hostRuntimeDependencies = [{ name: 'HostRT', publisher: 'CN=Host', minVersion: '1.0.0.0' }];
         m.dependencies.externalDependencies = [{ name: 'ExtDep', publisher: 'CN=Ext', minVersion: '3.0.0.0', optional: '' }];

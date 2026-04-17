@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverDependency, removeDriverDependency, moveDriverDependency, addDriverConstraint, removeDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverConstraint, removeDriverConstraint, moveDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -86,14 +86,14 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         };
 
         /** Send the current document state to the webview. */
-        const updateWebview = () => {
+        const updateWebview = (forceAll = false) => {
             const text = document.getText();
             if (!tryParseOrShowError(text)) { return; }
             if (showingErrorView) { showEditorView(); return; }
             try {
                 const data = parseManifest(text);
                 const errors = validateManifest(data);
-                webviewPanel.webview.postMessage({ type: 'update', data, errors });
+                webviewPanel.webview.postMessage({ type: 'update', data, errors, forceAll });
             } catch {
                 // Should not happen since tryParseOrShowError succeeded
             }
@@ -104,7 +104,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
         }
 
-        // Listen for document changes (e.g., from the text editor or external edits)
+        // Listen for document changes (e.g., from the text editor, undo, or external edits)
         const changeDocSub = vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString() && !isApplyingEdit) {
                 if (showingErrorView) {
@@ -114,7 +114,8 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         showEditorView();
                     }
                 } else {
-                    updateWebview();
+                    // External change (undo, redo, text editor) — force-update all fields
+                    updateWebview(true);
                 }
             }
         });
@@ -141,6 +142,16 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'fieldChanged':
                         newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
                         break;
+
+                    case 'packageTypeChanged': {
+                        // Set/clear the three mutually exclusive package type properties
+                        let result = text;
+                        result = applyFieldChange(result, 'properties', 'framework', message.value === 'framework' ? 'true' : '');
+                        result = applyFieldChange(result, 'properties', 'resourcePackage', message.value === 'resource' ? 'true' : '');
+                        result = applyFieldChange(result, 'properties', 'modificationPackage', message.value === 'modification' ? 'true' : '');
+                        newText = result;
+                        break;
+                    }
 
                     case 'addCapability':
                         newText = addCapability(text, message.capability);
@@ -200,20 +211,14 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         newText = moveMainPackageDependency(text, message.index, message.direction);
                         break;
 
-                    case 'addDriverDependency':
-                        newText = addDriverDependency(text);
-                        break;
-                    case 'removeDriverDependency':
-                        newText = removeDriverDependency(text, message.index);
-                        break;
-                    case 'moveDriverDependency':
-                        newText = moveDriverDependency(text, message.index, message.direction);
-                        break;
                     case 'addDriverConstraint':
-                        newText = addDriverConstraint(text, message.depIndex, message.constraint);
+                        newText = addDriverConstraint(text, message.constraint);
                         break;
                     case 'removeDriverConstraint':
-                        newText = removeDriverConstraint(text, message.depIndex, message.constraintIndex);
+                        newText = removeDriverConstraint(text, message.index);
+                        break;
+                    case 'moveDriverConstraint':
+                        newText = moveDriverConstraint(text, message.index, message.direction);
                         break;
 
                     case 'addOSPackageDependency':

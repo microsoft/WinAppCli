@@ -353,12 +353,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         }
         .form-group.has-error input,
         .form-group.has-error select,
-        .form-group.has-error textarea {
+        .form-group.has-error textarea,
+        .form-group.has-error .custom-select-trigger {
             border-color: var(--vscode-inputValidation-errorBorder, #f44747);
         }
         .form-group.has-warning input,
         .form-group.has-warning select,
-        .form-group.has-warning textarea {
+        .form-group.has-warning textarea,
+        .form-group.has-warning .custom-select-trigger {
             border-color: var(--vscode-editorWarning-foreground, #cca700);
         }
 
@@ -399,6 +401,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             display: flex;
             gap: 4px;
             align-items: center;
+            margin-left: auto;
         }
         .hidden-tab {
             display: none !important;
@@ -450,11 +453,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             height: 24px;
             padding: 0;
             border: none;
+            border-radius: 2px;
             background: rgba(128, 128, 128, 0.3);
             color: var(--vscode-editor-foreground, #ffffff);
             font-size: 14px;
             cursor: pointer;
-            border-radius: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -511,6 +514,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .btn-sm {
             padding: 2px 8px;
             font-size: 11px;
+            height: 24px;
+            background: rgba(128, 128, 128, 0.35);
+            color: var(--vscode-foreground);
+        }
+        .btn-sm:hover {
+            background: rgba(128, 128, 128, 0.55);
         }
 
         /* ─── Capabilities checklist ───────────────────────── */
@@ -688,7 +697,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="form-group" data-field="identity.processorArchitecture">
             <label>Processor Architecture:</label>
             <div class="custom-select" id="arch-select">
-                <button class="custom-select-trigger" id="arch-select-trigger" type="button"></button>
+                <button class="custom-select-trigger" id="arch-select-trigger" type="button" data-section="identity" data-field-name="processorArchitecture">(select)</button>
                 <div class="custom-select-options" id="arch-select-options">
                     ${archOptionItems}
                 </div>
@@ -708,7 +717,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <button class="btn-add-field" type="button" id="add-identity-resourceid" data-target="identity-resourceid-group" data-section="identity" data-field-name="resourceId" data-default="" title="Add Resource ID attribute">+ Add Resource ID</button>
         <div id="phone-identity-section" class="section-header-spaced" style="display:none;">
             <div class="section-header">Phone Identity</div>
-            <p class="page-description">Legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
+            <p class="page-description">Use this section to configure legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
             <div class="form-group" data-field="phoneIdentity.phoneProductId">
                 <label for="phone-product-id">Phone Product ID:</label>
                 <input type="text" id="phone-product-id" data-section="phoneIdentity" data-field-name="phoneProductId" placeholder="00000000-0000-0000-0000-000000000000" />
@@ -764,102 +773,108 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             </div>
         </div>
 
-        <div class="section-header section-header-spaced">Package Type Properties</div>
-        <p class="page-description">These properties control how Windows treats your package. Most apps should leave these at their defaults. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
-        <div class="form-group" data-field="properties.framework">
-            <label>Framework:</label>
-            <select id="props-framework" data-section="properties" data-field-name="framework">
-                <option value="">(omit)</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
-            <div class="description">Set to true if this is a framework package (shared runtime libraries consumed by other packages)</div>
-        </div>
-        <div class="form-group" data-field="properties.resourcePackage">
-            <label>Resource Package:</label>
-            <select id="props-resourcePackage" data-section="properties" data-field-name="resourcePackage">
-                <option value="">(omit)</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
-            <div class="description">Set to true if this package contains only resources (language/scale assets) and no executable code</div>
-        </div>
-        <div class="form-group" data-field="properties.modificationPackage">
-            <label>Modification Package (rescap6):</label>
-            <select id="props-modificationPackage" data-section="properties" data-field-name="modificationPackage">
-                <option value="">(omit)</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
-            <div class="description">Set to true if this is a modification package that customizes the main package</div>
+        <div class="section-header section-header-spaced">Package Type</div>
+        <p class="page-description">Use this section to control what type of package this is. Most packages are Application packages. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
+        <div class="form-group" data-field="properties.packageType">
+            <label>Package Type:</label>
+            <div class="custom-select" id="pkg-type-select">
+                <button class="custom-select-trigger" id="pkg-type-select-trigger" type="button">Application (default)</button>
+                <div class="custom-select-options" id="pkg-type-select-options">
+                    <div class="custom-select-option selected" data-value="application">Application (default)</div>
+                    <div class="custom-select-option" data-value="framework">Framework</div>
+                    <div class="custom-select-option" data-value="resource">Resource</div>
+                    <div class="custom-select-option" data-value="modification">Modification</div>
+                </div>
+            </div>
+            <div class="description">Application packages contain executable code and UI. Framework packages provide shared runtime libraries. Resource packages contain only language/scale assets. Modification packages customize a main package.</div>
         </div>
 
         <div class="section-header section-header-spaced">Advanced Properties</div>
+        <p class="page-description">Use this section to configure optional advanced package properties such as user scope, automatic updates, integrity enforcement, and update behavior.</p>
         <div class="form-group" data-field="properties.supportedUsers">
             <label>Supported Users:</label>
-            <select id="props-supportedUsers" data-section="properties" data-field-name="supportedUsers">
-                <option value="">(omit)</option>
-                <option value="multiple">multiple</option>
-                <option value="single">single</option>
-            </select>
+            <div class="custom-select" id="props-supportedUsers">
+                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="supportedUsers">(omit)</button>
+                <div class="custom-select-options">
+                    <div class="custom-select-option selected" data-value="">(omit)</div>
+                    <div class="custom-select-option" data-value="multiple">multiple</div>
+                    <div class="custom-select-option" data-value="single">single</div>
+                </div>
+            </div>
             <div class="description">Whether the app supports multiple user sessions or only a single user</div>
         </div>
         <div class="form-group" data-field="properties.allowExecution">
             <label>Allow Execution:</label>
-            <select id="props-allowExecution" data-section="properties" data-field-name="allowExecution">
-                <option value="">(omit)</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
+            <div class="custom-select" id="props-allowExecution">
+                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExecution">(omit)</button>
+                <div class="custom-select-options">
+                    <div class="custom-select-option selected" data-value="">(omit)</div>
+                    <div class="custom-select-option" data-value="true">true</div>
+                    <div class="custom-select-option" data-value="false">false</div>
+                </div>
+            </div>
             <div class="description">Whether executables in the package can be launched (set to false for content-only packages)</div>
         </div>
         <div class="form-group" data-field="properties.allowExternalContent">
             <label>Allow External Content:</label>
-            <select id="props-allowExternalContent" data-section="properties" data-field-name="allowExternalContent">
-                <option value="">(omit)</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
+            <div class="custom-select" id="props-allowExternalContent">
+                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExternalContent">(omit)</button>
+                <div class="custom-select-options">
+                    <div class="custom-select-option selected" data-value="">(omit)</div>
+                    <div class="custom-select-option" data-value="true">true</div>
+                    <div class="custom-select-option" data-value="false">false</div>
+                </div>
+            </div>
             <div class="description">Whether the package allows content outside its install directory to be treated as package content</div>
         </div>
         <div class="form-group" data-field="properties.fileSystemWriteVirtualization">
             <label>File System Write Virtualization:</label>
-            <select id="props-fsWriteVirt" data-section="properties" data-field-name="fileSystemWriteVirtualization">
-                <option value="">(omit)</option>
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
-            </select>
+            <div class="custom-select" id="props-fsWriteVirt">
+                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="fileSystemWriteVirtualization">(omit)</button>
+                <div class="custom-select-options">
+                    <div class="custom-select-option selected" data-value="">(omit)</div>
+                    <div class="custom-select-option" data-value="enabled">enabled</div>
+                    <div class="custom-select-option" data-value="disabled">disabled</div>
+                </div>
+            </div>
             <div class="description">Controls whether file system write operations are virtualized or written to the real file system</div>
         </div>
         <div class="form-group" data-field="properties.registryWriteVirtualization">
             <label>Registry Write Virtualization:</label>
-            <select id="props-regWriteVirt" data-section="properties" data-field-name="registryWriteVirtualization">
-                <option value="">(omit)</option>
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
-            </select>
+            <div class="custom-select" id="props-regWriteVirt">
+                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="registryWriteVirtualization">(omit)</button>
+                <div class="custom-select-options">
+                    <div class="custom-select-option selected" data-value="">(omit)</div>
+                    <div class="custom-select-option" data-value="enabled">enabled</div>
+                    <div class="custom-select-option" data-value="disabled">disabled</div>
+                </div>
+            </div>
             <div class="description">Controls whether registry write operations are virtualized or written to the real registry</div>
         </div>
         <div class="section-header section-header-spaced">Update &amp; Integrity</div>
+        <p class="page-description">Use this section to configure automatic update behavior and content integrity enforcement for your package.</p>
         <div class="optional-fields-group">
         <div class="form-group optional-field" data-field="properties.autoUpdateUri" id="props-autoupdate-group">
-            <label>Auto Update URI:</label>
+            <label>Auto Update App Installer URI:</label>
             <div class="optional-field-content">
                 <input type="text" id="props-autoUpdateUri" data-section="properties" data-field-name="autoUpdateUri" placeholder="https://example.com/install/MyApp.appinstaller" />
-                <button class="btn-remove-field" type="button" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" title="Remove Auto Update URI">✕</button>
+                <button class="btn-remove-field" type="button" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" title="Remove Auto Update App Installer URI">✕</button>
             </div>
             <div class="description">URI to an .appinstaller file that enables automatic updates for sideloaded apps</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group optional-field" data-field="properties.packageIntegrityEnforcement" id="props-pkgintegrity-group">
-            <label>Package Integrity Enforcement:</label>
+            <label>Package Integrity Content Enforcement:</label>
             <div class="optional-field-content">
-                <select id="props-packageIntegrityEnforcement" data-section="properties" data-field-name="packageIntegrityEnforcement">
-                    <option value="on">on</option>
-                    <option value="off">off</option>
-                    <option value="default">default</option>
-                </select>
-                <button class="btn-remove-field" type="button" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" title="Remove Package Integrity Enforcement">✕</button>
+                <div class="custom-select" id="props-packageIntegrityEnforcement">
+                    <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="packageIntegrityEnforcement">on</button>
+                    <div class="custom-select-options">
+                        <div class="custom-select-option selected" data-value="on">on</div>
+                        <div class="custom-select-option" data-value="off">off</div>
+                        <div class="custom-select-option" data-value="default">default</div>
+                    </div>
+                </div>
+                <button class="btn-remove-field" type="button" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" title="Remove Package Integrity Content Enforcement">✕</button>
             </div>
             <div class="description">Controls whether Windows enforces content integrity checks for the package — "on", "off", or "default"</div>
             <div class="validation-msg"></div>
@@ -867,18 +882,21 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="form-group optional-field" data-field="properties.updateWhileInUse" id="props-updatewhileinuse-group">
             <label>Update While In Use:</label>
             <div class="optional-field-content">
-                <select id="props-updateWhileInUse" data-section="properties" data-field-name="updateWhileInUse">
-                    <option value="allow">allow</option>
-                    <option value="defer">defer</option>
-                </select>
+                <div class="custom-select" id="props-updateWhileInUse">
+                    <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="updateWhileInUse">allow</button>
+                    <div class="custom-select-options">
+                        <div class="custom-select-option selected" data-value="allow">allow</div>
+                        <div class="custom-select-option" data-value="defer">defer</div>
+                    </div>
+                </div>
                 <button class="btn-remove-field" type="button" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" title="Remove Update While In Use">✕</button>
             </div>
             <div class="description">Whether the package can be updated while it is running — "allow" applies updates immediately, "defer" waits until the app closes</div>
             <div class="validation-msg"></div>
         </div>
         <div class="btn-add-buttons-row">
-            <button class="btn-add-field" type="button" id="add-props-autoupdate" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" data-default="" title="Add Auto Update URI">+ Add Auto Update URI</button>
-            <button class="btn-add-field" type="button" id="add-props-pkgintegrity" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" data-default="default" title="Add Package Integrity Enforcement">+ Add Package Integrity Enforcement</button>
+            <button class="btn-add-field" type="button" id="add-props-autoupdate" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" data-default="" title="Add Auto Update App Installer URI">+ Add Auto Update App Installer URI</button>
+            <button class="btn-add-field" type="button" id="add-props-pkgintegrity" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" data-default="default" title="Add Package Integrity Content Enforcement">+ Add Package Integrity Content Enforcement</button>
             <button class="btn-add-field" type="button" id="add-props-updatewhileinuse" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" data-default="defer" title="Add Update While In Use">+ Add Update While In Use</button>
         </div>
         </div>
@@ -897,32 +915,32 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         </div>
 
         <div class="section-header section-header-spaced">Package Dependencies</div>
-        <p class="page-description">Declares framework and library package dependencies required by your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-packagedependency">Learn more</a></p>
+        <p class="page-description">Use this section to declare framework and library package dependencies required by your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-packagedependency">Learn more</a></p>
         <div id="package-dependencies" class="list-container"></div>
         <button class="btn" id="add-package-dep">+ Add Package Dependency</button>
 
         <div class="section-header section-header-spaced">Main Package Dependencies (uap3)</div>
-        <p class="page-description">Declares a dependency on a main package for optional packages. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap3-mainpackagedependency2">Learn more</a></p>
+        <p class="page-description">Use this section to declare a dependency on a main package for optional packages. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap3-mainpackagedependency2">Learn more</a></p>
         <div id="main-package-dependencies" class="list-container"></div>
         <button class="btn" id="add-main-pkg-dep">+ Add Main Package Dependency</button>
 
-        <div class="section-header section-header-spaced">Driver Dependencies (uap5)</div>
-        <p class="page-description">Declares a dependency on a driver with constraints. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-driverdependency">Learn more</a></p>
-        <div id="driver-dependencies" class="list-container"></div>
-        <button class="btn" id="add-driver-dep">+ Add Driver Dependency</button>
+        <div class="section-header section-header-spaced">Driver Constraints (uap5)</div>
+        <p class="page-description">Use this section to declare driver constraints that your package depends on. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-driverdependency">Learn more</a></p>
+        <div id="driver-constraints" class="list-container"></div>
+        <button class="btn" id="add-driver-constraint">+ Add Driver Constraint</button>
 
         <div class="section-header section-header-spaced">OS Package Dependencies (uap7)</div>
-        <p class="page-description">Declares a dependency on an OS package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap7-ospackagedependency">Learn more</a></p>
+        <p class="page-description">Use this section to declare a dependency on an OS package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap7-ospackagedependency">Learn more</a></p>
         <div id="os-package-dependencies" class="list-container"></div>
         <button class="btn" id="add-os-pkg-dep">+ Add OS Package Dependency</button>
 
         <div class="section-header section-header-spaced">Host Runtime Dependencies (uap10)</div>
-        <p class="page-description">Declares a dependency on a host runtime. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap10-hostruntimedependency">Learn more</a></p>
+        <p class="page-description">Use this section to declare a dependency on a host runtime. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap10-hostruntimedependency">Learn more</a></p>
         <div id="host-runtime-dependencies" class="list-container"></div>
         <button class="btn" id="add-host-runtime-dep">+ Add Host Runtime Dependency</button>
 
         <div class="section-header section-header-spaced">External Dependencies (win32dependencies)</div>
-        <p class="page-description">Declares a dependency on an external Win32 component. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-win32dependencies-externaldependency">Learn more</a></p>
+        <p class="page-description">Use this section to declare a dependency on an external Win32 component. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-win32dependencies-externaldependency">Learn more</a></p>
         <div id="external-dependencies" class="list-container"></div>
         <button class="btn" id="add-external-dep">+ Add External Dependency</button>
     </div>
@@ -1027,37 +1045,92 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             const section = el.getAttribute('data-section');
             const field = el.getAttribute('data-field-name');
             const value = el.value;
-            // Driver constraint fields use data-dep-index + data-constraint-index instead of data-index
-            if (field && field.startsWith('driverConstraint.')) {
-                const depIndex = parseInt(el.getAttribute('data-dep-index') || '0', 10);
-                const subIndex = parseInt(el.getAttribute('data-constraint-index') || '0', 10);
-                vscode.postMessage({ type: 'fieldChanged', section, field, value, index: depIndex, subIndex });
-            } else {
-                const index = parseInt(el.getAttribute('data-index') || '0', 10);
-                vscode.postMessage({ type: 'fieldChanged', section, field, value, index });
-            }
+            const index = parseInt(el.getAttribute('data-index') || '0', 10);
+            vscode.postMessage({ type: 'fieldChanged', section, field, value, index });
         }
 
         // Debounce helper for text inputs
         let debounceTimers = {};
         function debouncedFieldChange(el) {
             const field = el.getAttribute('data-field-name') || '';
-            const depIdx = el.getAttribute('data-dep-index') || '';
-            const conIdx = el.getAttribute('data-constraint-index') || '';
             const idx = el.getAttribute('data-index') || '';
-            const key = el.id || (field + ':' + depIdx + ':' + conIdx + ':' + idx);
+            const key = el.id || (field + ':' + idx);
             clearTimeout(debounceTimers[key]);
             debounceTimers[key] = setTimeout(() => onFieldChange(el), 300);
         }
 
-        // Bind change events to static inputs
-        document.querySelectorAll('input[data-section], textarea[data-section], select[data-section]').forEach(el => {
-            if (el.tagName === 'SELECT') {
-                el.addEventListener('change', () => onFieldChange(el));
-            } else {
-                el.addEventListener('input', () => debouncedFieldChange(el));
-            }
+        // ─── Generic custom-select initialization ─────────────
+        function initCustomSelects(container) {
+            const root = container || document;
+            root.querySelectorAll('.custom-select').forEach(cs => {
+                const trigger = cs.querySelector('.custom-select-trigger');
+                const optionsDiv = cs.querySelector('.custom-select-options');
+                if (!trigger || !optionsDiv) return;
+                // Skip if already initialized or if trigger has no data-section (special selects like pkg-type)
+                if (trigger.hasAttribute('data-cs-init')) return;
+                const section = trigger.getAttribute('data-section');
+                if (!section) return;
+                trigger.setAttribute('data-cs-init', '1');
+
+                trigger.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    document.querySelectorAll('.custom-select-options.open').forEach(o => {
+                        if (o !== optionsDiv) o.classList.remove('open');
+                    });
+                    optionsDiv.classList.toggle('open');
+                });
+
+                optionsDiv.querySelectorAll('.custom-select-option').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        const val = opt.getAttribute('data-value');
+                        const label = opt.textContent;
+                        trigger.textContent = label;
+                        trigger.setAttribute('data-current-value', val);
+                        optionsDiv.classList.remove('open');
+                        optionsDiv.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                        opt.classList.add('selected');
+
+                        const field = trigger.getAttribute('data-field-name');
+                        const index = parseInt(trigger.getAttribute('data-index') || '0', 10);
+                        vscode.postMessage({ type: 'fieldChanged', section, field, value: val, index });
+                    });
+                });
+            });
+        }
+
+        // Global click to close all open custom selects
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.custom-select-options.open').forEach(o => o.classList.remove('open'));
         });
+
+        // Bind change events to static inputs
+        document.querySelectorAll('input[data-section], textarea[data-section]').forEach(el => {
+            el.addEventListener('input', () => debouncedFieldChange(el));
+        });
+
+        // Initialize all custom selects in the static DOM (arch, properties, etc.)
+        initCustomSelects(document);
+
+        // ─── Package Type custom select ─────────────────────
+        const pkgTypeTrigger = document.getElementById('pkg-type-select-trigger');
+        const pkgTypeOptions = document.getElementById('pkg-type-select-options');
+        if (pkgTypeTrigger && pkgTypeOptions) {
+            pkgTypeTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pkgTypeOptions.classList.toggle('open');
+            });
+            pkgTypeOptions.querySelectorAll('.custom-select-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const val = opt.getAttribute('data-value');
+                    pkgTypeTrigger.textContent = opt.textContent;
+                    pkgTypeOptions.classList.remove('open');
+                    pkgTypeOptions.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                    opt.classList.add('selected');
+                    vscode.postMessage({ type: 'packageTypeChanged', value: val });
+                });
+            });
+            document.addEventListener('click', () => { pkgTypeOptions.classList.remove('open'); });
+        }
 
         // ─── Image browse buttons (static) ──────────────────
         document.querySelectorAll('.browse-image-btn').forEach(btn => {
@@ -1072,27 +1145,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 vscode.postMessage(msg);
             });
         });
-
-        // ─── Architecture custom select ──────────────────────
-        const archTrigger = document.getElementById('arch-select-trigger');
-        const archOptions = document.getElementById('arch-select-options');
-        if (archTrigger && archOptions) {
-            archTrigger.addEventListener('click', (e) => {
-                e.stopPropagation();
-                archOptions.classList.toggle('open');
-            });
-            archOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-                opt.addEventListener('click', () => {
-                    const val = opt.getAttribute('data-value');
-                    archTrigger.textContent = val;
-                    archOptions.classList.remove('open');
-                    archOptions.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
-                    opt.classList.add('selected');
-                    vscode.postMessage({ type: 'fieldChanged', section: 'identity', field: 'processorArchitecture', value: val });
-                });
-            });
-            document.addEventListener('click', () => { archOptions.classList.remove('open'); });
-        }
 
         // ─── Capability toggles ─────────────────────────────
         document.querySelectorAll('.cap-item input[type="checkbox"]').forEach(cb => {
@@ -1181,8 +1233,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         document.getElementById('add-main-pkg-dep').addEventListener('click', () => {
             vscode.postMessage({ type: 'addMainPackageDependency', dependency: { name: '' } });
         });
-        document.getElementById('add-driver-dep').addEventListener('click', () => {
-            vscode.postMessage({ type: 'addDriverDependency' });
+        document.getElementById('add-driver-constraint').addEventListener('click', () => {
+            vscode.postMessage({ type: 'addDriverConstraint', constraint: { name: '', minVersion: '', minDate: '' } });
         });
         document.getElementById('add-os-pkg-dep').addEventListener('click', () => {
             vscode.postMessage({ type: 'addOSPackageDependency', dependency: { name: '', version: '' } });
@@ -1219,19 +1271,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     userOpenedOptionalFields.add(targetId);
                     // Set default value and trigger change
                     const defaultVal = addBtn.getAttribute('data-default') || '';
-                    const input = group.querySelector('input[data-section], select[data-section]');
-                    if (input) {
-                        if (input.tagName === 'SELECT') {
-                            // For selects, pick the first option or the default
-                            if (defaultVal) { input.value = defaultVal; }
-                        } else {
-                            input.value = defaultVal;
+                    const input = group.querySelector('input[data-section]');
+                    const csTrigger = group.querySelector('.custom-select-trigger[data-section]');
+                    if (csTrigger) {
+                        // For custom selects, set value via setCustomSelectValue using the wrapper's id
+                        const wrapper = csTrigger.closest('.custom-select');
+                        if (wrapper && wrapper.id) {
+                            setCustomSelectValue(wrapper.id, defaultVal);
                         }
+                        csTrigger.focus();
+                        // Trigger immediate field change for custom selects
+                        const section = csTrigger.getAttribute('data-section');
+                        const field = csTrigger.getAttribute('data-field-name');
+                        const index = parseInt(csTrigger.getAttribute('data-index') || '0', 10);
+                        vscode.postMessage({ type: 'fieldChanged', section, field, value: defaultVal, index });
+                    } else if (input) {
+                        input.value = defaultVal;
                         input.focus();
-                        // Trigger the change only for selects (they need immediate send), text inputs will fire on user typing
-                        if (input.tagName === 'SELECT') {
-                            debouncedFieldChange(input);
-                        }
                         if (input.tagName === 'INPUT' && !input.value) {
                             group.classList.add('has-error');
                             const msg = group.querySelector('.validation-msg');
@@ -1274,13 +1330,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         });
 
         // ─── Populate form from data ────────────────────────
-        function populateForm(data) {
+        function populateForm(data, forceAll) {
             currentData = data;
 
             // Save focused element info before DOM rebuild
-            const focused = document.activeElement;
+            const focused = forceAll ? null : document.activeElement;
             let focusInfo = null;
-            if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT')) {
+            if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT' || focused.classList.contains('custom-select-trigger'))) {
                 focusInfo = {
                     section: focused.getAttribute('data-section'),
                     fieldName: focused.getAttribute('data-field-name'),
@@ -1305,13 +1361,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             setValueIfNotFocused('identity-resourceid', data.identity.resourceId || '', focused);
 
             // Update architecture custom select
-            const archTrigger = document.getElementById('arch-select-trigger');
-            if (archTrigger) {
-                archTrigger.textContent = data.identity.processorArchitecture || '(select)';
-                document.querySelectorAll('#arch-select-options .custom-select-option').forEach(opt => {
-                    opt.classList.toggle('selected', opt.getAttribute('data-value') === data.identity.processorArchitecture);
-                });
-            }
+            setCustomSelectValue('arch-select', data.identity.processorArchitecture);
 
             // Phone Identity
             const phoneSection = document.getElementById('phone-identity-section');
@@ -1336,34 +1386,48 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             );
 
             // Properties - select fields
-            setSelectValue('props-framework', data.properties.framework);
-            setSelectValue('props-resourcePackage', data.properties.resourcePackage);
-            setSelectValue('props-modificationPackage', data.properties.modificationPackage);
-            setSelectValue('props-supportedUsers', data.properties.supportedUsers);
-            setSelectValue('props-allowExecution', data.properties.allowExecution);
-            setSelectValue('props-allowExternalContent', data.properties.allowExternalContent);
-            setSelectValue('props-fsWriteVirt', data.properties.fileSystemWriteVirtualization);
-            setSelectValue('props-regWriteVirt', data.properties.registryWriteVirtualization);
+            // Package type (derived from framework/resourcePackage/modificationPackage)
+            const pkgTypeTrigger = document.getElementById('pkg-type-select-trigger');
+            if (pkgTypeTrigger) {
+                let pkgType = 'application';
+                if (data.properties.framework === 'true') pkgType = 'framework';
+                else if (data.properties.resourcePackage === 'true') pkgType = 'resource';
+                else if (data.properties.modificationPackage === 'true') pkgType = 'modification';
+                const pkgTypeOpts = document.querySelectorAll('#pkg-type-select-options .custom-select-option');
+                pkgTypeOpts.forEach(opt => {
+                    const isMatch = opt.getAttribute('data-value') === pkgType;
+                    opt.classList.toggle('selected', isMatch);
+                    if (isMatch) pkgTypeTrigger.textContent = opt.textContent;
+                });
+            }
+            setCustomSelectValue('props-supportedUsers', data.properties.supportedUsers);
+            setCustomSelectValue('props-allowExecution', data.properties.allowExecution);
+            setCustomSelectValue('props-allowExternalContent', data.properties.allowExternalContent);
+            setCustomSelectValue('props-fsWriteVirt', data.properties.fileSystemWriteVirtualization);
+            setCustomSelectValue('props-regWriteVirt', data.properties.registryWriteVirtualization);
 
             // Properties - optional new fields
             toggleOptionalField('props-autoupdate-group', 'add-props-autoupdate', data.properties.autoUpdateUri);
             setValueIfNotFocused('props-autoUpdateUri', data.properties.autoUpdateUri || '', focused);
             toggleOptionalField('props-pkgintegrity-group', 'add-props-pkgintegrity', data.properties.packageIntegrityEnforcement);
-            setSelectValue('props-packageIntegrityEnforcement', data.properties.packageIntegrityEnforcement);
+            setCustomSelectValue('props-packageIntegrityEnforcement', data.properties.packageIntegrityEnforcement);
             toggleOptionalField('props-updatewhileinuse-group', 'add-props-updatewhileinuse', data.properties.updateWhileInUse);
-            setSelectValue('props-updateWhileInUse', data.properties.updateWhileInUse);
+            setCustomSelectValue('props-updateWhileInUse', data.properties.updateWhileInUse);
 
             // Dependencies - Target Device Families
             renderTargetDeviceFamilies(data.dependencies.targetDeviceFamilies);
             renderPackageDependencies(data.dependencies.packageDependencies);
             renderMainPackageDependencies(data.dependencies.mainPackageDependencies);
-            renderDriverDependencies(data.dependencies.driverDependencies);
+            renderDriverConstraints(data.dependencies.driverConstraints);
             renderOSPackageDependencies(data.dependencies.osPackageDependencies);
             renderHostRuntimeDependencies(data.dependencies.hostRuntimeDependencies);
             renderExternalDependencies(data.dependencies.externalDependencies);
 
-            // Applications — hide tab for framework and resource packages
-            const isNonAppPackage = data.properties.framework === 'true' || data.properties.resourcePackage === 'true';
+            // Hide tabs based on package type
+            const isNonAppPackage = data.properties.framework === 'true' || data.properties.resourcePackage === 'true' || data.properties.modificationPackage === 'true';
+            const isResourcePackage = data.properties.resourcePackage === 'true';
+
+            // Applications — hide for all non-application packages
             const appsTab = document.querySelector('.tab-btn[data-tab="applications"]');
             const appsContent = document.getElementById('tab-applications');
             if (appsTab) {
@@ -1371,11 +1435,33 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             }
             if (appsContent && isNonAppPackage) {
                 appsContent.classList.remove('active');
-                // If the hidden tab was active, switch to Identity
-                if (!document.querySelector('.tab-content.active')) {
-                    document.getElementById('tab-identity').classList.add('active');
-                    document.querySelector('.tab-btn[data-tab="identity"]').setAttribute('aria-selected', 'true');
-                }
+            }
+
+            // Capabilities — hide for framework, resource, and modification packages
+            const capsTab = document.querySelector('.tab-btn[data-tab="capabilities"]');
+            const capsContent = document.getElementById('tab-capabilities');
+            if (capsTab) {
+                if (isNonAppPackage) { capsTab.classList.add('hidden-tab'); } else { capsTab.classList.remove('hidden-tab'); }
+            }
+            if (capsContent && isNonAppPackage) {
+                capsContent.classList.remove('active');
+            }
+
+            // Dependencies — hide for resource packages
+            const depsTab = document.querySelector('.tab-btn[data-tab="dependencies"]');
+            const depsContent = document.getElementById('tab-dependencies');
+            if (depsTab) {
+                if (isResourcePackage) { depsTab.classList.add('hidden-tab'); } else { depsTab.classList.remove('hidden-tab'); }
+            }
+            if (depsContent && isResourcePackage) {
+                depsContent.classList.remove('active');
+            }
+
+            // If the active tab was hidden, switch to Identity
+            if (!document.querySelector('.tab-content.active')) {
+                document.getElementById('tab-identity').classList.add('active');
+                const identityTabBtn = document.querySelector('.tab-btn[data-tab="identity"]');
+                if (identityTabBtn) identityTabBtn.setAttribute('aria-selected', 'true');
             }
             renderApplications(data.applications);
 
@@ -1398,9 +1484,21 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             }
         }
 
-        function setSelectValue(elementId, value) {
-            const el = document.getElementById(elementId);
-            if (el) { el.value = value || ''; }
+        function setCustomSelectValue(selectId, value) {
+            const wrapper = document.getElementById(selectId);
+            if (!wrapper) return;
+            const trigger = wrapper.querySelector('.custom-select-trigger');
+            if (!trigger) return;
+            const normalizedValue = value || '';
+            trigger.setAttribute('data-current-value', normalizedValue);
+            const options = wrapper.querySelectorAll('.custom-select-option');
+            let label = '(select)';
+            options.forEach(opt => {
+                const isMatch = opt.getAttribute('data-value') === normalizedValue;
+                opt.classList.toggle('selected', isMatch);
+                if (isMatch) label = opt.textContent;
+            });
+            trigger.textContent = label;
         }
 
         function toggleOptionalField(groupId, addBtnId, value) {
@@ -1465,7 +1563,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="item-actions">
                             <button class="btn btn-sm move-family-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-family-down" data-index="\${idx}" \${idx === families.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-family" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-family" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.targetDeviceFamily.\${idx}.minVersion">
@@ -1510,7 +1608,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="item-actions">
                             <button class="btn btn-sm move-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-pkg-dep" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.name">
@@ -1532,11 +1630,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.optional">
                         <label>Optional:</label>
-                        <select data-section="dependencies" data-field-name="packageDependency.optional" data-index="\${idx}">
-                            <option value=""\${dep.optional === '' ? ' selected' : ''}>(omit)</option>
-                            <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
-                            <option value="false"\${dep.optional === 'false' ? ' selected' : ''}>false</option>
-                        </select>
+                        <div class="custom-select">
+                            <button class="custom-select-trigger" type="button" data-section="dependencies" data-field-name="packageDependency.optional" data-index="\${idx}">\${dep.optional === 'true' ? 'true' : dep.optional === 'false' ? 'false' : '(omit)'}</button>
+                            <div class="custom-select-options">
+                                <div class="custom-select-option\${dep.optional === '' ? ' selected' : ''}" data-value="">(omit)</div>
+                                <div class="custom-select-option\${dep.optional === 'true' ? ' selected' : ''}" data-value="true">true</div>
+                                <div class="custom-select-option\${dep.optional === 'false' ? ' selected' : ''}" data-value="false">false</div>
+                            </div>
+                        </div>
                         <div class="description">Whether this dependency is optional (requires uap6 namespace)</div>
                         <div class="validation-msg"></div>
                     </div>
@@ -1546,17 +1647,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
                 });
-                item.querySelectorAll('select[data-section]').forEach(sel => {
-                    sel.addEventListener('change', () => {
-                        vscode.postMessage({
-                            type: 'fieldChanged',
-                            section: sel.getAttribute('data-section'),
-                            field: sel.getAttribute('data-field-name'),
-                            value: sel.value,
-                            index: parseInt(sel.getAttribute('data-index'), 10)
-                        });
-                    });
-                });
+                initCustomSelects(item);
                 item.querySelector('.remove-pkg-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removePackageDependency', index: idx });
                 });
@@ -1581,7 +1672,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="item-actions">
                             <button class="btn btn-sm move-main-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-main-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-main-pkg-dep" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-main-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.mainPackageDependency.\${idx}.name">
@@ -1606,81 +1697,51 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             });
         }
 
-        function renderDriverDependencies(deps) {
-            const container = document.getElementById('driver-dependencies');
+        function renderDriverConstraints(constraints) {
+            const container = document.getElementById('driver-constraints');
             container.innerHTML = '';
-            deps.forEach((dep, depIdx) => {
+            constraints.forEach((dc, idx) => {
                 const item = document.createElement('div');
                 item.className = 'list-item';
-                let constraintsHtml = '';
-                dep.driverConstraints.forEach((dc, cIdx) => {
-                    constraintsHtml += \`
-                        <div class="list-item" style="margin-left: 16px;">
-                            <div class="item-header">
-                                <span class="item-title">Driver Constraint</span>
-                                <button class="btn btn-danger btn-sm remove-driver-constraint" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}">Remove</button>
-                            </div>
-                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.name">
-                                <label>Name:</label>
-                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.name" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.name)}" />
-                                <div class="description">The driver package identity name that this constraint applies to</div>
-                                <div class="validation-msg"></div>
-                            </div>
-                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.minVersion">
-                                <label>Min Version:</label>
-                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.minVersion" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minVersion)}" placeholder="1.0.0.0" />
-                                <div class="description">Minimum driver version required, in dotted-quad format (e.g. 1.0.0.0)</div>
-                                <div class="validation-msg"></div>
-                            </div>
-                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.minDate">
-                                <label>Min Date:</label>
-                                <input type="text" data-section="dependencies" data-field-name="driverConstraint.minDate" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minDate)}" placeholder="2020-01-01" />
-                                <div class="description">Earliest driver date accepted, in YYYY-MM-DD format</div>
-                                <div class="validation-msg"></div>
-                            </div>
-                        </div>
-                    \`;
-                });
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Driver Dependency #\${depIdx + 1}</span>
+                        <span class="item-title">Name:</span>
                         <div class="item-actions">
-                            <button class="btn btn-sm move-driver-dep-up" data-index="\${depIdx}" \${depIdx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-driver-dep-down" data-index="\${depIdx}" \${depIdx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-driver-dep" data-index="\${depIdx}">Remove</button>
+                            <button class="btn btn-sm move-driver-constraint-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-driver-constraint-down" data-index="\${idx}" \${idx === constraints.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn-remove-field remove-driver-constraint" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
-                    <div class="driver-constraints">\${constraintsHtml}</div>
-                    <button class="btn btn-sm add-driver-constraint" data-dep-index="\${depIdx}">+ Add Driver Constraint</button>
+                    <div class="form-group" data-field="dependencies.driverConstraint.\${idx}.name">
+                        <input type="text" data-section="dependencies" data-field-name="driverConstraint.name" data-index="\${idx}" value="\${escapeHtml(dc.name)}" />
+                        <div class="description">The driver package identity name that this constraint applies to</div>
+                        <div class="validation-msg"></div>
+                    </div>
+                    <div class="form-group" data-field="dependencies.driverConstraint.\${idx}.minVersion">
+                        <label>Min Version:</label>
+                        <input type="text" data-section="dependencies" data-field-name="driverConstraint.minVersion" data-index="\${idx}" value="\${escapeHtml(dc.minVersion)}" placeholder="1.0.0.0" />
+                        <div class="description">Minimum driver version required, in dotted-quad format (e.g. 1.0.0.0)</div>
+                        <div class="validation-msg"></div>
+                    </div>
+                    <div class="form-group" data-field="dependencies.driverConstraint.\${idx}.minDate">
+                        <label>Min Date:</label>
+                        <input type="text" data-section="dependencies" data-field-name="driverConstraint.minDate" data-index="\${idx}" value="\${escapeHtml(dc.minDate)}" placeholder="2020-01-01" />
+                        <div class="description">Earliest driver date accepted, in YYYY-MM-DD format</div>
+                        <div class="validation-msg"></div>
+                    </div>
                 \`;
                 container.appendChild(item);
-                item.querySelector('.remove-driver-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeDriverDependency', index: depIdx });
+                item.querySelector('.remove-driver-constraint').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'removeDriverConstraint', index: idx });
                 });
-                item.querySelector('.move-driver-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveDriverDependency', index: depIdx, direction: 'up' });
+                item.querySelector('.move-driver-constraint-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveDriverConstraint', index: idx, direction: 'up' });
                 });
-                item.querySelector('.move-driver-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveDriverDependency', index: depIdx, direction: 'down' });
+                item.querySelector('.move-driver-constraint-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveDriverConstraint', index: idx, direction: 'down' });
                 });
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                item.querySelectorAll('.remove-driver-constraint').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        vscode.postMessage({
-                            type: 'removeDriverConstraint',
-                            depIndex: parseInt(btn.getAttribute('data-dep-index'), 10),
-                            constraintIndex: parseInt(btn.getAttribute('data-constraint-index'), 10)
-                        });
-                    });
-                });
-                item.querySelector('.add-driver-constraint').addEventListener('click', () => {
-                    vscode.postMessage({
-                        type: 'addDriverConstraint',
-                        depIndex: depIdx,
-                        constraint: { name: '', minVersion: '', minDate: '' }
-                    });
                 });
             });
         }
@@ -1693,15 +1754,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">OS Package Dependency</span>
+                        <span class="item-title">Name:</span>
                         <div class="item-actions">
                             <button class="btn btn-sm move-os-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-os-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-os-pkg-dep" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-os-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.osPackageDependency.\${idx}.name">
-                        <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="osPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Package identity name of the OS package</div>
                         <div class="validation-msg"></div>
@@ -1737,15 +1797,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Host Runtime Dependency</span>
+                        <span class="item-title">Name:</span>
                         <div class="item-actions">
                             <button class="btn btn-sm move-host-runtime-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-host-runtime-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-host-runtime-dep" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-host-runtime-dep" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.hostRuntimeDependency.\${idx}.name">
-                        <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Package identity name of the host runtime</div>
                         <div class="validation-msg"></div>
@@ -1787,15 +1846,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">External Dependency</span>
+                        <span class="item-title">Name:</span>
                         <div class="item-actions">
                             <button class="btn btn-sm move-external-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-external-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-external-dep" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-external-dep" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="dependencies.externalDependency.\${idx}.name">
-                        <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="externalDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Name of the external Win32 component</div>
                         <div class="validation-msg"></div>
@@ -1814,11 +1872,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     </div>
                     <div class="form-group">
                         <label>Optional:</label>
-                        <select data-section="dependencies" data-field-name="externalDependency.optional" data-index="\${idx}">
-                            <option value=""\${dep.optional === '' ? ' selected' : ''}>(omit)</option>
-                            <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
-                            <option value="false"\${dep.optional === 'false' ? ' selected' : ''}>false</option>
-                        </select>
+                        <div class="custom-select">
+                            <button class="custom-select-trigger" type="button" data-section="dependencies" data-field-name="externalDependency.optional" data-index="\${idx}">\${dep.optional === 'true' ? 'true' : dep.optional === 'false' ? 'false' : '(omit)'}</button>
+                            <div class="custom-select-options">
+                                <div class="custom-select-option\${dep.optional === '' ? ' selected' : ''}" data-value="">(omit)</div>
+                                <div class="custom-select-option\${dep.optional === 'true' ? ' selected' : ''}" data-value="true">true</div>
+                                <div class="custom-select-option\${dep.optional === 'false' ? ' selected' : ''}" data-value="false">false</div>
+                            </div>
+                        </div>
                         <div class="description">Whether this external dependency is optional</div>
                     </div>
                 \`;
@@ -1826,17 +1887,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
                 });
-                item.querySelectorAll('select[data-section]').forEach(sel => {
-                    sel.addEventListener('change', () => {
-                        vscode.postMessage({
-                            type: 'fieldChanged',
-                            section: sel.getAttribute('data-section'),
-                            field: sel.getAttribute('data-field-name'),
-                            value: sel.value,
-                            index: parseInt(sel.getAttribute('data-index'), 10)
-                        });
-                    });
-                });
+                initCustomSelects(item);
                 item.querySelector('.remove-external-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeExternalDependency', index: idx });
                 });
@@ -1859,40 +1910,49 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
 
                 const scaleOptionsHtml = scaleOptions.map(s =>
-                    '<option value="' + s + '"' + (res.scale === s ? ' selected' : '') + '>' + (s || '(none)') + '</option>'
+                    '<div class="custom-select-option' + (res.scale === s ? ' selected' : '') + '" data-value="' + s + '">' + (s || '(none)') + '</div>'
                 ).join('');
                 const dxOptionsHtml = dxOptions.map(d =>
-                    '<option value="' + d + '"' + (res.dxFeatureLevel === d ? ' selected' : '') + '>' + (d || '(none)') + '</option>'
+                    '<div class="custom-select-option' + (res.dxFeatureLevel === d ? ' selected' : '') + '" data-value="' + d + '">' + (d || '(none)') + '</div>'
                 ).join('');
+                const scaleLabel = res.scale || '(none)';
+                const dxLabel = res.dxFeatureLevel || '(none)';
 
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Resource \${idx + 1}</span>
+                        <span class="item-title">Language:</span>
                         <div class="item-actions">
                             <button class="btn btn-sm move-resource-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-resource-down" data-index="\${idx}" \${idx === resources.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                            <button class="btn-remove-field remove-resource" data-index="\${idx}" title="Remove">✕</button>
                         </div>
                     </div>
                     <div class="form-group" data-field="resources.\${idx}.language">
-                        <label>Language:</label>
                         <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
                         <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp") or "x-generate"</div>
                         <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="resources.\${idx}.scale">
                         <label>Scale:</label>
-                        <select data-section="resources" data-field-name="scale" data-index="\${idx}">
-                            \${scaleOptionsHtml}
-                        </select>
+                        <div class="custom-select">
+                            <button class="custom-select-trigger" type="button" data-section="resources" data-field-name="scale" data-index="\${idx}">\${scaleLabel}</button>
+                            <div class="custom-select-options">
+                                \${scaleOptionsHtml}
+                            </div>
+                        </div>
                         <div class="description">Resolution scale for resource selection (e.g. 100, 200, 400)</div>
+                        <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="resources.\${idx}.dxFeatureLevel">
                         <label>DirectX Feature Level:</label>
-                        <select data-section="resources" data-field-name="dxFeatureLevel" data-index="\${idx}">
-                            \${dxOptionsHtml}
-                        </select>
+                        <div class="custom-select">
+                            <button class="custom-select-trigger" type="button" data-section="resources" data-field-name="dxFeatureLevel" data-index="\${idx}">\${dxLabel}</button>
+                            <div class="custom-select-options">
+                                \${dxOptionsHtml}
+                            </div>
+                        </div>
                         <div class="description">DirectX feature level for resource selection</div>
+                        <div class="validation-msg"></div>
                     </div>
                 \`;
                 container.appendChild(item);
@@ -1900,9 +1960,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.querySelectorAll('input[data-section]').forEach(inp => {
                     inp.addEventListener('input', () => debouncedFieldChange(inp));
                 });
-                item.querySelectorAll('select[data-section]').forEach(sel => {
-                    sel.addEventListener('change', () => onFieldChange(sel));
-                });
+                initCustomSelects(item);
                 item.querySelector('.remove-resource').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeResource', index: idx });
                 });
@@ -2016,7 +2074,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             return '<div class="form-group' + errorClass + '"><label>' + escapeHtml(f.label) + ':</label>' +
                                 inputHtml + descHtml + errorMsg + '</div>';
                         }).join('');
-                        extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn btn-danger btn-sm remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '">Remove</button></div>' + fieldsHtml + '</div>';
+                        extListHtml += '<div class="list-item"><div class="item-header"><span class="item-title">Extension #' + (eidx + 1) + '</span><button class="btn-remove-field remove-ext" data-app-index="' + idx + '" data-ext-index="' + eidx + '" title="Remove">✕</button></div>' + fieldsHtml + '</div>';
                     });
                 }
 
@@ -2032,7 +2090,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 card.innerHTML = \`
                     <div class="app-card-header">
                         <span class="app-card-title">Application: \${escapeHtml(app.id || '(unnamed)')}</span>
-                        \${apps.length > 1 ? '<button class="btn btn-danger btn-sm remove-app-btn" data-app-index="' + idx + '">Remove</button>' : ''}
+                        \${apps.length > 1 ? '<button class="btn-remove-field remove-app-btn" data-app-index="' + idx + '" title="Remove">✕</button>' : ''}
                     </div>
                     <div class="app-sub-tabs">
                         <button class="app-sub-tab \${activeTab === 'info' ? 'active' : ''}" data-subtab="info" data-app-idx="\${idx}">Info</button>
@@ -2068,10 +2126,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group optional-field" data-field="applications.\${idx}.trustLevel" id="app-\${idx}-trustlevel-group">
                             <label>Trust Level:</label>
                             <div class="optional-field-content">
-                                <select data-section="applications" data-field-name="trustLevel" data-index="\${idx}">
-                                    <option value="appContainer"\${app.trustLevel === 'appContainer' ? ' selected' : ''}>appContainer</option>
-                                    <option value="mediumIL"\${app.trustLevel === 'mediumIL' ? ' selected' : ''}>mediumIL</option>
-                                </select>
+                                <div class="custom-select">
+                                    <button class="custom-select-trigger" type="button" data-section="applications" data-field-name="trustLevel" data-index="\${idx}">\${app.trustLevel || 'appContainer'}</button>
+                                    <div class="custom-select-options">
+                                        <div class="custom-select-option\${app.trustLevel === 'appContainer' ? ' selected' : ''}" data-value="appContainer">appContainer</div>
+                                        <div class="custom-select-option\${app.trustLevel === 'mediumIL' ? ' selected' : ''}" data-value="mediumIL">mediumIL</div>
+                                    </div>
+                                </div>
                                 <button class="btn-remove-field" type="button" data-target="app-\${idx}-trustlevel-group" data-section="applications" data-field-name="trustLevel" data-index="\${idx}" title="Remove Trust Level">✕</button>
                             </div>
                             <div class="description">App trust level — appContainer (sandboxed UWP) or mediumIL (classic desktop, requires runFullTrust capability)</div>
@@ -2080,11 +2141,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group optional-field" data-field="applications.\${idx}.runtimeBehavior" id="app-\${idx}-runtimebehavior-group">
                             <label>Runtime Behavior:</label>
                             <div class="optional-field-content">
-                                <select data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}">
-                                    <option value="windowsApp"\${app.runtimeBehavior === 'windowsApp' ? ' selected' : ''}>windowsApp</option>
-                                    <option value="packagedClassicApp"\${app.runtimeBehavior === 'packagedClassicApp' ? ' selected' : ''}>packagedClassicApp</option>
-                                    <option value="win32App"\${app.runtimeBehavior === 'win32App' ? ' selected' : ''}>win32App</option>
-                                </select>
+                                <div class="custom-select">
+                                    <button class="custom-select-trigger" type="button" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}">\${app.runtimeBehavior || 'windowsApp'}</button>
+                                    <div class="custom-select-options">
+                                        <div class="custom-select-option\${app.runtimeBehavior === 'windowsApp' ? ' selected' : ''}" data-value="windowsApp">windowsApp</div>
+                                        <div class="custom-select-option\${app.runtimeBehavior === 'packagedClassicApp' ? ' selected' : ''}" data-value="packagedClassicApp">packagedClassicApp</div>
+                                        <div class="custom-select-option\${app.runtimeBehavior === 'win32App' ? ' selected' : ''}" data-value="win32App">win32App</div>
+                                    </div>
+                                </div>
                                 <button class="btn-remove-field" type="button" data-target="app-\${idx}-runtimebehavior-group" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}" title="Remove Runtime Behavior">✕</button>
                             </div>
                             <div class="description">Runtime model — windowsApp (UWP), packagedClassicApp (packaged desktop), or win32App (unpackaged desktop)</div>
@@ -2093,10 +2157,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group optional-field" data-field="applications.\${idx}.supportsMultipleInstances" id="app-\${idx}-multiinstance-group">
                             <label>Supports Multiple Instances:</label>
                             <div class="optional-field-content">
-                                <select data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}">
-                                    <option value="true"\${app.supportsMultipleInstances === 'true' ? ' selected' : ''}>true</option>
-                                    <option value="false"\${app.supportsMultipleInstances === 'false' ? ' selected' : ''}>false</option>
-                                </select>
+                                <div class="custom-select">
+                                    <button class="custom-select-trigger" type="button" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}">\${app.supportsMultipleInstances || 'true'}</button>
+                                    <div class="custom-select-options">
+                                        <div class="custom-select-option\${app.supportsMultipleInstances === 'true' ? ' selected' : ''}" data-value="true">true</div>
+                                        <div class="custom-select-option\${app.supportsMultipleInstances === 'false' ? ' selected' : ''}" data-value="false">false</div>
+                                    </div>
+                                </div>
                                 <button class="btn-remove-field" type="button" data-target="app-\${idx}-multiinstance-group" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}" title="Remove Supports Multiple Instances">✕</button>
                             </div>
                             <div class="description">Whether multiple instances of this app can run simultaneously</div>
@@ -2187,10 +2254,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.appListEntry" id="app-\${idx}-applistentry-group">
                             <label>App List Entry:</label>
                             <div class="optional-field-content">
-                                <select data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}">
-                                    <option value="default"\${app.visualElements.appListEntry === 'default' ? ' selected' : ''}>default</option>
-                                    <option value="none"\${app.visualElements.appListEntry === 'none' ? ' selected' : ''}>none</option>
-                                </select>
+                                <div class="custom-select">
+                                    <button class="custom-select-trigger" type="button" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}">\${app.visualElements.appListEntry || 'default'}</button>
+                                    <div class="custom-select-options">
+                                        <div class="custom-select-option\${app.visualElements.appListEntry === 'default' ? ' selected' : ''}" data-value="default">default</div>
+                                        <div class="custom-select-option\${app.visualElements.appListEntry === 'none' ? ' selected' : ''}" data-value="none">none</div>
+                                    </div>
+                                </div>
                                 <button class="btn-remove-field" type="button" data-target="app-\${idx}-applistentry-group" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}" title="Remove App List Entry">✕</button>
                             </div>
                             <div class="description">Whether the app appears in the All Apps list — "default" shows it, "none" hides it (e.g. for background tasks)</div>
@@ -2220,10 +2290,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.lockScreenNotification" id="app-\${idx}-lockscreennotif-group">
                             <label>Lock Screen Notification:</label>
                             <div class="optional-field-content">
-                                <select data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}">
-                                    <option value="badge"\${app.visualElements.lockScreenNotification === 'badge' ? ' selected' : ''}>badge</option>
-                                    <option value="badgeAndTileText"\${app.visualElements.lockScreenNotification === 'badgeAndTileText' ? ' selected' : ''}>badgeAndTileText</option>
-                                </select>
+                                <div class="custom-select">
+                                    <button class="custom-select-trigger" type="button" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}">\${app.visualElements.lockScreenNotification || 'badge'}</button>
+                                    <div class="custom-select-options">
+                                        <div class="custom-select-option\${app.visualElements.lockScreenNotification === 'badge' ? ' selected' : ''}" data-value="badge">badge</div>
+                                        <div class="custom-select-option\${app.visualElements.lockScreenNotification === 'badgeAndTileText' ? ' selected' : ''}" data-value="badgeAndTileText">badgeAndTileText</div>
+                                    </div>
+                                </div>
                                 <button class="btn-remove-field" type="button" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" title="Remove Lock Screen Notification">✕</button>
                             </div>
                             <div class="description">Lock screen notification style — "badge" (icon only) or "badgeAndTileText" (icon + text). Requires BadgeLogo and lock screen capability.</div>
@@ -2273,7 +2346,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 }
 
                 // Bind field events
-                card.querySelectorAll('input[data-section], select[data-section]').forEach(inp => {
+                card.querySelectorAll('input[data-section]').forEach(inp => {
                     if (inp.type === 'color') {
                         inp.addEventListener('input', () => {
                             const textInput = card.querySelector('input[type="text"][data-field-name="' + inp.getAttribute('data-field-name') + '"]');
@@ -2284,6 +2357,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         inp.addEventListener('input', () => debouncedFieldChange(inp));
                     }
                 });
+                initCustomSelects(card);
 
                 // Bind extension remove buttons
                 card.querySelectorAll('.remove-ext').forEach(btn => {
@@ -2555,7 +2629,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             const msg = event.data;
             switch (msg.type) {
                 case 'update':
-                    populateForm(msg.data);
+                    populateForm(msg.data, msg.forceAll);
                     showValidationErrors(msg.errors || []);
                     break;
                 case 'validationErrors':

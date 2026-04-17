@@ -14,7 +14,6 @@ import {
     TargetDeviceFamilyData,
     PackageDependencyData,
     MainPackageDependencyData,
-    DriverDependencyData,
     DriverConstraintData,
     OSPackageDependencyData,
     HostRuntimeDependencyData,
@@ -338,85 +337,110 @@ export function moveMainPackageDependency(xmlText: string, index: number, direct
 // ── DriverDependency (uap5) ──
 
 /** Add a uap5:DriverDependency element (empty, with no constraints yet). */
-export function addDriverDependency(xmlText: string): string {
+/** Add a uap5:DriverConstraint, auto-creating the single DriverDependency wrapper if needed. */
+export function addDriverConstraint(xmlText: string, constraint: DriverConstraintData): string {
     let result = ensureNamespace(xmlText, 'uap5', NS.uap5);
     const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        const childIndent = parentIndent + '  ';
-        const childXml = `<uap5:DriverDependency>\n${childIndent}</uap5:DriverDependency>`;
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-    return result;
-}
-
-/** Remove a uap5:DriverDependency by index. */
-export function removeDriverDependency(xmlText: string, index: number): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const items = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= items.length) { return xmlText; }
-    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
-}
-
-/** Move a uap5:DriverDependency up or down by swapping with its neighbor. */
-export function moveDriverDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const items = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
-    const swapIdx = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || index >= items.length || swapIdx < 0 || swapIdx >= items.length) { return xmlText; }
-    return swapAdjacentElements(xmlText, items[index], items[swapIdx]);
-}
-
-/** Add a uap5:DriverConstraint child to a uap5:DriverDependency. */
-export function addDriverConstraint(xmlText: string, depIndex: number, constraint: DriverConstraintData): string {
-    let result = xmlText;
-    const bounds = findParentBounds(result, 'Dependencies');
     if (!bounds) { return result; }
+
+    // Check if a DriverDependency wrapper already exists
     const children = findDirectChildElementBounds(result, bounds.contentStart, bounds.contentEnd);
     const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(result.substring(c.start, c.end)));
-    if (depIndex < 0 || depIndex >= driverDeps.length) { return result; }
 
     let attrs = `Name="${escapeXmlAttr(constraint.name)}"`;
     if (constraint.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(constraint.minVersion)}"`; }
     if (constraint.minDate) { attrs += ` MinDate="${escapeXmlAttr(constraint.minDate)}"`; }
     const constraintXml = `<uap5:DriverConstraint ${attrs} />`;
 
-    const ddText = result.substring(driverDeps[depIndex].start, driverDeps[depIndex].end);
+    if (driverDeps.length === 0) {
+        // Create wrapper with the constraint inside
+        const parentIndent = detectIndent(result, bounds.openStart);
+        const childIndent = parentIndent + '  ';
+        const grandchildIndent = childIndent + '  ';
+        const wrapperXml = `<uap5:DriverDependency>\n${grandchildIndent}${constraintXml}\n${childIndent}</uap5:DriverDependency>`;
+        return insertChildBeforeClose(result, bounds.contentEnd, wrapperXml, parentIndent);
+    }
+
+    // Append to the first (only) DriverDependency
+    const dd = driverDeps[0];
+    const ddText = result.substring(dd.start, dd.end);
     const closeTag = '</uap5:DriverDependency>';
     const closeIdx = ddText.lastIndexOf(closeTag);
     if (closeIdx < 0) { return result; }
-    const closePos = driverDeps[depIndex].start + closeIdx;
-    const ddIndent = detectIndent(result, driverDeps[depIndex].start);
+    const closePos = dd.start + closeIdx;
+    const ddIndent = detectIndent(result, dd.start);
     const constraintIndent = ddIndent + '  ';
 
-    // Find start of whitespace line before close tag so we replace it with proper indent
+    // Walk back to find start of whitespace before the close tag
     let wsStart = closePos;
     while (wsStart > 0 && result[wsStart - 1] !== '\n') { wsStart--; }
 
-    return result.substring(0, wsStart) + '\n' + constraintIndent + constraintXml + '\n' + ddIndent + result.substring(closePos);
+    return result.substring(0, wsStart) + constraintIndent + constraintXml + '\n' + ddIndent + result.substring(closePos);
 }
 
-/** Remove a uap5:DriverConstraint from a uap5:DriverDependency. */
-export function removeDriverConstraint(xmlText: string, depIndex: number, constraintIndex: number): string {
+/** Remove a uap5:DriverConstraint by flat index. Removes the DriverDependency wrapper if empty. */
+export function removeDriverConstraint(xmlText: string, index: number): string {
     const bounds = findParentBounds(xmlText, 'Dependencies');
     if (!bounds) { return xmlText; }
     const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
     const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
-    if (depIndex < 0 || depIndex >= driverDeps.length) { return xmlText; }
 
-    const dd = driverDeps[depIndex];
-    const ddContentStart = xmlText.indexOf('>', dd.start) + 1;
-    const ddContentEnd = xmlText.lastIndexOf('</uap5:DriverDependency>', dd.end);
-    if (ddContentEnd < 0) { return xmlText; }
+    // Collect all constraints across all DriverDependency elements with their parent info
+    let flatIdx = 0;
+    for (const dd of driverDeps) {
+        const ddContentStart = xmlText.indexOf('>', dd.start) + 1;
+        const ddContentEnd = xmlText.lastIndexOf('</uap5:DriverDependency>', dd.end);
+        if (ddContentEnd < 0) { continue; }
+        const constraints = findDirectChildElementBounds(xmlText, ddContentStart, ddContentEnd);
+        const dcItems = constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end)));
+        for (let i = 0; i < dcItems.length; i++) {
+            if (flatIdx === index) {
+                let result = removeElementWithWhitespace(xmlText, dcItems[i].start, dcItems[i].end, ddContentStart);
+                // If this was the last constraint, remove the entire DriverDependency wrapper
+                if (dcItems.length === 1) {
+                    const newBounds = findParentBounds(result, 'Dependencies');
+                    if (newBounds) {
+                        const newChildren = findDirectChildElementBounds(result, newBounds.contentStart, newBounds.contentEnd);
+                        const newDd = newChildren.filter(c => /^<uap5:DriverDependency\b/.test(result.substring(c.start, c.end)));
+                        // Find the corresponding empty wrapper and remove it
+                        for (const wrapper of newDd) {
+                            const wrapperText = result.substring(wrapper.start, wrapper.end).replace(/\s+/g, '');
+                            if (wrapperText === '<uap5:DriverDependency></uap5:DriverDependency>') {
+                                result = removeElementWithWhitespace(result, wrapper.start, wrapper.end, newBounds.contentStart);
+                                break;
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
+            flatIdx++;
+        }
+    }
+    return xmlText;
+}
 
-    const constraints = findDirectChildElementBounds(xmlText, ddContentStart, ddContentEnd);
-    const dcItems = constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end)));
-    if (constraintIndex < 0 || constraintIndex >= dcItems.length) { return xmlText; }
-    return removeElementWithWhitespace(xmlText, dcItems[constraintIndex].start, dcItems[constraintIndex].end, ddContentStart);
+/** Move a uap5:DriverConstraint up or down by flat index. */
+export function moveDriverConstraint(xmlText: string, index: number, direction: 'up' | 'down'): string {
+    // Collect all DriverConstraint elements across all DriverDependency wrappers
+    const bounds = findParentBounds(xmlText, 'Dependencies');
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
+
+    const allConstraints: { start: number; end: number }[] = [];
+    for (const dd of driverDeps) {
+        const ddContentStart = xmlText.indexOf('>', dd.start) + 1;
+        const ddContentEnd = xmlText.lastIndexOf('</uap5:DriverDependency>', dd.end);
+        if (ddContentEnd < 0) { continue; }
+        const constraints = findDirectChildElementBounds(xmlText, ddContentStart, ddContentEnd);
+        const dcItems = constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end)));
+        allConstraints.push(...dcItems);
+    }
+
+    const swapIdx = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || index >= allConstraints.length || swapIdx < 0 || swapIdx >= allConstraints.length) { return xmlText; }
+    return swapAdjacentElements(xmlText, allConstraints[index], allConstraints[swapIdx]);
 }
 
 // ── OSPackageDependency (uap7) ──
@@ -1237,7 +1261,7 @@ function parseDependencies(root: Element): DependenciesData {
     const targetDeviceFamilies: TargetDeviceFamilyData[] = [];
     const packageDependencies: PackageDependencyData[] = [];
     const mainPackageDependencies: MainPackageDependencyData[] = [];
-    const driverDependencies: DriverDependencyData[] = [];
+    const driverConstraints: DriverConstraintData[] = [];
     const osPackageDependencies: OSPackageDependencyData[] = [];
     const hostRuntimeDependencies: HostRuntimeDependencyData[] = [];
     const externalDependencies: ExternalDependencyData[] = [];
@@ -1264,15 +1288,13 @@ function parseDependencies(root: Element): DependenciesData {
             });
         }
         for (const child of getChildrenByLocalName(el, 'DriverDependency')) {
-            const constraints: DriverConstraintData[] = [];
             for (const dc of getChildrenByLocalName(child, 'DriverConstraint')) {
-                constraints.push({
+                driverConstraints.push({
                     name: dc.getAttribute('Name') ?? '',
                     minVersion: dc.getAttribute('MinVersion') ?? '',
                     minDate: dc.getAttribute('MinDate') ?? '',
                 });
             }
-            driverDependencies.push({ driverConstraints: constraints });
         }
         for (const child of getChildrenByLocalName(el, 'OSPackageDependency')) {
             osPackageDependencies.push({
@@ -1299,7 +1321,7 @@ function parseDependencies(root: Element): DependenciesData {
 
     return {
         targetDeviceFamilies, packageDependencies,
-        mainPackageDependencies, driverDependencies, osPackageDependencies,
+        mainPackageDependencies, driverConstraints, osPackageDependencies,
         hostRuntimeDependencies, externalDependencies,
     };
 }
@@ -1830,33 +1852,19 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
         const attrMap: Record<string, string> = { name: 'Name', minVersion: 'MinVersion', minDate: 'MinDate' };
         const attr = attrMap[subField];
         if (!attr) { return xml; }
-        const constraintIdx = subIndex ?? 0;
 
-        // Find the Nth uap5:DriverDependency (by depIndex = `index`)
-        const depRegex = /<uap5:DriverDependency\b[^]*?<\/uap5:DriverDependency>/gs;
-        let depMatch: RegExpExecArray | null;
-        let depCount = 0;
-        while ((depMatch = depRegex.exec(xml)) !== null) {
-            if (depCount === index) {
-                // Within this DriverDependency, find the Nth DriverConstraint
-                const depContent = depMatch[0];
-                const dcRegex = /<uap5:DriverConstraint\b[^>]*\/?>/gs;
-                let dcMatch: RegExpExecArray | null;
-                let dcCount = 0;
-                while ((dcMatch = dcRegex.exec(depContent)) !== null) {
-                    if (dcCount === constraintIdx) {
-                        const fullOffset = depMatch.index + dcMatch.index;
-                        const elemStr = dcMatch[0];
-                        const elemRegex = new RegExp(escapeRegex(elemStr));
-                        const result = replaceAttribute(xml, elemRegex, attr, value);
-                        if (result !== xml) { return result; }
-                        return addAttributeToElement(xml, elemRegex, attr, value);
-                    }
-                    dcCount++;
-                }
-                break;
+        // Flat index across all DriverConstraint elements in all DriverDependency wrappers
+        const dcRegex = /<uap5:DriverConstraint\b[^>]*\/?>/gs;
+        let match: RegExpExecArray | null;
+        let count = 0;
+        while ((match = dcRegex.exec(xml)) !== null) {
+            if (count === index) {
+                const elemRegex = new RegExp(escapeRegex(match[0]));
+                const result = replaceAttribute(xml, elemRegex, attr, value);
+                if (result !== xml) { return result; }
+                return addAttributeToElement(xml, elemRegex, attr, value);
             }
-            depCount++;
+            count++;
         }
     }
     return xml;

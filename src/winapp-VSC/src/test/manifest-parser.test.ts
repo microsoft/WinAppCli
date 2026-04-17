@@ -24,11 +24,9 @@ import {
     addMainPackageDependency,
     removeMainPackageDependency,
     moveMainPackageDependency,
-    addDriverDependency,
-    removeDriverDependency,
-    moveDriverDependency,
     addDriverConstraint,
     removeDriverConstraint,
+    moveDriverConstraint,
     addOSPackageDependency,
     removeOSPackageDependency,
     moveOSPackageDependency,
@@ -576,52 +574,53 @@ describe('Add/Remove/Move Main Package Dependencies', () => {
 
 // ─── 12. Add/Remove Driver Dependencies and Constraints ────────────────────
 
-describe('Add/Remove Driver Dependencies and Constraints', () => {
-    it('should add an empty driver dependency', () => {
-        const result = addDriverDependency(BASE_MANIFEST);
+describe('Add/Remove/Move Driver Constraints', () => {
+    it('should add a driver constraint (auto-creating DriverDependency wrapper)', () => {
+        const result = addDriverConstraint(BASE_MANIFEST, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2024-01-01' });
         const parsed = parseManifest(result);
-        assert.equal(parsed.dependencies.driverDependencies.length, 1);
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints.length, 0);
+        assert.equal(parsed.dependencies.driverConstraints.length, 1);
+        assert.equal(parsed.dependencies.driverConstraints[0].name, 'MyDriver');
+        assert.equal(parsed.dependencies.driverConstraints[0].minVersion, '1.0.0.0');
+        assert.equal(parsed.dependencies.driverConstraints[0].minDate, '2024-01-01');
     });
 
-    it('should add a driver constraint to a driver dependency', () => {
-        let xml = addDriverDependency(BASE_MANIFEST);
-        xml = addDriverConstraint(xml, 0, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2024-01-01' });
+    it('should add multiple driver constraints to the same wrapper', () => {
+        let xml = addDriverConstraint(BASE_MANIFEST, { name: 'Driver1', minVersion: '1.0.0.0', minDate: '' });
+        xml = addDriverConstraint(xml, { name: 'Driver2', minVersion: '2.0.0.0', minDate: '' });
         const parsed = parseManifest(xml);
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints.length, 1);
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints[0].name, 'MyDriver');
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints[0].minVersion, '1.0.0.0');
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints[0].minDate, '2024-01-01');
+        assert.equal(parsed.dependencies.driverConstraints.length, 2);
+        assert.equal(parsed.dependencies.driverConstraints[0].name, 'Driver1');
+        assert.equal(parsed.dependencies.driverConstraints[1].name, 'Driver2');
     });
 
-    it('should remove a driver constraint', () => {
-        let xml = addDriverDependency(BASE_MANIFEST);
-        xml = addDriverConstraint(xml, 0, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2024-01-01' });
-        xml = removeDriverConstraint(xml, 0, 0);
+    it('should remove a driver constraint and clean up empty wrapper', () => {
+        let xml = addDriverConstraint(BASE_MANIFEST, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '2024-01-01' });
+        xml = removeDriverConstraint(xml, 0);
         const parsed = parseManifest(xml);
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints.length, 0);
+        assert.equal(parsed.dependencies.driverConstraints.length, 0);
+        assert.ok(!xml.includes('DriverDependency'), 'Should remove empty DriverDependency wrapper');
     });
 
-    it('should remove a driver dependency', () => {
-        let xml = addDriverDependency(BASE_MANIFEST);
-        xml = removeDriverDependency(xml, 0);
+    it('should remove only one constraint and keep the wrapper', () => {
+        let xml = addDriverConstraint(BASE_MANIFEST, { name: 'Driver1', minVersion: '1.0.0.0', minDate: '' });
+        xml = addDriverConstraint(xml, { name: 'Driver2', minVersion: '2.0.0.0', minDate: '' });
+        xml = removeDriverConstraint(xml, 0);
         const parsed = parseManifest(xml);
-        assert.equal(parsed.dependencies.driverDependencies.length, 0);
+        assert.equal(parsed.dependencies.driverConstraints.length, 1);
+        assert.equal(parsed.dependencies.driverConstraints[0].name, 'Driver2');
     });
 
-    it('should swap driver dependency order on move', () => {
-        let xml = addDriverDependency(BASE_MANIFEST);
-        xml = addDriverDependency(xml);
-        xml = addDriverConstraint(xml, 0, { name: 'Driver1', minVersion: '1.0.0.0', minDate: '' });
-        xml = addDriverConstraint(xml, 1, { name: 'Driver2', minVersion: '2.0.0.0', minDate: '' });
-        xml = moveDriverDependency(xml, 1, 'up');
+    it('should swap driver constraint order on move', () => {
+        let xml = addDriverConstraint(BASE_MANIFEST, { name: 'Driver1', minVersion: '1.0.0.0', minDate: '' });
+        xml = addDriverConstraint(xml, { name: 'Driver2', minVersion: '2.0.0.0', minDate: '' });
+        xml = moveDriverConstraint(xml, 1, 'up');
         const parsed = parseManifest(xml);
-        assert.equal(parsed.dependencies.driverDependencies[0].driverConstraints[0].name, 'Driver2');
-        assert.equal(parsed.dependencies.driverDependencies[1].driverConstraints[0].name, 'Driver1');
+        assert.equal(parsed.dependencies.driverConstraints[0].name, 'Driver2');
+        assert.equal(parsed.dependencies.driverConstraints[1].name, 'Driver1');
     });
 
-    it('should add uap5 namespace when adding driver dependency', () => {
-        const result = addDriverDependency(BASE_MANIFEST);
+    it('should add uap5 namespace when adding driver constraint', () => {
+        const result = addDriverConstraint(BASE_MANIFEST, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '' });
         assert.ok(result.includes('xmlns:uap5='), 'Should add uap5 namespace');
     });
 });
@@ -824,8 +823,8 @@ describe('Namespace Injection', () => {
         assert.ok(result.includes('xmlns:uap3='), 'Should inject uap3 namespace');
     });
 
-    it('should add xmlns:uap5 when adding driver dependency', () => {
-        const result = addDriverDependency(BASE_MANIFEST);
+    it('should add xmlns:uap5 when adding driver constraint', () => {
+        const result = addDriverConstraint(BASE_MANIFEST, { name: 'MyDriver', minVersion: '1.0.0.0', minDate: '' });
         assert.ok(result.includes('xmlns:uap5='), 'Should inject uap5 namespace');
     });
 
@@ -926,9 +925,9 @@ describe('Edge Cases', () => {
         assert.equal(parsed.dependencies.packageDependencies.length, 5);
     });
 
-    it('should not change XML when removing driver dependency at invalid index', () => {
-        const result = removeDriverDependency(BASE_MANIFEST, 0);
-        assert.equal(result, BASE_MANIFEST, 'Should return unchanged XML (no driver deps exist)');
+    it('should not change XML when removing driver constraint at invalid index', () => {
+        const result = removeDriverConstraint(BASE_MANIFEST, 0);
+        assert.equal(result, BASE_MANIFEST, 'Should return unchanged XML (no driver constraints exist)');
     });
 
     it('should not change XML when removing main package dependency at invalid index', () => {
