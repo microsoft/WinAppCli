@@ -75,7 +75,7 @@ param(
 # Validate compound flag usage
 $CompoundFlagsCount = @($SkipAll, $OnlyDocs, $OnlyTests) | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count
 if ($CompoundFlagsCount -gt 1) {
-    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests can be specified."
+    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests/-TestsOnly can be specified."
     exit 1
 }
 
