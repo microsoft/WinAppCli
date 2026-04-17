@@ -274,6 +274,27 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
+### `newCommand()`
+
+Create a new WinUI 3 project or add an item to an existing project. Uses the latest Microsoft.WindowsAppSDK.WinUI.CSharp.Templates (automatically installed/updated). When run inside a .csproj directory, shows item templates (pages, windows, controls). Otherwise, shows project templates. Pass additional dotnet new arguments after --.
+
+```typescript
+function newCommand(options?: NewOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `template` | `string \| undefined` | No | Template short name (e.g., 'winui', 'winui-navview', 'winui-page'). If omitted, an interactive selection is shown. |
+| `name` | `string \| undefined` | No | Name for the created project or item |
+| `output` | `string \| undefined` | No | Output directory for the created project |
+| `project` | `string \| undefined` | No | Target .csproj file (for item templates). Auto-detected if omitted. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
@@ -1204,6 +1225,18 @@ type ManifestTemplates = "packaged" | "sparse"
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `NewOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `template` | `string \| undefined` | No | Template short name (e.g., 'winui', 'winui-navview', 'winui-page'). If omitted, an interactive selection is shown. |
+| `name` | `string \| undefined` | No | Name for the created project or item |
+| `output` | `string \| undefined` | No | Output directory for the created project |
+| `project` | `string \| undefined` | No | Target .csproj file (for item templates). Auto-detected if omitted. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

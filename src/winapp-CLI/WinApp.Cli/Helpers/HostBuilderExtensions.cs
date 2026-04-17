@@ -48,7 +48,9 @@ internal static class StoreHostBuilderExtensions
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            .AddSingleton<ITemplateProvider, DotNetTemplateProvider>()
+            .AddSingleton<ITemplateService, TemplateService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -91,7 +93,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiScrollCommand, UiScrollCommand.Handler>()
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
-                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>();
+                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                .UseCommandHandler<NewCommand, NewCommand.Handler>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)

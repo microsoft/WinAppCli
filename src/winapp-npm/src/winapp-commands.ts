@@ -361,6 +361,33 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 }
 
 // ---------------------------------------------------------------------------
+// new
+// ---------------------------------------------------------------------------
+
+export interface NewOptions extends CommonOptions {
+  /** Template short name (e.g., 'winui', 'winui-navview', 'winui-page'). If omitted, an interactive selection is shown. */
+  template?: string;
+  /** Name for the created project or item */
+  name?: string;
+  /** Output directory for the created project */
+  output?: string;
+  /** Target .csproj file (for item templates). Auto-detected if omitted. */
+  project?: string;
+}
+
+/**
+ * Create a new WinUI 3 project or add an item to an existing project. Uses the latest Microsoft.WindowsAppSDK.WinUI.CSharp.Templates (automatically installed/updated). When run inside a .csproj directory, shows item templates (pages, windows, controls). Otherwise, shows project templates. Pass additional dotnet new arguments after --.
+ */
+export async function newCommand(options: NewOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['new'];
+  if (options.template) args.push(options.template);
+  if (options.name) args.push('--name', options.name);
+  if (options.output) args.push('--output', options.output);
+  if (options.project) args.push('--project', options.project);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // package
 // ---------------------------------------------------------------------------
 

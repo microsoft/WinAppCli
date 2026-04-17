@@ -1,5 +1,82 @@
 # CLI Documentation and Usage
 
+### new
+
+Create a new WinUI 3 project or add an item to an existing project from a template.
+
+```bash
+winapp new [<template>] [options] [-- <dotnet-new-args>...]
+```
+
+**Arguments:**
+
+- `template` - Template short name (e.g., `winui`, `winui-navview`, `winui-page`). If omitted, an interactive selection is shown.
+
+**Options:**
+
+- `-n, --name <name>` - Name for the created project or item
+- `-o, --output <dir>` - Output directory for the created project
+- `--project <csproj>` - Target .csproj file (for item templates, auto-detected if omitted)
+
+**Context-aware behavior:**
+
+- **Outside a .csproj directory:** Shows project templates (winui, winui-navview, winui-lib, winui-unittest)
+- **Inside a .csproj directory:** Shows item templates (winui-page, winui-window, winui-usercontrol, etc.)
+
+**What it does:**
+
+- Automatically installs/updates the `Microsoft.WindowsAppSDK.WinUI.CSharp.Templates` package
+- Creates the project or item using `dotnet new` with template defaults
+- For new projects: configures `RuntimeIdentifier` for the current architecture and adds the `Microsoft.Windows.SDK.BuildTools.WinApp` package
+
+**Examples:**
+
+```bash
+# Interactive — select template and name
+winapp new
+
+# Create a blank WinUI app (non-interactive, default name)
+winapp new winui
+
+# Create a WinUI NavigationView app with a specific name
+winapp new winui-navview -n MyApp
+
+# Create a WinUI app in a specific directory
+winapp new winui -n MyApp -o ./projects/MyApp
+
+# Add a new page to the current WinUI project
+cd MyApp
+winapp new winui-page -n SettingsPage
+
+# Pass extra arguments to dotnet new
+winapp new winui -n MyApp -- --dotnet-version net9.0
+```
+
+**Available project templates:**
+
+| Template | Short name | Description |
+|----------|-----------|-------------|
+| WinUI Blank App | `winui` | WinUI 3 desktop app with single-project MSIX packaging |
+| WinUI NavigationView App | `winui-navview` | WinUI 3 NavigationView starter app |
+| WinUI Class Library | `winui-lib` | WinUI 3 class library for sharing UI components |
+| WinUI Unit Test App | `winui-unittest` | WinUI 3 packaged test app configured for MSTest |
+
+**Available item templates** (when inside a WinUI project):
+
+| Template | Short name |
+|----------|-----------|
+| WinUI Blank Page | `winui-page` |
+| WinUI Blank Window | `winui-window` |
+| WinUI User Control | `winui-usercontrol` |
+| WinUI Templated Control | `winui-templatedcontrol` |
+| WinUI Resource Dictionary | `winui-resourcedictionary` |
+| WinUI Resources File | `winui-resw` |
+| WinUI Content Dialog | `winui-dialog` |
+
+> **Note:** Template names and options are discovered dynamically from the installed package — they are not hardcoded and will update automatically as new templates are added.
+
+---
+
 ### init
 
 Initialize a directory with Windows SDK, Windows App SDK, and required assets for modern Windows development.
