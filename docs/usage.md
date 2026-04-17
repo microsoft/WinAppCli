@@ -307,7 +307,7 @@ winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Comp
 
 ### run
 
-Create a loose layout package from a build output folder, register it with Windows, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
+Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 

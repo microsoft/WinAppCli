@@ -18,7 +18,7 @@ internal class UiStatusCommand : Command, IShortDescription
     public string ShortDescription => "Connect to a running app and show connection info";
 
     public UiStatusCommand()
-        : base("status", "Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.")
+        : base("status", "Connect to a target app and display connection info.")
     {
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
