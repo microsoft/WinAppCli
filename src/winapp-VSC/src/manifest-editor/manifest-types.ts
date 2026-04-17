@@ -157,7 +157,8 @@ export type WebviewToExtensionMessage =
     | { type: 'setShowNameOnTiles'; appIndex: number; tiles: string[] }
     | { type: 'addResource'; resource: ResourceData }
     | { type: 'removeResource'; index: number }
-    | { type: 'addCapability'; capability: string }
+    | { type: 'moveResource'; index: number; direction: 'up' | 'down' }
+    | { type: 'addCapability';capability: string }
     | { type: 'removeCapability'; capability: string }
     | { type: 'addPackageDependency'; dependency: PackageDependencyData }
     | { type: 'removePackageDependency'; index: number }
@@ -175,16 +176,21 @@ export type WebviewToExtensionMessage =
     | { type: 'movePackageDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addMainPackageDependency'; dependency: MainPackageDependencyData }
     | { type: 'removeMainPackageDependency'; index: number }
+    | { type: 'moveMainPackageDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addDriverDependency' }
     | { type: 'removeDriverDependency'; index: number }
+    | { type: 'moveDriverDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addDriverConstraint'; depIndex: number; constraint: DriverConstraintData }
     | { type: 'removeDriverConstraint'; depIndex: number; constraintIndex: number }
     | { type: 'addOSPackageDependency'; dependency: OSPackageDependencyData }
     | { type: 'removeOSPackageDependency'; index: number }
+    | { type: 'moveOSPackageDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addHostRuntimeDependency'; dependency: HostRuntimeDependencyData }
     | { type: 'removeHostRuntimeDependency'; index: number }
+    | { type: 'moveHostRuntimeDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addExternalDependency'; dependency: ExternalDependencyData }
     | { type: 'removeExternalDependency'; index: number }
+    | { type: 'moveExternalDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'updateAssets' }
     | { type: 'openAsText' }
     | { type: 'ready' };

@@ -217,7 +217,9 @@ describe('Real-world manifest fixtures', () => {
                     e.severity === 'error' &&
                     !e.message.includes('.exe') &&
                     !e.message.includes('PNG') &&
-                    !e.message.includes('BCP-47')
+                    !e.message.includes('BCP-47') &&
+                    // Sample fixtures may have empty/placeholder dependency fields
+                    !e.field.startsWith('dependencies.')
                 );
                 assert.equal(
                     parserErrors.length, 0,

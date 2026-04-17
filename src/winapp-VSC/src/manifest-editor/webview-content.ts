@@ -182,7 +182,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         }
 
         /* ─── Tab content ──────────────────────────────────── */
-        .tab-content { display: none; padding: 20px 24px; max-width: 720px; }
+        .tab-content { display: none; padding: 20px 24px 120px; max-width: 720px; }
         .tab-content.active { display: block; }
 
         /* ─── Section header ───────────────────────────────── */
@@ -196,6 +196,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         }
         .section-header-spaced {
             margin-top: 64px;
+        }
+        .subsection-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+            margin-bottom: 12px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border));
         }
 
         /* ─── Page description ────────────────────────────── */
@@ -415,6 +423,18 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .btn-add-field:hover {
             background: var(--vscode-list-hoverBackground, rgba(55,148,255,0.1));
         }
+        .optional-fields-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .optional-fields-group > .optional-field { order: 0; }
+        .optional-fields-group > .btn-add-buttons-row { order: 1; }
+        .btn-add-buttons-row {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
         .optional-field-content {
             display: flex;
             gap: 6px;
@@ -430,8 +450,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             height: 24px;
             padding: 0;
             border: none;
-            background: transparent;
-            color: var(--vscode-errorForeground, #f44747);
+            background: rgba(128, 128, 128, 0.3);
+            color: var(--vscode-editor-foreground, #ffffff);
             font-size: 14px;
             cursor: pointer;
             border-radius: 4px;
@@ -440,7 +460,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             justify-content: center;
         }
         .btn-remove-field:hover {
-            background: var(--vscode-list-hoverBackground, rgba(244,71,71,0.1));
+            background: rgba(128, 128, 128, 0.5);
         }
         .list-item .item-title {
             font-weight: 600;
@@ -646,7 +666,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Identity ───── -->
     <div class="tab-content active" id="tab-identity" role="tabpanel">
         <div class="section-header">Package Identity</div>
-        <p class="page-description">Use this page to define the unique identity of your app package. These values determine how Windows and the Microsoft Store distinguish your package from all others. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-identity">Learn more</a></p>
+        <p class="page-description">Use this section to define the unique identity of your package. These values determine how Windows and the Microsoft Store distinguish your package from all others. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-identity">Learn more</a></p>
         <div class="form-group" data-field="identity.name">
             <label for="identity-name">Name:</label>
             <input type="text" id="identity-name" data-section="identity" data-field-name="name" placeholder="com.company.app" />
@@ -685,7 +705,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Optional string used to differentiate packages that are part of a resource bundle or bundle optional packages (max 30 chars, alphanumeric/period/dash only)</div>
             <div class="validation-msg"></div>
         </div>
-        <button class="btn-add-field" type="button" id="add-identity-resourceid" title="Add Resource ID attribute">+ Add Resource ID</button>
+        <button class="btn-add-field" type="button" id="add-identity-resourceid" data-target="identity-resourceid-group" data-section="identity" data-field-name="resourceId" data-default="" title="Add Resource ID attribute">+ Add Resource ID</button>
         <div id="phone-identity-section" class="section-header-spaced" style="display:none;">
             <div class="section-header">Phone Identity</div>
             <p class="page-description">Legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
@@ -707,7 +727,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Properties ───── -->
     <div class="tab-content" id="tab-properties" role="tabpanel">
         <div class="section-header">Package Properties</div>
-        <p class="page-description">Use this page to configure the user-facing display information for your app. These values appear in the Microsoft Store listing, app info dialogs, and the Windows shell. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
+        <p class="page-description">Use this section to configure the user-facing display information for your package. These values appear in the Microsoft Store listing, package details, and the Windows shell. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
         <div class="form-group" data-field="properties.displayName">
             <label for="props-displayname">Display Name:</label>
             <input type="text" id="props-displayname" data-section="properties" data-field-name="displayName" placeholder="My Application" />
@@ -717,13 +737,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         <div class="form-group" data-field="properties.publisherDisplayName">
             <label for="props-pubdisplayname">Publisher Display Name:</label>
             <input type="text" id="props-pubdisplayname" data-section="properties" data-field-name="publisherDisplayName" placeholder="Contoso" />
-            <div class="description">Publisher name shown in Settings (Installed apps), the Microsoft Store, and app info, max 256 characters</div>
+            <div class="description">Publisher name shown in Settings (Installed apps), the Microsoft Store, and package details, max 256 characters</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.description">
             <label for="props-description">Description:</label>
-            <textarea id="props-description" data-section="properties" data-field-name="description" placeholder="A short description of the app (optional, max 2048 chars)"></textarea>
-            <div class="description">Short summary of what your app does used in Store listings and app info dialogs, max 2048 characters (Optional)</div>
+            <textarea id="props-description" data-section="properties" data-field-name="description" placeholder="A short description of your package"></textarea>
+            <div class="description">Short summary of your package used in Store listings and package details, max 2048 characters (Optional)</div>
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="properties.logo">
@@ -776,7 +796,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
         <div class="section-header section-header-spaced">Advanced Properties</div>
         <div class="form-group" data-field="properties.supportedUsers">
-            <label>Supported Users (uap):</label>
+            <label>Supported Users:</label>
             <select id="props-supportedUsers" data-section="properties" data-field-name="supportedUsers">
                 <option value="">(omit)</option>
                 <option value="multiple">multiple</option>
@@ -785,7 +805,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Whether the app supports multiple user sessions or only a single user</div>
         </div>
         <div class="form-group" data-field="properties.allowExecution">
-            <label>Allow Execution (uap6):</label>
+            <label>Allow Execution:</label>
             <select id="props-allowExecution" data-section="properties" data-field-name="allowExecution">
                 <option value="">(omit)</option>
                 <option value="true">true</option>
@@ -794,7 +814,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Whether executables in the package can be launched (set to false for content-only packages)</div>
         </div>
         <div class="form-group" data-field="properties.allowExternalContent">
-            <label>Allow External Content (uap10):</label>
+            <label>Allow External Content:</label>
             <select id="props-allowExternalContent" data-section="properties" data-field-name="allowExternalContent">
                 <option value="">(omit)</option>
                 <option value="true">true</option>
@@ -803,7 +823,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Whether the package allows content outside its install directory to be treated as package content</div>
         </div>
         <div class="form-group" data-field="properties.fileSystemWriteVirtualization">
-            <label>File System Write Virtualization (desktop6):</label>
+            <label>File System Write Virtualization:</label>
             <select id="props-fsWriteVirt" data-section="properties" data-field-name="fileSystemWriteVirtualization">
                 <option value="">(omit)</option>
                 <option value="enabled">enabled</option>
@@ -812,7 +832,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Controls whether file system write operations are virtualized or written to the real file system</div>
         </div>
         <div class="form-group" data-field="properties.registryWriteVirtualization">
-            <label>Registry Write Virtualization (desktop6):</label>
+            <label>Registry Write Virtualization:</label>
             <select id="props-regWriteVirt" data-section="properties" data-field-name="registryWriteVirtualization">
                 <option value="">(omit)</option>
                 <option value="enabled">enabled</option>
@@ -821,8 +841,9 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Controls whether registry write operations are virtualized or written to the real registry</div>
         </div>
         <div class="section-header section-header-spaced">Update &amp; Integrity</div>
+        <div class="optional-fields-group">
         <div class="form-group optional-field" data-field="properties.autoUpdateUri" id="props-autoupdate-group">
-            <label>Auto Update URI (uap13):</label>
+            <label>Auto Update URI:</label>
             <div class="optional-field-content">
                 <input type="text" id="props-autoUpdateUri" data-section="properties" data-field-name="autoUpdateUri" placeholder="https://example.com/install/MyApp.appinstaller" />
                 <button class="btn-remove-field" type="button" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" title="Remove Auto Update URI">✕</button>
@@ -830,9 +851,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">URI to an .appinstaller file that enables automatic updates for sideloaded apps</div>
             <div class="validation-msg"></div>
         </div>
-        <button class="btn-add-field" type="button" id="add-props-autoupdate" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" data-default="" title="Add Auto Update URI">+ Add Auto Update URI</button>
         <div class="form-group optional-field" data-field="properties.packageIntegrityEnforcement" id="props-pkgintegrity-group">
-            <label>Package Integrity Enforcement (uap10):</label>
+            <label>Package Integrity Enforcement:</label>
             <div class="optional-field-content">
                 <select id="props-packageIntegrityEnforcement" data-section="properties" data-field-name="packageIntegrityEnforcement">
                     <option value="on">on</option>
@@ -844,9 +864,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Controls whether Windows enforces content integrity checks for the package — "on", "off", or "default"</div>
             <div class="validation-msg"></div>
         </div>
-        <button class="btn-add-field" type="button" id="add-props-pkgintegrity" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" data-default="default" title="Add Package Integrity Enforcement">+ Add Package Integrity Enforcement</button>
         <div class="form-group optional-field" data-field="properties.updateWhileInUse" id="props-updatewhileinuse-group">
-            <label>Update While In Use (uap17):</label>
+            <label>Update While In Use:</label>
             <div class="optional-field-content">
                 <select id="props-updateWhileInUse" data-section="properties" data-field-name="updateWhileInUse">
                     <option value="allow">allow</option>
@@ -857,13 +876,18 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="description">Whether the package can be updated while it is running — "allow" applies updates immediately, "defer" waits until the app closes</div>
             <div class="validation-msg"></div>
         </div>
-        <button class="btn-add-field" type="button" id="add-props-updatewhileinuse" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" data-default="defer" title="Add Update While In Use">+ Add Update While In Use</button>
+        <div class="btn-add-buttons-row">
+            <button class="btn-add-field" type="button" id="add-props-autoupdate" data-target="props-autoupdate-group" data-section="properties" data-field-name="autoUpdateUri" data-default="" title="Add Auto Update URI">+ Add Auto Update URI</button>
+            <button class="btn-add-field" type="button" id="add-props-pkgintegrity" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" data-default="default" title="Add Package Integrity Enforcement">+ Add Package Integrity Enforcement</button>
+            <button class="btn-add-field" type="button" id="add-props-updatewhileinuse" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" data-default="defer" title="Add Update While In Use">+ Add Update While In Use</button>
+        </div>
+        </div>
     </div>
 
     <!-- ───── Dependencies ───── -->
     <div class="tab-content" id="tab-dependencies" role="tabpanel">
         <div class="section-header">Target Device Families</div>
-        <p class="page-description">Use this page to declare the Windows versions and framework packages your app requires. Target device families determine which devices can install your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-dependencies">Learn more</a></p>
+        <p class="page-description">Use this section to declare the Windows versions and framework packages your package requires. Target device families determine which devices can install your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-dependencies">Learn more</a></p>
         <div id="target-device-families" class="list-container"></div>
         <div class="custom-dropdown" id="add-family-dropdown">
             <button class="custom-dropdown-btn" id="add-target-family">+ Add Target Device Family</button>
@@ -873,6 +897,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         </div>
 
         <div class="section-header section-header-spaced">Package Dependencies</div>
+        <p class="page-description">Declares framework and library package dependencies required by your package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-packagedependency">Learn more</a></p>
         <div id="package-dependencies" class="list-container"></div>
         <button class="btn" id="add-package-dep">+ Add Package Dependency</button>
 
@@ -905,7 +930,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Resources ───── -->
     <div class="tab-content" id="tab-resources" role="tabpanel">
         <div class="section-header">Resources</div>
-        <p class="page-description">Use this page to declare the language resources your app supports. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-resources">Learn more</a></p>
+        <p class="page-description">Use this section to declare the language resources your package supports. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-resources">Learn more</a></p>
         <div id="resources-list" class="list-container"></div>
         <button class="btn" id="add-resource-btn">+ Add Resource</button>
     </div>
@@ -913,7 +938,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Applications ───── -->
     <div class="tab-content" id="tab-applications" role="tabpanel">
         <div class="section-header">Applications</div>
-        <p class="page-description">Use this page to configure the entry points and visual presentation of your app. Each Application element represents a separate executable that can be launched from the package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-application">Learn more</a></p>
+        <p class="page-description">Use this section to configure the entry points and visual presentation of your applications. Each Application element represents a separate executable that can be launched from the package. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-application">Learn more</a></p>
         <div id="applications-list"></div>
         <button class="btn mt-12" id="add-application-btn">+ Add Application</button>
     </div>
@@ -921,7 +946,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
     <!-- ───── Capabilities ───── -->
     <div class="tab-content" id="tab-capabilities" role="tabpanel">
         <div class="section-header">Capabilities</div>
-        <p class="page-description">Use this page to declare the system resources and devices your app needs access to. Users will be prompted to grant restricted capabilities at install time. Only request capabilities your app actually uses. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-capabilities">Learn more</a></p>
+        <p class="page-description">Use this section to declare the system resources and devices your package needs access to. Users will be prompted to grant restricted capabilities at install time. Only request capabilities your package actually uses. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-capabilities">Learn more</a></p>
         <div class="capabilities-columns">
             <div class="capabilities-left">
                 <div class="cap-category">
@@ -938,10 +963,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 </div>
                 <div class="cap-category">
                     <div class="cap-category-title">Custom Capability</div>
+                    <p class="field-description">Custom capabilities must follow the format <code>company.capabilityname_publisherId</code> where publisherId is a 13-character base32 identifier. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap4-customcapability">Learn more</a></p>
                     <div class="custom-cap-row">
-                        <input type="text" id="custom-cap-input" placeholder="e.g. rescap:broadFileSystemAccess" />
+                        <input type="text" id="custom-cap-input" placeholder="e.g. Contoso.Devices.SerialCommunication_0wer1ey63g7b4" />
                         <button class="btn" id="add-custom-cap">Add</button>
                     </div>
+                    <div id="custom-cap-error" class="validation-msg error" style="display:none;"></div>
                     <div id="custom-caps-list" class="cap-list mt-8"></div>
                 </div>
             </div>
@@ -969,6 +996,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         const optionalVisualAssets = ${JSON.stringify(OPTIONAL_VISUAL_ASSETS)};
         const showNameOnTilesOptions = ${JSON.stringify(SHOW_NAME_ON_TILES_OPTIONS)};
         const activeAppSubTabs = {};
+        // Track optional fields the user has explicitly opened (to prevent re-parse from hiding them)
+        const userOpenedOptionalFields = new Set();
 
         // ─── Tab switching ──────────────────────────────────
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1080,16 +1109,31 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         // Custom capability
         document.getElementById('add-custom-cap').addEventListener('click', () => {
             const input = document.getElementById('custom-cap-input');
+            const errorEl = document.getElementById('custom-cap-error');
             const cap = input.value.trim();
-            if (cap) {
-                vscode.postMessage({ type: 'addCapability', capability: cap });
-                input.value = '';
+            if (!cap) {
+                errorEl.textContent = 'Custom capability name is required.';
+                errorEl.style.display = 'block';
+                return;
             }
+            // Validate format: company.capabilityname_publisherId (13-char base32)
+            const customCapRegex = /^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)+_[a-z0-9]{13}$/;
+            if (!customCapRegex.test(cap)) {
+                errorEl.textContent = 'Custom capability must follow the format company.capabilityname_publisherId (e.g. Contoso.Devices.SerialCommunication_0wer1ey63g7b4).';
+                errorEl.style.display = 'block';
+                return;
+            }
+            errorEl.style.display = 'none';
+            vscode.postMessage({ type: 'addCapability', capability: cap });
+            input.value = '';
         });
         document.getElementById('custom-cap-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 document.getElementById('add-custom-cap').click();
             }
+        });
+        document.getElementById('custom-cap-input').addEventListener('input', () => {
+            document.getElementById('custom-cap-error').style.display = 'none';
         });
 
         // ─── Capability hover descriptions ──────────────────
@@ -1172,6 +1216,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 if (group) {
                     group.classList.remove('hidden-optional');
                     addBtn.classList.add('hidden-optional');
+                    userOpenedOptionalFields.add(targetId);
                     // Set default value and trigger change
                     const defaultVal = addBtn.getAttribute('data-default') || '';
                     const input = group.querySelector('input[data-section], select[data-section]');
@@ -1187,6 +1232,18 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         if (input.tagName === 'SELECT') {
                             debouncedFieldChange(input);
                         }
+                        if (input.tagName === 'INPUT' && !input.value) {
+                            group.classList.add('has-error');
+                            const msg = group.querySelector('.validation-msg');
+                            if (msg) {
+                                const fieldAttr = group.getAttribute('data-field') || '';
+                                const errText = fieldAttr === 'identity.resourceId'
+                                    ? 'Resource ID must be at least 1 character.'
+                                    : 'This field is required. Enter a value or remove the field.';
+                                msg.className = 'validation-msg error';
+                                msg.textContent = errText;
+                            }
+                        }
                     }
                 }
                 return;
@@ -1198,6 +1255,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 const group = document.getElementById(targetId);
                 if (group) {
                     group.classList.add('hidden-optional');
+                    userOpenedOptionalFields.delete(targetId);
                     // Find the corresponding add button
                     const addBtnForGroup = document.querySelector('.btn-add-field[data-target="' + targetId + '"]');
                     if (addBtnForGroup) addBtnForGroup.classList.remove('hidden-optional');
@@ -1349,7 +1407,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             const group = document.getElementById(groupId);
             const addBtn = document.getElementById(addBtnId);
             if (!group) return;
-            if (value) {
+            if (value || userOpenedOptionalFields.has(groupId)) {
                 group.classList.remove('hidden-optional');
                 if (addBtn) addBtn.classList.add('hidden-optional');
             } else {
@@ -1448,7 +1506,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Package Dependency:</span>
+                        <span class="item-title">Name:</span>
                         <div class="item-actions">
                             <button class="btn btn-sm move-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
                             <button class="btn btn-sm move-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
@@ -1473,7 +1531,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="validation-msg"></div>
                     </div>
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.optional">
-                        <label>uap6:Optional:</label>
+                        <label>Optional:</label>
                         <select data-section="dependencies" data-field-name="packageDependency.optional" data-index="\${idx}">
                             <option value=""\${dep.optional === '' ? ' selected' : ''}>(omit)</option>
                             <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
@@ -1519,13 +1577,17 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.className = 'list-item';
                 item.innerHTML = \`
                     <div class="item-header">
-                        <span class="item-title">Main Package Dependency</span>
-                        <button class="btn btn-danger btn-sm remove-main-pkg-dep" data-index="\${idx}">Remove</button>
+                        <span class="item-title">Name:</span>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-main-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-main-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-main-pkg-dep" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Name:</label>
+                    <div class="form-group" data-field="dependencies.mainPackageDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="mainPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="MainPackageName" />
                         <div class="description">Package identity name of the main package</div>
+                        <div class="validation-msg"></div>
                     </div>
                 \`;
                 container.appendChild(item);
@@ -1534,6 +1596,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-main-pkg-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeMainPackageDependency', index: idx });
+                });
+                item.querySelector('.move-main-pkg-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveMainPackageDependency', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-main-pkg-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveMainPackageDependency', index: idx, direction: 'down' });
                 });
             });
         }
@@ -1552,17 +1620,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                 <span class="item-title">Driver Constraint</span>
                                 <button class="btn btn-danger btn-sm remove-driver-constraint" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}">Remove</button>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.name">
                                 <label>Name:</label>
                                 <input type="text" data-section="dependencies" data-field-name="driverConstraint.name" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.name)}" />
+                                <div class="description">The driver package identity name that this constraint applies to</div>
+                                <div class="validation-msg"></div>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.minVersion">
                                 <label>Min Version:</label>
                                 <input type="text" data-section="dependencies" data-field-name="driverConstraint.minVersion" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minVersion)}" placeholder="1.0.0.0" />
+                                <div class="description">Minimum driver version required, in dotted-quad format (e.g. 1.0.0.0)</div>
+                                <div class="validation-msg"></div>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" data-field="dependencies.driverDependency.\${depIdx}.driverConstraint.\${cIdx}.minDate">
                                 <label>Min Date:</label>
                                 <input type="text" data-section="dependencies" data-field-name="driverConstraint.minDate" data-dep-index="\${depIdx}" data-constraint-index="\${cIdx}" value="\${escapeHtml(dc.minDate)}" placeholder="2020-01-01" />
+                                <div class="description">Earliest driver date accepted, in YYYY-MM-DD format</div>
+                                <div class="validation-msg"></div>
                             </div>
                         </div>
                     \`;
@@ -1570,7 +1644,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">Driver Dependency #\${depIdx + 1}</span>
-                        <button class="btn btn-danger btn-sm remove-driver-dep" data-index="\${depIdx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-driver-dep-up" data-index="\${depIdx}" \${depIdx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-driver-dep-down" data-index="\${depIdx}" \${depIdx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-driver-dep" data-index="\${depIdx}">Remove</button>
+                        </div>
                     </div>
                     <div class="driver-constraints">\${constraintsHtml}</div>
                     <button class="btn btn-sm add-driver-constraint" data-dep-index="\${depIdx}">+ Add Driver Constraint</button>
@@ -1578,6 +1656,15 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 container.appendChild(item);
                 item.querySelector('.remove-driver-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeDriverDependency', index: depIdx });
+                });
+                item.querySelector('.move-driver-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveDriverDependency', index: depIdx, direction: 'up' });
+                });
+                item.querySelector('.move-driver-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveDriverDependency', index: depIdx, direction: 'down' });
+                });
+                item.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
                 });
                 item.querySelectorAll('.remove-driver-constraint').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -1592,7 +1679,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     vscode.postMessage({
                         type: 'addDriverConstraint',
                         depIndex: depIdx,
-                        constraint: { name: 'DriverName', minVersion: '', minDate: '' }
+                        constraint: { name: '', minVersion: '', minDate: '' }
                     });
                 });
             });
@@ -1607,15 +1694,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">OS Package Dependency</span>
-                        <button class="btn btn-danger btn-sm remove-os-pkg-dep" data-index="\${idx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-os-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-os-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-os-pkg-dep" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.osPackageDependency.\${idx}.name">
                         <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="osPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                        <div class="description">Package identity name of the OS package</div>
+                        <div class="validation-msg"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.osPackageDependency.\${idx}.version">
                         <label>Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="osPackageDependency.version" data-index="\${idx}" value="\${escapeHtml(dep.version)}" placeholder="10.0.0.0" />
+                        <div class="description">DotQuad version number (e.g. 10.0.0.0), each part 0–65535</div>
+                        <div class="validation-msg"></div>
                     </div>
                 \`;
                 container.appendChild(item);
@@ -1624,6 +1719,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-os-pkg-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeOSPackageDependency', index: idx });
+                });
+                item.querySelector('.move-os-pkg-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveOSPackageDependency', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-os-pkg-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveOSPackageDependency', index: idx, direction: 'down' });
                 });
             });
         }
@@ -1637,19 +1738,29 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">Host Runtime Dependency</span>
-                        <button class="btn btn-danger btn-sm remove-host-runtime-dep" data-index="\${idx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-host-runtime-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-host-runtime-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-host-runtime-dep" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.hostRuntimeDependency.\${idx}.name">
                         <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                        <div class="description">Package identity name of the host runtime</div>
+                        <div class="validation-msg"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.hostRuntimeDependency.\${idx}.publisher">
                         <label>Publisher:</label>
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.publisher" data-index="\${idx}" value="\${escapeHtml(dep.publisher)}" placeholder="CN=..." />
+                        <div class="description">X.500 distinguished name of the host runtime publisher</div>
+                        <div class="validation-msg"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.hostRuntimeDependency.\${idx}.minVersion">
                         <label>Min Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="1.0.0.0" />
+                        <div class="description">Minimum DotQuad version required (e.g. 1.0.0.0), each part 0–65535</div>
+                        <div class="validation-msg"></div>
                     </div>
                 \`;
                 container.appendChild(item);
@@ -1658,6 +1769,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-host-runtime-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeHostRuntimeDependency', index: idx });
+                });
+                item.querySelector('.move-host-runtime-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveHostRuntimeDependency', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-host-runtime-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveHostRuntimeDependency', index: idx, direction: 'down' });
                 });
             });
         }
@@ -1671,19 +1788,29 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 item.innerHTML = \`
                     <div class="item-header">
                         <span class="item-title">External Dependency</span>
-                        <button class="btn btn-danger btn-sm remove-external-dep" data-index="\${idx}">Remove</button>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-external-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-external-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-external-dep" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.externalDependency.\${idx}.name">
                         <label>Name:</label>
                         <input type="text" data-section="dependencies" data-field-name="externalDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
+                        <div class="description">Name of the external Win32 component</div>
+                        <div class="validation-msg"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.externalDependency.\${idx}.publisher">
                         <label>Publisher:</label>
                         <input type="text" data-section="dependencies" data-field-name="externalDependency.publisher" data-index="\${idx}" value="\${escapeHtml(dep.publisher)}" placeholder="CN=..." />
+                        <div class="description">X.500 distinguished name of the external component publisher</div>
+                        <div class="validation-msg"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" data-field="dependencies.externalDependency.\${idx}.minVersion">
                         <label>Min Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="externalDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="1.0.0.0" />
+                        <div class="description">Minimum version required for the external component</div>
+                        <div class="validation-msg"></div>
                     </div>
                     <div class="form-group">
                         <label>Optional:</label>
@@ -1692,6 +1819,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <option value="true"\${dep.optional === 'true' ? ' selected' : ''}>true</option>
                             <option value="false"\${dep.optional === 'false' ? ' selected' : ''}>false</option>
                         </select>
+                        <div class="description">Whether this external dependency is optional</div>
                     </div>
                 \`;
                 container.appendChild(item);
@@ -1711,6 +1839,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-external-dep').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeExternalDependency', index: idx });
+                });
+                item.querySelector('.move-external-dep-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveExternalDependency', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-external-dep-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveExternalDependency', index: idx, direction: 'down' });
                 });
             });
         }
@@ -1733,8 +1867,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
                 item.innerHTML = \`
                     <div class="item-header">
-                        <label><strong>Resource \${idx + 1}</strong></label>
-                        <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                        <span class="item-title">Resource \${idx + 1}</span>
+                        <div class="item-actions">
+                            <button class="btn btn-sm move-resource-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+                            <button class="btn btn-sm move-resource-down" data-index="\${idx}" \${idx === resources.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
+                            <button class="btn btn-danger btn-sm remove-resource" data-index="\${idx}">Remove</button>
+                        </div>
                     </div>
                     <div class="form-group" data-field="resources.\${idx}.language">
                         <label>Language:</label>
@@ -1767,6 +1905,12 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 });
                 item.querySelector('.remove-resource').addEventListener('click', () => {
                     vscode.postMessage({ type: 'removeResource', index: idx });
+                });
+                item.querySelector('.move-resource-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveResource', index: idx, direction: 'up' });
+                });
+                item.querySelector('.move-resource-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: 'moveResource', index: idx, direction: 'down' });
                 });
             });
         }
@@ -1918,8 +2062,9 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Activation type or runtime class, use 'Windows.FullTrustApplication' for desktop (Win32) apps</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <div class="section-header-spaced">Advanced Attributes</div>
+                        <div class="subsection-header section-header-spaced">Advanced Attributes</div>
                         <p class="description mb-12">Optional advanced attributes for this application entry. These control trust level, runtime behavior, and multi-instance support.</p>
+                        <div class="optional-fields-group">
                         <div class="form-group optional-field" data-field="applications.\${idx}.trustLevel" id="app-\${idx}-trustlevel-group">
                             <label>Trust Level:</label>
                             <div class="optional-field-content">
@@ -1932,7 +2077,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">App trust level — appContainer (sandboxed UWP) or mediumIL (classic desktop, requires runFullTrust capability)</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-trustlevel" data-target="app-\${idx}-trustlevel-group" data-section="applications" data-field-name="trustLevel" data-index="\${idx}" data-default="appContainer" title="Add Trust Level attribute">+ Add Trust Level</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.runtimeBehavior" id="app-\${idx}-runtimebehavior-group">
                             <label>Runtime Behavior:</label>
                             <div class="optional-field-content">
@@ -1946,7 +2090,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Runtime model — windowsApp (UWP), packagedClassicApp (packaged desktop), or win32App (unpackaged desktop)</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-runtimebehavior" data-target="app-\${idx}-runtimebehavior-group" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}" data-default="windowsApp" title="Add Runtime Behavior attribute">+ Add Runtime Behavior</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.supportsMultipleInstances" id="app-\${idx}-multiinstance-group">
                             <label>Supports Multiple Instances:</label>
                             <div class="optional-field-content">
@@ -1959,7 +2102,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Whether multiple instances of this app can run simultaneously</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-multiinstance" data-target="app-\${idx}-multiinstance-group" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}" data-default="true" title="Add Supports Multiple Instances">+ Add Supports Multiple Instances</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.parameters" id="app-\${idx}-parameters-group">
                             <label>Parameters:</label>
                             <div class="optional-field-content">
@@ -1969,7 +2111,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Command-line parameters passed to the executable at launch</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-parameters" data-target="app-\${idx}-parameters-group" data-section="applications" data-field-name="parameters" data-index="\${idx}" data-default="" title="Add Parameters attribute">+ Add Parameters</button>
+                        <div class="btn-add-buttons-row">
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-trustlevel" data-target="app-\${idx}-trustlevel-group" data-section="applications" data-field-name="trustLevel" data-index="\${idx}" data-default="appContainer" title="Add Trust Level attribute">+ Add Trust Level</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-runtimebehavior" data-target="app-\${idx}-runtimebehavior-group" data-section="applications" data-field-name="runtimeBehavior" data-index="\${idx}" data-default="windowsApp" title="Add Runtime Behavior attribute">+ Add Runtime Behavior</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-multiinstance" data-target="app-\${idx}-multiinstance-group" data-section="applications" data-field-name="supportsMultipleInstances" data-index="\${idx}" data-default="true" title="Add Supports Multiple Instances">+ Add Supports Multiple Instances</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-parameters" data-target="app-\${idx}-parameters-group" data-section="applications" data-field-name="parameters" data-index="\${idx}" data-default="" title="Add Parameters attribute">+ Add Parameters</button>
+                        </div>
+                        </div>
                     </div>
                     <div class="app-sub-content \${activeTab === 'extensions' ? 'active' : ''}" data-subcontent="extensions" data-app-idx="\${idx}">
                         <p class="description mb-12">Extensions register your app for system integration points like URI protocols, file type associations, COM servers, and execution aliases. <a class="doc-link" href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-1-extension">Learn more</a></p>
@@ -1987,7 +2135,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         <div class="form-group" data-field="applications.\${idx}.visualElements.description">
                             <label>Description:</label>
                             <input type="text" data-section="applications" data-field-name="visualElements.description" data-index="\${idx}" value="\${escapeHtml(app.visualElements.description)}" />
-                            <div class="description">Short description shown in app info tooltips and accessibility tools, max 2048 characters</div>
+                            <div class="description">Short description shown in package tooltips and accessibility tools, max 2048 characters</div>
                             <div class="validation-msg"></div>
                         </div>
                         <div class="form-group" data-field="applications.\${idx}.visualElements.backgroundColor">
@@ -2034,7 +2182,8 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             buildAddVisualAssetMenuHtml(app, idx) +
                             '</div></div>' : ''}
                         \${buildShowNameOnTilesHtml(app, idx)}
-                        <div class="section-header-spaced">Additional Visual Properties</div>
+                        <div class="subsection-header section-header-spaced">Additional Visual Properties</div>
+                        <div class="optional-fields-group">
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.appListEntry" id="app-\${idx}-applistentry-group">
                             <label>App List Entry:</label>
                             <div class="optional-field-content">
@@ -2047,7 +2196,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Whether the app appears in the All Apps list — "default" shows it, "none" hides it (e.g. for background tasks)</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-applistentry" data-target="app-\${idx}-applistentry-group" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}" data-default="default" title="Add App List Entry">+ Add App List Entry</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.shortName" id="app-\${idx}-shortname-group">
                             <label>Short Name:</label>
                             <div class="optional-field-content">
@@ -2057,7 +2205,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Abbreviated name shown on the app tile when space is limited (1–40 characters, on uap:DefaultTile)</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-shortname" data-target="app-\${idx}-shortname-group" data-section="applications" data-field-name="visualElements.shortName" data-index="\${idx}" data-default="" title="Add Short Name">+ Add Short Name</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.splashScreenBackgroundColor" id="app-\${idx}-splashbgcolor-group">
                             <label>Splash Screen Background Color:</label>
                             <div class="optional-field-content">
@@ -2070,7 +2217,6 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Background color for the splash screen, displayed behind the SplashScreen image</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-splashbgcolor" data-target="app-\${idx}-splashbgcolor-group" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" data-default="" title="Add Splash Screen Background Color">+ Add Splash Screen Background Color</button>
                         <div class="form-group optional-field" data-field="applications.\${idx}.visualElements.lockScreenNotification" id="app-\${idx}-lockscreennotif-group">
                             <label>Lock Screen Notification:</label>
                             <div class="optional-field-content">
@@ -2083,7 +2229,13 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             <div class="description">Lock screen notification style — "badge" (icon only) or "badgeAndTileText" (icon + text). Requires BadgeLogo and lock screen capability.</div>
                             <div class="validation-msg"></div>
                         </div>
-                        <button class="btn-add-field" type="button" id="add-app-\${idx}-lockscreennotif" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" data-default="badge" title="Add Lock Screen Notification">+ Add Lock Screen Notification</button>
+                        <div class="btn-add-buttons-row">
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-applistentry" data-target="app-\${idx}-applistentry-group" data-section="applications" data-field-name="visualElements.appListEntry" data-index="\${idx}" data-default="default" title="Add App List Entry">+ Add App List Entry</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-shortname" data-target="app-\${idx}-shortname-group" data-section="applications" data-field-name="visualElements.shortName" data-index="\${idx}" data-default="" title="Add Short Name">+ Add Short Name</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-splashbgcolor" data-target="app-\${idx}-splashbgcolor-group" data-section="applications" data-field-name="visualElements.splashScreenBackgroundColor" data-index="\${idx}" data-default="" title="Add Splash Screen Background Color">+ Add Splash Screen Background Color</button>
+                            <button class="btn-add-field" type="button" id="add-app-\${idx}-lockscreennotif" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" data-default="badge" title="Add Lock Screen Notification">+ Add Lock Screen Notification</button>
+                        </div>
+                        </div>
                         <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
@@ -2330,11 +2482,23 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             const customCaps = capabilities.filter(c => !knownCapNames.has(c));
             const customList = document.getElementById('custom-caps-list');
             customList.innerHTML = '';
+            const customCapRegex = /^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)+_[a-z0-9]{13}$/;
             customCaps.forEach(cap => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'custom-cap-entry';
                 const label = document.createElement('label');
                 label.className = 'cap-item';
                 label.innerHTML = \`<input type="checkbox" checked data-custom-cap="\${escapeHtml(cap)}" /><span>\${escapeHtml(cap)}</span>\`;
-                customList.appendChild(label);
+                wrapper.appendChild(label);
+                if (!customCapRegex.test(cap)) {
+                    const errSpan = document.createElement('span');
+                    errSpan.className = 'validation-msg error';
+                    errSpan.textContent = 'Invalid format. Expected: company.capabilityname_publisherId (e.g. Contoso.Devices.SerialCommunication_0wer1ey63g7b4)';
+                    errSpan.style.display = 'block';
+                    errSpan.style.marginLeft = '24px';
+                    wrapper.appendChild(errSpan);
+                }
+                customList.appendChild(wrapper);
                 label.querySelector('input').addEventListener('change', (e) => {
                     if (!e.target.checked) {
                         vscode.postMessage({ type: 'removeCapability', capability: cap });
@@ -2361,6 +2525,26 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                     if (msg) {
                         msg.className = 'validation-msg ' + err.severity;
                         msg.textContent = err.message;
+                    }
+                }
+            });
+
+            // Re-apply required errors for user-opened optional text fields that are still empty
+            userOpenedOptionalFields.forEach(groupId => {
+                const group = document.getElementById(groupId);
+                if (!group || group.classList.contains('hidden-optional')) return;
+                if (group.classList.contains('has-error') || group.classList.contains('has-warning')) return;
+                const input = group.querySelector('input[data-section]');
+                if (input && !input.value) {
+                    group.classList.add('has-error');
+                    const msg = group.querySelector('.validation-msg');
+                    if (msg) {
+                        const fieldAttr = group.getAttribute('data-field') || '';
+                        const errText = fieldAttr === 'identity.resourceId'
+                            ? 'Resource ID must be at least 1 character.'
+                            : 'This field is required. Enter a value or remove the field.';
+                        msg.className = 'validation-msg error';
+                        msg.textContent = errText;
                     }
                 }
             });

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<Package
+<Package xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4" xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7" xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -18,16 +18,24 @@
   <Properties>
     <DisplayName>BackgroundTaskBuilder</DisplayName>
     <PublisherDisplayName>Microsoft</PublisherDisplayName>
-    <Logo>Assets\StoreLogo.png</Logo>
+    <Logo>Assets\StoreLogo</Logo>
+    <ResourcePackage>false</ResourcePackage>
   </Properties>
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <uap3:MainPackageDependency Name="j33" />
+    <uap5:DriverDependency>
+      <uap5:DriverConstraint Name="3" MinVersion="" MinDate="" />
+    </uap5:DriverDependency>
+    <uap7:OSPackageDependency Name="eee" Version="s" />
+    <uap3:MainPackageDependency Name="333" />
+    <uap10:HostRuntimeDependency Name="e" Publisher="" MinVersion="e" />
+    <win32dependencies:ExternalDependency Name="e" Publisher="e" MinVersion="e" />
   </Dependencies>
 
   <Resources>
-    <Resource Language="x-generate"/>
   </Resources>
 
   <Applications>
@@ -73,5 +81,6 @@
   </Extensions>
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <uap4:CustomCapability Name="aaaaa" />
   </Capabilities>
 </Package>

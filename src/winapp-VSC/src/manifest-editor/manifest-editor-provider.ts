@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, addDriverDependency, removeDriverDependency, addDriverConstraint, removeDriverConstraint, addOSPackageDependency, removeOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, addExternalDependency, removeExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, setShowNameOnTiles } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverDependency, removeDriverDependency, moveDriverDependency, addDriverConstraint, removeDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -158,6 +158,10 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         newText = removeResource(text, message.index);
                         break;
 
+                    case 'moveResource':
+                        newText = moveResource(text, message.index, message.direction);
+                        break;
+
                     case 'setShowNameOnTiles':
                         newText = setShowNameOnTiles(text, message.appIndex, message.tiles);
                         break;
@@ -192,12 +196,18 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'removeMainPackageDependency':
                         newText = removeMainPackageDependency(text, message.index);
                         break;
+                    case 'moveMainPackageDependency':
+                        newText = moveMainPackageDependency(text, message.index, message.direction);
+                        break;
 
                     case 'addDriverDependency':
                         newText = addDriverDependency(text);
                         break;
                     case 'removeDriverDependency':
                         newText = removeDriverDependency(text, message.index);
+                        break;
+                    case 'moveDriverDependency':
+                        newText = moveDriverDependency(text, message.index, message.direction);
                         break;
                     case 'addDriverConstraint':
                         newText = addDriverConstraint(text, message.depIndex, message.constraint);
@@ -212,6 +222,9 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'removeOSPackageDependency':
                         newText = removeOSPackageDependency(text, message.index);
                         break;
+                    case 'moveOSPackageDependency':
+                        newText = moveOSPackageDependency(text, message.index, message.direction);
+                        break;
 
                     case 'addHostRuntimeDependency':
                         newText = addHostRuntimeDependency(text, message.dependency);
@@ -219,12 +232,18 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'removeHostRuntimeDependency':
                         newText = removeHostRuntimeDependency(text, message.index);
                         break;
+                    case 'moveHostRuntimeDependency':
+                        newText = moveHostRuntimeDependency(text, message.index, message.direction);
+                        break;
 
                     case 'addExternalDependency':
                         newText = addExternalDependency(text, message.dependency);
                         break;
                     case 'removeExternalDependency':
                         newText = removeExternalDependency(text, message.index);
+                        break;
+                    case 'moveExternalDependency':
+                        newText = moveExternalDependency(text, message.index, message.direction);
                         break;
 
                     case 'addApplication':
