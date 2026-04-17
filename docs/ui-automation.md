@@ -350,7 +350,6 @@ winapp ui list-windows                                      # all windows (no fi
 | "Selector matched N elements" | Ambiguous legacy selector | Use slugs from `inspect` output, or append `[0]`, `[1]` to legacy selectors |
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` or `search` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | Use `inspect` on the element to find an invokable child |
-
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
 | Popup/dropdown not in screenshot | PrintWindow doesn't capture overlays | Use `--capture-screen` flag |
