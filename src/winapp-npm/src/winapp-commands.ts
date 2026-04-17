@@ -946,7 +946,7 @@ export interface UiStatusOptions extends CommonOptions {
 }
 
 /**
- * Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+ * Connect to a target app and display connection info.
  */
 export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'status'];

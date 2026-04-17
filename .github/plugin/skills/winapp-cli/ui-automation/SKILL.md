@@ -171,7 +171,7 @@ winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
 
 ## Related skills
-- `winapp-setup` for adding Windows SDK and DevTools to your project
+- `winapp-setup` for adding Windows SDK to your project
 - `winapp-package` for packaging apps as MSIX
 
 ## Troubleshooting
@@ -190,7 +190,7 @@ Note: The filename input in standard file dialogs typically has AutomationId `11
 
 ### `winapp ui status`
 
-Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+Connect to a target app and display connection info.
 
 #### Options
 <!-- auto-generated from cli-schema.json -->

@@ -361,6 +361,7 @@ internal partial class RunCommand : Command, IShortDescription
                 return exitCode;
             }
 
+
             // Wait for the launched process to exit before returning.
             // The process may have already exited by the time we get here (common for
             // fast-starting apps), in which case GetProcessById throws ArgumentException.
@@ -471,6 +472,7 @@ internal partial class RunCommand : Command, IShortDescription
             }
 
             var alias = aliases[0]; // Use the first alias
+
 
             // Launch the execution alias process with inherited stdio
             var psi = new ProcessStartInfo

@@ -1651,7 +1651,7 @@
       }
     },
     "ui": {
-      "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Auto-detects DevTools mode for WinUI 3 apps with the WinApp NuGet. Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
+      "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
       "hidden": false,
       "subcommands": {
         "click": {
@@ -3024,7 +3024,7 @@
           }
         },
         "status": {
-          "description": "Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.",
+          "description": "Connect to a target app and display connection info.",
           "hidden": false,
           "options": {
             "--app": {

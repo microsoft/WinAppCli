@@ -102,6 +102,7 @@ winapp run ./bin/Debug --debug-output
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
 
+
 #### Choosing between `run` and `create-debug-identity`
 
 | | `winapp run` | `create-debug-identity` |
