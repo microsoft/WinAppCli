@@ -946,7 +946,7 @@ export interface UiStatusOptions extends CommonOptions {
 }
 
 /**
- * Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+ * Connect to a target app and display connection info.
  */
 export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'status'];
@@ -975,7 +975,7 @@ export interface UiWaitForOptions extends CommonOptions {
   property?: string;
   /** Timeout in milliseconds */
   timeout?: number;
-  /** Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. */
+  /** Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. */
   value?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
