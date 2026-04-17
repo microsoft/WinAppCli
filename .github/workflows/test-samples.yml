@@ -3,9 +3,6 @@ name: Test Samples & Guides
 on:
   pull_request:
     branches: [ "main" ]
-  workflow_run:
-    workflows: ["Build and Package"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       sample:
@@ -26,12 +23,12 @@ on:
 
 permissions:
   contents: read
-  actions: read    # Required for downloading cross-workflow artifacts
 
 jobs:
-  # Build npm package for pull_request events (workflow_run already has it)
+  # Build npm (and NuGet) package for pull_request and workflow_dispatch events.
+  # This makes the workflow self-contained — no cross-workflow artifact chaining.
   build:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v5
@@ -56,15 +53,7 @@ jobs:
 
   test-sample:
     needs: [build]
-    # Run when: PR build succeeded, workflow_run build succeeded, or manual dispatch
-    if: >-
-      always() &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
-      (
-        github.event_name == 'pull_request' ||
-        github.event_name == 'workflow_dispatch' ||
-        github.event.workflow_run.conclusion == 'success'
-      )
+    if: needs.build.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -88,66 +77,18 @@ jobs:
       if: steps.check.outputs.skip != 'true'
       uses: actions/checkout@v5
 
-    # Download the npm package artifact — source varies by trigger
-    - name: Download npm package (pull_request)
-      if: >-
-        steps.check.outputs.skip != 'true' &&
-        github.event_name == 'pull_request'
+    # Download the npm package artifact built by the `build` job above
+    - name: Download npm package
+      if: steps.check.outputs.skip != 'true'
       uses: actions/download-artifact@v4
       with:
         name: npm-package
         path: artifacts/npm
-
-    - name: Download npm package (workflow_run)
-      if: >-
-        steps.check.outputs.skip != 'true' &&
-        github.event_name == 'workflow_run'
-      uses: actions/download-artifact@v4
-      with:
-        name: npm-package
-        path: artifacts/npm
-        run-id: ${{ github.event.workflow_run.id }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Download npm package (workflow_dispatch)
-      if: >-
-        steps.check.outputs.skip != 'true' &&
-        github.event_name == 'workflow_dispatch'
-      uses: actions/download-artifact@v4
-      with:
-        name: npm-package
-        path: artifacts/npm
-      continue-on-error: true
 
     # Download NuGet package for .NET samples
-    - name: Download NuGet package (pull_request)
+    - name: Download NuGet package
       if: >-
         steps.check.outputs.skip != 'true' &&
-        github.event_name == 'pull_request' &&
-        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
-      uses: actions/download-artifact@v4
-      with:
-        name: nuget-package
-        path: artifacts/nuget
-      continue-on-error: true
-
-    - name: Download NuGet package (workflow_run)
-      if: >-
-        steps.check.outputs.skip != 'true' &&
-        github.event_name == 'workflow_run' &&
-        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
-      uses: actions/download-artifact@v4
-      with:
-        name: nuget-package
-        path: artifacts/nuget
-        run-id: ${{ github.event.workflow_run.id }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-      continue-on-error: true
-
-    - name: Download NuGet package (workflow_dispatch)
-      if: >-
-        steps.check.outputs.skip != 'true' &&
-        github.event_name == 'workflow_dispatch' &&
         contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
       uses: actions/download-artifact@v4
       with:
@@ -214,12 +155,8 @@ jobs:
       if: steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        $winappPath = "artifacts/npm"
-        if (-not (Test-Path $winappPath)) {
-          $winappPath = "src/winapp-npm"
-        }
         $container = New-PesterContainer -Path "samples/${{ matrix.sample }}/test.Tests.ps1" -Data @{
-          WinappPath = $winappPath
+          WinappPath = "artifacts/npm"
         }
         $config = New-PesterConfiguration
         $config.Run.Container = $container

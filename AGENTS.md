@@ -60,7 +60,10 @@ Each sample under `samples/` has a self-contained **Pester 5.x** test file (`tes
 # Run a specific sample
 .\scripts\test-samples.ps1 -Samples dotnet-app
 
-# Run with a specific winapp package (e.g., from CI artifacts)
+# Run with a locally built winapp npm tarball (package-npm.ps1 outputs to .\artifacts\)
+.\scripts\test-samples.ps1 -WinappPath .\artifacts -Verbose
+
+# Or pass a specific .tgz / a directory containing one (e.g., a CI artifact download)
 .\scripts\test-samples.ps1 -WinappPath .\artifacts\npm -Verbose
 ```
 

@@ -31,20 +31,25 @@ function Resolve-WinappCliPath {
     $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
     if (-not $WinappPath) {
-        $WinappPath = Join-Path $repoRoot "artifacts\npm"
-        if (-not (Test-Path $WinappPath)) {
-            $WinappPath = Join-Path $repoRoot "src\winapp-npm"
-        }
+        # Default search order: CI artifact dir, local package-npm.ps1 output dir, then source dir.
+        $defaultCandidates = @(
+            (Join-Path $repoRoot "artifacts\npm"),
+            (Join-Path $repoRoot "artifacts"),
+            (Join-Path $repoRoot "src\winapp-npm")
+        )
+        $WinappPath = $defaultCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     }
 
-    if (-not (Test-Path $WinappPath)) {
+    if (-not $WinappPath -or -not (Test-Path $WinappPath)) {
         throw "Winapp path not found: $WinappPath"
     }
 
     $resolved = (Resolve-Path $WinappPath).Path
 
     if (Test-Path $resolved -PathType Container) {
-        $tgz = Get-ChildItem -Path $resolved -Filter "*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $tgz = Get-ChildItem -Path $resolved -Filter "*.tgz" -ErrorAction SilentlyContinue |
+            Sort-Object -Property LastWriteTime -Descending |
+            Select-Object -First 1
         if ($tgz) { return $tgz.FullName }
         if (Test-Path (Join-Path $resolved "package.json")) { return $resolved }
         throw "No .tgz or package.json found in $resolved"
@@ -57,8 +62,9 @@ function Invoke-WinappCommand {
     <#
     .SYNOPSIS
     Invokes the winapp CLI with the given arguments and returns stdout lines.
-    Uses npx if in a Node project, falls back to dotnet run, then PATH.
-    Throws on non-zero exit code.
+    Resolution order: local node_modules/.bin/winapp -> winapp on PATH ->
+    dotnet run against the repo CLI project (only when WINAPP_TEST_USE_DOTNET=1
+    or no other winapp is available). Throws on non-zero exit code.
     #>
     param(
         [Parameter(Mandatory)]
@@ -67,15 +73,19 @@ function Invoke-WinappCommand {
     )
 
     $npxWinapp = Join-Path (Get-Location) "node_modules\.bin\winapp.cmd"
+    $pathWinapp = Get-Command winapp -ErrorAction SilentlyContinue
+    $cliProject = Join-Path $PSScriptRoot "..\src\winapp-CLI\WinApp.Cli\WinApp.Cli.csproj"
+    $useDotnet = $env:WINAPP_TEST_USE_DOTNET -eq '1'
+
     if (Test-Path $npxWinapp) {
         $cmd = "npx winapp $Arguments"
+    } elseif ($pathWinapp -and -not $useDotnet) {
+        $cmd = "winapp $Arguments"
+    } elseif (Test-Path $cliProject) {
+        # Fall back to dotnet run when no installed winapp is on PATH, or when explicitly requested.
+        $cmd = "dotnet run --project `"$cliProject`" -- $Arguments"
     } else {
-        $cliProject = Join-Path $PSScriptRoot "..\src\winapp-CLI\WinApp.Cli\WinApp.Cli.csproj"
-        if (Test-Path $cliProject) {
-            $cmd = "dotnet run --project `"$cliProject`" -- $Arguments"
-        } else {
-            $cmd = "winapp $Arguments"
-        }
+        $cmd = "winapp $Arguments"
     }
 
     Write-Verbose "Running: $cmd"
