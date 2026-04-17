@@ -167,7 +167,6 @@ try
     }
     
     Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinApp package created successfully!" -ForegroundColor Green
-
     # ============================================================================
     # Summary
     # ============================================================================

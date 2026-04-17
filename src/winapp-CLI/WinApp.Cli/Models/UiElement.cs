@@ -4,7 +4,7 @@
 namespace WinApp.Cli.Models;
 
 /// <summary>
-/// Represents a UI element discovered via UIA or DevTools inspection.
+/// Represents a UI element discovered via UIA inspection.
 /// </summary>
 internal sealed class UiElement
 {

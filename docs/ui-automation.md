@@ -6,12 +6,8 @@ Used by AI agents and developers for UI testing, debugging, and automation.
 ## Overview
 
 `winapp ui` provides commands for inspecting and interacting with Windows app UIs.
-Two modes are available, auto-detected per session:
-
-- **UIA mode** — Works with any Windows app (WPF, WinForms, Win32, Electron, WinUI 3).
-  Uses Windows UI Automation. Safe by design — no global input injection.
-- **DevTools mode** — For WinUI 3 apps with the DevTools assembly. Provides full XAML tree
-  access, property writing, input simulation, hot-reload, and more. (Future)
+Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, Win32, Electron, and WinUI 3.
+Safe by design — no global input injection.
 
 ## Quick Start
 
@@ -354,7 +350,6 @@ winapp ui list-windows                                      # all windows (no fi
 | "Selector matched N elements" | Ambiguous legacy selector | Use slugs from `inspect` output, or append `[0]`, `[1]` to legacy selectors |
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` or `search` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | Use `inspect` on the element to find an invokable child |
-| "Pipe not ready" | DevTools NuGet but UseWinAppTools() not called | Add `window.UseWinAppTools()` to startup |
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
 | Popup/dropdown not in screenshot | PrintWindow doesn't capture overlays | Use `--capture-screen` flag |

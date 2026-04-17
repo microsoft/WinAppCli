@@ -7,39 +7,33 @@
     "default": {
       "name": "default",
       "createdDate": "2025-10-14 18:40:43Z",
-      "lastUpdatedDate": "2025-10-14 18:40:43Z"
+      "lastUpdatedDate": "2026-04-17 00:00:00Z"
     }
   },
   "results": {
-    "4e7824f7df49062dd7edfc58de620340ee94abb2edb366ca9d8f78202607b454": {
-      "signature": "4e7824f7df49062dd7edfc58de620340ee94abb2edb366ca9d8f78202607b454",
-      "alternativeSignatures": [
-        "193511ab86392d208ad4b5b1ef546ccd73498c2a9790e6908eec60114de1226f"
-      ],
-      "target": "cli/win-arm64/winapp.exe",
+    "5ca1b6336b4c897e0051c1906282d756496583cf01f2396f075954644f2bdc13": {
+      "signature": "5ca1b6336b4c897e0051c1906282d756496583cf01f2396f075954644f2bdc13",
+      "target": "cli/win-arm64/libSkiaSharp.dll",
       "memberOf": [
         "default"
       ],
       "tool": "binskim",
       "ruleId": "BA2008",
-      "createdDate": "2025-10-14 18:40:43Z",
-      "expirationDate": "2026-04-02 18:45:20Z",
-      "justification": "This error is baselined with an expiration date of 180 days from 2025-10-14 18:45:20Z"
+      "createdDate": "2026-04-17 00:00:00Z",
+      "expirationDate": "2026-10-14 00:00:00Z",
+      "justification": "libSkiaSharp.dll is a third-party native binary shipped by the SkiaSharp NuGet package. We cannot recompile it to enable /guard:cf. Tracked by upstream SkiaSharp."
     },
-    "10b385649c04b33c1e1e3346c399eee67c8f36872165c6c05d7dc358e6326327": {
-      "signature": "10b385649c04b33c1e1e3346c399eee67c8f36872165c6c05d7dc358e6326327",
-      "alternativeSignatures": [
-        "64b71262df8c91b9b863ca4c959cdcc727251361b9b4e4c0f700b2518a547ed3"
-      ],
-      "target": "cli/win-x64/winapp.exe",
+    "4b54f4eb14c18c15cb572b88baa253008f728ee4ff3e248f8bf767fad27eac8a": {
+      "signature": "4b54f4eb14c18c15cb572b88baa253008f728ee4ff3e248f8bf767fad27eac8a",
+      "target": "cli/win-x64/libSkiaSharp.dll",
       "memberOf": [
         "default"
       ],
       "tool": "binskim",
       "ruleId": "BA2008",
-      "createdDate": "2025-10-14 18:40:43Z",
-      "expirationDate": "2026-04-02 18:45:20Z",
-      "justification": "This error is baselined with an expiration date of 180 days from 2025-10-14 18:45:20Z"
+      "createdDate": "2026-04-17 00:00:00Z",
+      "expirationDate": "2026-10-14 00:00:00Z",
+      "justification": "libSkiaSharp.dll is a third-party native binary shipped by the SkiaSharp NuGet package. We cannot recompile it to enable /guard:cf. Tracked by upstream SkiaSharp."
     }
   }
 }
