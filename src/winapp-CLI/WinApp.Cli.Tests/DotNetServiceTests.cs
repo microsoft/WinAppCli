@@ -1038,7 +1038,7 @@ public class DotNetServiceTests : BaseCommandTests
         // Assert
         Assert.IsTrue(result, "Should modify csproj when no asset Content items exist");
         var content = File.ReadAllText(csprojPath);
-        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**"" />"),
+        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**\*"" />"),
             "Should add Assets glob Content item");
         Assert.IsTrue(content.Contains("</Project>"),
             "Should preserve </Project> closing tag");
@@ -1054,7 +1054,7 @@ public class DotNetServiceTests : BaseCommandTests
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include=""Assets\**"" />
+    <Content Include=""Assets\**\*"" />
   </ItemGroup>
 </Project>
 ");
