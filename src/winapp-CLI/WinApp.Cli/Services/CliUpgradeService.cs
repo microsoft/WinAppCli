@@ -140,8 +140,7 @@ internal class CliUpgradeService(
         switch (channel)
         {
             case InstallChannel.Npm:
-                logger.LogInformation("winapp was installed via npm. To upgrade, run:");
-                logger.LogInformation("  npm update -g @microsoft/winappcli");
+                logger.LogInformation("winapp was installed via Node. Upgrade with your Node package manager.");
                 return 0;
 
             case InstallChannel.NuGet:
