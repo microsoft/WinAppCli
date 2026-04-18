@@ -123,7 +123,7 @@ internal interface IDotNetService
     Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Ensures the .csproj contains a <c>&lt;Content Include="Assets\**" /&gt;</c> item so that
+    /// Ensures the .csproj contains a <c>&lt;Content Include="Assets\**\*" /&gt;</c> item so that
     /// generated visual assets (StoreLogo, AppList, etc.) are included in the MSIX package layout.
     /// Without this, non-WinUI projects exclude the assets from the .build.appxrecipe.
     /// </summary>
