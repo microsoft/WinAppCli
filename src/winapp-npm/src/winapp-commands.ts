@@ -92,7 +92,7 @@ export interface CertGenerateOptions extends CommonOptions {
 }
 
 /**
- * Create a self-signed certificate for local testing only. Publisher must match AppxManifest.xml (auto-inferred if --manifest provided or appxmanifest.xml is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
+ * Create a self-signed certificate for local testing only. Publisher must match the app manifest (auto-inferred if --manifest is provided or if appxmanifest.xml or Package.appxmanifest is in the working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
  */
 export async function certGenerate(options: CertGenerateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['cert', 'generate'];
