@@ -646,6 +646,15 @@ internal class WorkspaceSetupService(
                     await SetupManifestSubTaskAsync(options, shouldGenerateManifest, manifestGenerationInfo, taskContext, cancellationToken);
                 }
 
+                // Add generated assets as Content items so MSIX tooling includes them in the package layout
+                if (isDotNetProject && csprojFile != null && shouldGenerateManifest)
+                {
+                    if (await dotNetService.EnsureAssetContentItemsAsync(csprojFile, cancellationToken))
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Added asset Content items to .csproj");
+                    }
+                }
+
                 // Save configuration (native/C++ projects only — .NET uses .csproj PackageReferences)
                 if (!isDotNetProject && !options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && usedVersions != null)
                 {

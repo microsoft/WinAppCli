@@ -76,4 +76,7 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default)
         => _real.AnnotatePackageReferencesAsync(csprojPath, packageComments, cancellationToken);
+
+    public Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+        => _real.EnsureAssetContentItemsAsync(csprojPath, cancellationToken);
 }
