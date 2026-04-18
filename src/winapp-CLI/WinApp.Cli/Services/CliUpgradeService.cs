@@ -328,7 +328,7 @@ internal class CliUpgradeService(
         var upgradeHint = channel switch
         {
             InstallChannel.Npm => "npm update -g @microsoft/winappcli",
-            InstallChannel.NuGet => "update the Microsoft.Windows.SDK.BuildTools.WinApp NuGet package",
+            InstallChannel.NuGet => "dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp",
             _ => "winapp upgrade"
         };
 
