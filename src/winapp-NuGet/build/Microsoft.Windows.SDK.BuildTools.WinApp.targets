@@ -125,7 +125,7 @@
     
     <!-- Validate manifest exists -->
     <Error Condition="'$(WinAppManifestPath)' != '' And !Exists('$(WinAppManifestPath)')"
-           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure Package.appxmanifest or appxmanifest.xml exists in your project directory." />
+           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure Package.appxmanifest or appxmanifest.xml exists at the resolved manifest path, in your project directory, or in the build output directory, as applicable." />
     <Error Condition="'$(WinAppManifestPath)' == ''"
            Text="[WinAppRunSupport] No AppxManifest found. Ensure Package.appxmanifest or appxmanifest.xml exists in your project or build output directory. Run 'winapp init' to generate one." />
     
