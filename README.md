@@ -273,7 +273,7 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm, and NuGet, from the repo root
+# Build the CLI and package for npm, VS Code extension, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 

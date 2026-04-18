@@ -114,6 +114,7 @@ The main build script now includes NuGet packaging:
 ```powershell
 .\scripts\build-cli.ps1                        # Full build including NuGet
 .\scripts\build-cli.ps1 -SkipNuGet             # Skip NuGet packages
+.\scripts\build-cli.ps1 -SkipVsc              # Skip VS Code extension
 ```
 
 ## Usage
@@ -155,6 +156,7 @@ Register identity without launching:
 </PropertyGroup>
 ```
 
+
 Capture OutputDebugString messages and first-chance exceptions:
 ```xml
 <PropertyGroup>
@@ -162,7 +164,7 @@ Capture OutputDebugString messages and first-chance exceptions:
 </PropertyGroup>
 ```
 
-## Outstanding Production Blockers
+## Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
 

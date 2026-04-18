@@ -171,7 +171,7 @@ winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
 
 ## Related skills
-- `winapp-setup` for adding Windows SDK and DevTools to your project
+- `winapp-setup` for adding Windows SDK to your project
 - `winapp-package` for packaging apps as MSIX
 
 ## Troubleshooting
@@ -190,7 +190,7 @@ Note: The filename input in standard file dialogs typically has AutomationId `11
 
 ### `winapp ui status`
 
-Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+Connect to a target app and display connection info.
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -432,7 +432,7 @@ Wait for an element to appear, disappear, or have a property reach a target valu
 | `--json` | Format output as JSON | (none) |
 | `--property` | Property name to read or filter on | (none) |
 | `--timeout` | Timeout in milliseconds | `5000` |
-| `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern ΓåÆ ValuePattern ΓåÆ Name). Combine with --property to check a specific property instead. | (none) |
+| `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui list-windows`
