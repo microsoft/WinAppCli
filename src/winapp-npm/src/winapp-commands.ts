@@ -1036,18 +1036,3 @@ export async function update(options: UpdateOptions = {}): Promise<WinappResult>
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   return execCommand(args, options);
 }
-
-// ---------------------------------------------------------------------------
-// upgrade
-// ---------------------------------------------------------------------------
-
-export interface UpgradeOptions extends CommonOptions {
-}
-
-/**
- * Check for and install the latest version of the winapp CLI. For MSIX installs, downloads and installs the latest MSIX. For standalone exe installs, downloads and swaps the executable. For npm or NuGet installs, shows instructions for using the package manager.
- */
-export async function upgrade(options: UpgradeOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['upgrade'];
-  return execCommand(args, options);
-}
