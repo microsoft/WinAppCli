@@ -49,11 +49,11 @@
       This is set here (in targets) because $(OutputPath) is not available in props.
     -->
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
-    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
-    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
   </PropertyGroup>
 
   <!--
