@@ -44,8 +44,8 @@
     <!--
       Path to the AppxManifest.xml file.
       Auto-detected from output directory first, then project directory.
-      Checks all supported manifest filenames: AppxManifest.xml (MSBuild output),
-      appxmanifest.xml (winapp convention), and Package.appxmanifest (VS convention).
+      Checks all supported manifest filenames: Package.appxmanifest (VS convention), AppxManifest.xml (MSBuild output),
+      and appxmanifest.xml (winapp convention).
       This is set here (in targets) because $(OutputPath) is not available in props.
     -->
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
