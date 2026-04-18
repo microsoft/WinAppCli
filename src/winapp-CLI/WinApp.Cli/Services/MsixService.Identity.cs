@@ -705,7 +705,7 @@ internal partial class MsixService
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning("{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
+                    logger.LogWarning(ex, "{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
                     taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
                 }
                 finally
