@@ -656,7 +656,7 @@ internal partial class DotNetService : IDotNetService
 
         var itemGroup =
             "  <ItemGroup>" + Environment.NewLine
-            + "    <Content Include=\"Assets\\**\" />" + Environment.NewLine
+            + "    <Content Include=\"Assets\\**\\*\" />" + Environment.NewLine
             + "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
 
         content = content[..closeProjectIdx] + itemGroup + content[closeProjectIdx..];
