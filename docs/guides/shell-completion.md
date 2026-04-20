@@ -1,6 +1,6 @@
 # Shell Completion
 
-Enable tab completion for `winapp` in your terminal. Once activated, pressing Tab will show an interactive menu of commands, options, and argument values as you type.
+Enable tab completion for `winapp` in your terminal. Once activated, pressing Tab will suggest commands, options, and argument values as you type.
 
 ## PowerShell
 
@@ -24,7 +24,13 @@ To try it in the current session without modifying your profile:
 winapp complete --setup powershell | Out-String | Invoke-Expression
 ```
 
-The setup script enables `MenuComplete` mode, which shows an interactive list of completions with descriptions when you press Tab. You can navigate the list with arrow keys.
+### Optional: Menu-style completions
+
+By default, Tab cycles through completions one at a time. For an interactive menu with descriptions, add this to your profile:
+
+```powershell
+Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
+```
 
 ### What it does
 
@@ -33,28 +39,6 @@ Registers a native argument completer that calls `winapp complete` on each Tab p
 ### To deactivate
 
 Open your profile (`notepad $PROFILE`) and remove the `Register-ArgumentCompleter` block for `winapp`. Restart PowerShell.
-
-## Bash
-
-```bash
-winapp complete --setup bash >> ~/.bashrc
-source ~/.bashrc
-```
-
-### To deactivate
-
-Remove the `_winapp_completions` function and the `complete -o default -F _winapp_completions winapp` line from `~/.bashrc`. Restart your shell.
-
-## Zsh
-
-```zsh
-winapp complete --setup zsh >> ~/.zshrc
-source ~/.zshrc
-```
-
-### To deactivate
-
-Remove the `_winapp` function and `compdef _winapp winapp` line from `~/.zshrc`. Restart your shell.
 
 ## What gets completed
 

@@ -213,7 +213,6 @@ internal class CompleteCommand : Command, IShortDescription
 
     private static string GetPowerShellScript() =>
         """
-        Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
         Register-ArgumentCompleter -Native -CommandName winapp -ScriptBlock {
             param($wordToComplete, $commandAst, $cursorPosition)
             if ($wordToComplete -like '.*' -or $wordToComplete -like '\*' -or $wordToComplete -like '[A-Z]:\*') { return }
