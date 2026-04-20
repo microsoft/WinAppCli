@@ -11,6 +11,9 @@ Before starting this guide, make sure you've:
 > [!NOTE]
 > WinML runs on any Windows 10 (1809+) or Windows 11 device. For best performance, devices with GPUs or NPUs are recommended, but the API works on CPU as well.
 
+> [!IMPORTANT]
+> The WinML addon requires the **experimental** Windows App SDK. If you selected "Stable SDKs" during `winapp init` in the setup guide, you'll need to update your SDK version. Edit `winapp.yaml` and change the `Microsoft.WindowsAppSDK` version to `2.0.0-experimental3`, then run `npx winapp restore` to update.
+
 ## Step 1: Create a C# Native Addon
 
 Let's create a native addon that will use WinML APIs. We'll use a C# template that leverages [node-api-dotnet](https://github.com/microsoft/node-api-dotnet) to bridge JavaScript and C#.
@@ -24,11 +27,12 @@ This creates a `winMlAddon/` folder with:
 - `winMlAddon.csproj` - Project file with references to Windows SDK and Windows App SDK
 - `README.md` - Documentation on how to use the addon
 
-The command also adds a `build-winMlAddon` script to your `package.json` for building the addon:
+The command also adds a `build-winMlAddon` script to your `package.json` for building the addon, and a `clean-winMlAddon` script for cleaning build artifacts:
 ```json
 {
   "scripts": {
-    "build-winMlAddon": "dotnet publish ./winMlAddon/winMlAddon.csproj -c Release"
+    "build-winMlAddon": "dotnet publish ./winMlAddon/winMlAddon.csproj -c Release",
+    "clean-winMlAddon": "dotnet clean ./winMlAddon/winMlAddon.csproj"
   }
 }
 ```
@@ -42,7 +46,8 @@ Let's verify everything is set up correctly by building the addon:
 npm run build-winMlAddon
 ```
 
-> **Note:** You can also create a C++ addon using `npx winapp node create-addon` (without the `--template` flag). C++ addons use [node-addon-api](https://github.com/nodejs/node-addon-api) and provide direct access to Windows APIs with maximum performance. See the [C++ Notification Addon guide](cpp-notification-addon.md) for a walkthrough or the [full command documentation](../../usage.md#node-create-addon) for more options.
+> [!NOTE]
+> You can also create a C++ addon using `npx winapp node create-addon` (without the `--template` flag). C++ addons use [node-addon-api](https://github.com/nodejs/node-addon-api) and provide direct access to Windows APIs with maximum performance. See the [C++ Notification Addon guide](cpp-notification-addon.md) for a walkthrough or the [full command documentation](../../usage.md#node-create-addon) for more options.
 
 ## Step 2: Download the SqueezeNet Model and Get Sample Code
 
@@ -64,7 +69,7 @@ We'll use the **Classify Image** sample from the [AI Dev Gallery](https://aka.ms
 
 ## Step 3: Add Required NuGet Packages
 
-Before adding the WinML code, we need to add two additional NuGet packages that are required for image processing and ONNX Runtime extensions.
+Before adding the WinML code, we need to add additional NuGet packages required for image processing, ONNX Runtime, and GenAI support.
 
 ### 3.1. Update Directory.packages.props
 
@@ -79,9 +84,12 @@ Add the following package versions to the `Directory.packages.props` file in the
   <ItemGroup>
     <PackageVersion Include="Microsoft.JavaScript.NodeApi" Version="0.9.17" />
     <PackageVersion Include="Microsoft.JavaScript.NodeApi.Generator" Version="0.9.17" />
-    <!-- Add these two packages for WinML -->
+    <!-- Add these packages for WinML -->
 +   <PackageVersion Include="Microsoft.ML.OnnxRuntime.Extensions" Version="0.14.0" />
 +   <PackageVersion Include="System.Drawing.Common" Version="9.0.9" />
++   <PackageVersion Include="Microsoft.Extensions.AI" Version="9.9.1" />
++   <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.10.1" />
++   <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" Version="0.10.1" />
     
     <!-- These versions may be updated automatically during restore to match yaml -->
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.0.0-experimental3" />
@@ -98,9 +106,12 @@ Open `winMlAddon/winMlAddon.csproj` and add the package references to the `<Item
 <ItemGroup>
   <PackageReference Include="Microsoft.JavaScript.NodeApi" />
   <PackageReference Include="Microsoft.JavaScript.NodeApi.Generator" />
-  <!-- Add these two packages for WinML -->
+  <!-- Add these packages for WinML -->
 + <PackageReference Include="Microsoft.ML.OnnxRuntime.Extensions" />
 + <PackageReference Include="System.Drawing.Common" />
++ <PackageReference Include="Microsoft.Extensions.AI" />
++ <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" />
++ <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.WinML" />
   
   <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
   <PackageReference Include="Microsoft.WindowsAppSDK" />
@@ -110,6 +121,9 @@ Open `winMlAddon/winMlAddon.csproj` and add the package references to the `<Item
 **What these packages do:**
 - **Microsoft.ML.OnnxRuntime.Extensions** - Provides additional operators and utilities for ONNX Runtime
 - **System.Drawing.Common** - Enables image loading and manipulation for preprocessing
+- **Microsoft.Extensions.AI** - AI abstractions for .NET
+- **Microsoft.ML.OnnxRuntimeGenAI.Managed** - Managed bindings for ONNX Runtime GenAI
+- **Microsoft.ML.OnnxRuntimeGenAI.WinML** - WinML integration for ONNX Runtime GenAI
 
 ## Step 4: Add the Sample Code
 
@@ -119,13 +133,10 @@ The AI Dev Gallery shows the complete implementation for image classification wi
 
 We've adapted this code for Electron and you can find the complete implementation in the [electron-winml sample](../../../samples/electron-winml/). The `winMlAddon/` folder contains the modified code from the AI Dev Gallery.
 
-You can either:
+Copy the entire `winMlAddon/` folder from [samples/electron-winml/winMlAddon/](../../../samples/electron-winml/winMlAddon/) to your project root, replacing the one created in Step 1. The sample includes multiple files beyond `addon.cs` (helper classes in `Utils/`, a chat client, etc.) that are required for the addon to build and run.
 
-**Option A: Copy from the sample**
-Copy the entire `winMlAddon/` folder from [samples/electron-winml/winMlAddon/](../../../samples/electron-winml/winMlAddon/) to your project root, replacing the one created in Step 1.
-
-**Option B: Manually update your addon**
-Open `winMlAddon/addon.cs` and update it with the code from the sample. The complete source is available at [samples/electron-winml/winMlAddon/addon.cs](../../../samples/electron-winml/winMlAddon/addon.cs).
+> [!IMPORTANT]
+> You must copy the **entire folder**, not just `addon.cs`. The addon depends on helper files in the `Utils/` subfolder (`Prediction.cs`, `ImageNet.cs`, `BitmapFunctions.cs`, etc.).
 
 ### Key Implementation Details
 
@@ -212,7 +223,8 @@ module.exports = {
    - `.msix` files - Packaged outputs
    - `winMlAddon/` source files - Keeps only the `dist/` folder with compiled binaries
 
-> **📝 Note:** If you're using a different packaging tool (electron-builder, etc.), you'll need to configure similar settings for unpacking native dependencies and excluding development files. Check your packager's documentation for ASAR unpacking options.
+> [!NOTE]
+> If you're using a different packaging tool (electron-builder, etc.), you'll need to configure similar settings for unpacking native dependencies and excluding development files. Check your packager's documentation for ASAR unpacking options.
 
 #### 4. Image Classification
 
@@ -232,7 +244,8 @@ The complete implementation handles:
 - Running the model inference
 - Post-processing results to get top predictions with labels and confidence scores
 
-> **📝 Note:** The full source code includes image preprocessing, tensor creation, and result parsing. Check the [sample implementation](../../../samples/electron-winml/winMlAddon/addon.cs) for all the details.
+> [!NOTE]
+> The full source code includes image preprocessing, tensor creation, and result parsing. Check the [sample implementation](../../../samples/electron-winml/winMlAddon/addon.cs) for all the details.
 
 ### Understanding the Code
 
@@ -261,7 +274,7 @@ The compiled addon will be in `winMlAddon/dist/winMlAddon.node`.
 
 ## Step 6: Test the Addon
 
-Now let's test the addon works by calling it from the main process. Open `src/index.js` and follow these steps:
+Now let's test the addon works by calling it from the main process. Open `src/main.js` and follow these steps:
 
 ### 6.1. Load the Addon
 
@@ -320,12 +333,13 @@ testWinML();
 To test image classification:
 
 1. Create a `test-images/` folder in your project root
-2. Add some test images (e.g., `sample.jpg`, `cat.jpg`, `dog.jpg`)
-3. The SqueezeNet model recognizes 1000 different ImageNet classes
+2. Add a test image named `sample.jpg` (the code expects this exact filename)
+3. The SqueezeNet model recognizes 1000 different ImageNet classes (animals, objects, scenes, etc.)
 
 When you run the app, you'll see the classification results in the console!
 
-> **💡 Tip:** For a complete implementation with IPC handlers, file selection dialogs, and a UI, see the [electron-winml sample](../../../samples/electron-winml/src/index.js).
+> [!TIP]
+> For a complete implementation with IPC handlers, file selection dialogs, and a UI, see the [electron-winml sample](../../../samples/electron-winml/src/index.js).
 
 ## Step 7: Update Debug Identity
 
@@ -340,7 +354,8 @@ This command:
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without full MSIX packaging
 
-> **📝 Note:** This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
+> [!NOTE]
+> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
 > - Modify `appxmanifest.xml` (change capabilities, identity, or properties)
 > - Update app assets (icons, logos, etc.)
 
@@ -389,6 +404,43 @@ To fully integrate your ONNX model, you'll need to:
 - **[AI Dev Gallery](https://aka.ms/aidevgallery)** - Sample gallery of all AI APIs 
 - **[Windows App SDK Samples](https://github.com/microsoft/WindowsAppSDK-Samples/tree/main/Samples/WindowsML)** - Collection of Windows App SDK samples
 - **[node-api-dotnet](https://github.com/microsoft/node-api-dotnet)** - C# ↔ JavaScript interop library
+
+### Troubleshooting
+
+<details>
+<summary><b>Build fails with NU1010: PackageReference items do not define a corresponding PackageVersion</b></summary>
+
+Ensure all packages referenced in `winMlAddon.csproj` have matching entries in `Directory.packages.props`. See Step 3 for the complete list of required packages.
+
+</details>
+
+<details>
+<summary><b>"not a valid Win32 application" when loading the addon</b></summary>
+
+This means the addon was built for a different architecture than your Node.js/Electron runtime. Check your Node.js architecture:
+
+```bash
+node -e "console.log(process.arch)"
+```
+
+Then rebuild the addon with the matching target:
+
+```bash
+# For x64 Node.js:
+dotnet publish ./winMlAddon/winMlAddon.csproj -c Release -r win-x64
+
+# For ARM64 Node.js:
+dotnet publish ./winMlAddon/winMlAddon.csproj -c Release -r win-arm64
+```
+
+If you recently changed your Node.js installation, also reinstall `node_modules` to get the matching Electron binary:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+</details>
 
 ### Get Help
 
