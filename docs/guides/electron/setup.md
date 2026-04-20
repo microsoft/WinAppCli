@@ -20,6 +20,12 @@ npm create electron-app@latest my-windows-app
 cd my-windows-app
 ```
 
+When prompted by Electron Forge:
+- **Bundler**: Select **None** (recommended — native addons work without extra configuration)
+- **Language**: Select **JavaScript** (this guide uses JS; TypeScript works too)
+- **Electron version**: Select **latest**
+- **Initialize git**: Your preference
+
 Verify the app runs:
 
 ```bash
@@ -29,6 +35,8 @@ npm start
 You should see the default Electron Forge window. Close it and let's add Windows capabilities!
 
 ## Step 2: Install winapp CLI
+
+The Electron workflow requires the **npm package** (`@microsoft/winappcli`) rather than the standalone CLI installed from winget. The npm package includes Node.js-specific helpers (like `add-electron-debug-identity` and `create-addon`) that are not available in the native CLI. If you already have winapp installed from winget, that's fine — the npm package adds Node.js-specific tools as a project dependency and won't conflict with your system installation.
 
 ```bash
 npm install --save-dev @microsoft/winappcli
@@ -41,7 +49,7 @@ The `winapp init` command sets up everything you need in one go: app manifest, a
 Run the following command and follow the prompts:
 
 ```bash
-npx winapp init
+npx winapp init .
 ```
 
 When prompted:
@@ -66,16 +74,17 @@ This command sets up everything you need for Windows development:
 
 4. **Creates `winapp.yaml`** - Tracks SDK versions and project configuration
 
-6. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
+5. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
 
-7. **Enables Developer Mode in Windows** - Required for debugging our application
+6. **Enables Developer Mode in Windows** - Required for debugging our application
 
 > [!NOTE]
 > The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
-> **💡 About the Windows SDKs:**
+> [!TIP]
+> **About the Windows SDKs:**
 >
 > - **[Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/)** - A development platform that lets you build Win32/desktop apps. It's designed around Windows APIs that are coupled to particular versions of the OS. Use this to access core Win32 APIs like file system, networking, and system services.
 > 
@@ -100,7 +109,14 @@ This script automatically runs after `npm install` and does two things:
 1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
 2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
 
-Now whenever someone runs `npm install`, the Windows environment is automatically configured!
+Now run `npm install` to trigger the postinstall script and configure the Windows environment:
+
+```bash
+npm install
+```
+
+> [!NOTE]
+> The `postinstall` script runs automatically after every `npm install`. This means the Windows environment will be configured automatically whenever someone clones your project and runs `npm install`.
 
 <details>
 <summary><b>💡 Cross-Platform Development (click to expand)</b></summary>
@@ -138,7 +154,7 @@ This ensures Windows-specific setup only runs on Windows machines, allowing deve
 
 ## Step 5: Understanding Debug Identity
 
-The `postinstall` script in Step 4 includes the `winapp node add-electron-debug-identity` command, which enables you to test Windows APIs that require app identity during development.
+The `npm install` you ran in Step 4 triggered the `postinstall` script, which ran `winapp node add-electron-debug-identity`. This gives your app a temporary debug identity so you can test Windows APIs that require app identity during development.
 
 ### What Does Debug Identity Do?
 
@@ -147,7 +163,7 @@ This command:
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without creating a full MSIX package
 
-The debug identity is automatically applied when you run `npm install` thanks to the `postinstall` script.
+The debug identity was applied automatically when you ran `npm install` in Step 4. Going forward, it will be reapplied whenever anyone runs `npm install`.
 
 ### When to Manually Update Debug Identity
 
@@ -164,6 +180,8 @@ You can now test your Electron app with the debug identity applied:
 ```bash
 npm start
 ```
+
+You should see a **desktop application window** open (not a browser tab) — this is how Electron apps run.
 
 <details>
 <summary><b>⚠️ Known Issue: App Crashes or Blank Window (click to expand)</b></summary>

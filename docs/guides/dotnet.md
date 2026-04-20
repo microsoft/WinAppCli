@@ -10,12 +10,12 @@ A standard executable (like one created with `dotnet build`) does not have packa
 
 ## Prerequisites
 
-1.  **.NET SDK**: Install the .NET SDK:
+1.  **.NET SDK**: Install the .NET SDK (requires a restart after installation):
     ```powershell
     winget install Microsoft.DotNet.SDK.10 --source winget
     ```
 
-2.  **winapp CLI**: Install the `winapp` tool via winget:
+2.  **winapp CLI**: Install the `winapp` tool via winget (or update if already installed):
     ```powershell
     winget install Microsoft.winappcli --source winget
     ```
@@ -104,6 +104,14 @@ This command will:
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
+To verify the packages were added to your project:
+
+```powershell
+dotnet list package
+```
+
+You should see `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` in the output.
+
 ## 5. Debug with Identity
 
 Since `winapp init` added the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package to your project, you can simply run:
@@ -113,6 +121,8 @@ dotnet run
 ```
 
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
+
+> **Note**: You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
 
 > **Console apps:** By default, AUMID activation opens a new window. For console applications that need stdin/stdout in the current terminal, add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to your `.csproj` and ensure your manifest has a `uap5:ExecutionAlias`. You can add one with `winapp manifest add-alias`.
 
@@ -165,10 +175,13 @@ With this configuration, `dotnet build` applies the debug identity and you can r
 
 > **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
+> **When to skip this**: If you prefer explicit control over when identity is applied, or if you're working on code that doesn't need identity for most of your development cycle, the manual approach above may be simpler.
 
-## 6. Using Windows App SDK
+## 6. Using Windows App SDK (Optional)
 
-If you ran `winapp init` (Step 4), `Microsoft.WindowsAppSDK` was already added as a NuGet package reference to your `.csproj`. If you skipped SDK setup during init, or need to add it manually, run:
+The Windows App SDK gives you access to modern Windows APIs beyond what the base Windows SDK provides — things like the notification system, windowing APIs, app lifecycle management, and on-device AI. If your app needs any of these capabilities, this step is for you. If you just need package identity for distribution, you can skip to step 7.
+
+If you ran `winapp init` (Step 4), `Microsoft.WindowsAppSDK` was already added as a NuGet package reference to your `.csproj`. You can verify with `dotnet list package`. If you skipped SDK setup during init, or need to add it manually, run:
 
 ```powershell
 dotnet add package Microsoft.WindowsAppSDK
@@ -176,7 +189,7 @@ dotnet add package Microsoft.WindowsAppSDK
 
 ### Update Program.cs
 
-Let's update the app to use the Windows App Runtime API to get the runtime version:
+Replace the entire contents of `Program.cs` with the following code, which adds a Windows App Runtime version check:
 
 ```csharp
 using Windows.ApplicationModel;
@@ -206,7 +219,7 @@ class Program
 
 ### Build and Run
 
-Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-register with identity so `winapp` adds the runtime dependency. If you added the WinApp NuGet package (recommended), simply run `dotnet run`. Otherwise:
+Rebuild and run the application with Windows App SDK. Since we've added the WinAppSDK, we need to re-register with identity so `winapp` adds the runtime dependency. If you added the WinApp NuGet package (recommended), simply run `dotnet run`. Otherwise (replace `dotnet-app` with your project name):
 
 ```powershell
 dotnet build -c Debug
@@ -238,8 +251,10 @@ First, build your application in release mode for optimal performance:
 dotnet build -c Release
 ```
 
+> **Note**: You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
+
 ### Add Execution Alias (for console apps)
-To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `appxmanifest.xml`. If you are building a WPF or WinForms app, this step is not necessary. 
+To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `appxmanifest.xml`. If you are building a WPF or WinForms app, this step is not necessary — those apps launch from the Start menu instead.
 
 Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
 
@@ -281,7 +296,7 @@ winapp cert generate --if-exists skip
 
 ### Sign and Pack
 
-Now you can package and sign. Point the pack command to your build output folder:
+Now you can package and sign. Point the pack command to your build output folder (replace `dotnet-app` and the TFM path with your project's values):
 
 ```powershell
 # package and sign the app with the generated certificate
@@ -309,7 +324,9 @@ dotnet-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-### Tips:
+> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `appxmanifest.xml` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+
+## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
 2. The Microsoft Store will sign the MSIX for you, no need to sign before submission.
 3. You might need to create multiple MSIX packages, one for each architecture you support (x64, Arm64). Use the `-r` flag with `dotnet build` to target specific architectures: `dotnet build -c Release -r win-x64` or `dotnet build -c Release -r win-arm64`.
@@ -334,3 +351,10 @@ With this configuration:
 - The final `.msix` file will be in the root of the project
 
 You can also create a custom configuration (e.g., `PackagedRelease`) by modifying the condition to `'$(Configuration)' == 'PackagedRelease'`.
+
+## Next Steps
+
+- **Distribute via winget**: Submit your MSIX to the [Windows Package Manager Community Repository](https://github.com/microsoft/winget-pkgs)
+- **Publish to the Microsoft Store**: Use `winapp store` to submit your package
+- **Set up CI/CD**: Use the [`setup-WinAppCli`](https://github.com/microsoft/setup-WinAppCli) GitHub Action to automate packaging in your pipeline
+- **Explore Windows APIs**: With package identity, you can now use [Notifications](https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart), [on-device AI](https://learn.microsoft.com/windows/ai/apis/), and other [identity-dependent APIs](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions)
