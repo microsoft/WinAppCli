@@ -813,9 +813,13 @@ internal class WorkspaceSetupService(
         // Step 1: Handle configuration requirements
         if (options.RequireExistingConfig && !configService.Exists())
         {
-            logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
-            logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            // Non-.NET project with no winapp.yaml — nothing to restore.
+            // (.NET projects without yaml are handled earlier in SetupWorkspaceAsync.)
+            // This is a no-op rather than an error: a project that doesn't declare
+            // SDK package versions in winapp.yaml has nothing for restore to do.
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
         // Step 2: Load or prepare configuration
