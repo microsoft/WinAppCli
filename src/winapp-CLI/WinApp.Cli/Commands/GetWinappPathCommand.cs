@@ -61,7 +61,12 @@ internal class GetWinappPathCommand : Command, IShortDescription
                     if (!winappDir.Exists)
                     {
                         var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
-                        logger.LogWarning("{UISymbol} No local .winapp directory found; falling back to the global cache at {GlobalDir}.", UiSymbols.Warning, globalDir.FullName);
+                        // Write the warning to stderr so stdout stays script-friendly
+                        // (callers do `path = $(winapp get-winapp-path)`). Going through
+                        // ILogger.LogWarning would route via the static AnsiConsole and
+                        // pollute stdout (TextWriterLogger only sends >= Error to stderr).
+                        parseResult.InvocationConfiguration.Error.WriteLine(
+                            $"{UiSymbols.Warning} No local .winapp directory found; falling back to the global cache at {globalDir.FullName}.");
                         winappDir = globalDir;
                         directoryType = "Global (fallback)";
                     }

@@ -61,15 +61,25 @@ public class GetWinappPathCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Missing local .winapp should not be a fatal error; the global cache is a sensible fallback.");
 
-        var output = TestAnsiConsole.Output;
-        StringAssert.Contains(output, globalDir.FullName,
+        var stdout = TestAnsiConsole.Output;
+        StringAssert.Contains(stdout, globalDir.FullName,
             "Should fall back to the global .winapp path (#475) instead of returning a non-existent local path.");
 
         var nonExistentLocal = Path.Combine(_tempDirectory.FullName, ".winapp");
         Assert.IsFalse(File.Exists(nonExistentLocal) || Directory.Exists(nonExistentLocal),
             "Sanity check: the local .winapp should not exist for this test.");
-        Assert.IsFalse(output.Contains(nonExistentLocal),
+        Assert.IsFalse(stdout.Contains(nonExistentLocal),
             "Must not print the non-existent <cwd>/.winapp path that scripts can't use (#475).");
+
+        // The warning must go to stderr so `path = $(winapp get-winapp-path)` in scripts
+        // captures only the path. Verifying both sides keeps stdout script-friendly.
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "No local .winapp directory found",
+            "Should warn (on stderr) that no local .winapp directory was found before falling back.");
+        StringAssert.Contains(stderr, globalDir.FullName,
+            "Warning should mention the global cache path being used as the fallback.");
+        Assert.IsFalse(stdout.Contains("No local .winapp directory found"),
+            "Warning text must not pollute stdout — scripts capturing stdout should get only the path.");
     }
 
     [TestMethod]
