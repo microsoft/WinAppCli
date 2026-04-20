@@ -21,6 +21,12 @@
     Skip MSIX packages creation
 .PARAMETER SkipDocs
     Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
+.PARAMETER SkipAll
+    Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
+.PARAMETER OnlyDocs
+    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs). Alias: DocsOnly
+.PARAMETER OnlyTests
+    Skip NuGet, MSIX, docs, and npm package creation (builds the CLI and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -36,6 +42,16 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipMsix
 .EXAMPLE
+    .\scripts\build-cli.ps1 -SkipAll
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyDocs
+.EXAMPLE
+    .\scripts\build-cli.ps1 -DocsOnly
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyTests
+.EXAMPLE
+    .\scripts\build-cli.ps1 -TestsOnly
+.EXAMPLE
     .\scripts\build-cli.ps1 -Stable
 #>
 
@@ -48,8 +64,39 @@ param(
     [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
+    [switch]$SkipAll = $false,
+    [Alias("DocsOnly")]
+    [switch]$OnlyDocs = $false,
+    [Alias("TestsOnly")]
+    [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
+
+# Validate compound flag usage
+$CompoundFlagsCount = @($SkipAll, $OnlyDocs, $OnlyTests) | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count
+if ($CompoundFlagsCount -gt 1) {
+    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests/-TestsOnly can be specified."
+    exit 1
+}
+
+# Apply compound skip flags
+if ($SkipAll) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+    $SkipDocs = $true
+} elseif ($OnlyDocs) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+} elseif ($OnlyTests) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipDocs = $true
+}
 
 # Ensure we're running from the project root
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
@@ -172,7 +219,7 @@ try
     }
 
     # Step 4: Build Node CLI so E2E tests that invoke node cli.js can run
-    if (-not $SkipNpm) {
+    if ((-not $SkipNpm) -or (-not $SkipTests)) {
         Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
         Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
         try {

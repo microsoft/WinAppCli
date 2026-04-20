@@ -70,6 +70,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
         CreateExternalCatalogCommand createExternalCatalogCommand,
+        CompleteCommand completeCommand,
         UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
@@ -87,6 +88,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
         Subcommands.Add(uiCommand);
+        Subcommands.Add(completeCommand);
 
         Options.Add(CliSchemaOption);
         Options.Add(CallerOption);

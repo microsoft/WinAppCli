@@ -137,37 +137,11 @@ internal sealed class Telemetry : ITelemetry
     /// <param name="relatedActivityId">Optional relatedActivityId which will allow to correlate this telemetry with other telemetry in the same action/activity or thread and corelate them</param>
     public void LogException(string action, Exception e, Guid? relatedActivityId = null)
     {
-        var message = e.InnerException?.Message;
-        var innerMessage = message != null ? this.ReplaceSensitiveStrings(message) : null;
-        StringBuilder innerStackTrace = new();
-        Exception? innerException = e.InnerException;
-        while (innerException != null)
-        {
-            innerStackTrace.Append(innerException.StackTrace);
-
-            // Separating by 2 new lines to distinguish between different exceptions.
-            innerStackTrace.AppendLine();
-            innerStackTrace.AppendLine();
-            innerException = innerException.InnerException;
-        }
-
-        this.LogInternal(
+        this.LogError(
             ExceptionThrownEventName,
             LogLevel.Critical,
-            new
-            {
-                action,
-                name = e.GetType().Name,
-                stackTrace = e.StackTrace,
-                innerName = e.InnerException?.GetType().Name,
-                innerMessage,
-                innerStackTrace = innerStackTrace.ToString(),
-                message = this.ReplaceSensitiveStrings(e.Message),
-                PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
-                PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
-            },
-            relatedActivityId,
-            isError: true);
+            new ExceptionThrownEvent(action, e, this.ReplaceSensitiveStrings),
+            relatedActivityId);
     }
 
     /// <summary>
@@ -178,18 +152,11 @@ internal sealed class Telemetry : ITelemetry
     /// <param name="relatedActivityId">Optional relatedActivityId which will allow to correlate this telemetry with other telemetry in the same action/activity or thread and corelate them</param>
     public void LogTimeTaken(string eventName, uint timeTakenMilliseconds, Guid? relatedActivityId = null)
     {
-        this.LogInternal(
+        this.Log(
             TimeTakenEventName,
             LogLevel.Critical,
-            new
-            {
-                eventName,
-                timeTakenMilliseconds,
-                PartA_PrivTags = PartA_PrivTags.ProductAndServicePerformance,
-                PartA_PrivacyProduct = PrivacyProduct.WIN_APP_DEV_CLI,
-            },
-            relatedActivityId,
-            isError: false);
+            new TimeTakenEvent(eventName, timeTakenMilliseconds),
+            relatedActivityId);
     }
 
     /// <summary>
@@ -200,7 +167,14 @@ internal sealed class Telemetry : ITelemetry
     /// <param name="relatedActivityId">GUID to correlate activities.</param>
     public void LogCritical(string eventName, bool isError = false, Guid? relatedActivityId = null)
     {
-        this.LogInternal(eventName, LogLevel.Critical, new EmptyEvent(PartA_PrivTags.ProductAndServiceUsage), relatedActivityId, isError);
+        if (isError)
+        {
+            this.LogError(eventName, LogLevel.Critical, new EmptyEvent(PartA_PrivTags.ProductAndServiceUsage), relatedActivityId);
+        }
+        else
+        {
+            this.Log(eventName, LogLevel.Critical, new EmptyEvent(PartA_PrivTags.ProductAndServiceUsage), relatedActivityId);
+        }
     }
 
     /// <summary>
@@ -214,8 +188,7 @@ internal sealed class Telemetry : ITelemetry
     public void Log<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(string eventName, LogLevel level, T data, Guid? relatedActivityId = null)
         where T : EventBase
     {
-        data.ReplaceSensitiveStrings(this.ReplaceSensitiveStrings);
-        data.Caller = data.Caller != null ? this.ReplaceSensitiveStrings(data.Caller) : null;
+        this.SanitizeEventBase(data);
         this.LogInternal(eventName, level, data, relatedActivityId, isError: false);
     }
 
@@ -230,9 +203,19 @@ internal sealed class Telemetry : ITelemetry
     public void LogError<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(string eventName, LogLevel level, T data, Guid? relatedActivityId = null)
         where T : EventBase
     {
+        this.SanitizeEventBase(data);
+        this.LogInternal(eventName, level, data, relatedActivityId, isError: true);
+    }
+
+    /// <summary>
+    /// Sanitizes all cross-cutting EventBase fields that may contain PII.
+    /// Called once before any event is sent to LogInternal.
+    /// </summary>
+    private void SanitizeEventBase(EventBase data)
+    {
         data.ReplaceSensitiveStrings(this.ReplaceSensitiveStrings);
         data.Caller = data.Caller != null ? this.ReplaceSensitiveStrings(data.Caller) : null;
-        this.LogInternal(eventName, level, data, relatedActivityId, isError: true);
+        data.AgentName = data.AgentName != null ? this.ReplaceSensitiveStrings(data.AgentName) : null;
     }
 
     private void LogInternal<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(string eventName, LogLevel level, T data, Guid? relatedActivityId, bool isError)
