@@ -1,0 +1,137 @@
+TODO: HEADER IMAGE
+
+# Windows App Development CLI v0.3: `winapp run`, `winapp ui`, and .NET `dotnet run` Support
+
+Windows App Development CLI v0.3 is here! This release brings some of our best features yet: a full run-and-debug experience outside Visual Studio, built-in UI Automation from the command line, and a new NuGet package that makes `dotnet run` just work for packaged .NET apps. Get the update by running `winget install Microsoft.WinAppCLI` or [check the repo for other install options](https://github.com/microsoft/winappCli).
+
+TODO: ADD BUTTON FOR INSTALL STEPS
+
+Let's dive in!
+
+## 🏃‍♂️‍➡️ `winapp run`: The Visual Studio F5 experience, anywhere
+
+Think of `winapp run` as Visual Studio's F5 — but from the command line, and for any packaged app. Give it an unpackaged app folder and a manifest, and it handles the rest: registers a loose package, launches your app, and preserves your `LocalState` across re-deploys.
+
+```
+# Build your app, then run it as a packaged app
+winapp run ./bin/Debug
+```
+
+It works across the full range of app types we support — WinUI, WPF, C++, Rust, Tauri, Flutter — and comes with a set of modes designed for developers or automated workflows:
+
+- **`--detach`**: Launch the app and return control to the terminal immediately. Great for CI/automation pipelines where you need the app running but don't want to block.
+- **`--unregister-on-exit`**: Automatically cleans up the registered package when the app closes. Perfect for clean test runs where you don't want leftover state.
+- **`--debug-output`**: Captures `OutputDebugString` messages and exceptions in real time. When a crash occurs, a minidump is automatically captured and analyzed in-process. Managed (.NET) crashes are triaged via ClrMD; native (C++/WinRT) crashes are analyzed via DbgEng. Add `--symbols` to download PDBs from the Microsoft Symbol Server for full function names in native stacks.
+
+Whether you're a developer iterating locally or an agent running end-to-end validation, `winapp run` gives you a single command to go from build output to a running, debuggable packaged app.
+
+TODO: ADD GIF
+
+## 🖥️ `winapp ui`: UI Automation from the command line
+
+UI Automation is now built right into the CLI. `winapp ui` lets you inspect and interact with any running Windows application — WPF, WinForms, Win32, Electron, WinUI3 — all from the command line.
+
+```
+# List all visible windows
+winapp ui list-windows -a "My App"
+
+# Inspect the UI tree of a running app
+winapp ui inspect -a "My App" -i
+
+# Click a button by name
+winapp ui click "btn-save-d1" -a "My App"
+
+# Take a screenshot
+winapp ui screenshot -a "My App" -o screenshot.png
+
+# Find an element
+winapp ui search "Save" -a "My App"
+
+# Set a TextBox value
+winapp ui set-value "txt-name-a3" "Hello" -a "My App"
+
+# Block until element appears
+winapp ui wait-for "Done" -a "My App" -t 10000
+```
+
+Here's what you can do:
+
+- **List windows** — enumerate all top-level windows on the desktop.
+- **Inspect trees** — walk the full UI Automation tree of any window.
+- **Search across windows** — find elements by name, type, or automation ID.
+- **Click, invoke, set values** — drive the app just like a user would.
+- **Take screenshots** — capture individual windows or multi-window composites.
+- **Wait for elements** — block until a specific element appears, ideal for test synchronization.
+
+This unblocks a whole class of agentic and automation scenarios. Agents or a script can now actually *see* and *interact with* a running app — not just build it. Combine it with `winapp run` for a complete build → launch → verify workflow entirely from the terminal.
+
+TODO: ADD GIF
+
+## 📦 `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package
+
+We're introducing a new NuGet package that enables `dotnet run` to correctly launch packaged .NET apps. It works with WinUI, WPF, WinForms, Console, Avalonia, and more. 
+
+With `Microsoft.Windows.SDK.BuildTools.WinApp` configured, `dotnet run` can handle the entire inner loop: it can build your app, prepare a loose-layout package, register it with Windows, and launch — all in one step. No extra commands, no manual registration. Just `dotnet run`.
+
+Install it directly via NuGet, or let `winapp init` set it up for you (which also ensures your `.csproj` has all the right properties):
+
+```
+# Option 1: Let winapp init do the work
+winapp init
+
+# Option 2: Install the NuGet package directly
+dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp
+```
+
+TODO: ADD GIF
+
+## 🐚 Shell Completion
+
+Tab completion is here. Run one command and every `winapp` command, subcommand, and option becomes discoverable right in your terminal — with descriptions.
+
+```powershell
+# Set up permanently (PowerShell)
+winapp complete --setup powershell >> $PROFILE
+
+# Try it in the current session
+winapp complete --setup powershell | Out-String | Invoke-Expression
+```
+
+Press `Tab` to cycle through commands, or `Ctrl+Space` to see the full list with descriptions. Works for nested commands (`winapp cert <Tab>`) and options (`winapp init --c<Tab>`).
+
+TODO: ADD GIF
+
+## ⚡ Other notable changes
+
+- **`winapp unregister`**: The cleanup counterpart to `winapp run`. Safely removes a sideloaded dev package when you're done with it.
+- **`winapp manifest add-alias`**: Adds a `uap5:AppExecutionAlias` to your manifest so a packaged app can be launched by name from the command line — no more hunting for full package family names.
+- **Long path support**: `winapp run` now handles paths exceeding Windows' 260-character limit — no more silent failures on deep directory structures.
+- **Smarter `winapp init`**: The init command no longer overwrites existing NuGet package versions in your `.csproj`, prompts before installing packages, and automatically adds the properties required for packaging.
+- **`Package.appxmanifest` by default**: `winapp init` and `winapp manifest generate` now create a `Package.appxmanifest` file instead of `appxmanifest.xml`. This aligns with the Visual Studio convention and makes it easier to open and edit manifests in VS with the visual manifest editor.
+- **Smarter package resolution**: `winapp run` now resolves framework packages from your `.csproj` first and only falls back to `winapp.yml` if needed — reducing configuration friction for .NET projects.
+- **Taskbar icon fix**: Fixed a visual bug where a blue plate appeared behind app icons in the taskbar when running with a debug identity.
+- **WinAppRuntime install fix**: Framework packages are now correctly installed regardless of whether your manifest came from MSBuild or was specified manually — fixing a case where `winapp run` could fail on a fresh machine.
+
+## Get started today
+
+The Windows App Development CLI is available now in public preview. Visit our [GitHub repository](https://github.com/microsoft/WinAppCli) for documentation, guides, and to file issues.
+
+We would love to hear your feedback!
+
+To get started:
+
+**Install via WinGet:**
+
+```
+winget install Microsoft.WinAppCli
+```
+
+**Install via npm:**
+
+```
+npm install -g @microsoft/winappcli
+```
+
+Check out our [.NET](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md), [C++/CMAKE](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md), [Electron](https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md), Rust or Flutter guides for getting started quickly.
+
+Happy coding!
