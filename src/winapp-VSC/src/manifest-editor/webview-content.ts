@@ -417,14 +417,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             padding: 4px 10px;
             font-size: 12px;
             cursor: pointer;
-            color: var(--vscode-textLink-foreground, #3794ff);
-            background: transparent;
-            border: 1px dashed var(--vscode-textLink-foreground, #3794ff);
-            border-radius: 4px;
+            color: var(--vscode-button-foreground);
+            background: var(--vscode-button-background);
+            border: none;
+            border-radius: 2px;
             margin-bottom: 12px;
         }
         .btn-add-field:hover {
-            background: var(--vscode-list-hoverBackground, rgba(55,148,255,0.1));
+            background: var(--vscode-button-hoverBackground);
         }
         .optional-fields-group {
             display: flex;
