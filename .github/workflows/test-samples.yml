@@ -1,0 +1,190 @@
+name: Test Samples & Guides
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: 'Specific sample to test (or "all")'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - cpp-app
+          - dotnet-app
+          - electron
+          - flutter-app
+          - packaging-cli
+          - rust-app
+          - tauri-app
+          - wpf-app
+
+permissions:
+  contents: read
+
+jobs:
+  # Build npm (and NuGet) package for pull_request and workflow_dispatch events.
+  # This makes the workflow self-contained — no cross-workflow artifact chaining.
+  build:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '10.0.x'
+    - uses: actions/setup-node@v5
+      with:
+        node-version: '24'
+    - name: Build npm package
+      shell: pwsh
+      run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix
+    - uses: actions/upload-artifact@v4
+      with:
+        name: npm-package
+        path: artifacts/*.tgz
+    - uses: actions/upload-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget/*.nupkg
+        if-no-files-found: ignore
+
+  test-sample:
+    needs: [build]
+    if: needs.build.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app]
+    runs-on: windows-latest
+    name: ${{ matrix.sample }}
+
+    steps:
+    - name: Check if sample should run
+      id: check
+      shell: pwsh
+      run: |
+        $requested = '${{ github.event.inputs.sample || 'all' }}'
+        if ($requested -ne 'all' -and $requested -ne '${{ matrix.sample }}') {
+          echo "skip=true" >> $env:GITHUB_OUTPUT
+        } else {
+          echo "skip=false" >> $env:GITHUB_OUTPUT
+        }
+
+    - name: Checkout
+      if: steps.check.outputs.skip != 'true'
+      uses: actions/checkout@v5
+
+    # Download the npm package artifact built by the `build` job above
+    - name: Download npm package
+      if: steps.check.outputs.skip != 'true'
+      uses: actions/download-artifact@v4
+      with:
+        name: npm-package
+        path: artifacts/npm
+
+    # Download NuGet package for .NET samples
+    - name: Download NuGet package
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-package
+        path: artifacts/nuget
+      continue-on-error: true
+
+    - name: Add local NuGet source
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
+      shell: pwsh
+      run: |
+        $nugetPath = "artifacts/nuget"
+        if (Test-Path $nugetPath) {
+          $resolvedPath = (Resolve-Path $nugetPath).Path
+          dotnet nuget add source $resolvedPath --name WinAppLocal
+          Write-Host "Added local NuGet source: $resolvedPath"
+        } else {
+          Write-Warning "No NuGet artifacts found — .NET samples may fail to restore"
+        }
+
+    # --- Toolchain setup (conditional per sample) ---
+
+    - name: Setup .NET
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron"]'), matrix.sample)
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Setup Node.js
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
+      uses: actions/setup-node@v5
+      with:
+        node-version: '24'
+
+    - name: Setup Flutter
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        matrix.sample == 'flutter-app'
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+
+    - name: Setup Rust
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        contains(fromJson('["rust-app", "tauri-app"]'), matrix.sample)
+      uses: dtolnay/rust-toolchain@stable
+
+    # --- Run the sample's self-contained Pester test ---
+
+    - name: Install Pester
+      if: steps.check.outputs.skip != 'true'
+      shell: pwsh
+      run: |
+        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
+
+    - name: Run ${{ matrix.sample }} test
+      if: steps.check.outputs.skip != 'true'
+      shell: pwsh
+      run: |
+        $container = New-PesterContainer -Path "samples/${{ matrix.sample }}/test.Tests.ps1" -Data @{
+          WinappPath = "artifacts/npm"
+        }
+        $config = New-PesterConfiguration
+        $config.Run.Container = $container
+        $config.Run.Exit = $true
+        $config.Output.Verbosity = 'Detailed'
+        $config.TestResult.Enabled = $true
+        $config.TestResult.OutputPath = "test-results-${{ matrix.sample }}.xml"
+        $config.TestResult.OutputFormat = 'JUnitXml'
+        Invoke-Pester -Configuration $config
+
+    - name: Upload test results
+      if: always() && steps.check.outputs.skip != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.sample }}
+        path: test-results-${{ matrix.sample }}.xml
+        if-no-files-found: ignore
+
+  # Summary job to provide a single check status for branch protection
+  test-samples-result:
+    if: always()
+    needs: [build, test-sample]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check results
+      run: |
+        if [ "${{ needs.test-sample.result }}" = "failure" ]; then
+          echo "::error::One or more sample tests failed"
+          exit 1
+        fi
+        echo "All sample tests passed (or were skipped)"

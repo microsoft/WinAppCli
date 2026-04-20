@@ -6,12 +6,12 @@
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
         "<!(node -e \"require('nan')\")",
-        "<!@(node -p \"require('@microsoft/winappcli').getLocalWinappPath().replace(/\\\\/g, '/') + '/include'\")"
+        "<(module_root_dir)/../.winapp/include"
       ],
       "msvs_settings": {
         "VCCLCompilerTool": {
           "ExceptionHandling": 1,
-          "DebugInformationFormat": "OldStyle",
+          "DebugInformationFormat": 1,
           "AdditionalOptions": [
             "/FS"
           ]
@@ -26,7 +26,7 @@
         "_WIN32_WINNT=0x0A00"
       ],
       "library_dirs": [
-        "<!@(node -p \"require('@microsoft/winappcli').getLocalWinappPath().replace(/\\\\/g, '/') + '/lib/<(target_arch)'\")",
+        "<(module_root_dir)/../.winapp/lib/<(target_arch)",
         "../build/<(target_arch)/Release"
       ],
       "libraries": [
