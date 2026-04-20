@@ -165,9 +165,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Dependency resolution failures are non-fatal; the main package is installed
+            // Dependency resolution failures are non-fatal; the main package is installed.
+            // Log so transitive dependency issues are visible in verbose/debug output.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Dependency resolution for {package} {version}: {ex.Message}");
         }
     }
 

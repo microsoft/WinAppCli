@@ -119,7 +119,7 @@ internal sealed class PackageInstallationService(
                 // Add the main package to installed versions
                 allInstalledVersions[packageName] = version;
                 
-                // Try to get package information about what else is installed with this package
+                // Resolve transitive dependencies and ensure they are also present on disk
                 try
                 {
                     var cachedPackages = await nugetService.GetPackageDependenciesAsync(packageName, version, cancellationToken);
@@ -128,16 +128,40 @@ internal sealed class PackageInstallationService(
                         var depVersion = NugetService.ParseMinimumVersion(packageVersion);
                         if (!string.IsNullOrEmpty(depVersion))
                         {
-                            if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
+                            // Check if the dependency actually exists on disk — if not, install it
+                            var depDir = nugetService.GetNuGetPackageDir(packageId, depVersion);
+                            if (!depDir.Exists)
                             {
-                                if (NugetService.CompareVersions(depVersion, existingVersion) > 0)
+                                logger.LogDebug("Transitive dependency {PackageId} {Version} missing from cache, installing", packageId, depVersion);
+                                var depInstalledVersions = await nugetService.InstallPackageAsync(packageId, depVersion, taskContext, cancellationToken);
+                                foreach (var (depPkg, depVer) in depInstalledVersions)
                                 {
-                                    allInstalledVersions[packageId] = depVersion;
+                                    if (allInstalledVersions.TryGetValue(depPkg, out var existingDepVersion))
+                                    {
+                                        if (NugetService.CompareVersions(depVer, existingDepVersion) > 0)
+                                        {
+                                            allInstalledVersions[depPkg] = depVer;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        allInstalledVersions[depPkg] = depVer;
+                                    }
                                 }
                             }
                             else
                             {
-                                allInstalledVersions[packageId] = depVersion;
+                                if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
+                                {
+                                    if (NugetService.CompareVersions(depVersion, existingVersion) > 0)
+                                    {
+                                        allInstalledVersions[packageId] = depVersion;
+                                    }
+                                }
+                                else
+                                {
+                                    allInstalledVersions[packageId] = depVersion;
+                                }
                             }
                         }
                     }

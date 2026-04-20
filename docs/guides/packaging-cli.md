@@ -22,9 +22,10 @@ cd MyCliPackage
 
 ### 2. Install winapp CLI
 
-The quickest way to get started is to install winapp CLI via Windows Package Manager:
+Install the winapp CLI via Windows Package Manager, or update to the latest version if you already have it:
 
 ```powershell
+# Install (or update if already installed)
 winget install microsoft.winappcli --source winget
 ```
 
@@ -40,14 +41,11 @@ This command creates an `appxmanifest.xml` file in the current directory with de
 
 ### 4. Configure the Manifest
 
-You'll need to edit the generated `appxmanifest.xml` to:
-- Add an execution alias so users can run your CLI from any directory
-- Hide the app from the Start menu app list
-- Update application details to match your CLI
+Edit the generated `appxmanifest.xml` to customize your package. Each sub-step below explains what to change and why.
 
 #### 4.1 Add Required Namespace
 
-Add the `uap5` namespace to the `Package` element if it's not already present:
+Add the `uap5` namespace to the `Package` element if it's not already present. This is needed for the execution alias in step 4.3:
 
 ```xml
 <Package
@@ -61,7 +59,7 @@ Add the `uap5` namespace to the `Package` element if it's not already present:
 
 #### 4.2 Configure the Application Element
 
-In the `<uap:VisualElements>` element, add `AppListEntry="none"` to prevent the app from appearing in the Start menu:
+In the `<uap:VisualElements>` element, add `AppListEntry="none"` to hide the app from the Start menu. CLI tools are invoked from the terminal, so they don't need a Start menu entry:
 
 ```xml
 <uap:VisualElements
@@ -76,7 +74,7 @@ In the `<uap:VisualElements>` element, add `AppListEntry="none"` to prevent the 
 
 #### 4.3 Add Execution Alias Extension
 
-Add the execution alias extension within the `<Application>` element (after `<uap:VisualElements>`):
+Add an execution alias so users can run your CLI by name from any terminal window. Add this within the `<Application>` element (after `<uap:VisualElements>`):
 
 ```xml
 <Extensions>
@@ -92,7 +90,9 @@ Replace `yourcli.exe` with the desired command name for your CLI. Once a user in
 
 #### 4.4 Update Application Metadata
 
-Update the following fields to match your CLI application:
+Update the following fields to match your CLI application.
+
+> **Important**: The `Publisher` value in your manifest must match the publisher in your signing certificate. If you generate a certificate later (step 5), it will use the publisher from your manifest. If you change the publisher after generating a certificate, you'll need to regenerate the certificate to match.
 
 - **Identity**: Update `Name`, `Publisher`, and `Version`
   ```xml
@@ -131,7 +131,7 @@ Update the following fields to match your CLI application:
 
 For local testing and distribution outside the Microsoft Store, you'll need to sign your MSIX package with a certificate.
 
-Generate a development certificate:
+Generate a development certificate. Keep it outside your CLI folder to avoid accidentally including it in the package:
 
 ```powershell
 # Navigate to a location outside your CLI folder (e.g., your home directory)
@@ -139,28 +139,55 @@ cd ~
 winapp cert generate
 ```
 
-This creates a `devcert.pfx` file. To trust this certificate on your development machine, install it (requires administrator privileges):
+This creates a `devcert.pfx` file in your home directory (e.g., `C:\Users\yourname\devcert.pfx`).
+
+To trust this certificate on your development machine, install it (requires administrator privileges):
 
 ```powershell
 # Run PowerShell as Administrator
-winapp cert install
+winapp cert install ~\devcert.pfx
 ```
-
-**Important**: Keep your development certificate outside the folder containing your CLI executable to avoid accidentally including it in the package.
 
 ### 6. Package Your CLI
 
 Now you're ready to create the MSIX package:
 
 ```powershell
-# Run from outside CLI folder
+# Navigate back outside of your project folder
 # Package with dev certificate (for local testing/distribution)
-winapp pack .\MyCliPackage --cert path\to\devcert.pfx
+winapp pack .\path\to\MyCliPackage --cert .\path\to\devcert.pfx
 ```
 
-This creates an `.msix` file in the current directory
+This creates an `.msix` file in the current directory.
 
-### Tips:
+### 7. Install and Verify
+
+Install the MSIX package to verify everything works:
+
+```powershell
+Add-AppxPackage .\MyCliPackage.msix
+```
+
+If you added an execution alias in step 4.3, you can now run your CLI from any terminal:
+
+```powershell
+yourcli --help
+```
+
+To uninstall later:
+
+```powershell
+Get-AppxPackage *YourCLI* | Remove-AppxPackage
+```
+
+## Tips
+
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate
 2. The Microsoft Store will sign the MSIX for you, no need to sign before submission.
 3. You might need to create multiple MSIX packages, one for each architecture you support (x64, Arm64)
+
+## Next Steps
+
+- **Distribute via winget**: Submit your MSIX to the [Windows Package Manager Community Repository](https://github.com/microsoft/winget-pkgs)
+- **Publish to the Microsoft Store**: Use `winapp store` to submit your package
+- **Set up CI/CD**: Use the [`setup-WinAppCli`](https://github.com/microsoft/setup-WinAppCli) GitHub Action to automate packaging in your pipeline
