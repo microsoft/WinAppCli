@@ -1181,7 +1181,7 @@
           "recursive": false
         },
         "--output": {
-          "description": "Output msix file name for the generated package (defaults to <name>.msix)",
+          "description": "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,

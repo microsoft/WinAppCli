@@ -179,7 +179,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 | `--install-cert` | Install certificate to machine | (none) |
 | `--manifest` | Path to AppX manifest file (default: auto-detect from input folder or current directory) | (none) |
 | `--name` | Package name (default: from manifest) | (none) |
-| `--output` | Output msix file name for the generated package (defaults to <name>.msix) | (none) |
+| `--output` | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) | (none) |
 | `--publisher` | Publisher name for certificate generation | (none) |
 | `--self-contained` | Bundle Windows App SDK runtime for self-contained deployment | (none) |
 | `--skip-pri` | Skip PRI file generation | (none) |

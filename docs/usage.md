@@ -122,12 +122,11 @@ winapp update [options]
 
 **Options:**
 
-- `--config-dir <path>` - Directory containing winapp.yaml (default: current directory)
-- `----setup-sdks` - SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)
+- `--setup-sdks <stable|preview|experimental|none>` - SDK installation mode: `stable` (default), `preview`, `experimental`, or `none` (skip SDK installation)
 
 **What it does:**
 
-- Reads existing `winapp.yaml` configuration
+- Reads existing `winapp.yaml` configuration in the current directory
 - Updates all packages to their latest available versions
 - Updates the `winapp.yaml` file with new version numbers
 - Regenerates C++/WinRT headers and binaries
@@ -158,7 +157,7 @@ winapp pack <input-folder> [options]
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
+- `--output <filename>` - Output MSIX file name (default: `<name>_<version>_<arch>.msix`, falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix` when version/arch can't be determined)
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
@@ -228,7 +227,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: `./appxmanifest.xml`)
+- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -278,7 +277,7 @@ winapp manifest generate [directory] [options]
 - `--entrypoint <path>` - Entry point executable or script
 - `--template <type>` - Template type: `packaged` (default) or `sparse`
 - `--logo-path <path>` - Path to logo image file
-- `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
+- `--if-exists <Error|Overwrite|Skip>` - Behavior when the manifest file already exists at the target path (default: `Error`)
 
 **Templates:**
 
