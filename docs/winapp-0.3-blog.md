@@ -113,12 +113,8 @@ See more information on shell completion at [Shell Completion Guide](https://git
 
 - **`winapp unregister`**: The cleanup counterpart to `winapp run`. Safely removes a sideloaded dev package when you're done with it.
 - **`winapp manifest add-alias`**: Adds a `uap5:AppExecutionAlias` to your manifest so a packaged app can be launched by name from the command line — no more hunting for full package family names.
-- **Long path support**: `winapp run` now handles paths exceeding Windows' 260-character limit — no more silent failures on deep directory structures.
-- **Smarter `winapp init`**: The init command no longer overwrites existing NuGet package versions in your `.csproj`, prompts before installing packages, and automatically adds the properties required for packaging.
 - **`Package.appxmanifest` by default**: `winapp init` and `winapp manifest generate` now create a `Package.appxmanifest` file instead of `appxmanifest.xml`. This aligns with the Visual Studio convention and makes it easier to open and edit manifests in VS with the visual manifest editor.
-- **Smarter package resolution**: `winapp run` now resolves framework packages from your `.csproj` first and only falls back to `winapp.yml` if needed — reducing configuration friction for .NET projects.
 - **Taskbar icon fix**: Fixed a visual bug where a blue plate appeared behind app icons in the taskbar when running with a debug identity.
-- **WinAppRuntime install fix**: Framework packages are now correctly installed regardless of whether your manifest came from MSBuild or was specified manually — fixing a case where `winapp run` could fail on a fresh machine.
 
 ## Get started today
 
