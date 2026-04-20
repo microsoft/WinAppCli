@@ -105,38 +105,20 @@ This command will:
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
 ### Add Execution Alias (for console apps)
-An execution alias lets users run your app by name from any terminal (like `rust-app`). It also enables `winapp run --with-alias` during development, which keeps console output in the current terminal instead of opening a new window.
 
-You can add one automatically:
+Because `cargo new` creates a console app, we need to add an execution alias to the manifest. Without it, `winapp run` launches the app via AUMID activation, which opens a new window — and that window closes immediately when a console app finishes, swallowing any output.
+
+The alias also lets users run your app by name from any terminal (like `rust-app`) after they install the MSIX.
+
+> **Skip this step if you're building a UI app** (a Rust app that renders its own window). Those apps work fine with the default AUMID launch.
+
+Add the alias:
 
 ```powershell
 winapp manifest add-alias
 ```
 
-Or manually: open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
-
-```diff
-<Package
-  ...
-  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-+ xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
-
-  ...
-  <Applications>
-    <Application ...>
-      ...
-+     <Extensions>
-+       <uap5:Extension Category="windows.appExecutionAlias">
-+         <uap5:AppExecutionAlias>
-+           <uap5:ExecutionAlias Alias="rust-app.exe" />
-+         </uap5:AppExecutionAlias>
-+       </uap5:Extension>
-+     </Extensions>
-    </Application>
-  </Applications>
-</Package>
-```
+This adds a `uap5:ExecutionAlias` to `appxmanifest.xml` (defaulting to your project's exe name).
 
 ## 5. Debug with Identity
 

@@ -112,6 +112,30 @@ dotnet list package
 
 You should see `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` in the output.
 
+### Add Execution Alias (for console apps)
+
+Because we're building a console app, we need to make sure `dotnet run` keeps console output in the current terminal. By default, `dotnet run` launches the packaged app via AUMID activation, which opens a new window — and the window closes immediately when the console app finishes, swallowing any output.
+
+To fix this, you'll add an execution alias to the manifest and tell the run integration to launch via that alias instead.
+
+> **Skip this step if you're building a UI app** (WPF, WinForms, WinUI). Those apps render their own window, so the default AUMID launch is what you want.
+
+1. Add the execution alias to your manifest:
+
+   ```powershell
+   winapp manifest add-alias
+   ```
+
+   This adds a `uap5:ExecutionAlias` to `appxmanifest.xml` (defaulting to your project's exe name) so the app can be launched by name from a terminal.
+
+2. Tell the `dotnet run` integration to use the alias. Open `dotnet-app.csproj` and add the following inside the existing `<PropertyGroup>`:
+
+   ```xml
+   <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+   ```
+
+   With this property set, `dotnet run` launches the app via its execution alias and inherits the current terminal's stdin/stdout/stderr so you see console output inline.
+
 ## 5. Debug with Identity
 
 Since `winapp init` added the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package to your project, you can simply run:
@@ -123,8 +147,6 @@ dotnet run
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
 > **Note**: You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
-
-> **Console apps:** By default, AUMID activation opens a new window. For console applications that need stdin/stdout in the current terminal, add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to your `.csproj` and ensure your manifest has a `uap5:ExecutionAlias`. You can add one with `winapp manifest add-alias`.
 
 You should see output similar to:
 ```
@@ -254,37 +276,16 @@ dotnet build -c Release
 > **Note**: You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
 
 ### Add Execution Alias (for console apps)
-To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `appxmanifest.xml`. If you are building a WPF or WinForms app, this step is not necessary — those apps launch from the Start menu instead.
 
-Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
+If you followed step 4 above, you already added an execution alias to your manifest with `winapp manifest add-alias`, and you can skip this section.
 
-```xml
-<Package
-  ...
-  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
+If you're packaging a console app and didn't add it earlier, add it now so users can run your app by name from any terminal after installing the MSIX:
 
-  ...
-  <Applications>
-    <Application ...>
-      ...
-
-      <!-- Add this Extensions element in your manifest 
-           along with the xmlns:uap5 namespace above -->
-      <Extensions>
-        <uap5:Extension Category="windows.appExecutionAlias">
-          <uap5:AppExecutionAlias>
-            <uap5:ExecutionAlias Alias="dotnet-app.exe" />
-          </uap5:AppExecutionAlias>
-        </uap5:Extension>
-      </Extensions>
-
-      ...
-    </Application>
-  </Applications>
-</Package>
+```powershell
+winapp manifest add-alias
 ```
+
+> **Skip this step if you're building a UI app** (WPF, WinForms, WinUI). Those apps launch from the Start menu instead.
 
 ### Generate a Development Certificate
 
