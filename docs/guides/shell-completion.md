@@ -24,17 +24,14 @@ To try it in the current session without modifying your profile:
 winapp complete --setup powershell | Out-String | Invoke-Expression
 ```
 
-### Optional: Menu-style completions
-
-By default, Tab cycles through completions one at a time. For an interactive menu with descriptions, add this to your profile:
-
-```powershell
-Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
-```
-
 ### What it does
 
 Registers a native argument completer that calls `winapp complete` on each Tab press, providing context-aware suggestions for commands, subcommands, options, and values.
+
+### Controls
+
+- **Tab** cycles through completions one at a time (default PowerShell behavior)
+- **Ctrl+Space** shows an interactive menu with descriptions: use arrow keys to navigate
 
 ### To deactivate
 
