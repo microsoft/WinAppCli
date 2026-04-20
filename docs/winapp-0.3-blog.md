@@ -27,6 +27,8 @@ Whether you're a developer iterating locally or an agent running end-to-end vali
 
 TODO: ADD GIF
 
+See full usage instructions for `winapp run` at [WinApp CLI Run Command](https://github.com/microsoft/winappCli/blob/main/docs/usage.md#run).
+
 ## 🖥️ `winapp ui`: UI Automation from the command line
 
 UI Automation is now built right into the CLI. `winapp ui` lets you inspect and interact with any running Windows application — WPF, WinForms, Win32, Electron, WinUI3 — all from the command line.
@@ -67,6 +69,8 @@ This unblocks a whole class of agentic and automation scenarios. Agents or a scr
 
 TODO: ADD GIF
 
+See full usage instructions for `winapp ui` at [WinApp CLI UI Command](https://github.com/microsoft/winappCli/blob/main/docs/usage.md#ui). Also checkout our [UI Automation Getting Started Guide](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md).
+
 ## 📦 `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package
 
 We're introducing a new NuGet package that enables `dotnet run` to correctly launch packaged .NET apps. It works with WinUI, WPF, WinForms, Console, Avalonia, and more. 
@@ -85,6 +89,8 @@ dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp
 
 TODO: ADD GIF
 
+For more information on `dotnet run` and the `Microsoft.Windows.SDK.BuildTools.WinApp`, checkout [dotnet run Support for Packaged WinUI Apps](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
+
 ## 🐚 Shell Completion
 
 Tab completion is here. Run one command and every `winapp` command, subcommand, and option becomes discoverable right in your terminal — with descriptions.
@@ -100,6 +106,8 @@ winapp complete --setup powershell | Out-String | Invoke-Expression
 Press `Tab` to cycle through commands, or `Ctrl+Space` to see the full list with descriptions. Works for nested commands (`winapp cert <Tab>`) and options (`winapp init --c<Tab>`).
 
 TODO: ADD GIF
+
+See more information on shell completion at [Shell Completion Guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/shell-completion.md).
 
 ## ⚡ Other notable changes
 
