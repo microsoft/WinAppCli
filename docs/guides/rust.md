@@ -108,7 +108,7 @@ You can open `appxmanifest.xml` to further customize properties like the display
 
 Because `cargo new` creates a console app, we need to add an execution alias to the manifest. Without it, `winapp run` launches the app via AUMID activation, which opens a new window — and that window closes immediately when a console app finishes, swallowing any output.
 
-The alias also lets users run your app by name from any terminal (like `rust-app`) after they install the MSIX.
+The alias also lets users run your app by name from any terminal after they install the MSIX. The manifest registers an alias like `rust-app.exe` (defaulting to your project's exe name), which users can invoke as `rust-app` or `rust-app.exe`.
 
 > **Skip this step if you're building a UI app** (a Rust app that renders its own window). Those apps work fine with the default AUMID launch.
 
@@ -118,7 +118,7 @@ Add the alias:
 winapp manifest add-alias
 ```
 
-This adds a `uap5:ExecutionAlias` to `appxmanifest.xml` (defaulting to your project's exe name).
+This adds a `uap5:ExecutionAlias` entry to `appxmanifest.xml`.
 
 ## 5. Debug with Identity
 
