@@ -260,4 +260,21 @@ public class CliSchemaTests : BaseCommandTests
         Assert.DoesNotContain("\r\n", TestAnsiConsole.Output, "JSON should not use \\r\\n line endings");
         Assert.IsGreaterThan(100, TestAnsiConsole.Output.Length, "Indented JSON should be multi-line and reasonably long");
     }
+
+    [TestMethod]
+    public async Task CliSchema_DoesNotContainHiddenCommands()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+        var args = new[] { "--cli-schema" };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand, args);
+
+        Assert.AreEqual(0, exitCode);
+        using var jsonDoc = JsonDocument.Parse(TestAnsiConsole.Output);
+        var root = jsonDoc.RootElement;
+
+        Assert.IsTrue(root.TryGetProperty("subcommands", out var subcommands));
+        Assert.IsFalse(subcommands.TryGetProperty("complete", out _),
+            "Hidden 'complete' command should not appear in CLI schema");
+    }
 }

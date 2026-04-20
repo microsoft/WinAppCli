@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text.Json;
 using WinApp.Cli.Commands;
 
 namespace WinApp.Cli.Tests;
@@ -16,22 +15,19 @@ public class CompleteCommandTests : BaseCommandTests
     private string[] GetCompletionLabels() =>
         GetCompletionLines().Select(line => line.Split('\t')[0]).ToArray();
 
+    // --- Top-level command completions ---
+
     [TestMethod]
     public async Task Complete_TopLevelCommands_ReturnsAllCommands()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — complete at end of "winapp "
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--commandline", "winapp ", "--position", "7"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var completions = GetCompletionLabels();
         Assert.IsTrue(completions.Length > 0, "Should return completions");
-
-        // Verify known top-level commands appear
         CollectionAssert.Contains(completions, "init");
         CollectionAssert.Contains(completions, "cert");
         CollectionAssert.Contains(completions, "package");
@@ -42,32 +38,119 @@ public class CompleteCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Complete_PartialCommand_ReturnsMatchingCommands()
+    public async Task Complete_TopLevelCommands_IncludesDescriptions()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — complete "winapp in" (should match "init")
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp ", "--position", "7"]);
+
+        Assert.AreEqual(0, exitCode);
+        var lines = GetCompletionLines();
+        var linesWithDescriptions = lines.Where(l => l.Contains('\t')).ToArray();
+        Assert.IsTrue(linesWithDescriptions.Length > 0, "Completions should include descriptions");
+
+        var initLine = linesWithDescriptions.FirstOrDefault(l => l.StartsWith("init\t", StringComparison.Ordinal));
+        Assert.IsNotNull(initLine, "init command should have a description");
+    }
+
+    [TestMethod]
+    public async Task Complete_HiddenCommands_NotReturned()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp ", "--position", "7"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        CollectionAssert.DoesNotContain(completions, "complete");
+    }
+
+    // --- Prefix matching (not substring) ---
+
+    [TestMethod]
+    public async Task Complete_PartialCommand_ReturnsOnlyPrefixMatches()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--commandline", "winapp in", "--position", "9"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var completions = GetCompletionLabels();
         CollectionAssert.Contains(completions, "init");
+        // Substring matches should NOT appear -- "sign", "unregister" contain "in" but don't start with it
+        CollectionAssert.DoesNotContain(completions, "sign");
+        CollectionAssert.DoesNotContain(completions, "unregister");
     }
+
+    [TestMethod]
+    public async Task Complete_PartialOption_ReturnsOnlyPrefixMatches()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        // "winapp init --c" should match --cli-schema, --config-dir, --config-only
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp init --c", "--position", "15"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        CollectionAssert.Contains(completions, "--cli-schema");
+        CollectionAssert.Contains(completions, "--config-dir");
+        CollectionAssert.Contains(completions, "--config-only");
+        // Non-matching options should be absent
+        CollectionAssert.DoesNotContain(completions, "--setup-sdks");
+        CollectionAssert.DoesNotContain(completions, "--verbose");
+    }
+
+    // --- Alias exclusion ---
+
+    [TestMethod]
+    public async Task Complete_AliasesAreExcluded()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp ", "--position", "7"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        // "pack" is an alias for "package", "run-buildtool" is an alias for "tool"
+        CollectionAssert.DoesNotContain(completions, "pack");
+        CollectionAssert.DoesNotContain(completions, "run-buildtool");
+        // Primary names should be present
+        CollectionAssert.Contains(completions, "package");
+        CollectionAssert.Contains(completions, "tool");
+    }
+
+    [TestMethod]
+    public async Task Complete_ShortOptionAliasesAreExcluded()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        // Complete options for init -- should not include -h, -?, /h, /?
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp init -", "--position", "13"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        CollectionAssert.DoesNotContain(completions, "-h");
+        CollectionAssert.DoesNotContain(completions, "-?");
+        CollectionAssert.DoesNotContain(completions, "/h");
+        CollectionAssert.DoesNotContain(completions, "/?");
+    }
+
+    // --- Subcommand completions ---
 
     [TestMethod]
     public async Task Complete_Subcommands_ReturnsCertSubcommands()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — complete "winapp cert "
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--commandline", "winapp cert ", "--position", "12"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var completions = GetCompletionLabels();
         CollectionAssert.Contains(completions, "generate");
@@ -76,16 +159,30 @@ public class CompleteCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Complete_Options_ReturnsInitOptions()
+    public async Task Complete_ManifestSubcommands_ReturnsExpected()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — complete "winapp init --"
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp manifest ", "--position", "16"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        CollectionAssert.Contains(completions, "generate");
+        CollectionAssert.Contains(completions, "update-assets");
+        CollectionAssert.Contains(completions, "add-alias");
+    }
+
+    // --- Options completions ---
+
+    [TestMethod]
+    public async Task Complete_Options_ReturnsInitOptions()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--commandline", "winapp init --", "--position", "14"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var completions = GetCompletionLabels();
         CollectionAssert.Contains(completions, "--setup-sdks");
@@ -95,62 +192,118 @@ public class CompleteCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Complete_HiddenCommands_NotReturned()
+    public async Task Complete_NoSubcommands_FallsBackToOptions()
     {
-        // Arrange
+        // "winapp init " has no subcommands, so completions should show options
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — complete at top level
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
-            ["complete", "--commandline", "winapp ", "--position", "7"]);
+            ["complete", "--commandline", "winapp init ", "--position", "12"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var completions = GetCompletionLabels();
+        Assert.IsTrue(completions.Length > 0, "Should fall back to showing options");
+        Assert.IsTrue(completions.Any(c => c.StartsWith("--", StringComparison.Ordinal)),
+            "Should contain option flags when no subcommands exist");
+    }
 
-        // "complete" command is hidden and should not appear in completions
-        CollectionAssert.DoesNotContain(completions, "complete");
+    // --- Position edge cases ---
+
+    [TestMethod]
+    public async Task Complete_PositionPastEnd_TreatsAsTrailingSpace()
+    {
+        // PowerShell sends position past the string length when there's a trailing space
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        // "winapp cert" is 11 chars, position 12 means trailing space
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp cert", "--position", "12"]);
+
+        Assert.AreEqual(0, exitCode);
+        var completions = GetCompletionLabels();
+        CollectionAssert.Contains(completions, "generate");
+        CollectionAssert.Contains(completions, "install");
+        CollectionAssert.Contains(completions, "info");
     }
 
     [TestMethod]
-    public async Task Complete_EmptyCommandLine_ReturnsZeroExitCode()
+    public async Task Complete_NegativePosition_ClampsToZero()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — empty commandline
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp ", "--position", "-1"]);
+
+        // Should not throw, should return 0
+        Assert.AreEqual(0, exitCode);
+    }
+
+    // --- End-of-options marker ---
+
+    [TestMethod]
+    public async Task Complete_EndOfOptionsMarker_ReturnsEmpty()
+    {
+        // After "-- ", everything is positional -- no option completions
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp init -- ", "--position", "15"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(string.Empty, GetOutput(), "Should produce no output after end-of-options marker");
+    }
+
+    // --- Path prefix fallthrough ---
+
+    [TestMethod]
+    public async Task Complete_PathPrefix_ReturnsEmpty()
+    {
+        // When user types a path like "./", completions should be empty
+        // to let the shell's built-in file completion handle it
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", "winapp init .", "--position", "13"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(string.Empty, GetOutput(), "Should produce no output for path prefixes");
+    }
+
+    // --- Empty/no commandline ---
+
+    [TestMethod]
+    public async Task Complete_EmptyCommandLine_ProducesNoOutput()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--commandline", "", "--position", "0"]);
 
-        // Assert — should not error
         Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(string.Empty, GetOutput(), "Empty commandline should produce no output");
     }
 
     [TestMethod]
-    public async Task Complete_NoCommandLine_ReturnsZeroExitCode()
+    public async Task Complete_NoCommandLine_ProducesNoOutput()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act — no --commandline provided at all
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete"]);
 
-        // Assert — should not error
         Assert.AreEqual(0, exitCode);
     }
+
+    // --- Setup scripts ---
 
     [TestMethod]
     public async Task Complete_SetupPowerShell_OutputsRegistrationScript()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--setup", "powershell"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var output = GetOutput();
         Assert.IsTrue(output.Contains("Register-ArgumentCompleter"), "Should contain PowerShell argument completer");
@@ -162,108 +315,42 @@ public class CompleteCommandTests : BaseCommandTests
     [TestMethod]
     public async Task Complete_SetupBash_OutputsRegistrationScript()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--setup", "bash"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var output = GetOutput();
         Assert.IsTrue(output.Contains("_winapp_completions"), "Should contain bash completion function");
         Assert.IsTrue(output.Contains("complete -o default -F"), "Should register with bash complete");
+        Assert.IsTrue(output.Contains("--commandline"), "Should pass commandline");
+        Assert.IsTrue(output.Contains("--position"), "Should pass position");
     }
 
     [TestMethod]
     public async Task Complete_SetupZsh_OutputsRegistrationScript()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--setup", "zsh"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode);
         var output = GetOutput();
         Assert.IsTrue(output.Contains("compdef _winapp winapp"), "Should contain zsh compdef");
+        Assert.IsTrue(output.Contains("--commandline"), "Should pass commandline");
+        Assert.IsTrue(output.Contains("--position"), "Should pass position");
     }
 
     [TestMethod]
     public async Task Complete_SetupUnknownShell_ReturnsError()
     {
-        // Arrange
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
             ["complete", "--setup", "fish"]);
 
-        // Assert
         Assert.AreEqual(1, exitCode);
-    }
-
-    [TestMethod]
-    public async Task Complete_ManifestSubcommands_ReturnsExpected()
-    {
-        // Arrange
-        var rootCommand = GetRequiredService<WinAppRootCommand>();
-
-        // Act — complete "winapp manifest "
-        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
-            ["complete", "--commandline", "winapp manifest ", "--position", "16"]);
-
-        // Assert
-        Assert.AreEqual(0, exitCode);
-        var completions = GetCompletionLabels();
-        CollectionAssert.Contains(completions, "generate");
-        CollectionAssert.Contains(completions, "update-assets");
-        CollectionAssert.Contains(completions, "add-alias");
-    }
-
-    [TestMethod]
-    public async Task Complete_TopLevelCommands_IncludesDescriptions()
-    {
-        // Arrange
-        var rootCommand = GetRequiredService<WinAppRootCommand>();
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
-            ["complete", "--commandline", "winapp ", "--position", "7"]);
-
-        // Assert
-        Assert.AreEqual(0, exitCode);
-        var lines = GetCompletionLines();
-
-        // At least some lines should contain tab-separated descriptions
-        var linesWithDescriptions = lines.Where(l => l.Contains('\t')).ToArray();
-        Assert.IsTrue(linesWithDescriptions.Length > 0, "Completions should include descriptions");
-
-        // Verify a known command has its description
-        var initLine = linesWithDescriptions.FirstOrDefault(l => l.StartsWith("init\t", StringComparison.Ordinal));
-        Assert.IsNotNull(initLine, "init command should have a description");
-    }
-
-    [TestMethod]
-    public async Task CliSchema_DoesNotContainHiddenCommands()
-    {
-        // Arrange
-        var rootCommand = GetRequiredService<WinAppRootCommand>();
-        var args = new[] { "--cli-schema" };
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand, args);
-
-        // Assert
-        Assert.AreEqual(0, exitCode);
-        using var jsonDoc = JsonDocument.Parse(TestAnsiConsole.Output);
-        var root = jsonDoc.RootElement;
-
-        Assert.IsTrue(root.TryGetProperty("subcommands", out var subcommands));
-        Assert.IsFalse(subcommands.TryGetProperty("complete", out _),
-            "Hidden 'complete' command should not appear in CLI schema");
     }
 }
