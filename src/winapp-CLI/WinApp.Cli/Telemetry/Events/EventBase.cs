@@ -50,6 +50,16 @@ public abstract class EventBase
     public string? Caller { get; set; } = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
 
     /// <summary>
+    /// Gets the sender origin category: "direct" (human), "agent" (AI coding agent), or "ci" (CI system).
+    /// </summary>
+    public string SenderOrigin { get; } = AgentEnvironmentDetector.Detect().SenderOrigin;
+
+    /// <summary>
+    /// Gets the normalized name of the detected AI agent (e.g., "claude-code", "copilot", "cursor"), or null if not agent-invoked.
+    /// </summary>
+    public string? AgentName { get; set; } = AgentEnvironmentDetector.Detect().AgentName;
+
+    /// <summary>
     /// Replaces all the strings in this event that may contain PII using the provided function.
     /// </summary>
     /// <remarks>
