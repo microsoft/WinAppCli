@@ -24,8 +24,10 @@ public class AgentEnvironmentDetectorTests
         "CURSOR_CLI",
         "CODEX_CI",
         "GOOSE_TERMINAL",
-        "COPILOT_MODEL",
+        "COPILOT_CLI",
+        "COPILOT_AGENT_SESSION_ID",
         "VSCODE_COPILOT_TERMINAL",
+        "COPILOT_MODEL",
         "CLINE_ACTIVE",
     ];
 
@@ -145,8 +147,10 @@ public class AgentEnvironmentDetectorTests
     [DataRow("CURSOR_CLI", "cursor")]
     [DataRow("CODEX_CI", "codex")]
     [DataRow("GOOSE_TERMINAL", "goose")]
+    [DataRow("COPILOT_CLI", "copilot-cli")]
+    [DataRow("COPILOT_AGENT_SESSION_ID", "copilot-cli")]
+    [DataRow("VSCODE_COPILOT_TERMINAL", "copilot-vscode")]
     [DataRow("COPILOT_MODEL", "copilot")]
-    [DataRow("VSCODE_COPILOT_TERMINAL", "copilot")]
     [DataRow("CLINE_ACTIVE", "cline")]
     public void Detect_ToolSpecificEnvVar_ReturnsExpectedAgent(string envVar, string expectedAgentName)
     {
