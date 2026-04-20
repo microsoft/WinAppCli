@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.CommandLine.Completions;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Commands;
 
@@ -111,7 +112,7 @@ internal class CompleteCommand : Command, IShortDescription
             return 0;
         }
 
-        var completionParseResult = rootCommand.Parse(argsText);
+        var completionParseResult = rootCommand.Parse(argsText, WinAppParserConfiguration.Default);
         var completions = completionParseResult.GetCompletions(argsPosition);
 
         // Build a set of alias names to exclude from completions.

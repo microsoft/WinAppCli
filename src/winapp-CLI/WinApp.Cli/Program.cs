@@ -103,21 +103,22 @@ internal static class Program
             }
 
             // Show help by invoking with --help
-            await rootCommand.Parse(["--help"]).InvokeAsync();
+            await rootCommand.Parse(["--help"], WinAppParserConfiguration.Default).InvokeAsync();
             return 0;
         }
 
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
-        // Catch single-dash typos like "-app" that POSIX bundling silently reinterprets as
-        // "-a pp" — see issue #467.
+        // Catch single-dash typos like "-app" before invocation so the user gets a clear
+        // "Did you mean --app?" message instead of System.CommandLine's confusing
+        // "Unrecognized command or argument" pointing at the wrong token (issue #467).
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
         if (typo is not null)
         {
             var suggested = "-" + typo;
             Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
             Console.Error.WriteLine(
-                $"Single-dash flags are short aliases (e.g. '-a'). '{typo}' would otherwise be parsed as the short option '{typo[..2]}' with attached value '{typo[2..]}'.");
+                "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
             return 1;
         }
 

@@ -10,9 +10,11 @@ namespace WinApp.Cli.Helpers;
 /// Detects single-dash option typos like <c>-app</c> when a long option <c>--app</c> exists.
 /// </summary>
 /// <remarks>
-/// System.CommandLine treats <c>-app</c> as the short option <c>-a</c> with attached value <c>pp</c>
-/// (POSIX bundling). When a user clearly meant <c>--app</c>, that silent reinterpretation can lead
-/// to surprising results (see issue #467). This helper surfaces such cases as an explicit error.
+/// POSIX short-option bundling is disabled in <see cref="WinAppParserConfiguration"/>, so without
+/// this guard the parser would treat <c>-app</c> as the positional <c>selector</c> argument and then
+/// emit a confusing "Unrecognized command or argument" error pointing at the next token. This helper
+/// catches the case before invocation and surfaces a clearer "Did you mean --app?" message.
+/// See issue #467.
 /// </remarks>
 internal static class OptionTypoValidator
 {
