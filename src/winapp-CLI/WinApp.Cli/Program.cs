@@ -109,6 +109,18 @@ internal static class Program
 
         var parseResult = rootCommand.Parse(args);
 
+        // Catch single-dash typos like "-app" that POSIX bundling silently reinterprets as
+        // "-a pp" — see issue #467.
+        var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+        if (typo is not null)
+        {
+            var suggested = "-" + typo;
+            Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+            Console.Error.WriteLine(
+                $"Single-dash flags are short aliases (e.g. '-a'). '{typo}' would otherwise be parsed as the short option '{typo[..2]}' with attached value '{typo[2..]}'.");
+            return 1;
+        }
+
         // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
         var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
         if (!string.IsNullOrWhiteSpace(caller))

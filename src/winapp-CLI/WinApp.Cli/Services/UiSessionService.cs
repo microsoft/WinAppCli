@@ -76,7 +76,7 @@ internal sealed class UiSessionService(
         var selected = foreground != default ? foreground : PickLargestWindow(windows);
 
         var reason = foreground != default ? "foreground" : "largest";
-        logger.LogDebug("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}'", selected.Hwnd, reason, windows.Count, app);
+        logger.LogInformation("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}' — pass -w {Hwnd} to target this window explicitly.", selected.Hwnd, reason, windows.Count, app, selected.Hwnd);
 
         return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
     }
@@ -256,7 +256,7 @@ internal sealed class UiSessionService(
         catch { }
     }
 
-    private static Process? TryResolveProcess(string app)
+    private Process? TryResolveProcess(string app)
     {
         // Try as PID
         if (int.TryParse(app, out var pid))
@@ -333,6 +333,7 @@ internal sealed class UiSessionService(
             {
                 var result = partialMatches[0];
                 partialMatches = []; // prevent disposal
+                LogPartialMatch(app, result);
                 return result;
             }
 
@@ -350,6 +351,7 @@ internal sealed class UiSessionService(
                 {
                     var result = withWindow[0];
                     partialMatches = partialMatches.Where(p => p != result).ToArray();
+                    LogPartialMatch(app, result);
                     return result;
                 }
             }
@@ -360,6 +362,22 @@ internal sealed class UiSessionService(
         }
 
         return null;
+    }
+
+    private void LogPartialMatch(string input, Process matched)
+    {
+        // Surface partial-name matches so users notice when a short/typoed --app value
+        // resolved to an unrelated process (issue #467).
+        try
+        {
+            logger.LogInformation(
+                "Partial process-name match: '{Input}' resolved to '{ProcessName}' (PID {Pid}). Pass the full process name or PID to disambiguate.",
+                input, matched.ProcessName, matched.Id);
+        }
+        catch
+        {
+            // Process metadata can be unavailable for protected processes; ignore logging failures.
+        }
     }
 
     private static uint GetPidFromHwnd(long hwnd)
