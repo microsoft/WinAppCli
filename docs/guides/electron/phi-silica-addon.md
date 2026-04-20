@@ -24,11 +24,12 @@ This creates a `csAddon/` folder with:
 - `csAddon.csproj` - Project file with references to Windows SDK and Windows App SDK
 - `README.md` - Documentation on how to use the addon
 
-The command also adds a `build-csAddon` script to your `package.json` for building the addon:
+The command also adds a `build-csAddon` script to your `package.json` for building the addon, and a `clean-csAddon` script for cleaning build artifacts:
 ```json
 {
   "scripts": {
-    "build-csAddon": "dotnet publish ./csAddon/csAddon.csproj -c Release"
+    "build-csAddon": "dotnet publish ./csAddon/csAddon.csproj -c Release",
+    "clean-csAddon": "dotnet clean ./csAddon/csAddon.csproj"
   }
 }
 ```
@@ -42,7 +43,8 @@ Let's verify everything is set up correctly by building the addon:
 npm run build-csAddon
 ```
 
-> **Note:** You can also create a C++ addon using `npx winapp node create-addon` (without the `--template` flag). C++ addons use [node-addon-api](https://github.com/nodejs/node-addon-api) and provide direct access to Windows APIs with maximum performance. See the [C++ Notification Addon guide](cpp-notification-addon.md) for a walkthrough or the [full command documentation](../../usage.md#node-create-addon) for more options.
+> [!NOTE]
+> You can also create a C++ addon using `npx winapp node create-addon` (without the `--template` flag). C++ addons use [node-addon-api](https://github.com/nodejs/node-addon-api) and provide direct access to Windows APIs with maximum performance. See the [C++ Notification Addon guide](cpp-notification-addon.md) for a walkthrough or the [full command documentation](../../usage.md#node-create-addon) for more options.
 
 ## Step 2: Add AI Capabilities with Phi Silica
 
@@ -99,14 +101,15 @@ namespace csAddon
 }
 ```
 
-> **📝 Note:** Phi Silica requires Windows 11 with an NPU-equipped device (Copilot+ PC). If you don't have compatible hardware, the API will return a message indicating the model is not available. You can still complete this tutorial and package the app - it will gracefully handle devices without NPU support.
+> [!NOTE]
+> Phi Silica requires Windows 11 with an NPU-equipped device (Copilot+ PC). If you don't have compatible hardware, the API will return a message indicating the model is not available. You can still complete this tutorial and package the app - it will gracefully handle devices without NPU support.
 
 ## Step 3: Build the C# Addon
 
 Now build the addon again:
 
 ```bash
-npm run build-addon
+npm run build-csAddon
 ```
 
 This compiles your C# code using **Native AOT** (Ahead-of-Time compilation), which:
@@ -115,11 +118,11 @@ This compiles your C# code using **Native AOT** (Ahead-of-Time compilation), whi
 - Requires **no .NET runtime** on target machines
 - Provides native performance
 
-The compiled addon will be in `csAddon/bin/Release/net10.0/win-<arch>/publish/csAddon.node` .
+The compiled addon will be in `csAddon/dist/csAddon.node`.
 
 ## Step 4: Test the Windows API
 
-Now let's verify the addon works by calling it from the main process. Open `src/index.js` and follow these steps:
+Now let's verify the addon works by calling it from the main process. Open `src/main.js` and follow these steps:
 
 ### 4.1. Load the C# Addon
 
@@ -162,7 +165,8 @@ Before you can use the Phi Silica API, you need to declare the required capabili
 </Capabilities>
 ```
 
-> **💡 Tip:** Different Windows APIs require different capabilities. Always check the API documentation to see what capabilities are needed. Common ones include `microphone`, `webcam`, `location`, and `bluetooth`.
+> [!TIP]
+> Different Windows APIs require different capabilities. Always check the API documentation to see what capabilities are needed. Common ones include `microphone`, `webcam`, `location`, and `bluetooth`.
 
 ## Step 6: Update Debug Identity
 
@@ -177,7 +181,8 @@ This command:
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without full MSIX packaging
 
-> **📝 Note:** This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
+> [!NOTE]
+> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
 > - Modify `appxmanifest.xml` (change capabilities, identity, or properties)
 > - Update app assets (icons, logos, etc.)
 > - Reinstall or update dependencies

@@ -12,7 +12,7 @@ A standard Flutter Windows build does not have package identity. This guide show
 
 1. **Flutter SDK**: Install Flutter following the [official guide](https://docs.flutter.dev/install/quick).
 
-2. **winapp CLI**: Install the `winapp` CLI via winget:
+2. **winapp CLI**: Install the `winapp` CLI via winget (or update if already installed):
     ```powershell
     winget install Microsoft.winappcli --source winget
     ```
@@ -176,14 +176,22 @@ Now, build and run the app as usual:
 
 ```powershell
 flutter build windows
+```
+
+Run the executable directly (replace `flutter_app` with your project name if different):
+
+```powershell
 .\build\windows\x64\runner\Release\flutter_app.exe
 ```
+
+> [!TIP]
+> The build output is in the `x64` folder regardless of your machine's architecture — this is expected for Flutter's Windows build.
 
 You should see the app with an orange "Not packaged" indicator. This confirms that the standard executable is running without any package identity.
 
 ## 4. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, and optionally Windows App SDK headers for C++ development.
+The `winapp init` command sets up everything you need in one go: app manifest, assets, and optionally Windows App SDK headers for C++ development. The manifest defines your app's identity (name, publisher, version) which Windows uses to grant API access.
 
 Run the following command and follow the prompts:
 
@@ -192,22 +200,23 @@ winapp init
 ```
 
 When prompted:
-- **Package name**: Press Enter to accept the default (flutterapp)
+- **Package name**: Press Enter to accept the default (derived from your project name)
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
 - **Description**: Press Enter to accept the default (Windows Application)
-- **Setup SDKs**: Select "Stable SDKs" to download Windows App SDK and generate C++ headers
+- **Setup SDKs**: Select "Stable SDKs" to download Windows App SDK and generate C++ headers (needed for step 6)
 
 This command will:
-- Create `appxmanifest.xml` and `Assets` folder for your app identity
+- Create `appxmanifest.xml` — the manifest that defines your app's identity
+- Create `Assets` folder — icons required for MSIX packaging and Store submission
 - Create a `.winapp` folder with Windows App SDK headers and libraries
-- Create a `winapp.yaml` configuration file for pinning sdk versions
+- Create a `winapp.yaml` configuration file for pinning SDK versions
 
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
 ## 5. Debug with Identity
 
-To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp run`. This registers a loose layout package (just like a real MSIX install) and launches the app in one step.
+To test features that require identity (like Notifications) without fully packaging the app, you can use `winapp run`. This registers a loose layout package (just like a real MSIX install) and launches the app in one step. No certificate or signing is needed for debugging.
 
 1. **Build the app**:
     ```powershell
@@ -219,6 +228,8 @@ To test features that require identity (like Notifications) without fully packag
     winapp run .\build\windows\x64\runner\Release
     ```
 
+> **Tip**: `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 7. Use `winapp unregister` to clean up development packages when done.
+
 You should now see the app with a green indicator showing:
 ```
 Package Family Name: flutterapp.debug_xxxxxxxx
@@ -229,7 +240,7 @@ This confirms your app is running with a valid package identity!
 
 ## 6. Using Windows App SDK (Optional)
 
-If you selected to setup the SDKs during `winapp init`, you now have access to Windows App SDK C++ headers in the `.winapp/include` folder. Since Flutter's Windows runner is C++, you can call Windows App SDK APIs from native code and expose them to Dart via a method channel.
+If you selected to setup the SDKs during `winapp init`, you now have access to Windows App SDK C++ headers in the `.winapp/include` folder. Since Flutter's Windows runner is C++, you can call Windows App SDK APIs from native code and expose them to Dart via a method channel. If you just need package identity for distribution, you can skip to step 7.
 
 Let's add a simple example that displays the Windows App Runtime version.
 
@@ -294,23 +305,24 @@ void RegisterWinAppSdkPlugin(flutter::FlutterEngine* engine) {
 
 ### Update CMakeLists.txt
 
-Edit `windows/runner/CMakeLists.txt` to add the new source file, include the Windows App SDK headers, and link the required libraries:
+Edit `windows/runner/CMakeLists.txt` to make three changes. Find the `add_executable` block and add `"winapp_sdk_plugin.cpp"` to the source file list:
 
 ```cmake
-# Add the new source file to the executable
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
-  "winapp_sdk_plugin.cpp"
+  "winapp_sdk_plugin.cpp"       # <-- add this line
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
 )
+```
 
-# ... existing settings ...
+Then add these two lines at the end of the file to link WinRT libraries and include the Windows App SDK headers:
 
+```cmake
 # Link Windows Runtime libraries for WinRT
 target_link_libraries(${BINARY_NAME} PRIVATE "WindowsApp.lib")
 
@@ -321,23 +333,30 @@ target_include_directories(${BINARY_NAME} PRIVATE
 
 ### Register the Plugin
 
-In `windows/runner/flutter_window.cpp`, include the header and register the plugin:
+In `windows/runner/flutter_window.cpp`, add the include at the top of the file with the other includes:
 
 ```cpp
 #include "winapp_sdk_plugin.h"
+```
 
-// In FlutterWindow::OnCreate(), after RegisterPlugins:
-RegisterPlugins(flutter_controller_->engine());
-RegisterWinAppSdkPlugin(flutter_controller_->engine());
+Then find the `RegisterPlugins` call in `FlutterWindow::OnCreate()` and add `RegisterWinAppSdkPlugin` on the line right after it:
+
+```cpp
+  RegisterPlugins(flutter_controller_->engine());
+  RegisterWinAppSdkPlugin(flutter_controller_->engine());  // <-- add this line
 ```
 
 ### Update main.dart
 
-Add a method channel call in Dart to query the runtime version and display it:
+Add the following import at the top of `lib/main.dart`, alongside the existing imports:
 
 ```dart
 import 'package:flutter/services.dart';
+```
 
+Add this function below the existing `getPackageFamilyName()` function (outside any class):
+
+```dart
 /// Queries the Windows App Runtime version via a native method channel.
 Future<String?> getWindowsAppRuntimeVersion() async {
   if (!Platform.isWindows) return null;
@@ -351,7 +370,41 @@ Future<String?> getWindowsAppRuntimeVersion() async {
 }
 ```
 
-Call it in `initState()` and display it in the UI alongside the package identity indicator.
+In the `_MyHomePageState` class, add a new field next to the existing `_packageFamilyName`:
+
+```dart
+  late final String? _packageFamilyName;
+  String? _runtimeVersion;         // <-- add this line
+```
+
+Update `initState()` to call the new function:
+
+```dart
+  @override
+  void initState() {
+    super.initState();
+    _packageFamilyName = getPackageFamilyName();
+    // Fetch the runtime version asynchronously
+    getWindowsAppRuntimeVersion().then((version) {
+      setState(() {
+        _runtimeVersion = version;
+      });
+    });
+  }
+```
+
+Finally, display the runtime version in the `build` method. Add this widget inside the `Column` children list, right after the `Container` that shows the package identity:
+
+```dart
+            if (_runtimeVersion != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  'Windows App Runtime: $_runtimeVersion',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ),
+```
 
 ### Build and Run
 
@@ -418,7 +471,7 @@ winapp pack .\dist --cert .\devcert.pfx
 
 ### Install the Certificate
 
-Before you can install the MSIX package, you need to install the development certificate. Run this command as administrator (you only need to do this once):
+Before you can install the MSIX package, you need to trust the development certificate on your machine. Run this command as administrator (you only need to do this once per certificate):
 
 ```powershell
 winapp cert install .\devcert.pfx
@@ -426,14 +479,25 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-Install the package by double-clicking the generated `flutterapp.msix` file, or using PowerShell:
+> **Tip**: If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
+
+Install the package by double-clicking the generated `.msix` file, or using PowerShell:
 
 ```powershell
 Add-AppxPackage .\flutterapp.msix
 ```
 
-### Tips
+> **Tip**: The MSIX filename includes the version and architecture (e.g., `flutterapplication1_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `appxmanifest.xml` — Windows requires a higher version number to update an installed package.
+
+## Tips
 
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
 2. The [Azure Trusted Signing](https://azure.microsoft.com/products/trusted-signing) service is a great way to manage your certificates securely and integrate signing into your CI/CD pipeline.
 3. The Microsoft Store will sign the MSIX for you, no need to sign before submission.
+
+## Next Steps
+
+- **Distribute via winget**: Submit your MSIX to the [Windows Package Manager Community Repository](https://github.com/microsoft/winget-pkgs)
+- **Publish to the Microsoft Store**: Use `winapp store` to submit your package
+- **Set up CI/CD**: Use the [`setup-WinAppCli`](https://github.com/microsoft/setup-WinAppCli) GitHub Action to automate packaging in your pipeline
+- **Explore Windows APIs**: With package identity, you can now use [Notifications](https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart), [on-device AI](https://learn.microsoft.com/windows/ai/apis/), and other [identity-dependent APIs](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions)
