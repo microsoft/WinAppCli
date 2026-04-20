@@ -167,7 +167,10 @@ internal class WorkspaceSetupService(
         {
             if (options.SdkInstallMode == SdkInstallMode.None)
             {
-                logger.LogDebug("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+                // The "why we're skipping" message is emitted by AskSdkInstallModeAsync (interactive
+                // choice, --setup-sdks none) or — for .NET — by the early-exit when the project
+                // already references WinAppSDK. Don't repeat a generic / potentially-misleading
+                // "by user choice" line here (#464).
                 logger.LogInformation("Configuration processed (SDK installation skipped)");
             }
             else
@@ -203,7 +206,10 @@ internal class WorkspaceSetupService(
         }
         else if (options.SdkInstallMode == SdkInstallMode.None)
         {
-            logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+            // For .NET projects: AskSdkInstallModeAsync already logged the actual reason we're
+            // skipping (auto-skipped because WinAppSDK is already referenced, or the user picked
+            // "Do not setup", or --setup-sdks=none was passed). Don't append a misleading
+            // "by user choice" line on top of that (#464).
         }
 
         // Prompt to install the WinApp CLI package before entering the live display context
