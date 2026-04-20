@@ -157,6 +157,8 @@ This command will:
 - Create `appxmanifest.xml` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 
+> **Note:** Because no SDK packages are being managed, no `winapp.yaml` is created — Tauri uses Rust's `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
+
 You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
 
 ## 4. Debug with Identity

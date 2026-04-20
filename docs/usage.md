@@ -35,7 +35,7 @@ winapp init [base-directory] [options]
 
 **What it does:**
 
-- Creates `winapp.yaml` configuration file
+- Creates `winapp.yaml` configuration file (only when SDK packages are managed; skipped with `--setup-sdks none`)
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
 - Creates AppxManifest.xml
