@@ -464,6 +464,14 @@ internal partial class DotNetService : IDotNetService
         {
             return false;
         }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     /// <inheritdoc />
