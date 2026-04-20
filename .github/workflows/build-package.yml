@@ -118,6 +118,14 @@ jobs:
         path: artifacts/nuget/
         if-no-files-found: error
 
+    - name: Upload VS Code extension
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: vscode-extension
+        path: artifacts/*.vsix
+        if-no-files-found: error
+
     # --- Build quality metrics ---
     - name: Collect build metrics
       if: ${{ !cancelled() }}
