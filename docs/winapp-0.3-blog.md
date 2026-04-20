@@ -29,6 +29,26 @@ TODO: ADD GIF
 
 See full usage instructions for `winapp run` at [WinApp CLI Run Command](https://github.com/microsoft/winappCli/blob/main/docs/usage.md#run).
 
+## 📦 `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package
+
+We're introducing a new NuGet package that enables `dotnet run` to correctly launch packaged .NET apps. It works with WinUI, WPF, WinForms, Console, Avalonia, and more. 
+
+With `Microsoft.Windows.SDK.BuildTools.WinApp` configured, `dotnet run` can handle the entire inner loop: it can build your app, prepare a loose-layout package, register it with Windows, and launch — all in one step. No extra commands, no manual registration. Just `dotnet run`.
+
+Install it directly via NuGet, or let `winapp init` set it up for you (which also ensures your `.csproj` has all the right properties):
+
+```
+# Option 1: Let winapp init do the work
+winapp init
+
+# Option 2: Install the NuGet package directly
+dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp
+```
+
+TODO: ADD GIF
+
+For more information on `dotnet run` and the `Microsoft.Windows.SDK.BuildTools.WinApp`, checkout [dotnet run Support for Packaged WinUI Apps](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
+
 ## 🖥️ `winapp ui`: UI Automation from the command line
 
 UI Automation is now built right into the CLI. `winapp ui` lets you inspect and interact with any running Windows application — WPF, WinForms, Win32, Electron, WinUI3 — all from the command line.
@@ -70,26 +90,6 @@ This unblocks a whole class of agentic and automation scenarios. Agents or a scr
 TODO: ADD GIF
 
 See full usage instructions for `winapp ui` at [WinApp CLI UI Command](https://github.com/microsoft/winappCli/blob/main/docs/usage.md#ui). Also checkout our [UI Automation Getting Started Guide](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md).
-
-## 📦 `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package
-
-We're introducing a new NuGet package that enables `dotnet run` to correctly launch packaged .NET apps. It works with WinUI, WPF, WinForms, Console, Avalonia, and more. 
-
-With `Microsoft.Windows.SDK.BuildTools.WinApp` configured, `dotnet run` can handle the entire inner loop: it can build your app, prepare a loose-layout package, register it with Windows, and launch — all in one step. No extra commands, no manual registration. Just `dotnet run`.
-
-Install it directly via NuGet, or let `winapp init` set it up for you (which also ensures your `.csproj` has all the right properties):
-
-```
-# Option 1: Let winapp init do the work
-winapp init
-
-# Option 2: Install the NuGet package directly
-dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp
-```
-
-TODO: ADD GIF
-
-For more information on `dotnet run` and the `Microsoft.Windows.SDK.BuildTools.WinApp`, checkout [dotnet run Support for Packaged WinUI Apps](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
 
 ## 🐚 Shell Completion
 
