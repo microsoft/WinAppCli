@@ -56,7 +56,6 @@ internal sealed class AgentEnvironmentDetector
 
         // GitHub Copilot CLI
         ("COPILOT_CLI", "copilot-cli"),
-        ("COPILOT_AGENT_SESSION_ID", "copilot-cli"),
 
         // GitHub Copilot (VS Code)
         ("VSCODE_COPILOT_TERMINAL", "copilot-vscode"),

@@ -25,7 +25,6 @@ public class AgentEnvironmentDetectorTests
         "CODEX_CI",
         "GOOSE_TERMINAL",
         "COPILOT_CLI",
-        "COPILOT_AGENT_SESSION_ID",
         "VSCODE_COPILOT_TERMINAL",
         "COPILOT_MODEL",
         "CLINE_ACTIVE",
@@ -148,7 +147,6 @@ public class AgentEnvironmentDetectorTests
     [DataRow("CODEX_CI", "codex")]
     [DataRow("GOOSE_TERMINAL", "goose")]
     [DataRow("COPILOT_CLI", "copilot-cli")]
-    [DataRow("COPILOT_AGENT_SESSION_ID", "copilot-cli")]
     [DataRow("VSCODE_COPILOT_TERMINAL", "copilot-vscode")]
     [DataRow("COPILOT_MODEL", "copilot")]
     [DataRow("CLINE_ACTIVE", "cline")]
