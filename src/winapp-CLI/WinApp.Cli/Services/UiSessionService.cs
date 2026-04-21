@@ -76,7 +76,7 @@ internal sealed class UiSessionService(
         var selected = foreground != default ? foreground : PickLargestWindow(windows);
 
         var reason = foreground != default ? "foreground" : "largest";
-        logger.LogInformation("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}' — pass -w {Hwnd} to target this window explicitly.", selected.Hwnd, reason, windows.Count, app, selected.Hwnd);
+        logger.LogInformation("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}' — pass -w {ExplicitHwnd} to target this window explicitly.", selected.Hwnd, reason, windows.Count, app, selected.Hwnd);
 
         return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
     }

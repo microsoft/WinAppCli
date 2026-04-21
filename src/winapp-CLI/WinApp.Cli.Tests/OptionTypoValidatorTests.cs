@@ -14,7 +14,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "-app", "tauri-app", "--depth", "6" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -26,7 +26,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "-app=tauri-app" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -38,7 +38,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "-a", "tauri-app", "--depth", "6" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -50,7 +50,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "--app", "tauri-app" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -63,7 +63,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         // "-xyz" doesn't correspond to any "--xyz" option, so it's not a confident typo.
         var args = new[] { "ui", "inspect", "-xyz" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -75,7 +75,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "--app", "x", "--", "-app" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
@@ -87,7 +87,7 @@ public class OptionTypoValidatorTests : BaseCommandTests
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
         var args = new[] { "ui", "inspect", "--app", "x", "-42" };
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
 
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
