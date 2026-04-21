@@ -38,7 +38,7 @@ winapp init [base-directory] [options]
 - Creates `winapp.yaml` configuration file
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
-- Creates AppxManifest.xml
+- Creates Package.appxmanifest
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
@@ -49,7 +49,7 @@ When a `.csproj` file is found in the target directory, `init` uses a streamline
 
 - Validates and updates the `TargetFramework` to a Windows-compatible TFM (e.g., `net10.0-windows10.0.26100.0`)
 - Adds `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` as NuGet `PackageReference` entries directly in the `.csproj`
-- Generates `appxmanifest.xml`, assets, and a development certificate
+- Generates `Package.appxmanifest`, assets, and a development certificate
 - Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
 **Examples:**
@@ -146,7 +146,7 @@ winapp update --setup-sdks experimental
 
 ### pack
 
-Create MSIX packages from prepared application directories. Requires appxmanifest.xml file to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
+Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
 
 ```bash
 winapp pack <input-folder> [options]
@@ -160,7 +160,7 @@ winapp pack <input-folder> [options]
 
 - `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
 - `--name <name>` - Package name (default: from manifest)
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
+- `--manifest <path>` - Path to manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported; default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
 - `--cert-password <password>` - Certificate password (default: "password")
 - `--generate-cert` - Generate a new development certificate
@@ -172,7 +172,7 @@ winapp pack <input-folder> [options]
 
 **What it does:**
 
-- Validates and processes AppxManifest.xml files
+- Validates and processes Package.appxmanifest files
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
@@ -184,7 +184,7 @@ winapp pack <input-folder> [options]
 
 When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
-- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
+- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `Package.appxmanifest`
 - **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
 
 **Placeholder resolution during packaging:**
@@ -228,7 +228,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: `./appxmanifest.xml`)
+- `--manifest <path>` - Path to Package.appxmanifest (default: `./Package.appxmanifest`)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -255,11 +255,11 @@ winapp create-debug-identity app.py
 
 ### manifest
 
-Generate and manage AppxManifest.xml files.
+Generate and manage Package.appxmanifest files.
 
 #### manifest generate
 
-Generate AppxManifest.xml from templates.
+Generate Package.appxmanifest from templates.
 
 ```bash
 winapp manifest generate [directory] [options]
@@ -333,7 +333,7 @@ winapp run <input-folder> [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from input folder or current directory)
+- `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from input folder or current directory)
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
 - `--args <string>` - Command-line arguments to pass to the application
 - `--no-launch` - Only create the debug identity and register the package without launching the application
@@ -352,7 +352,7 @@ Use `--clean` when you need a fresh start (e.g., to reset corrupted state or tes
 
 **What it does:**
 
-- Locates or generates the AppxManifest.xml
+- Locates or generates the Package.appxmanifest
 - Creates and registers a debug identity using a loose layout package
 - Computes the Application User Model ID (AUMID)
 - Launches the application using the registered identity (unless `--no-launch` is specified)
@@ -365,7 +365,7 @@ Use `--clean` when you need a fresh start (e.g., to reset corrupted state or tes
 winapp run ./bin/Debug
 
 # Launch with custom manifest and arguments
-winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
 
 # Specify output directory for loose layout package
 winapp run ./bin/Release --output-appx-directory ./AppXDebug
@@ -429,7 +429,7 @@ winapp unregister [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from current directory)
+- `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
 - `--json` - Format output as JSON
 
@@ -448,7 +448,7 @@ winapp unregister [options]
 winapp unregister
 
 # Unregister with explicit manifest
-winapp unregister --manifest ./appxmanifest.xml
+winapp unregister --manifest ./Package.appxmanifest
 
 # Force unregister even if registered from a different project tree
 winapp unregister --force
@@ -461,7 +461,7 @@ winapp unregister --json
 
 #### manifest add-alias
 
-Add an execution alias (`uap5:AppExecutionAlias`) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name.
+Add an execution alias (`uap5:AppExecutionAlias`) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name.
 
 ```bash
 winapp manifest add-alias [options]
@@ -470,7 +470,7 @@ winapp manifest add-alias [options]
 **Options:**
 
 - `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
-- `--manifest <path>` - Path to AppxManifest.xml (default: search current directory)
+- `--manifest <path>` - Path to Package.appxmanifest (default: search current directory)
 - `--app-id <id>` - Application Id to add the alias to (default: first Application element)
 
 **What it does:**
@@ -490,7 +490,7 @@ winapp manifest add-alias
 winapp manifest add-alias --name myapp.exe
 
 # Add alias to specific manifest
-winapp manifest add-alias --manifest ./dist/appxmanifest.xml
+winapp manifest add-alias --manifest ./dist/Package.appxmanifest
 ```
 
 Generate all required MSIX image assets from a single source image.
@@ -505,7 +505,7 @@ winapp manifest update-assets <image-path> [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml file (default: search current directory)
+- `--manifest <path>` - Path to Package.appxmanifest file (default: search current directory)
 - `--light-image <path>` - Path to a separate source image for light theme variants
 
 **Description:**
@@ -540,7 +540,7 @@ winapp manifest update-assets mylogo.png
 winapp manifest update-assets mylogo.svg
 
 # Specify manifest location explicitly
-winapp manifest update-assets mylogo.png --manifest ./dist/appxmanifest.xml
+winapp manifest update-assets mylogo.png --manifest ./dist/Package.appxmanifest
 
 # Generate light theme variants from a separate image
 winapp manifest update-assets mylogo.png --light-image mylogo-light.png
@@ -568,7 +568,7 @@ winapp cert generate [options]
 
 **Options:**
 
-- `--manifest <appxmanifest.xml>` - Extract publisher information from appxmanifest.xml 
+- `--manifest <Package.appxmanifest>` - Extract publisher information from Package.appxmanifest 
 - `--publisher <name>` - Publisher name for certificate
 - `--output <path>` - Output certificate file path (supports absolute and relative paths)
 - `--password <password>` - Certificate password (default: "password")
@@ -832,7 +832,7 @@ npx winapp node create-addon --name myWindowsAddon
 
 ### node add-electron-debug-identity
 
-*(Available in NPM package only)* Add app identity to Electron development process by using sparse packaging. Requires an appxmanifest.xml (create one with `winapp init` or `winapp manifest generate` if you don't have one).
+*(Available in NPM package only)* Add app identity to Electron development process by using sparse packaging. Requires a Package.appxmanifest (create one with `winapp init` or `winapp manifest generate` if you don't have one).
 
 > [!IMPORTANT]  
 > There is a known issue with sparse packaging Electron applications which causes the app to crash on start or not render the web content. The issue has been fixed in Windows but it has not propagated to external Windows devices yet. If you are seeing this issue after calling `add-electron-debug-identity`, you can [disable sandboxing in your Electron app](https://www.electronjs.org/docs/latest/tutorial/sandbox#disabling-chromiums-sandbox-testing-only) for debug purposes with the `--no-sandbox` flag. This issue does not affect full MSIX packaging.
@@ -847,7 +847,7 @@ npx winapp node add-electron-debug-identity [options]
 
 | Option | Description |
 |--------|-------------|
-| `--manifest <path>` | Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory) |
+| `--manifest <path>` | Path to custom Package.appxmanifest (default: Package.appxmanifest in current directory) |
 | `--no-install` | Do not install or modify dependencies; only configure the Electron debug identity |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` to the package name and application ID |
 | `--verbose` | Enable verbose output |
@@ -856,7 +856,7 @@ npx winapp node add-electron-debug-identity [options]
 
 - Registers debug identity for electron.exe process
 - Enables testing identity-requiring APIs in Electron development
-- Uses existing AppxManifest.xml for identity configuration
+- Uses existing Package.appxmanifest for identity configuration
 
 **Examples:**
 
@@ -865,7 +865,7 @@ npx winapp node add-electron-debug-identity [options]
 npx winapp node add-electron-debug-identity
 
 # Use a custom manifest file
-npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+npx winapp node add-electron-debug-identity --manifest ./custom/Package.appxmanifest
 ```
 
 ---
