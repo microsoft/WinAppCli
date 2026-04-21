@@ -146,7 +146,7 @@ winapp update --setup-sdks experimental
 
 ### pack
 
-Create MSIX packages from prepared application directories. Requires Package.appxmanifest file to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
+Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
 
 ```bash
 winapp pack <input-folder> [options]
@@ -160,7 +160,7 @@ winapp pack <input-folder> [options]
 
 - `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
 - `--name <name>` - Package name (default: from manifest)
-- `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect)
+- `--manifest <path>` - Path to manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported; default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
 - `--cert-password <password>` - Certificate password (default: "password")
 - `--generate-cert` - Generate a new development certificate

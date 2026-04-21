@@ -201,7 +201,7 @@ Host the MSIX package on your website for direct download. Ensure you sign it wi
 Submit your app to the Microsoft Store for the widest distribution and automatic updates. You'll need to:
 1. Create a Microsoft Partner Center account
 2. Reserve your app name
-3. Update `Package.appxmanifest` with your Store identity. No need to sign the msix, the store publishing process will sign it automaticly. 
+3. Update `Package.appxmanifest` with your Store identity. No need to sign the msix, the store publishing process will sign it automatically. 
 5. Submit for certification
 
 Learn more: [Publish your app to the Microsoft Store](https://learn.microsoft.com/windows/apps/publish/)

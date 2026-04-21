@@ -32,7 +32,7 @@ npx winapp node create-addon --template cs --name MyCsAddon
 
 ### `node add-electron-debug-identity`
 
-Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires an `Package.appxmanifest` (create one with `winapp init` or `winapp manifest generate`).
+Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires a `Package.appxmanifest` (create one with `winapp init` or `winapp manifest generate`).
 
 ```bash
 npx winapp node add-electron-debug-identity [options]

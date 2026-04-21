@@ -318,7 +318,7 @@ internal partial class MsixService(
             }
             else
             {
-                throw new FileNotFoundException($"Manifest file not found. Searched for Package.appxmanifest in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
+                throw new FileNotFoundException($"Manifest file not found. Searched for Package.appxmanifest, then appxmanifest.xml in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
             }
         }
 
@@ -677,10 +677,10 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Searches for Package.appxmanifest in the project by looking for .winapp directory in parent directories
+    /// Searches for a manifest file in the start directory and parent directories.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
-    /// <returns>Path to the project's Package.appxmanifest file, or null if not found</returns>
+    /// <returns>Path to the first manifest found (preferring Package.appxmanifest over appxmanifest.xml), or null if not found.</returns>
     public static FileInfo? FindProjectManifest(ICurrentDirectoryProvider currentDirectoryProvider, DirectoryInfo? startDirectory = null)
     {
         var directory = startDirectory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();

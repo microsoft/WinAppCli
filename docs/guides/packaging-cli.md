@@ -37,7 +37,7 @@ Generate a base Package.appxmanifest and required assets for your CLI executable
 winapp manifest generate --executable .\yourcli.exe
 ```
 
-This command creates an `Package.appxmanifest` file in the current directory with default values populated from your executable.
+This command creates a `Package.appxmanifest` file in the current directory with default values populated from your executable.
 
 ### 4. Configure the Manifest
 
