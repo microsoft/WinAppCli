@@ -154,10 +154,10 @@ When prompted:
 - **Setup SDKs**: Select "Do not setup SDKs" (Tauri uses Rust's `windows` crate, not the C++ SDK headers)
 
 This command will:
-- Create `appxmanifest.xml` — the manifest that defines your app's identity
+- Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 ## 4. Debug with Identity
 
@@ -218,7 +218,7 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Tip**: The certificate's publisher must match the `Publisher` in your `appxmanifest.xml`. The `cert generate` command reads this automatically from your manifest.
+> **Tip**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Build, Stage, and Pack
 
@@ -226,7 +226,7 @@ winapp cert generate --if-exists skip
 npm run pack:msix
 ```
 
-> **Tip**: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> **Tip**: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
@@ -246,7 +246,7 @@ Install the package by double-clicking the generated `.msix` file, or using Powe
 Add-AppxPackage .\tauri-app.msix
 ```
 
-> **Tip**: The MSIX filename includes the version and architecture (e.g., `tauri-app_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `appxmanifest.xml` — Windows requires a higher version number to update an installed package.
+> **Tip**: The MSIX filename includes the version and architecture (e.g., `tauri-app_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
 
 Once installed, you can launch your app from the Start menu. You should see the app running with identity.
 
