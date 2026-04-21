@@ -111,6 +111,8 @@ internal static class Program
             }
         }
 
+        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+
         // If no arguments provided, display banner and show help
         if (args.Length == 0)
         {
@@ -124,7 +126,14 @@ internal static class Program
             return 0;
         }
 
-        var effectiveParseResult = parseResult ?? rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args);
+
+        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
+        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+        if (!string.IsNullOrWhiteSpace(caller))
+        {
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+        }
 
         try
         {
@@ -133,7 +142,7 @@ internal static class Program
                 CommandInvokedEvent.Log(parseResult.CommandResult);
             }
 
-            var returnCode = await effectiveParseResult.InvokeAsync();
+            var returnCode = await parseResult.InvokeAsync();
 
             if (!isCompleteMode)
             {
@@ -144,7 +153,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(effectiveParseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parseResult.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
