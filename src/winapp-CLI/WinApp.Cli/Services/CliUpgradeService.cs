@@ -372,23 +372,28 @@ internal class CliUpgradeService(
     {
         static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
         {
-            coreVersion = default!;
             prerelease = null;
-
+        
             var plusIdx = value.IndexOf('+');
             if (plusIdx >= 0)
-            {
                 value = value[..plusIdx];
-            }
-
+        
             var dashIdx = value.IndexOf('-');
             if (dashIdx >= 0)
             {
                 prerelease = value[(dashIdx + 1)..];
                 value = value[..dashIdx];
             }
-
-            return Version.TryParse(value, out coreVersion);
+        
+            // Parse into a nullable to satisfy nullable analysis, then assign on success
+            if (Version.TryParse(value, out Version? parsed) && parsed is not null)
+            {
+                coreVersion = parsed;
+                return true;
+            }
+        
+            coreVersion = new Version(0, 0); // any non-null default; will be ignored because we return false
+            return false;
         }
 
         static int ComparePrerelease(string? left, string? right)
