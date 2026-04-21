@@ -372,27 +372,26 @@ internal class CliUpgradeService(
     {
         static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
         {
+            coreVersion = new Version(0, 0);
             prerelease = null;
-        
+
             var plusIdx = value.IndexOf('+');
             if (plusIdx >= 0)
                 value = value[..plusIdx];
-        
+
             var dashIdx = value.IndexOf('-');
             if (dashIdx >= 0)
             {
                 prerelease = value[(dashIdx + 1)..];
                 value = value[..dashIdx];
             }
-        
-            // Parse into a nullable to satisfy nullable analysis, then assign on success
-            if (Version.TryParse(value, out Version? parsed) && parsed is not null)
+
+            if (Version.TryParse(value, out var parsedVersion) && parsedVersion is not null)
             {
-                coreVersion = parsed;
+                coreVersion = parsedVersion;
                 return true;
             }
-        
-            coreVersion = new Version(0, 0); // any non-null default; will be ignored because we return false
+
             return false;
         }
 
@@ -476,7 +475,19 @@ internal class CliUpgradeService(
         // Remove any leftover backup from a previous upgrade
         if (File.Exists(backupPath))
         {
-            File.Delete(backupPath);
+            try
+            {
+                File.Delete(backupPath);
+            }
+            catch
+            {
+                // Best-effort cleanup only.
+            }
+        }
+
+        if (File.Exists(backupPath))
+        {
+            backupPath = currentExePath + ".old." + Guid.NewGuid().ToString("N");
         }
 
         // Rename running exe to .old (Windows allows renaming a locked file)
