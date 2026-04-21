@@ -2,7 +2,15 @@ TODO: HEADER IMAGE
 
 # Windows App Development CLI v0.3: `winapp run`, `winapp ui`, and .NET `dotnet run` Support
 
-Windows App Development CLI v0.3 is here! This release brings some of our best features yet: a full run-and-debug experience outside Visual Studio, built-in UI Automation from the command line, and a new NuGet package that makes `dotnet run` just work for packaged .NET apps. Get the update by running `winget install Microsoft.WinAppCLI` or [check the repo for other install options](https://github.com/microsoft/winappCli).
+Windows App Development CLI v0.3 is here! This release brings some of our best features yet including a full run-and-debug experience outside Visual Studio and built-in UI Automation from the command line.
+
+With v0.3, we've unlocked a whole class of agentic and automation scenarios. Agents or a script can now *run*, *see*, and *interact with* a running Windows app — not just build it.
+
+Whether you're building with **WinUI, WPF, WinForms, C++, Electron, Rust, Tauri, Flutter, or Avalonia** — the Windows App Development CLI is for you. It provides the tooling to package, run, and add Windows SDK support, and more to any Windows desktop app.
+
+And for **.NET developers** in particular, this release makes things even smoother with a new NuGet package that brings `dotnet run` support for packaged apps right out of the box.
+
+Get the update by running `winget install Microsoft.WinAppCLI` or [check the repo for other install options](https://github.com/microsoft/winappCli).
 
 TODO: ADD BUTTON FOR INSTALL STEPS
 
@@ -17,7 +25,7 @@ Think of `winapp run` as Visual Studio's F5 — but from the command line, and f
 winapp run ./bin/Debug
 ```
 
-It works across the full range of app types we support — WinUI, WPF, C++, Rust, Tauri, Flutter — and comes with a set of modes designed for developers or automated workflows:
+It works across the full range of app types we support and comes with a set of modes designed for developers or automated workflows:
 
 - **`--detach`**: Launch the app and return control to the terminal immediately. Great for CI/automation pipelines where you need the app running but don't want to block.
 - **`--unregister-on-exit`**: Automatically cleans up the registered package when the app closes. Perfect for clean test runs where you don't want leftover state.
@@ -85,7 +93,7 @@ Here's what you can do:
 - **Take screenshots** — capture individual windows or multi-window composites.
 - **Wait for elements** — block until a specific element appears, ideal for test synchronization.
 
-This unblocks a whole class of agentic and automation scenarios. Agents or a script can now actually *see* and *interact with* a running app — not just build it. Combine it with `winapp run` for a complete build → launch → verify workflow entirely from the terminal.
+This unlocks several new agentic and automation scenarios. Agents or a script are now able to *see* and *interact with* a running app. Combine `winapp ui` with `winapp run` for a complete build → launch → verify workflow entirely from the terminal — driven by an agent, a script, or just you.
 
 TODO: ADD GIF
 
