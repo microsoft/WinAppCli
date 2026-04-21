@@ -1,5 +1,17 @@
 # CLI Documentation and Usage
 
+## Shell Completion
+
+Enable tab completion for commands, options, and values. See the [Shell Completion guide](guides/shell-completion.md) for setup instructions.
+
+```powershell
+# Quick setup for PowerShell (permanent — add to profile)
+winapp complete --setup powershell >> $PROFILE
+
+# Or try it in the current session only
+winapp complete --setup powershell | Out-String | Invoke-Expression
+```
+
 ### init
 
 Initialize a directory with Windows SDK, Windows App SDK, and required assets for modern Windows development.

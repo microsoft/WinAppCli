@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -220,9 +221,14 @@ internal partial class MsixService
                 await priService.GeneratePriFileAsync(outputAppXDirectory, taskContext, cancellationToken: cancellationToken);
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Generated resources.pri");
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                logger.LogWarning(ex, "{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
             }
         }
 
@@ -699,7 +705,8 @@ internal partial class MsixService
                 }
                 catch (Exception ex)
                 {
-                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                    logger.LogWarning(ex, "{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
                 }
                 finally
                 {
