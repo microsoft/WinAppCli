@@ -420,7 +420,10 @@ internal class WorkspaceSetupService(
                             {
                                 return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/], but failed to add: {failedList}");
                             }
-                            return (1, $"Failed to add NuGet packages: {failedList}");
+
+                            // Only optional package failures reach this point. Required package failures
+                            // already return non-zero in the catch block above, so do not abort init here.
+                            return (0, $"Failed to add optional NuGet packages: {failedList}");
                         }
 
                         return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/]");
