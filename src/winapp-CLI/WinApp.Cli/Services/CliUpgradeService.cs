@@ -377,7 +377,9 @@ internal class CliUpgradeService(
 
             var plusIdx = value.IndexOf('+');
             if (plusIdx >= 0)
+            {
                 value = value[..plusIdx];
+            }
 
             var dashIdx = value.IndexOf('-');
             if (dashIdx >= 0)
