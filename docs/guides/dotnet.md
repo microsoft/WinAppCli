@@ -126,7 +126,7 @@ To fix this, you'll add an execution alias to the manifest and tell the run inte
    winapp manifest add-alias
    ```
 
-   This adds a `uap5:ExecutionAlias` to `appxmanifest.xml` (defaulting to your project's exe name) so the app can be launched by name from a terminal.
+   This adds a `uap5:ExecutionAlias` to `Package.appxmanifest` (defaulting to your project's exe name) so the app can be launched by name from a terminal.
 
 2. Tell the `dotnet run` integration to use the alias. Open `dotnet-app.csproj` and add the following inside any `<PropertyGroup>` (or create a new `<PropertyGroup>` if needed):
 

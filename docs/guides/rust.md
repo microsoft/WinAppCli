@@ -120,7 +120,7 @@ Add the alias:
 winapp manifest add-alias
 ```
 
-This adds a `uap5:ExecutionAlias` entry to `appxmanifest.xml`.
+This adds a `uap5:ExecutionAlias` entry to `Package.appxmanifest`.
 
 ## 5. Debug with Identity
 
