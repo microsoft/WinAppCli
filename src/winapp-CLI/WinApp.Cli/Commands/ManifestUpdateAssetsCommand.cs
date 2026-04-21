@@ -59,7 +59,7 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
                 manifestPath = MsixService.FindProjectManifest(currentDirectoryProvider);
                 if (manifestPath == null)
                 {
-                    logger.LogError("{UISymbol} Could not find AppxManifest.xml/Package.appxmanifest in current directory or parent directories", UiSymbols.Error);
+                    logger.LogError("{UISymbol} Could not find Package.appxmanifest or appxmanifest.xml in current directory or parent directories", UiSymbols.Error);
                     return 1;
                 }
 

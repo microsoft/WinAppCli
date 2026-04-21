@@ -68,7 +68,7 @@ This command sets up everything you need for Windows development:
    - Headers and libraries from the **Windows App SDK**
    - NuGet packages with the required binaries
 
-2. **Generates `appxmanifest.xml`** - The app manifest required for app identity and MSIX packaging
+2. **Generates `Package.appxmanifest`** - The app manifest required for app identity and MSIX packaging
 
 3. **Creates `Assets/` folder** - Contains app icons and visual assets for your app
 
@@ -81,7 +81,7 @@ This command sets up everything you need for Windows development:
 > [!NOTE]
 > The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 > [!TIP]
 > **About the Windows SDKs:**
@@ -159,7 +159,7 @@ The `npm install` you ran in Step 4 triggered the `postinstall` script, which ra
 ### What Does Debug Identity Do?
 
 This command:
-1. Reads your `appxmanifest.xml` to get app details and capabilities
+1. Reads your `Package.appxmanifest` to get app details and capabilities
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without creating a full MSIX package
 
@@ -167,7 +167,7 @@ The debug identity was applied automatically when you ran `npm install` in Step 
 
 ### When to Manually Update Debug Identity
 
-You need to run this command manually whenever you modify `appxmanifest.xml` (change capabilities, identity, or properties) or any of the linked assets (icons, mcp.json, etc)
+You need to run this command manually whenever you modify `Package.appxmanifest` (change capabilities, identity, or properties) or any of the linked assets (icons, mcp.json, etc)
 
 ```bash
 npx winapp node add-electron-debug-identity

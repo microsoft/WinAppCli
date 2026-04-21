@@ -168,7 +168,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SetupWorkspace_WithRequireExistingConfig_FailsWhenConfigMissing()
+    public async Task SetupWorkspace_WithRequireExistingConfig_NoOpsWhenConfigMissing()
     {
         // Arrange - Don't create any config file
         var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
@@ -176,7 +176,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         {
             BaseDirectory = _tempDirectory,
             ConfigDir = _tempDirectory,
-            RequireExistingConfig = true, // This should fail when config doesn't exist
+            RequireExistingConfig = true, // Restore-style call
             UseDefaults = true,
             NoGitignore = true
         };
@@ -185,7 +185,11 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(1, exitCode, "Setup should fail when config is required but missing");
+        // Restore on a non-.NET project with no winapp.yaml is a graceful no-op:
+        // a project that doesn't declare SDK package versions has nothing to restore.
+        // (.NET projects without yaml are still rejected — handled separately by the
+        // csproj-detection branch in SetupWorkspaceAsync.)
+        Assert.AreEqual(0, exitCode, "Restore should be a no-op (exit 0) when no winapp.yaml exists on a non-.NET project");
     }
 }
 
@@ -953,6 +957,38 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // Assert: init must succeed even though NuGet lookup failed for the WinApp package
         Assert.AreEqual(0, exitCode,
             "Init should succeed (exit code 0) even when NuGet version lookup fails for the WinApp integration package");
+    }
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_InitSucceeds_WhenOptionalWinAppPackageAddFails()
+    {
+        // Arrange
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+        _fakeDotNetService.PackagesToThrowOnAdd.Add(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode,
+            "Init should succeed (exit code 0) when optional WinApp package add fails");
+
+        var combinedOutput = TestAnsiConsole.Output + ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.IsTrue(
+            combinedOutput.Contains("Failed to add optional NuGet packages", StringComparison.OrdinalIgnoreCase) &&
+            combinedOutput.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase),
+            $"Output should include the optional package failure message. Output:\n{combinedOutput}");
     }
 
     #endregion

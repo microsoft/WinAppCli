@@ -15,20 +15,20 @@ Use this skill when:
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "winapp.yaml not found" | Running `restore` or `update` without config | Run `winapp init` first, or `cd` to the directory containing `winapp.yaml` |
-| "appxmanifest.xml not found" | Running `package`, `create-debug-identity`, or `cert generate --manifest` | Run `winapp init` or `winapp manifest generate` first, or pass `--manifest <path>` |
-| "Publisher mismatch" | Certificate publisher ≠ manifest publisher | Regenerate cert: `winapp cert generate --manifest`, or edit `appxmanifest.xml` `Identity.Publisher` to match |
+| "Package.appxmanifest not found" | Running `package`, `create-debug-identity`, or `cert generate --manifest` | Run `winapp init` or `winapp manifest generate` first, or pass `--manifest <path>` |
+| "Publisher mismatch" | Certificate publisher ≠ manifest publisher | Regenerate cert: `winapp cert generate --manifest`, or edit `Package.appxmanifest` `Identity.Publisher` to match |
 | "Access denied" / "elevation required" | `cert install` without admin | Run terminal as Administrator for `winapp cert install` |
 | "Package installation failed" | Cert not trusted, or stale package registration | `winapp cert install ./devcert.pfx` (admin), then `Get-AppxPackage <name> \| Remove-AppxPackage` |
 | "Certificate not trusted" | Dev cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Build tools not found" | First run, tools not yet downloaded | Run `winapp update` to download tools; ensure internet access |
 | "Failed to add package identity" | Stale debug identity or untrusted cert | `Get-AppxPackage *yourapp* \| Remove-AppxPackage` to clean up, then `winapp cert install` and retry |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `winapp cert generate --if-exists overwrite` or `--if-exists skip` |
-| "Manifest already exists" | `appxmanifest.xml` already present | Use `winapp manifest generate --if-exists overwrite` or edit manifest directly |
+| "Manifest already exists" | `Package.appxmanifest` already present | Use `winapp manifest generate --if-exists overwrite` or edit manifest directly |
 
 ## Command selection guide
 
 ```
-Does the project have an appxmanifest.xml?
+Does the project have a Package.appxmanifest?
 ├─ No → Do you want full setup (manifest + config + optional SDKs)?
 │       ├─ Yes → winapp init (adds Windows platform files to existing project)
 │       └─ No, just a manifest → winapp manifest generate
@@ -60,7 +60,7 @@ Does the project have an appxmanifest.xml?
 
 **Important notes:**
 - `winapp init` adds files to an **existing** project — it does not create a new project
-- The key prerequisite for most commands is `appxmanifest.xml`, not `winapp.yaml`
+- The key prerequisite for most commands is `Package.appxmanifest`, not `winapp.yaml`
 - `winapp.yaml` is only needed for SDK version management (`restore`/`update`)
 - Projects with NuGet package references (e.g., `.csproj` referencing `Microsoft.Windows.SDK.BuildTools`) can use winapp commands without `winapp.yaml`
 - For Electron projects, use the npm package (`npm install --save-dev @microsoft/winappcli`) which includes Node.js-specific commands under `npx winapp node`
@@ -86,17 +86,17 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 
 | Command | Requires | Creates/Modifies |
 |---------|----------|------------------|
-| `init` | Existing project (any framework) | `winapp.yaml`, `.winapp/`, `appxmanifest.xml`, `Assets/`, `.gitignore` update |
+| `init` | Existing project (any framework) | `winapp.yaml`, `.winapp/`, `Package.appxmanifest`, `Assets/`, `.gitignore` update |
 | `restore` | `winapp.yaml` | `.winapp/packages/`, generated projections |
 | `update` | `winapp.yaml` | Updates versions in `winapp.yaml`, reinstalls packages |
-| `manifest generate` | Nothing | `appxmanifest.xml`, `Assets/` |
-| `manifest update-assets` | `appxmanifest.xml` + source image | Regenerates `Assets/` icons |
-| `cert generate` | Nothing (or `appxmanifest.xml` for publisher) | `devcert.pfx` |
+| `manifest generate` | Nothing | `Package.appxmanifest`, `Assets/` |
+| `manifest update-assets` | `Package.appxmanifest` + source image | Regenerates `Assets/` icons |
+| `cert generate` | Nothing (or `Package.appxmanifest` for publisher) | `devcert.pfx` |
 | `cert install` | Certificate file + admin | Machine certificate store |
-| `create-debug-identity` | `appxmanifest.xml` + exe + trusted cert | Registers sparse package with Windows |
-| `run` | Build output folder + `appxmanifest.xml` | Registers loose layout package, launches app |
-| `unregister` | `appxmanifest.xml` (auto-detect or `--manifest`) | Removes dev-mode package registrations |
-| `package` | Build output + `appxmanifest.xml` | `.msix` file |
+| `create-debug-identity` | `Package.appxmanifest` + exe + trusted cert | Registers sparse package with Windows |
+| `run` | Build output folder + `Package.appxmanifest` | Registers loose layout package, launches app |
+| `unregister` | `Package.appxmanifest` (auto-detect or `--manifest`) | Removes dev-mode package registrations |
+| `package` | Build output + `Package.appxmanifest` | `.msix` file |
 | `sign` | File + certificate | Signed file (in-place) |
 | `create-external-catalog` | Directory with executables | `CodeIntegrityExternal.cat` |
 | `tool <name>` | Nothing (auto-downloads tools) | Runs SDK tool directly |
@@ -120,7 +120,7 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 
 ## Related skills
 - **Setup & init**: `winapp-setup` — adding Windows support to a project
-- **Manifest**: `winapp-manifest` — creating and editing `appxmanifest.xml`
+- **Manifest**: `winapp-manifest` — creating and editing `Package.appxmanifest`
 - **Signing**: `winapp-signing` — certificate generation and management
 - **Packaging**: `winapp-package` — creating MSIX installers
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs

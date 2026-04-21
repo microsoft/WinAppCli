@@ -132,8 +132,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             el.WindowHandle = session.WindowHandle;
         }
 
-        // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
-        if (string.IsNullOrEmpty(elementId))
+        // Also walk popup/owned windows (when inspecting full tree, not scoped to element,
+        // and the user did not explicitly target a single HWND — see issue #472).
+        if (string.IsNullOrEmpty(elementId) && !session.IsExplicitWindow)
         {
             var mainHwnd = (nint)session.WindowHandle;
             var allWindows = GetAllAppWindows(session);
@@ -388,8 +389,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             }
         }
 
-        // If no results on main window, search popup/owned windows
-        if (mainResults.Count == 0)
+        // If no results on main window, search popup/owned windows — unless the user
+        // explicitly scoped the session to a single HWND via --window (issue #472).
+        if (mainResults.Count == 0 && !session.IsExplicitWindow)
         {
             var allWindows = GetAllAppWindows(session);
             var mainHwnd = (nint)session.WindowHandle;
@@ -467,11 +469,14 @@ internal sealed partial class UiAutomationService : IUiAutomationService
                 slugResult.WindowHandle = session.WindowHandle;
                 return Task.FromResult<UiElement?>(slugResult);
             }
-            // Not found on main window — search other windows
-            var otherResult = FindElementOnOtherWindows(session, selector);
-            if (otherResult is not null)
+            // Not found on main window — search other windows (unless --window scoped us to one)
+            if (!session.IsExplicitWindow)
             {
-                return Task.FromResult<UiElement?>(otherResult);
+                var otherResult = FindElementOnOtherWindows(session, selector);
+                if (otherResult is not null)
+                {
+                    return Task.FromResult<UiElement?>(otherResult);
+                }
             }
             return Task.FromResult<UiElement?>(null);
         }
@@ -525,10 +530,14 @@ return Task.FromResult<UiElement?>(null);
             }
 
             // Element not found on main window — search popup/owned windows
-            var otherResult = FindElementOnOtherWindows(session, selector);
-            if (otherResult is not null)
+            // (unless --window scoped us to a single HWND).
+            if (!session.IsExplicitWindow)
             {
-                return Task.FromResult<UiElement?>(otherResult);
+                var otherResult = FindElementOnOtherWindows(session, selector);
+                if (otherResult is not null)
+                {
+                    return Task.FromResult<UiElement?>(otherResult);
+                }
             }
             return Task.FromResult<UiElement?>(null);
         }

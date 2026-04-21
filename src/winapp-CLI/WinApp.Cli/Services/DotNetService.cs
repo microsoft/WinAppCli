@@ -418,6 +418,16 @@ internal partial class DotNetService : IDotNetService
 
     public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
     {
+        // Fast path: many .csproj files declare PackageReference inline. A direct XML scan avoids
+        // an implicit `dotnet restore` (which can take 30s+ on a fresh machine — see #463).
+        // We only short-circuit on a positive match; absence still requires the slow path because
+        // the package may come from Directory.Packages.props (CPM), Directory.Build.props, an SDK,
+        // or another import that only MSBuild evaluation can resolve.
+        if (TryFindPackageReferenceInCsproj(csprojPath, packageName))
+        {
+            return true;
+        }
+
         var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
         if (packageList?.Projects is null)
         {
@@ -428,6 +438,40 @@ internal partial class DotNetService : IDotNetService
             .SelectMany(p => p.Frameworks ?? [])
             .SelectMany(f => f.TopLevelPackages ?? [])
             .Any(pkg => string.Equals(pkg.Id, packageName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryFindPackageReferenceInCsproj(FileInfo csprojPath, string packageName)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Load(csprojPath.FullName);
+            // PackageReference items live in the default (no-prefix) MSBuild namespace; new-style
+            // SDK csproj files have no xmlns, so XName.LocalName is what we want either way.
+            return doc.Descendants()
+                .Where(e => string.Equals(e.Name.LocalName, "PackageReference", StringComparison.Ordinal))
+                .Any(e => string.Equals((string?)e.Attribute("Include"), packageName, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -631,6 +675,41 @@ internal partial class DotNetService : IDotNetService
 
         return modified;
     }
+
+    public async Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+
+        // Skip if the csproj already includes Assets content (glob or individual entries)
+        if (AssetsContentItemRegex().IsMatch(content))
+        {
+            return false;
+        }
+
+        // Insert a new ItemGroup with the Assets glob before </Project>
+        var closeProjectIdx = content.LastIndexOf("</Project>", StringComparison.OrdinalIgnoreCase);
+        if (closeProjectIdx < 0)
+        {
+            return false;
+        }
+
+        var itemGroup =
+            "  <ItemGroup>" + Environment.NewLine
+            + "    <Content Include=\"Assets\\**\\*\" />" + Environment.NewLine
+            + "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
+
+        content = content[..closeProjectIdx] + itemGroup + content[closeProjectIdx..];
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    [GeneratedRegex(@"<Content\s[^>]*Include\s*=\s*""Assets\\", RegexOptions.IgnoreCase)]
+    private static partial Regex AssetsContentItemRegex();
 }
 
 [JsonSerializable(typeof(DotNetPackageListJson))]
