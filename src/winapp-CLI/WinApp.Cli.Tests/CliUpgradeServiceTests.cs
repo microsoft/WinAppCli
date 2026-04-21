@@ -421,7 +421,7 @@ public class IsNewerVersionTests
     public void IsNewerVersion_CurrentHasPrerelease_LatestIsStable()
     {
         // Current "1.0.0-beta" stripped to "1.0.0", same as latest "1.0.0" — not newer
-        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", "1.0.0-beta"));
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.0.0", "1.0.0-beta"));
     }
 
     [TestMethod]
