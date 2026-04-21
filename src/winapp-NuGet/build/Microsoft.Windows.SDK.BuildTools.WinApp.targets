@@ -35,15 +35,35 @@
     <WinAppLooseLayoutPath Condition="'$(WinAppLooseLayoutPath)' == ''">$(OutputPath)AppX\</WinAppLooseLayoutPath>
     
     <!--
+      When EnableMsixTooling is true and Package.appxmanifest doesn't exist but
+      appxmanifest.xml does, promote it so the MSIX SDK processes it (placeholder
+      resolution, PRI generation, .appxrecipe, etc.).
+    -->
+    <_WinAppPromoteManifest Condition="'$(EnableMsixTooling)' == 'true' And !Exists('$(MSBuildProjectDirectory)\Package.appxmanifest') And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">true</_WinAppPromoteManifest>
+    
+    <!--
       Path to the AppxManifest.xml file.
       Auto-detected from output directory first, then project directory.
+      Checks all supported manifest filenames: Package.appxmanifest (VS convention), AppxManifest.xml (MSBuild output),
+      and appxmanifest.xml (winapp convention).
       This is set here (in targets) because $(OutputPath) is not available in props.
     -->
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
-    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
   </PropertyGroup>
+
+  <!--
+    When EnableMsixTooling is true and the user has appxmanifest.xml (instead of
+    Package.appxmanifest), promote it to an AppxManifest item so the MSIX SDK
+    processes it — placeholder resolution, PRI generation, .appxrecipe, etc.
+  -->
+  <ItemGroup Condition="'$(_WinAppPromoteManifest)' == 'true'">
+    <AppxManifest Include="$(MSBuildProjectDirectory)\appxmanifest.xml" />
+  </ItemGroup>
 
   <!--
     Design-time build support:
@@ -62,12 +82,33 @@
   <!--
     Temporary: Include this for non-WinUI projects as well, to ensure appxmanifest is included 
     in the build output for the CLI to find to be able to run the app. We can remove this once we have a better solution for non-WinUI projects.
+    Excluded when the manifest is promoted to AppxManifest (to avoid dual item-group conflict).
   -->
-  <ItemGroup Condition="'$(UseWinUI)' != 'true'">
+  <ItemGroup Condition="'$(UseWinUI)' != 'true' And '$(_WinAppPromoteManifest)' != 'true'">
     <Content Condition="Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')" Include="$(MSBuildProjectDirectory)\appxmanifest.xml">  
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!--
+    ============================================================================
+    _WinAppResolveManifestPath Target
+    
+    When appxmanifest.xml is promoted to AppxManifest, the MSIX SDK generates
+    AppxManifest.xml in the output directory during build. This target re-resolves
+    WinAppManifestPath to point to the generated file (which has build metadata,
+    resolved placeholders, etc.) instead of the raw source file.
+    ============================================================================
+  -->
+  <Target Name="_WinAppResolveManifestPath"
+          AfterTargets="Build"
+          BeforeTargets="_WinAppValidateRunSupport;_WinAppBuildRunArgs"
+          Condition="'$(_WinAppPromoteManifest)' == 'true' And '$(EnableWinAppRunSupport)' == 'true'">
+    <PropertyGroup Condition="Exists('$(OutputPath)AppxManifest.xml')">
+      <WinAppManifestPath>$(OutputPath)AppxManifest.xml</WinAppManifestPath>
+    </PropertyGroup>
+    <Message Text="[WinAppRunSupport] Resolved promoted manifest to: $(WinAppManifestPath)" Importance="normal" />
+  </Target>
 
   <!--
     ============================================================================
@@ -84,7 +125,9 @@
     
     <!-- Validate manifest exists -->
     <Error Condition="'$(WinAppManifestPath)' != '' And !Exists('$(WinAppManifestPath)')"
-           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure appxmanifest.xml exists in your project directory." />
+           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure Package.appxmanifest or appxmanifest.xml exists at the resolved manifest path, in your project directory, or in the build output directory, as applicable." />
+    <Error Condition="'$(WinAppManifestPath)' == ''"
+           Text="[WinAppRunSupport] No AppxManifest found. Ensure Package.appxmanifest or appxmanifest.xml exists in your project or build output directory. Run 'winapp init' to generate one." />
     
     <Message Text="[WinAppRunSupport] Using CLI: $(WinAppCliPath)" Importance="normal" />
     <Message Text="[WinAppRunSupport] Loose layout path: $(WinAppLooseLayoutPath)" Importance="normal" />

@@ -69,6 +69,9 @@ internal static class Program
         // and should not display any interactive messages like first-run notices
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
+        // Check if this is a completion request - completions must be fast and silent
+        bool isCompleteMode = args.Length > 0 && args[0] == "complete";
+
         var services = new ServiceCollection()
             .ConfigureServices()
             .ConfigureCommands()
@@ -81,9 +84,9 @@ internal static class Program
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        // Skip first-run notice for machine-readable output modes
+        // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json)
+        if (!isCliSchemaMode && !isCompleteMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
@@ -115,11 +118,17 @@ internal static class Program
 
         try
         {
-            CommandInvokedEvent.Log(parseResult.CommandResult);
+            if (!isCompleteMode)
+            {
+                CommandInvokedEvent.Log(parseResult.CommandResult);
+            }
 
             var returnCode = await parseResult.InvokeAsync();
 
-            CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            if (!isCompleteMode)
+            {
+                CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            }
 
             return returnCode;
         }
