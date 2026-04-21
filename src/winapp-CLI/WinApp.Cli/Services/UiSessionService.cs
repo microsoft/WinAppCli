@@ -191,6 +191,7 @@ internal sealed class UiSessionService(
         }
 
         var session = CreateSession((int)pid, (nint)hwnd, null);
+        session.IsExplicitWindow = true;
         RefreshWindowTitle(session);
         return session;
     }

@@ -15,7 +15,7 @@ Use this skill when:
 
 Before packaging, you need:
 1. **Built app output** in a folder (e.g., `bin/Release/`, `dist/`, `build/`)
-2. **`appxmanifest.xml`** — from `winapp init` or `winapp manifest generate`
+2. **`Package.appxmanifest`** — from `winapp init` or `winapp manifest generate`
 3. **Certificate** (optional) — `devcert.pfx` from `winapp cert generate` for signing
 
 ## Usage
@@ -27,7 +27,7 @@ Before packaging, you need:
 winapp package ./bin/Release
 
 # Specify manifest location explicitly
-winapp package ./dist --manifest ./appxmanifest.xml
+winapp package ./dist --manifest ./Package.appxmanifest
 ```
 
 ### Package and sign in one step
@@ -69,7 +69,7 @@ winapp package ./dist --name "MyApp_1.0.0_x64" --cert ./devcert.pfx
 
 ## What the command does
 
-1. **Locates `appxmanifest.xml`** — looks in input folder, then current directory (or uses `--manifest`)
+1. **Locates `Package.appxmanifest`** — looks in input folder, then current directory (or uses `--manifest`)
 2. **Copies manifest + assets** into a staging layout alongside your app files
 3. **Generates `resources.pri`** — Package Resource Index for UWP-style resource lookup (skip with `--skip-pri`)
 4. **Runs `makeappx pack`** — creates the `.msix` package file
@@ -134,21 +134,21 @@ Use the `microsoft/setup-winapp` action to install winapp on GitHub-hosted runne
 ## Tips
 
 - The `package` command aliases to `pack` — both work identically
-- `appxmanifest.xml` Publisher must match the certificate publisher — use `winapp cert generate --manifest` to ensure they match
+- `Package.appxmanifest` Publisher must match the certificate publisher — use `winapp cert generate --manifest` to ensure they match
 - Use `--skip-pri` if your app doesn't use Windows resource loading (e.g., most Electron/Rust/C++ apps without UWP resources)
 - For framework-specific packaging paths (Electron, .NET, Rust, etc.), see the `winapp-frameworks` skill
-- The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `appxmanifest.xml`
+- The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `Package.appxmanifest`
 - For production distribution, use a certificate from a trusted CA and add `--timestamp` when signing with `winapp sign`
 
 ## Related skills
-- Need a manifest first? See `winapp-manifest` to generate `appxmanifest.xml`
+- Need a manifest first? See `winapp-manifest` to generate `Package.appxmanifest`
 - Need a certificate? See `winapp-signing` for certificate generation and management
 - Having issues? See `winapp-troubleshoot` for a command selection flowchart and error solutions
 
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "appxmanifest.xml not found" | No manifest in input folder or current dir | Run `winapp init` or `winapp manifest generate` first |
+| "Package.appxmanifest not found" | No manifest in input folder or current dir | Run `winapp init` or `winapp manifest generate` first |
 | "Publisher mismatch" | Cert publisher ≠ manifest publisher | Regenerate cert with `winapp cert generate --manifest`, or edit manifest |
 | "Package installation failed" | Cert not trusted or stale package | Run `winapp cert install ./devcert.pfx` (admin), then `Get-AppxPackage <name> \| Remove-AppxPackage` |
 | "makeappx not found" | Build tools not downloaded | Run `winapp update` or `winapp tool makeappx --help` to trigger download |

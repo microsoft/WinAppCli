@@ -131,7 +131,7 @@ Disable run support for a project:
 Specify manifest path:
 ```xml
 <PropertyGroup>
-  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\appxmanifest.xml</WinAppManifestPath>
+  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\Package.appxmanifest</WinAppManifestPath>
 </PropertyGroup>
 ```
 

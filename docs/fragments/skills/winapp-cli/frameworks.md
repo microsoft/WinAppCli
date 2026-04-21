@@ -43,7 +43,7 @@ Additional Electron guides:
 ### .NET (WPF, WinForms, Console)
 .NET projects have direct access to Windows APIs. Key differences:
 - Projects with NuGet references to `Microsoft.Windows.SDK.BuildTools` or `Microsoft.WindowsAppSDK` **don't need `winapp.yaml`** — winapp auto-detects SDK versions from the `.csproj`
-- The key prerequisite is `appxmanifest.xml`, not `winapp.yaml`
+- The key prerequisite is `Package.appxmanifest`, not `winapp.yaml`
 - No native addon step needed — unlike Electron, .NET can call Windows APIs directly
 - `winapp init` automatically adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, enabling `dotnet run` with automatic identity registration
 
@@ -96,7 +96,7 @@ C++ projects use winapp primarily for SDK projections (CppWinRT headers) and pac
 
 **Key rules:**
 - **GUI apps** (Flutter, Tauri, WPF): use `winapp run <build-output>` — launches via AUMID activation
-- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `appxmanifest.xml`
+- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `Package.appxmanifest`
 - **Electron**: different mechanism — uses `npx winapp node add-electron-debug-identity` because `electron.exe` is in `node_modules/`, not your build output
 - **Startup debugging (any framework)**: use `winapp create-debug-identity <exe>` so your IDE can F5-launch the exe with identity from the first instruction
 
@@ -104,7 +104,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ## Related skills
 - **Setup**: `winapp-setup` — initial project setup with `winapp init`
-- **Manifest**: `winapp-manifest` — creating and customizing `appxmanifest.xml`
+- **Manifest**: `winapp-manifest` — creating and customizing `Package.appxmanifest`
 - **Signing**: `winapp-signing` — certificate generation and management
 - **Packaging**: `winapp-package` — creating MSIX installers from build output
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs during development
