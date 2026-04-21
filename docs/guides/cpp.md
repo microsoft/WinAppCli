@@ -137,12 +137,12 @@ When prompted:
 - **Setup SDKs**: Select "Stable SDKs" to download Windows App SDK and generate C++ headers
 
 This command will:
-- Create `appxmanifest.xml` — the manifest that defines your app's identity
+- Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 - Create a `.winapp` folder with Windows App SDK headers and libraries
 - Create a `winapp.yaml` configuration file for pinning SDK versions
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 ### Add Execution Alias (for console apps)
 
@@ -154,7 +154,7 @@ You can add one automatically:
 winapp manifest add-alias
 ```
 
-Or manually: open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
+Or manually: open `Package.appxmanifest` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
 
 ```diff
 <Package
@@ -424,7 +424,7 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Tip**: The certificate's publisher must match the `Publisher` in your `appxmanifest.xml`. The `cert generate` command reads this automatically from your manifest.
+> **Tip**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Sign and Pack
 
@@ -435,7 +435,7 @@ Now you can package and sign:
 winapp pack .\dist --cert .\devcert.pfx 
 ```
 
-> **Tip**: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated `.msix` file will be in the current directory.
+> **Tip**: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated `.msix` file will be in the current directory.
 
 ### Install the Certificate
 
@@ -465,7 +465,7 @@ cpp-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `appxmanifest.xml` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
