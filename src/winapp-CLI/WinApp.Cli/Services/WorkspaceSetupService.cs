@@ -167,7 +167,10 @@ internal class WorkspaceSetupService(
         {
             if (options.SdkInstallMode == SdkInstallMode.None)
             {
-                logger.LogDebug("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+                // The "why we're skipping" message is emitted by AskSdkInstallModeAsync (interactive
+                // choice, --setup-sdks none) or — for .NET — by the early-exit when the project
+                // already references WinAppSDK. Don't repeat a generic / potentially-misleading
+                // "by user choice" line here (#464).
                 logger.LogInformation("Configuration processed (SDK installation skipped)");
             }
             else
@@ -203,7 +206,10 @@ internal class WorkspaceSetupService(
         }
         else if (options.SdkInstallMode == SdkInstallMode.None)
         {
-            logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+            // For .NET projects: AskSdkInstallModeAsync already logged the actual reason we're
+            // skipping (auto-skipped because WinAppSDK is already referenced, or the user picked
+            // "Do not setup", or --setup-sdks=none was passed). Don't append a misleading
+            // "by user choice" line on top of that (#464).
         }
 
         // Prompt to install the WinApp CLI package before entering the live display context
@@ -646,6 +652,15 @@ internal class WorkspaceSetupService(
                     await SetupManifestSubTaskAsync(options, shouldGenerateManifest, manifestGenerationInfo, taskContext, cancellationToken);
                 }
 
+                // Add generated assets as Content items so MSIX tooling includes them in the package layout
+                if (isDotNetProject && csprojFile != null && shouldGenerateManifest)
+                {
+                    if (await dotNetService.EnsureAssetContentItemsAsync(csprojFile, cancellationToken))
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Added asset Content items to .csproj");
+                    }
+                }
+
                 // Save configuration (native/C++ projects only — .NET uses .csproj PackageReferences)
                 if (!isDotNetProject && !options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && usedVersions != null)
                 {
@@ -1011,24 +1026,42 @@ internal class WorkspaceSetupService(
         // For init (not restore), prompt for SDK installation choice if not specified
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null)
         {
-            // If the .NET project already references WinAppSDK, skip the prompt and default to None
-            if (isDotNetProject && csprojFile != null && await dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, cancellationToken))
+            // If the .NET project already references WinAppSDK, skip the prompt and default to None.
+            // This call may take a while on a fresh machine because `dotnet list package` triggers
+            // an implicit restore — surface a spinner so the user knows we're doing something (#463).
+            if (isDotNetProject && csprojFile != null)
             {
-                options.SdkInstallMode = SdkInstallMode.None;
-                logger.LogDebug("{UISymbol} Project already references {PackageName}, skipping SDK setup", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
-                return;
+                var alreadyReferencesWinAppSdk = await RunWithStatusAsync(
+                    "Detecting project SDK references...",
+                    ct => dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, ct),
+                    cancellationToken);
+                if (alreadyReferencesWinAppSdk)
+                {
+                    options.SdkInstallMode = SdkInstallMode.None;
+                    logger.LogInformation("{UISymbol} Project already references {PackageName}; skipping Windows App SDK setup.", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
+                    return;
+                }
             }
             // Determine which packages to show versions for
             var packages = isDotNetProject
                 ? [BuildToolsService.WINAPP_SDK_PACKAGE]
                 : new[] { BuildToolsService.CPP_SDK_PACKAGE, BuildToolsService.WINAPP_SDK_PACKAGE };
 
-            // Fetch versions for all modes in parallel (failures are non-fatal)
+            // Fetch versions for all modes in parallel (failures are non-fatal). On a fresh machine
+            // these NuGet feed calls can take many seconds; show a spinner so the prompt doesn't
+            // appear to hang (#463).
             var modes = new[] { SdkInstallMode.Stable, SdkInstallMode.Preview, SdkInstallMode.Experimental };
-            var versionTasks = modes
-                .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, cancellationToken))))
-                .ToList();
-            await Task.WhenAll(versionTasks.Select(v => v.Task));
+            var versionTasks = await RunWithStatusAsync(
+                "Fetching latest SDK versions...",
+                async ct =>
+                {
+                    var tasks = modes
+                        .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, ct))))
+                        .ToList();
+                    await Task.WhenAll(tasks.Select(v => v.Task));
+                    return tasks;
+                },
+                cancellationToken);
 
             // Build a lookup: (mode) → version label
             var versionsByMode = modes.ToDictionary(
@@ -1391,6 +1424,32 @@ internal class WorkspaceSetupService(
     {
         var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
         return msixDir.Exists ? msixDir : null;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> while showing a Spectre.Console spinner with <paramref name="message"/>.
+    /// In non-interactive contexts (redirected output, no Information logging), falls back to a single
+    /// log line so the user still sees what's happening (#463).
+    /// </summary>
+    private async Task<T> RunWithStatusAsync<T>(string message, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    {
+        if (Environment.UserInteractive
+            && !Console.IsOutputRedirected
+            && logger.IsEnabled(LogLevel.Information)
+            && ansiConsole.Profile.Capabilities.Interactive)
+        {
+            T result = default!;
+            await ansiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync(message, async _ =>
+                {
+                    result = await work(cancellationToken);
+                });
+            return result;
+        }
+
+        logger.LogInformation("{Message}", message);
+        return await work(cancellationToken);
     }
 
     /// <summary>

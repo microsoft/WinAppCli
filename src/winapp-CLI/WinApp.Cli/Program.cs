@@ -69,6 +69,9 @@ internal static class Program
         // and should not display any interactive messages like first-run notices
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
+        // Check if this is a completion request - completions must be fast and silent
+        bool isCompleteMode = args.Length > 0 && args[0] == "complete";
+
         var services = new ServiceCollection()
             .ConfigureServices()
             .ConfigureCommands()
@@ -81,22 +84,9 @@ internal static class Program
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
-
-        var parseResult = args.Length > 0 ? rootCommand.Parse(args) : null;
-        if (parseResult is not null)
-        {
-            // Set WINAPP_CLI_CALLER env var from --caller option so telemetry and update hints can pick it up
-            var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
-            if (!string.IsNullOrWhiteSpace(caller))
-            {
-                Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
-            }
-        }
-
-        // Skip first-run notice for machine-readable output modes
+        // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json)
+        if (!isCliSchemaMode && !isCompleteMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
@@ -121,6 +111,8 @@ internal static class Program
             }
         }
 
+        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+
         // If no arguments provided, display banner and show help
         if (args.Length == 0)
         {
@@ -134,21 +126,34 @@ internal static class Program
             return 0;
         }
 
-        var effectiveParseResult = parseResult ?? rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args);
+
+        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
+        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+        if (!string.IsNullOrWhiteSpace(caller))
+        {
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+        }
 
         try
         {
-            CommandInvokedEvent.Log(effectiveParseResult.CommandResult);
+            if (!isCompleteMode)
+            {
+                CommandInvokedEvent.Log(parseResult.CommandResult);
+            }
 
-            var returnCode = await effectiveParseResult.InvokeAsync();
+            var returnCode = await parseResult.InvokeAsync();
 
-            CommandCompletedEvent.Log(effectiveParseResult.CommandResult, returnCode);
+            if (!isCompleteMode)
+            {
+                CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            }
 
             return returnCode;
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(effectiveParseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parseResult.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }

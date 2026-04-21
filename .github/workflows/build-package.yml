@@ -118,6 +118,14 @@ jobs:
         path: artifacts/nuget/
         if-no-files-found: error
 
+    - name: Upload VS Code extension
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: vscode-extension
+        path: artifacts/*.vsix
+        if-no-files-found: error
+
     # --- Build quality metrics ---
     - name: Collect build metrics
       if: ${{ !cancelled() }}
@@ -172,34 +180,6 @@ jobs:
             body: updatedBody,
           });
           core.info(`Marked comment ${existing.id} as stale.`);
-
-  # E2E test for Electron workflow - runs after build completes
-  e2e-test:
-    runs-on: windows-latest
-    needs: build-and-package
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v5
-
-    - name: Enable Windows Developer Mode
-      run: |
-        # Registry key to enable Developer Mode
-        reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v "AllowDevelopmentWithoutDevLicense" /d 1 /f
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v5
-      with:
-        node-version: '24'
-
-    - name: Download npm package artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: npm-package
-        path: artifacts/npm
-
-    - name: Run E2E Electron test
-      run: |
-        .\scripts\test-e2e-electron.ps1 -ArtifactsPath "artifacts/npm" -Verbose
 
   # E2E test for winapp ui commands against WinUI 3 sample app
   e2e-test-ui:

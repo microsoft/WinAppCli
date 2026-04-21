@@ -172,7 +172,7 @@ export interface CreateDebugIdentityOptions extends CommonOptions {
 }
 
 /**
- * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
+ * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
  */
 export async function createDebugIdentity(options: CreateDebugIdentityOptions = {}): Promise<WinappResult> {
   const args: string[] = ['create-debug-identity'];

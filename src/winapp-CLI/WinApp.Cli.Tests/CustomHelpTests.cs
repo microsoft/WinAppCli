@@ -22,8 +22,8 @@ public class CustomHelpTests : BaseCommandTests
 
         var categorizedTypes = new HashSet<Type>(helpAction.CategorizedCommandTypes);
 
-        // Assert — every registered subcommand must be present in a help category
-        foreach (var subcommand in rootCommand.Subcommands)
+        // Assert — every registered subcommand must be present in a help category (hidden commands excluded)
+        foreach (var subcommand in rootCommand.Subcommands.Where(c => !c.Hidden))
         {
             CollectionAssert.Contains(categorizedTypes.ToList(), subcommand.GetType(),
                 $"Top-level command '{subcommand.Name}' ({subcommand.GetType().Name}) is registered on the root command but not listed in any " +
