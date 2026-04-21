@@ -29,19 +29,19 @@ Install the winapp CLI via Windows Package Manager, or update to the latest vers
 winget install microsoft.winappcli --source winget
 ```
 
-### 3. Generate the appxmanifest.xml
+### 3. Generate the Package.appxmanifest
 
-Generate a base appxmanifest.xml and required assets for your CLI executable:
+Generate a base Package.appxmanifest and required assets for your CLI executable:
 
 ```powershell
 winapp manifest generate --executable .\yourcli.exe
 ```
 
-This command creates an `appxmanifest.xml` file in the current directory with default values populated from your executable.
+This command creates a `Package.appxmanifest` file in the current directory with default values populated from your executable.
 
 ### 4. Configure the Manifest
 
-Edit the generated `appxmanifest.xml` to customize your package. Each sub-step below explains what to change and why.
+Edit the generated `Package.appxmanifest` to customize your package. Each sub-step below explains what to change and why.
 
 #### 4.1 Add Required Namespace
 

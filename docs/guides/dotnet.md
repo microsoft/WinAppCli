@@ -98,11 +98,11 @@ When prompted:
 This command will:
 - Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
 - Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
-- Create `appxmanifest.xml` and `Assets` folder for your app identity
+- Create `Package.appxmanifest` and `Assets` folder for your app identity
 
 > **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 To verify the packages were added to your project:
 
@@ -254,9 +254,9 @@ dotnet build -c Release
 > **Note**: You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
 
 ### Add Execution Alias (for console apps)
-To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `appxmanifest.xml`. If you are building a WPF or WinForms app, this step is not necessary — those apps launch from the Start menu instead.
+To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `Package.appxmanifest`. If you are building a WPF or WinForms app, this step is not necessary — those apps launch from the Start menu instead.
 
-Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
+Open `Package.appxmanifest` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
 
 ```xml
 <Package
@@ -300,10 +300,10 @@ Now you can package and sign. Point the pack command to your build output folder
 
 ```powershell
 # package and sign the app with the generated certificate
-winapp pack .\bin\Release\net10.0-windows10.0.26100.0 --manifest .\appxmanifest.xml --cert .\devcert.pfx 
+winapp pack .\bin\Release\net10.0-windows10.0.26100.0 --manifest .\Package.appxmanifest --cert .\devcert.pfx 
 ```
 
-> Note: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> Note: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
@@ -324,7 +324,7 @@ dotnet-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `appxmanifest.xml` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
