@@ -98,11 +98,11 @@ When prompted:
 This command will:
 - Update the `TargetFramework` in your `.csproj` to a supported Windows TFM (if needed)
 - Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
-- Create `appxmanifest.xml` and `Assets` folder for your app identity
+- Create `Package.appxmanifest` and `Assets` folder for your app identity
 
 > **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 To verify the packages were added to your project:
 
@@ -111,6 +111,30 @@ dotnet list package
 ```
 
 You should see `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` in the output.
+
+### Add Execution Alias (for console apps)
+
+Because we're building a console app, we need to make sure `dotnet run` keeps console output in the current terminal. By default, `dotnet run` launches the packaged app via AUMID activation, which opens a new window — and the window closes immediately when the console app finishes, swallowing any output.
+
+To fix this, you'll add an execution alias to the manifest and tell the run integration to launch via that alias instead.
+
+> **Skip this step if you're building a UI app** (WPF, WinForms, WinUI). Those apps render their own window, so the default AUMID launch is what you want.
+
+1. Add the execution alias to your manifest:
+
+   ```powershell
+   winapp manifest add-alias
+   ```
+
+   This adds a `uap5:ExecutionAlias` to `Package.appxmanifest` (defaulting to your project's exe name) so the app can be launched by name from a terminal.
+
+2. Tell the `dotnet run` integration to use the alias. Open `dotnet-app.csproj` and add the following inside any `<PropertyGroup>` (or create a new `<PropertyGroup>` if needed):
+
+   ```xml
+   <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+   ```
+
+   With this property set, `dotnet run` launches the app via its execution alias and inherits the current terminal's stdin/stdout/stderr so you see console output inline.
 
 ## 5. Debug with Identity
 
@@ -123,8 +147,6 @@ dotnet run
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
 > **Note**: You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
-
-> **Console apps:** By default, AUMID activation opens a new window. For console applications that need stdin/stdout in the current terminal, add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to your `.csproj` and ensure your manifest has a `uap5:ExecutionAlias`. You can add one with `winapp manifest add-alias`.
 
 You should see output similar to:
 ```
@@ -253,39 +275,6 @@ dotnet build -c Release
 
 > **Note**: You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
 
-### Add Execution Alias (for console apps)
-To allow users to run your app from the command line after installation (like `dotnet-app`), add an execution alias to the `appxmanifest.xml`. If you are building a WPF or WinForms app, this step is not necessary — those apps launch from the Start menu instead.
-
-Open `appxmanifest.xml` and add the `uap5` namespace to the `<Package>` tag if it's missing, and then add the extension inside `<Applications><Application><Extensions>...`:
-
-```xml
-<Package
-  ...
-  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
-
-  ...
-  <Applications>
-    <Application ...>
-      ...
-
-      <!-- Add this Extensions element in your manifest 
-           along with the xmlns:uap5 namespace above -->
-      <Extensions>
-        <uap5:Extension Category="windows.appExecutionAlias">
-          <uap5:AppExecutionAlias>
-            <uap5:ExecutionAlias Alias="dotnet-app.exe" />
-          </uap5:AppExecutionAlias>
-        </uap5:Extension>
-      </Extensions>
-
-      ...
-    </Application>
-  </Applications>
-</Package>
-```
-
 ### Generate a Development Certificate
 
 Before packaging, you need a development certificate for signing. Generate one if you haven't already:
@@ -300,10 +289,10 @@ Now you can package and sign. Point the pack command to your build output folder
 
 ```powershell
 # package and sign the app with the generated certificate
-winapp pack .\bin\Release\net10.0-windows10.0.26100.0 --manifest .\appxmanifest.xml --cert .\devcert.pfx 
+winapp pack .\bin\Release\net10.0-windows10.0.26100.0 --manifest .\Package.appxmanifest --cert .\devcert.pfx 
 ```
 
-> Note: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> Note: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
@@ -324,7 +313,7 @@ dotnet-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `appxmanifest.xml` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.

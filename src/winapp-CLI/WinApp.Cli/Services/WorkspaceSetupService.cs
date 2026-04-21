@@ -340,6 +340,7 @@ internal class WorkspaceSetupService(
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
                         usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        var failedPackages = new List<string>();
 
                         // When SdkInstallMode is None, still use Stable versions for build tools packages
                         var versionQueryMode = sdkInstallMode == SdkInstallMode.None ? SdkInstallMode.Stable : sdkInstallMode;
@@ -408,7 +409,21 @@ internal class WorkspaceSetupService(
                                 {
                                     return (1, $"Failed to add {packageName} package reference");
                                 }
+                                failedPackages.Add(packageName);
                             }
+                        }
+
+                        if (failedPackages.Count > 0)
+                        {
+                            var failedList = string.Join(", ", failedPackages);
+                            if (usedVersions.Count > 0)
+                            {
+                                return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/], but failed to add: {failedList}");
+                            }
+
+                            // Only optional package failures reach this point. Required package failures
+                            // already return non-zero in the catch block above, so do not abort init here.
+                            return (0, $"Failed to add optional NuGet packages: {failedList}");
                         }
 
                         return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/]");
@@ -828,9 +843,13 @@ internal class WorkspaceSetupService(
         // Step 1: Handle configuration requirements
         if (options.RequireExistingConfig && !configService.Exists())
         {
-            logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
-            logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            // Non-.NET project with no winapp.yaml — nothing to restore.
+            // (.NET projects without yaml are handled earlier in SetupWorkspaceAsync.)
+            // This is a no-op rather than an error: a project that doesn't declare
+            // SDK package versions in winapp.yaml has nothing for restore to do.
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
         // Step 2: Load or prepare configuration

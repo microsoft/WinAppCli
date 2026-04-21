@@ -381,7 +381,7 @@ export interface PackageOptions extends CommonOptions {
   manifest?: string;
   /** Package name (default: from manifest) */
   name?: string;
-  /** Output msix file name for the generated package (defaults to <name>.msix) */
+  /** Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) */
   output?: string;
   /** Publisher name for certificate generation */
   publisher?: string;

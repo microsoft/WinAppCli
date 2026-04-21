@@ -7,7 +7,7 @@ Used by AI agents and developers for UI testing, debugging, and automation.
 
 `winapp ui` provides commands for inspecting and interacting with Windows app UIs.
 Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, Win32, Electron, and WinUI 3.
-Safe by design — no global input injection.
+Most commands drive the app through UIA patterns (no input injection); `ui click` is the exception and uses real mouse simulation for controls that don't support `InvokePattern`.
 
 ## Quick Start
 
@@ -103,15 +103,14 @@ Slugs are shell-safe (no special characters), unique, and can be used directly a
 
 Elements with no name or AutomationId show only prefix + hash (e.g., `pn-c8a3`).
 
-### Index disambiguation (`[N]`)
+### Disambiguating multiple matches
 
-When using legacy selectors that match multiple elements, append `[N]` (zero-based) to pick a specific one. Slugs from inspect output are already unique and don't need indexing.
+Slugs from `inspect`/`search` output are unique, but can change across layout changes - use them over plain type names or text when multiple matches. When a selector is ambiguous, the CLI prints all matches with their slugs so you can pick the right one and re-run with that slug.
 
 ```bash
 winapp ui search Button -a myapp            # shows: btn-ok-a1b2 "OK", btn-cancel-c3d4 "Cancel"
 winapp ui invoke btn-ok-a1b2 -a myapp       # invoke using slug (preferred)
-winapp ui invoke "Button[0]" -a myapp       # or use legacy selector with index
-winapp ui invoke "Button[1]" -a myapp       # invokes the second Button ("Cancel")
+winapp ui invoke btn-cancel-c3d4 -a myapp   # invoke the other Button by its slug
 ```
 
 ### Plain text search
@@ -219,7 +218,7 @@ winapp ui get-property cmb-combobox-d5e6 -p ExpandCollapseState -a myapp  # expa
 ```
 
 ### screenshot
-Capture a window or element as PNG. When multiple windows exist (e.g., app + open dialog), captures each to a separate file.
+Capture a window or element as PNG. When multiple windows exist (e.g., app + open dialog), they are composited into a single PNG with each window stitched in.
 ```bash
 winapp ui screenshot -a notepad                     # saves screenshot.png in cwd
 winapp ui screenshot -a notepad --output my.png     # custom filename
@@ -229,15 +228,9 @@ winapp ui screenshot txt-searchbox-e5f6 -a myapp          # crop to element boun
 winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays)
 ```
 
-When dialogs or popups are open, each window is captured separately:
-```
-⚠  2 windows detected. Capturing each separately.
-  ✓ screenshot.png — HWND 133306: "*hello - Notepad" (window, 1476x1167)
-  ✓ screenshot.3213334-dialog.png — HWND 3213334: "Open" (dialog, 1248x834, owner: HWND 133306)
-```
+When dialogs or popups are open, all windows are composited into one PNG so you can see the full UI state in a single image.
 
-Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays.
-The window is brought to the foreground automatically before capture.
+Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays. In `--capture-screen` mode (and when retrying after a blank-frame is detected) the target window is brought to the foreground first; normal window captures do not move the window.
 
 ### invoke
 Programmatically activate an element (click button, toggle checkbox, expand combo box).
@@ -295,6 +288,7 @@ winapp ui wait-for btn-submit-7a90 -a myapp --timeout 5000             # wait fo
 winapp ui wait-for CounterDisplay -a myapp --value "5" --timeout 5000  # wait for element value (smart fallback)
 winapp ui wait-for lbl-status -a myapp --property Name --value "Done" --timeout 5000  # wait for specific property
 winapp ui wait-for btn-submit-a1b2 --gone -a myapp --timeout 2000      # wait for element to disappear
+winapp ui wait-for lbl-status -a myapp --value "Done" --contains       # substring match instead of exact equality
 ```
 
 ### scroll
@@ -482,7 +476,7 @@ winapp ui wait-for "Main Page" -a $app.ProcessId -t 30000
 
 # Interact and assert
 winapp ui invoke "Add Item" -a $app.ProcessId
-winapp ui set-value "Item Name" -a $app.ProcessId --text "Test Item"
+winapp ui set-value "Item Name" "Test Item" -a $app.ProcessId
 winapp ui invoke "Save" -a $app.ProcessId
 winapp ui wait-for "Test Item" -a $app.ProcessId -t 5000              # assert item appeared in list
 winapp ui wait-for "Save" -a $app.ProcessId --gone -t 3000            # assert save dialog closed

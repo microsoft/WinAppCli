@@ -294,7 +294,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
+| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -817,7 +817,7 @@ function execWithBuildTools(command: string, options?: ExecSyncOptions): string 
 
 ### `addMsixIdentityToExe()`
 
-Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
+Adds package identity information from a Package.appxmanifest file to an executable's embedded manifest
 
 ```typescript
 function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undefined, options?: MsixIdentityOptions): Promise<MsixIdentityResult>
@@ -828,7 +828,7 @@ function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undef
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `exePath` | `string` | Yes | Path to the executable file |
-| `appxManifestPath` | `string \| undefined` | No | Path to the appxmanifest.xml file containing package identity data |
+| `appxManifestPath` | `string \| undefined` | No | Path to the Package.appxmanifest file containing package identity data |
 | `options` | `MsixIdentityOptions` | No | Optional configuration |
 
 ---
@@ -923,7 +923,7 @@ npx winapp node create-addon --template cs --name MyCsAddon
 
 ### `node add-electron-debug-identity`
 
-Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires an `appxmanifest.xml` (create one with `winapp init` or `winapp manifest generate`).
+Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires a `Package.appxmanifest` (create one with `winapp init` or `winapp manifest generate`).
 
 ```bash
 npx winapp node add-electron-debug-identity [options]
@@ -933,7 +933,7 @@ npx winapp node add-electron-debug-identity [options]
 
 | Flag | Description |
 |------|-------------|
-| `--manifest <path>` | Path to custom `appxmanifest.xml` (default: `appxmanifest.xml` in current directory) |
+| `--manifest <path>` | Path to custom `Package.appxmanifest` (default: `Package.appxmanifest` in current directory) |
 | `--no-install` | Do not install the package after creation |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` suffix |
 | `--verbose` | Enable verbose output |
@@ -944,7 +944,7 @@ npx winapp node add-electron-debug-identity [options]
 
 ```bash
 npx winapp node add-electron-debug-identity
-npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+npx winapp node add-electron-debug-identity --manifest ./custom/Package.appxmanifest
 ```
 
 ---
@@ -1238,7 +1238,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
+| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -1520,13 +1520,3 @@ type ManifestTemplates = "packaged" | "sparse"
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `UpgradeOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `force` | `boolean \| undefined` | No | Force the upgrade even if the current version appears up to date |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-

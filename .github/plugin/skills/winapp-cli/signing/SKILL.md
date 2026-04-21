@@ -17,7 +17,7 @@ Use this skill when:
 
 ## Key concepts
 
-**Publisher matching:** The publisher in your certificate (e.g., `CN=MyCompany`) must exactly match the `Publisher` attribute in `appxmanifest.xml`. Use `--manifest` when generating to auto-match.
+**Publisher matching:** The publisher in your certificate (e.g., `CN=MyCompany`) must exactly match the `Publisher` attribute in `Package.appxmanifest`. Use `--manifest` when generating to auto-match.
 
 **Dev vs. production certs:** `winapp cert generate` creates self-signed certificates for **local testing only**. For production distribution (Microsoft Store or enterprise), obtain a certificate from a trusted Certificate Authority.
 
@@ -28,11 +28,11 @@ Use this skill when:
 ### Generate a development certificate
 
 ```powershell
-# Auto-infer publisher from appxmanifest.xml in the current directory
+# Auto-infer publisher from Package.appxmanifest in the current directory
 winapp cert generate
 
 # Explicitly point to a manifest
-winapp cert generate --manifest ./path/to/appxmanifest.xml
+winapp cert generate --manifest ./path/to/Package.appxmanifest
 
 # Set publisher manually (when no manifest exists yet)
 winapp cert generate --publisher "CN=Contoso, O=Contoso Ltd, C=US"
@@ -85,21 +85,21 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 
 ## Tips
 
-- Always use `--manifest` (or have `appxmanifest.xml` in the working directory) when generating certs to ensure the publisher matches automatically
+- Always use `--manifest` (or have `Package.appxmanifest` in the working directory) when generating certs to ensure the publisher matches automatically
 - For CI/CD, store the PFX as a secret and pass the password via `--password` rather than using the default
 - `winapp cert install` modifies the machine certificate store — it persists across reboots and user sessions
 - Use `--timestamp` when signing production builds so the signature survives certificate expiration
 - You can also use the shorthand: `winapp package ./dist --generate-cert --install-cert` to do everything in one command
 
 ## Related skills
-- Need to create a manifest first? See `winapp-manifest` to generate `appxmanifest.xml` with correct publisher info
+- Need to create a manifest first? See `winapp-manifest` to generate `Package.appxmanifest` with correct publisher info
 - Ready to package? See `winapp-package` to create and sign an MSIX in one step
 - Having issues? See `winapp-troubleshoot` for common error solutions
 
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Publisher mismatch" | Cert publisher ≠ manifest publisher | `winapp cert generate --manifest ./appxmanifest.xml` to re-generate with correct publisher |
+| "Publisher mismatch" | Cert publisher ≠ manifest publisher | `winapp cert generate --manifest ./Package.appxmanifest` to re-generate with correct publisher |
 | "Access denied" / "elevation required" | `cert install` needs admin | Run your terminal as Administrator |
 | "Certificate not trusted" | Cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `--if-exists overwrite` or `--if-exists skip` |
