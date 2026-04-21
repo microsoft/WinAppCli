@@ -202,6 +202,14 @@ internal class CliUpgradeService(
                         await response.Content.CopyToAsync(fs, ct);
                     }
 
+                    taskContext.AddDebugMessage("Verifying Authenticode signature...");
+                    var sigResult = AuthenticodeHelper.VerifyMicrosoftSignature(msixPath);
+                    if (!sigResult.IsValid)
+                    {
+                        throw new InvalidOperationException(
+                            $"Downloaded MSIX package failed signature verification. {sigResult.ErrorMessage}");
+                    }
+
                     taskContext.AddDebugMessage("Installing MSIX package...");
 
                     // Use PackageManager to install the MSIX
@@ -261,6 +269,14 @@ internal class CliUpgradeService(
                     // Find the new winapp.exe in extracted directory
                     var newExePath = Directory.GetFiles(extractDir, "winapp.exe", SearchOption.AllDirectories).FirstOrDefault()
                         ?? throw new FileNotFoundException("winapp.exe not found in downloaded archive");
+
+                    taskContext.AddDebugMessage("Verifying Authenticode signature...");
+                    var sigResult = AuthenticodeHelper.VerifyMicrosoftSignature(newExePath);
+                    if (!sigResult.IsValid)
+                    {
+                        throw new InvalidOperationException(
+                            $"Downloaded executable failed signature verification. {sigResult.ErrorMessage}");
+                    }
 
                     var currentExePath = Environment.ProcessPath
                         ?? throw new InvalidOperationException("Cannot determine current executable path");

@@ -334,3 +334,88 @@ public class UpgradeCommandTests : BaseCommandTests
         Assert.IsNotNull(forceOption, "upgrade command should have a --force option");
     }
 }
+
+[TestClass]
+public class AuthenticodeHelperTests
+{
+    [TestMethod]
+    public void VerifyMicrosoftSignature_WithNonexistentFile_ReturnsInvalid()
+    {
+        var result = AuthenticodeHelper.VerifyMicrosoftSignature(@"C:\nonexistent\fake.exe");
+
+        Assert.IsFalse(result.IsValid);
+        Assert.IsNotNull(result.ErrorMessage);
+    }
+
+    [TestMethod]
+    public void VerifyMicrosoftSignature_WithUnsignedFile_ReturnsInvalid()
+    {
+        // Create a temporary unsigned file
+        var tempFile = Path.Combine(Path.GetTempPath(), $"unsigned-{Guid.NewGuid():N}.exe");
+        try
+        {
+            File.WriteAllBytes(tempFile, [0x4D, 0x5A, 0x00, 0x00]); // Minimal MZ header stub
+
+            var result = AuthenticodeHelper.VerifyMicrosoftSignature(tempFile);
+
+            Assert.IsFalse(result.IsValid, "Unsigned file should fail verification");
+            Assert.IsNotNull(result.ErrorMessage);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [TestMethod]
+    public void VerifyMicrosoftSignature_WithMicrosoftSignedSystemBinary_ReturnsValid()
+    {
+        // Try several system binaries — some use embedded Authenticode, others use catalog signing.
+        // Catalog-signed files return TRUST_E_NOSIGNATURE (0x800B0100) for embedded-only checks.
+        string[] candidates =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "msiexec.exe"),
+        ];
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            var result = AuthenticodeHelper.VerifyMicrosoftSignature(path);
+            if (result.IsValid)
+            {
+                Assert.IsNotNull(result.SignerName, "Signer name should be present");
+                StringAssert.Contains(result.SignerName, "Microsoft", "Signer should be Microsoft");
+                return; // At least one signed binary verified successfully
+            }
+        }
+
+        Assert.Inconclusive(
+            "No system binary with embedded Authenticode signature found (all may use catalog signing).");
+    }
+
+    [TestMethod]
+    public void SignatureVerificationResult_Success_HasExpectedProperties()
+    {
+        var result = SignatureVerificationResult.Success("Microsoft Corporation");
+
+        Assert.IsTrue(result.IsValid);
+        Assert.AreEqual("Microsoft Corporation", result.SignerName);
+        Assert.IsNull(result.ErrorMessage);
+    }
+
+    [TestMethod]
+    public void SignatureVerificationResult_Fail_HasExpectedProperties()
+    {
+        var result = SignatureVerificationResult.Fail("test error");
+
+        Assert.IsFalse(result.IsValid);
+        Assert.IsNull(result.SignerName);
+        Assert.AreEqual("test error", result.ErrorMessage);
+    }
+}
