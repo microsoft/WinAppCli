@@ -96,17 +96,15 @@ internal static class Program
             {
                 var cliUpgradeService = serviceProvider.GetRequiredService<ICliUpgradeService>();
 
+                using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
                 try
                 {
-                    await cliUpgradeService.CheckAndNotifyAsync().WaitAsync(TimeSpan.FromSeconds(2));
-                }
-                catch (TimeoutException)
-                {
-                    // Keep startup responsive if the update check is slow/unreachable.
+                    await cliUpgradeService.CheckAndNotifyAsync(cancellationTokenSource.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    // Keep startup responsive if the timed wait is canceled.
+                    // Keep startup responsive if the update check is slow/unreachable or canceled.
                 }
             }
         }
