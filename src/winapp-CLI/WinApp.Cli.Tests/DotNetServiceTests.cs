@@ -1062,4 +1062,88 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     #endregion
+
+    #region EnsureAssetContentItemsAsync
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_AddsMissingAssetsGlob()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should modify csproj when no asset Content items exist");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**\*"" />"),
+            "Should add Assets glob Content item");
+        Assert.IsTrue(content.Contains("</Project>"),
+            "Should preserve </Project> closing tag");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenAlreadyPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include=""Assets\**\*"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when asset Content items already exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenIndividualAssetPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <Content Include=""Assets\StoreLogo.png"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when individual asset Content items exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_ReturnsFalseForMissingFile()
+    {
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "NonExistent.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
 }

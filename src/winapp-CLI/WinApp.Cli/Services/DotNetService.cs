@@ -675,6 +675,41 @@ internal partial class DotNetService : IDotNetService
 
         return modified;
     }
+
+    public async Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+
+        // Skip if the csproj already includes Assets content (glob or individual entries)
+        if (AssetsContentItemRegex().IsMatch(content))
+        {
+            return false;
+        }
+
+        // Insert a new ItemGroup with the Assets glob before </Project>
+        var closeProjectIdx = content.LastIndexOf("</Project>", StringComparison.OrdinalIgnoreCase);
+        if (closeProjectIdx < 0)
+        {
+            return false;
+        }
+
+        var itemGroup =
+            "  <ItemGroup>" + Environment.NewLine
+            + "    <Content Include=\"Assets\\**\\*\" />" + Environment.NewLine
+            + "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
+
+        content = content[..closeProjectIdx] + itemGroup + content[closeProjectIdx..];
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    [GeneratedRegex(@"<Content\s[^>]*Include\s*=\s*""Assets\\", RegexOptions.IgnoreCase)]
+    private static partial Regex AssetsContentItemRegex();
 }
 
 [JsonSerializable(typeof(DotNetPackageListJson))]
