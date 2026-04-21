@@ -142,11 +142,11 @@ internal static class Program
         // "Unrecognized command or argument" pointing at the wrong token (issue #467).
         // Only run when parsing already failed — otherwise a command that legitimately
         // accepts a "-foo"-shaped positional value would get a false-positive typo error.
-        var effectiveParseResult = parseResult!;
+        var parsedArgs = parseResult!;
 
-        if (effectiveParseResult.Errors.Count > 0)
+        if (parsedArgs.Errors.Count > 0)
         {
-            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, effectiveParseResult);
+            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parsedArgs);
             if (typo is not null)
             {
                 var suggested = "-" + typo;
@@ -161,21 +161,21 @@ internal static class Program
         {
             if (!isCompleteMode)
             {
-                CommandInvokedEvent.Log(effectiveParseResult.CommandResult);
+                CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
-            var returnCode = await effectiveParseResult.InvokeAsync();
+            var returnCode = await parsedArgs.InvokeAsync();
 
             if (!isCompleteMode)
             {
-                CommandCompletedEvent.Log(effectiveParseResult.CommandResult, returnCode);
+                CommandCompletedEvent.Log(parsedArgs.CommandResult, returnCode);
             }
 
             return returnCode;
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(effectiveParseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parsedArgs.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }

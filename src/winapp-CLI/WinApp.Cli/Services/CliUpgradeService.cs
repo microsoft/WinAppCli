@@ -483,7 +483,8 @@ internal class CliUpgradeService(
             }
             catch
             {
-                // Best-effort cleanup only.
+                // Ignore cleanup failures (for example, stale backup file locked by AV/another process).
+                // We fall back to a unique backup name below so upgrade can still proceed.
             }
         }
 
