@@ -52,12 +52,8 @@ internal class GetWinappPathCommand : Command, IShortDescription
                     winappDir = winappDirectoryService.GetLocalWinappDirectory();
                     directoryType = "Local";
 
-                    // #475: GetLocalWinappDirectory falls back to <baseDir>/.winapp when no
-                    // .winapp folder is found by walking upward, even though that path doesn't
-                    // actually exist. Returning a non-existent path makes scripts that rely on
-                    // this command point at empty directories. Fall back to the global cache
-                    // (which is also where 'winapp install' would put packages without a local
-                    // .winapp) and warn the user.
+                    // Fall back to the global cache (which is also where 'winapp install' would
+                    // put packages without a local .winapp) and warn the user. See #475.
                     if (!winappDir.Exists)
                     {
                         var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
