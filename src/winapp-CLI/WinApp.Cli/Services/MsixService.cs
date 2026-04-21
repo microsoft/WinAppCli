@@ -677,7 +677,7 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Searches for a manifest file in the start directory and parent directories.
+    /// Searches for a manifest file in the start directory and walks up parent directories until one is found.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
     /// <returns>Path to the first manifest found (preferring Package.appxmanifest over appxmanifest.xml), or null if not found.</returns>
