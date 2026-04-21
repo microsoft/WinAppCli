@@ -72,7 +72,7 @@ npx winapp node add-electron-debug-identity
 ```
 
 > [!NOTE]
-> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you modify `appxmanifest.xml`, update app assets, or reinstall dependencies.
+> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you modify `Package.appxmanifest`, update app assets, or reinstall dependencies.
 
 Now run your app:
 

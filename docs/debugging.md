@@ -86,7 +86,7 @@ winapp run .\build\Debug --no-launch
 
 **Step 2:** Configure your IDE to launch via the AUMID or the **execution alias** (not the exe directly). 
 * Launching with AUMID: Use the command `start shell:AppsFolder\<AUMID>`. `winapp run` outputs the AUMID when the app is registered.
-* Launching with the alias: The alias must be defined in the appxmanifest.xml (or Package.appxmanifest).
+* Launching with the alias: The alias must be defined in your manifest (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported).
 
 > **Important:** Simply launching the exe in the build folder will **not** give it identity. The app must be started via AUMID activation or its execution alias. This is how loose layout packages work - identity is tied to the activation path, not the exe file.
 

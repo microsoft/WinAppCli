@@ -343,20 +343,20 @@ When you run the app, you'll see the classification results in the console!
 
 ## Step 7: Update Debug Identity
 
-To ensure the Windows App SDK is loaded and available for usage, we need to ensure we setup debug identity which will ensure the framework is loaded whenever our app runs. Likewise, whenever you modify `appxmanifest.xml` or change assets referenced in the manifest (like app icons), you need to update your app's debug identity. Run:
+To ensure the Windows App SDK is loaded and available for usage, we need to ensure we setup debug identity which will ensure the framework is loaded whenever our app runs. Likewise, whenever you modify `Package.appxmanifest` or change assets referenced in the manifest (like app icons), you need to update your app's debug identity. Run:
 
 ```bash
 npx winapp node add-electron-debug-identity
 ```
 
 This command:
-1. Reads your `appxmanifest.xml` to get app details and capabilities
+1. Reads your `Package.appxmanifest` to get app details and capabilities
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without full MSIX packaging
 
 > [!NOTE]
 > This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
-> - Modify `appxmanifest.xml` (change capabilities, identity, or properties)
+> - Modify `Package.appxmanifest` (change capabilities, identity, or properties)
 > - Update app assets (icons, logos, etc.)
 
 Now run your app:

@@ -156,7 +156,7 @@ When you run the app, the summary will be printed to the console. From here, you
 
 ## Step 5: Add Required Capability
 
-Before you can use the Phi Silica API, you need to declare the required capability in your app manifest. Open `appxmanifest.xml` and add the `systemAIModels` capability inside the `<Capabilities>` section:
+Before you can use the Phi Silica API, you need to declare the required capability in your app manifest. Open `Package.appxmanifest` and add the `systemAIModels` capability inside the `<Capabilities>` section:
 
 ```xml
 <Capabilities>
@@ -170,20 +170,20 @@ Before you can use the Phi Silica API, you need to declare the required capabili
 
 ## Step 6: Update Debug Identity
 
-Whenever you modify `appxmanifest.xml` or change assets referenced in the manifest (like app icons), you need to update your app's debug identity. Run:
+Whenever you modify `Package.appxmanifest` or change assets referenced in the manifest (like app icons), you need to update your app's debug identity. Run:
 
 ```bash
 npx winapp node add-electron-debug-identity
 ```
 
 This command:
-1. Reads your `appxmanifest.xml` to get app details and capabilities
+1. Reads your `Package.appxmanifest` to get app details and capabilities
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without full MSIX packaging
 
 > [!NOTE]
 > This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you:
-> - Modify `appxmanifest.xml` (change capabilities, identity, or properties)
+> - Modify `Package.appxmanifest` (change capabilities, identity, or properties)
 > - Update app assets (icons, logos, etc.)
 > - Reinstall or update dependencies
 
