@@ -955,5 +955,37 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
             "Init should succeed (exit code 0) even when NuGet version lookup fails for the WinApp integration package");
     }
 
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_InitSucceeds_WhenOptionalWinAppPackageAddFails()
+    {
+        // Arrange
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+        _fakeDotNetService.PackagesToThrowOnAdd.Add(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode,
+            "Init should succeed (exit code 0) when optional WinApp package add fails");
+
+        var combinedOutput = TestAnsiConsole.Output + ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.IsTrue(
+            combinedOutput.Contains("Failed to add optional NuGet packages", StringComparison.OrdinalIgnoreCase) &&
+            combinedOutput.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase),
+            $"Output should include the optional package failure message. Output:\n{combinedOutput}");
+    }
+
     #endregion
 }

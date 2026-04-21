@@ -26,6 +26,12 @@ internal class FakeDotNetService : IDotNetService
     /// </summary>
     public DotNetPackageListJson? PackageListResult { get; set; }
 
+    /// <summary>
+    /// Packages listed here will cause <see cref="AddOrUpdatePackageReferenceAsync"/> to throw,
+    /// simulating failures from <c>dotnet add package</c>.
+    /// </summary>
+    public HashSet<string> PackagesToThrowOnAdd { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     // Delegate file-based operations to real implementation
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory) => _real.FindCsproj(directory);
     public string? GetTargetFramework(FileInfo csprojPath) => _real.GetTargetFramework(csprojPath);
@@ -53,6 +59,11 @@ internal class FakeDotNetService : IDotNetService
     // Fake CLI-based operations
     public Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
     {
+        if (PackagesToThrowOnAdd.Contains(packageName))
+        {
+            throw new InvalidOperationException($"Simulated dotnet add package failure for {packageName}");
+        }
+
         AddedPackages.Add((csprojPath.FullName, packageName, version));
         return Task.FromResult(version ?? "1.0.0");
     }
