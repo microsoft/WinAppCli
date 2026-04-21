@@ -298,8 +298,8 @@ internal partial class MsixService(
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
-        // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
-        // 3. Check for appxmanifest.xml or package.appxmanifest in current directory
+        // 2. Check for Package.appxmanifest or appxmanifest.xml in input folder
+        // 3. Check for Package.appxmanifest or appxmanifest.xml in current directory
         FileInfo resolvedManifestPath;
         if (manifestPath != null)
         {
@@ -318,7 +318,7 @@ internal partial class MsixService(
             }
             else
             {
-                throw new FileNotFoundException($"Manifest file not found. Searched for appxmanifest.xml and package.appxmanifest in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
+                throw new FileNotFoundException($"Manifest file not found. Searched for Package.appxmanifest, then appxmanifest.xml in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
             }
         }
 
@@ -677,10 +677,10 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Searches for appxmanifest.xml in the project by looking for .winapp directory in parent directories
+    /// Searches for a manifest file in the start directory and walks up parent directories until one is found.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
-    /// <returns>Path to the project's appxmanifest.xml file, or null if not found</returns>
+    /// <returns>Path to the first manifest found (preferring Package.appxmanifest over appxmanifest.xml), or null if not found.</returns>
     public static FileInfo? FindProjectManifest(ICurrentDirectoryProvider currentDirectoryProvider, DirectoryInfo? startDirectory = null)
     {
         var directory = startDirectory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();

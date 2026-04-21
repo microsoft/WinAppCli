@@ -207,12 +207,12 @@ When prompted:
 - **Setup SDKs**: Select "Stable SDKs" to download Windows App SDK and generate C++ headers (needed for step 6)
 
 This command will:
-- Create `appxmanifest.xml` — the manifest that defines your app's identity
+- Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 - Create a `.winapp` folder with Windows App SDK headers and libraries
 - Create a `winapp.yaml` configuration file for pinning SDK versions
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 ## 5. Debug with Identity
 
@@ -467,7 +467,7 @@ Now you can package and sign:
 winapp pack .\dist --cert .\devcert.pfx
 ```
 
-> Note: The `pack` command automatically uses the `appxmanifest.xml` from your current directory and copies it to the target folder before packaging.
+> Note: The `pack` command automatically uses the `Package.appxmanifest` from your current directory and copies it to the target folder before packaging.
 
 ### Install the Certificate
 
@@ -487,7 +487,7 @@ Install the package by double-clicking the generated `.msix` file, or using Powe
 Add-AppxPackage .\flutterapp.msix
 ```
 
-> **Tip**: The MSIX filename includes the version and architecture (e.g., `flutterapplication1_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `appxmanifest.xml` — Windows requires a higher version number to update an installed package.
+> **Tip**: The MSIX filename includes the version and architecture (e.g., `flutterapplication1_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
 
 ## Tips
 

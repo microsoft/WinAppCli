@@ -32,7 +32,7 @@ module.exports = {
 ```
 
 > [!IMPORTANT]
-> Verify that your `appxmanifest.xml` matches your packaged app structure:
+> Verify that your `Package.appxmanifest` matches your packaged app structure:
 > - The `Executable` attribute should point to the correct .exe file in your packaged output
 
 ## Generate a Development Certificate
@@ -76,12 +76,12 @@ This will create a production version of your app in the `./out/` folder. The ex
 Now use the winapp CLI to create and sign an MSIX package from your packaged app:
 
 ```bash
-npx winapp pack .\out\<your-app-folder> --output .\out --cert .\devcert.pfx --manifest .\appxmanifest.xml
+npx winapp pack .\out\<your-app-folder> --output .\out --cert .\devcert.pfx --manifest .\Package.appxmanifest
 ```
 
 Replace `<your-app-folder>` with the actual folder name created by Electron Forge (e.g., `my-windows-app-win32-x64` for x64 or `my-windows-app-win32-arm64` for ARM64).
 
-The `--manifest` option is optional. If not provided, it will look for an appxmanifest.xml in the folder being packaged, or in the current directory.
+The `--manifest` option is optional. If not provided, it will look for a Package.appxmanifest in the folder being packaged, or in the current directory.
 
 The `--cert` option is also optional. If not provided, the msix will not be signed.
 
@@ -94,7 +94,7 @@ The MSIX package will be created as `./out/<your-app-name>.msix`.
 > ```json
 > {
 >   "scripts": {
->     "package-msix": "npm run build-csAddon && npx electron-forge package && npx winapp pack ./out/my-windows-app-win32-x64 --output ./out --cert ./devcert.pfx --manifest appxmanifest.xml"
+>     "package-msix": "npm run build-csAddon && npx electron-forge package && npx winapp pack ./out/my-windows-app-win32-x64 --output ./out --cert ./devcert.pfx --manifest Package.appxmanifest"
 >   }
 > }
 > ```
@@ -123,7 +123,7 @@ module.exports = {
     {
       name: '@electron-forge/maker-msix',
       config: {
-        appManifest: '.\\appxmanifest.xml',
+        appManifest: '.\\Package.appxmanifest',
         windowsSignOptions: {
           certificateFile: '.\\devcert.pfx',
           certificatePassword: 'password'
@@ -135,9 +135,9 @@ module.exports = {
 };
 ```
 
-#### Update appxmanifest.xml
+#### Update Package.appxmanifest
 
-The Electron Forge MSIX maker uses a different folder layout than the winapp CLI approach. It places your app inside an `app\` folder in the MSIX. This folder is created automatically during packaging — you don't need to create it yourself. Update the `Executable` path in your `appxmanifest.xml` to point to the `app` folder:
+The Electron Forge MSIX maker uses a different folder layout than the winapp CLI approach. It places your app inside an `app\` folder in the MSIX. This folder is created automatically during packaging — you don't need to create it yourself. Update the `Executable` path in your `Package.appxmanifest` to point to the `app` folder:
 
 ```xml
 <Applications>
@@ -152,7 +152,7 @@ The Electron Forge MSIX maker uses a different folder layout than the winapp CLI
 Replace `my-app.exe` with your actual executable name. This is based on the `productName` (or `name`) field in your `package.json`.
 
 > [!NOTE]
-> The Forge MSIX maker looks for Windows SDK tools based on the `MinVersion` in your `appxmanifest.xml`. If you get an error about WindowsKit not being found, ensure the SDK version specified in `MinVersion` is installed on your machine, or update `MinVersion` to match an installed SDK version.
+> The Forge MSIX maker looks for Windows SDK tools based on the `MinVersion` in your `Package.appxmanifest`. If you get an error about WindowsKit not being found, ensure the SDK version specified in `MinVersion` is installed on your machine, or update `MinVersion` to match an installed SDK version.
 
 #### Create the MSIX Package
 
@@ -201,7 +201,7 @@ Host the MSIX package on your website for direct download. Ensure you sign it wi
 Submit your app to the Microsoft Store for the widest distribution and automatic updates. You'll need to:
 1. Create a Microsoft Partner Center account
 2. Reserve your app name
-3. Update `appxmanifest.xml` with your Store identity. No need to sign the msix, the store publishing process will sign it automaticly. 
+3. Update `Package.appxmanifest` with your Store identity. No need to sign the msix, the store publishing process will sign it automatically. 
 5. Submit for certification
 
 Learn more: [Publish your app to the Microsoft Store](https://learn.microsoft.com/windows/apps/publish/)

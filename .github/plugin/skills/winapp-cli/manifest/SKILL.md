@@ -6,7 +6,7 @@ version: 0.2.2
 ## When to use
 
 Use this skill when:
-- **Creating `appxmanifest.xml`** for a project that doesn't have one yet
+- **Creating `Package.appxmanifest`** for a project that doesn't have one yet
 - **Generating app icon assets** from a single source image
 - **Understanding manifest structure** for package identity and capabilities
 
@@ -17,7 +17,7 @@ Use this skill when:
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the key prerequisite for most winapp commands — it's more important than `winapp.yaml`. It declares:
+**`Package.appxmanifest`** is the key prerequisite for most winapp commands — it's more important than `winapp.yaml`. It declares:
 - **Package identity** — name, publisher, version
 - **App entry point** — which executable to launch
 - **Capabilities** — what the app can access (internet, file system, etc.)
@@ -55,7 +55,7 @@ winapp manifest generate --if-exists overwrite
 ```
 
 Output:
-- `appxmanifest.xml` — the manifest file
+- `Package.appxmanifest` — the manifest file
 - `Assets/` — default app icons in required sizes (Square44x44Logo, Square150x150Logo, Wide310x150Logo, etc.)
 
 ### Update app icons from a source image
@@ -68,7 +68,7 @@ winapp manifest update-assets ./my-logo.png
 winapp manifest update-assets ./my-logo.svg
 
 # Specify manifest location (if not in current directory)
-winapp manifest update-assets ./my-logo.png --manifest ./path/to/appxmanifest.xml
+winapp manifest update-assets ./my-logo.png --manifest ./path/to/Package.appxmanifest
 
 # Generate light theme variants from a separate image
 winapp manifest update-assets ./my-logo.png --light-image ./my-logo-light.png
@@ -95,7 +95,7 @@ winapp manifest add-alias
 winapp manifest add-alias --name myapp
 
 # Target a specific manifest file
-winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
+winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
 ```
 
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
@@ -114,14 +114,14 @@ winapp manifest add-alias
 winapp manifest add-alias --name myapp
 
 # Target a specific manifest file
-winapp manifest add-alias --manifest ./path/to/appxmanifest.xml
+winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
 ```
 
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
 
 ## Manifest structure overview
 
-A typical `appxmanifest.xml` looks like:
+A typical `Package.appxmanifest` looks like:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -160,10 +160,10 @@ Key fields to edit:
 
 - Always ensure `Identity.Publisher` matches your signing certificate — use `winapp cert generate --manifest` to auto-match
 - The `sparse` template adds `uap10:AllowExternalContent="true"` for apps that need identity but run outside the MSIX container
-- You can manually edit `appxmanifest.xml` after generation — it's a standard XML file
+- You can manually edit `Package.appxmanifest` after generation — it's a standard XML file
 - Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
 - For logos, transparent PNGs or SVGs work best. SVG source images are rendered as vectors directly at each target size, producing pixel-perfect results. Use a square image for best results across all sizes.
-- **`$targetnametoken$` placeholder:** When `winapp manifest generate` creates `appxmanifest.xml`, it sets `Application.Executable` to `$targetnametoken$.exe` by default. This is a valid placeholder that gets automatically resolved by `winapp package --executable <name>` at packaging time — you rarely need to override it during manifest generation. If `--executable` is provided to `winapp manifest generate`, winapp reads `FileVersionInfo` from the actual exe to auto-fill package name, description, publisher, and extract an icon, so the exe must already exist on disk.
+- **`$targetnametoken$` placeholder:** When `winapp manifest generate` creates `Package.appxmanifest`, it sets `Application.Executable` to `$targetnametoken$.exe` by default. This is a valid placeholder that gets automatically resolved by `winapp package --executable <name>` at packaging time — you rarely need to override it during manifest generation. If `--executable` is provided to `winapp manifest generate`, winapp reads `FileVersionInfo` from the actual exe to auto-fill package name, description, publisher, and extract an icon, so the exe must already exist on disk.
 
 ## Related skills
 
@@ -173,7 +173,7 @@ Key fields to edit:
 ## Troubleshooting
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Manifest already exists" | `appxmanifest.xml` present | Use `--if-exists overwrite` to replace, or edit existing file directly |
+| "Manifest already exists" | `Package.appxmanifest` present | Use `--if-exists overwrite` to replace, or edit existing file directly |
 | "Invalid source image" | Image too small or wrong format | Use PNG or SVG, at least 400x400 pixels |
 | "Publisher mismatch" during packaging | Manifest publisher ≠ cert publisher | Edit `Identity.Publisher` in manifest, or regenerate cert with `--manifest` |
 

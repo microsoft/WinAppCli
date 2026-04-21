@@ -99,10 +99,12 @@ When prompted:
 - **Setup SDKs**: Select "Do not setup SDKs" (Rust uses its own `windows` crate, not the C++ SDK headers)
 
 This command will:
-- Create `appxmanifest.xml` — the manifest that defines your app's identity
+- Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+> **Note:** Because no SDK packages are being managed, no `winapp.yaml` is created — Rust uses the `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
+
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 ### Add Execution Alias (for console apps)
 
@@ -154,11 +156,6 @@ Once you're ready to distribute your app, you can package it as an MSIX using th
 First, build your application in release mode for optimal performance:
 
 ```powershell
-winapp manifest add-alias
-```
-
-
-```powershell
 cargo build --release
 ```
 
@@ -177,7 +174,7 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Important**: The certificate's publisher must match the `Publisher` in your `appxmanifest.xml`. The `cert generate` command reads this automatically from your manifest.
+> **Important**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Sign and Pack
 
@@ -187,7 +184,7 @@ Now you can package and sign in one step:
 winapp pack .\dist --cert .\devcert.pfx 
 ```
 
-> Note: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> Note: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
@@ -215,7 +212,7 @@ rust-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `appxmanifest.xml` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate
