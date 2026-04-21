@@ -14,12 +14,14 @@ namespace WinApp.Cli.Services;
 internal class CliUpgradeService(
     IWinappDirectoryService winappDirectoryService,
     IStatusService statusService,
+    IAnsiConsole ansiConsole,
     ILogger<CliUpgradeService> logger) : ICliUpgradeService
 {
-    private static readonly HttpClient Http = new();
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/winappcli/releases/latest";
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
+    private static readonly TimeSpan UpgradeTimeout = TimeSpan.FromMinutes(5);
 
     public InstallChannel DetectInstallChannel()
     {
@@ -167,9 +169,22 @@ internal class CliUpgradeService(
                     }
                 }
 
-                return channel == InstallChannel.Msix
-                    ? await UpgradeMsixAsync(cancellationToken)
-                    : await UpgradeExeAsync(cancellationToken);
+                // Apply an overall timeout to the download + verify + install pipeline
+                using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    timeoutCts.CancelAfter(UpgradeTimeout);
+                    try
+                    {
+                        return channel == InstallChannel.Msix
+                            ? await UpgradeMsixAsync(timeoutCts.Token)
+                            : await UpgradeExeAsync(timeoutCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        logger.LogError("Upgrade timed out after {Minutes} minutes.", (int)UpgradeTimeout.TotalMinutes);
+                        return 1;
+                    }
+                }
 
             default:
                 logger.LogError("Unknown install channel. Cannot upgrade automatically.");
@@ -282,30 +297,7 @@ internal class CliUpgradeService(
                         ?? throw new InvalidOperationException("Cannot determine current executable path");
 
                     taskContext.AddDebugMessage("Swapping executable...");
-                    var backupPath = currentExePath + ".old";
-
-                    // Remove any leftover backup from a previous upgrade
-                    if (File.Exists(backupPath))
-                    {
-                        File.Delete(backupPath);
-                    }
-
-                    // Rename running exe to .old (Windows allows renaming a locked file)
-                    File.Move(currentExePath, backupPath);
-
-                    try
-                    {
-                        File.Move(newExePath, currentExePath);
-                    }
-                    catch
-                    {
-                        // Roll back if the move fails
-                        File.Move(backupPath, currentExePath);
-                        throw;
-                    }
-
-                    // Try to clean up the old exe (may fail if still locked)
-                    try { File.Delete(backupPath); } catch { }
+                    SwapExecutable(newExePath, currentExePath);
 
                     // Clear the update check cache
                     ClearCacheFile();
@@ -332,13 +324,18 @@ internal class CliUpgradeService(
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        var tagName = doc.RootElement.GetProperty("tag_name").GetString()
+        return ParseReleaseAsset(doc.RootElement, assetFileName);
+    }
+
+    internal static (string DownloadUrl, string Version) ParseReleaseAsset(JsonElement root, string assetFileName)
+    {
+        var tagName = root.GetProperty("tag_name").GetString()
             ?? throw new InvalidOperationException("Could not determine latest release version.");
 
         var version = tagName.StartsWith('v') ? tagName[1..] : tagName;
 
         string? downloadUrl = null;
-        if (doc.RootElement.TryGetProperty("assets", out var assets))
+        if (root.TryGetProperty("assets", out var assets))
         {
             foreach (var asset in assets.EnumerateArray())
             {
@@ -351,6 +348,7 @@ internal class CliUpgradeService(
             }
         }
 
+        // Fallback URL preserves raw tagName (including "v" prefix if present)
         downloadUrl ??= $"https://github.com/microsoft/winappcli/releases/download/{tagName}/{assetFileName}";
 
         return (downloadUrl, version);
@@ -366,10 +364,10 @@ internal class CliUpgradeService(
             _ => "winapp upgrade"
         };
 
-        AnsiConsole.MarkupLine($"[yellow]v{newVersion} is available. Run `{Markup.Escape(upgradeHint)}` to update.[/]");
+        ansiConsole.MarkupLine($"[yellow]v{newVersion} is available. Run `{Markup.Escape(upgradeHint)}` to update.[/]");
     }
 
-    private static bool IsNewerVersion(string latest, string current)
+    internal static bool IsNewerVersion(string latest, string current)
     {
         // Strip prerelease/build metadata suffixes (e.g. "0.2.2-beta.1+abc" → "0.2.2")
         static string StripSuffix(string v)
@@ -394,6 +392,34 @@ internal class CliUpgradeService(
             return latestVer > currentVer;
         }
         return false;
+    }
+
+    internal static void SwapExecutable(string newExePath, string currentExePath)
+    {
+        var backupPath = currentExePath + ".old";
+
+        // Remove any leftover backup from a previous upgrade
+        if (File.Exists(backupPath))
+        {
+            File.Delete(backupPath);
+        }
+
+        // Rename running exe to .old (Windows allows renaming a locked file)
+        File.Move(currentExePath, backupPath);
+
+        try
+        {
+            File.Move(newExePath, currentExePath);
+        }
+        catch
+        {
+            // Roll back if the move fails
+            File.Move(backupPath, currentExePath);
+            throw;
+        }
+
+        // Try to clean up the old exe (may fail if still locked)
+        try { File.Delete(backupPath); } catch { }
     }
 
     private static bool HasMsixPackageIdentity()

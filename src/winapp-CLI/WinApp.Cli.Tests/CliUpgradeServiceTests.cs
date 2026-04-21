@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
+using System.Text.Json;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
@@ -241,6 +242,33 @@ public class CliUpgradeServiceTests : BaseCommandTests
         // Assert - npm always returns 0 with instructions
         Assert.AreEqual(0, exitCode);
     }
+
+    [TestMethod]
+    public async Task CheckAndNotifyAsync_WhenNewerVersionAvailable_DisplaysNotification()
+    {
+        // Arrange - Set latest version much higher than current to trigger notification
+        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
+
+        // Act
+        await _cliUpgradeService.CheckAndNotifyAsync(TestContext.CancellationToken);
+
+        // Assert - notification text should appear in the DI'd IAnsiConsole output
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, "999.0.0", "Should display the new version number");
+        StringAssert.Contains(output, "winapp upgrade", "Should show upgrade hint for standalone installs");
+    }
+
+    [TestMethod]
+    public async Task CheckAndNotifyAsync_WhenNoNewerVersion_DoesNotDisplayNotification()
+    {
+        // Arrange - WINAPP_CLI_LATEST_VERSION is "0.0.0" (from Setup), older than current
+        // Act
+        await _cliUpgradeService.CheckAndNotifyAsync(TestContext.CancellationToken);
+
+        // Assert - no notification should be shown
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("is available"), "Should not display update notification");
+    }
 }
 
 [TestClass]
@@ -332,6 +360,417 @@ public class UpgradeCommandTests : BaseCommandTests
         var forceOption = upgradeCommand.Options.FirstOrDefault(o => o.Name == "--force");
 
         Assert.IsNotNull(forceOption, "upgrade command should have a --force option");
+    }
+}
+
+[TestClass]
+public class IsNewerVersionTests
+{
+    [TestMethod]
+    public void IsNewerVersion_NewerMajor_ReturnsTrue()
+    {
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("2.0.0", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_NewerMinor_ReturnsTrue()
+    {
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.1.0", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_NewerPatch_ReturnsTrue()
+    {
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.0.1", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_SameVersion_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_OlderVersion_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", "2.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_StripsPrereleaseSuffix()
+    {
+        // "1.0.0-beta.1" stripped to "1.0.0" — same as current, so not newer
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0-beta.1", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_StripsBuildMetadata()
+    {
+        // "1.0.0+abc123" stripped to "1.0.0" — same as current, so not newer
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0+abc123", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_StripsPrereleaseAndBuildMetadata()
+    {
+        // "2.0.0-rc.1+sha.abc" stripped to "2.0.0" > "1.0.0"
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("2.0.0-rc.1+sha.abc", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_CurrentHasPrerelease_LatestIsStable()
+    {
+        // Current "1.0.0-beta" stripped to "1.0.0", same as latest "1.0.0" — not newer
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", "1.0.0-beta"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_BothHavePrerelease_ComparesBaseVersions()
+    {
+        // "2.0.0-alpha" > "1.0.0-beta" (after stripping: 2.0.0 > 1.0.0)
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("2.0.0-alpha", "1.0.0-beta"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_EmptyLatest_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_EmptyCurrent_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", ""));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_BothEmpty_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("", ""));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_UnparseableLatest_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("not-a-version", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_UnparseableCurrent_ReturnsFalse()
+    {
+        Assert.IsFalse(CliUpgradeService.IsNewerVersion("1.0.0", "not-a-version"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_TwoComponentVersion_WorksCorrectly()
+    {
+        // "1.2" is valid for Version.TryParse
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.2", "1.1"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_FourComponentVersion_WorksCorrectly()
+    {
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.0.0.1", "1.0.0.0"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_CurrentHasBuildMetadataOnly()
+    {
+        // Current "1.0.0+sha.abc" stripped to "1.0.0", latest "1.0.1" > "1.0.0"
+        Assert.IsTrue(CliUpgradeService.IsNewerVersion("1.0.1", "1.0.0+sha.abc"));
+    }
+}
+
+[TestClass]
+public class ParseReleaseAssetTests
+{
+    private static JsonElement ParseJson(string json)
+    {
+        return JsonDocument.Parse(json).RootElement;
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_MatchingAsset_ReturnsDownloadUrl()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "winappcli-x64.zip",
+                    "browser_download_url": "https://example.com/winappcli-x64.zip"
+                }
+            ]
+        }
+        """);
+
+        var (url, version) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://example.com/winappcli-x64.zip", url);
+        Assert.AreEqual("1.2.3", version);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_StripsVPrefix()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v0.3.0",
+            "assets": []
+        }
+        """);
+
+        var (_, version) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("0.3.0", version);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_NoVPrefix_KeepsVersionAsIs()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "1.0.0",
+            "assets": []
+        }
+        """);
+
+        var (_, version) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("1.0.0", version);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_NoMatchingAsset_ReturnsFallbackUrl()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0",
+            "assets": [
+                {
+                    "name": "winappcli-arm64.zip",
+                    "browser_download_url": "https://example.com/winappcli-arm64.zip"
+                }
+            ]
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://github.com/microsoft/winappcli/releases/download/v1.0.0/winappcli-x64.zip", url);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_FallbackPreservesRawTagName()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v2.0.0-beta",
+            "assets": []
+        }
+        """);
+
+        var (url, version) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        // Fallback URL preserves the raw "v2.0.0-beta" tag
+        Assert.AreEqual("https://github.com/microsoft/winappcli/releases/download/v2.0.0-beta/winappcli-x64.zip", url);
+        // Version strips "v" prefix
+        Assert.AreEqual("2.0.0-beta", version);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_NoAssetsProperty_ReturnsFallbackUrl()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0"
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://github.com/microsoft/winappcli/releases/download/v1.0.0/winappcli-x64.zip", url);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_EmptyAssetsArray_ReturnsFallbackUrl()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0",
+            "assets": []
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://github.com/microsoft/winappcli/releases/download/v1.0.0/winappcli-x64.zip", url);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_NullTagName_Throws()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": null,
+            "assets": []
+        }
+        """);
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip"));
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_MissingTagName_Throws()
+    {
+        var json = ParseJson("""
+        {
+            "assets": []
+        }
+        """);
+
+        Assert.ThrowsExactly<KeyNotFoundException>(
+            () => CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip"));
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_AssetMatchIsCaseInsensitive()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0",
+            "assets": [
+                {
+                    "name": "WinAppCLI-X64.ZIP",
+                    "browser_download_url": "https://example.com/download"
+                }
+            ]
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://example.com/download", url);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_MultipleAssets_FindsCorrectOne()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0",
+            "assets": [
+                {
+                    "name": "winappcli-arm64.zip",
+                    "browser_download_url": "https://example.com/arm64"
+                },
+                {
+                    "name": "winappcli-x64.zip",
+                    "browser_download_url": "https://example.com/x64"
+                },
+                {
+                    "name": "winappcli_x64.msix",
+                    "browser_download_url": "https://example.com/msix"
+                }
+            ]
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli-x64.zip");
+
+        Assert.AreEqual("https://example.com/x64", url);
+    }
+
+    [TestMethod]
+    public void ParseReleaseAsset_MsixAssetName_MatchesCorrectly()
+    {
+        var json = ParseJson("""
+        {
+            "tag_name": "v1.0.0",
+            "assets": [
+                {
+                    "name": "winappcli_x64.msix",
+                    "browser_download_url": "https://example.com/msix-x64"
+                }
+            ]
+        }
+        """);
+
+        var (url, _) = CliUpgradeService.ParseReleaseAsset(json, "winappcli_x64.msix");
+
+        Assert.AreEqual("https://example.com/msix-x64", url);
+    }
+}
+
+[TestClass]
+public class SwapExecutableTests
+{
+    private string _tempDir = null!;
+
+    [TestInitialize]
+    public void Setup()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"swap-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempDir);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        try { Directory.Delete(_tempDir, true); } catch { }
+    }
+
+    [TestMethod]
+    public void SwapExecutable_ReplacesCurrentWithNew()
+    {
+        var currentExe = Path.Combine(_tempDir, "winapp.exe");
+        var newExe = Path.Combine(_tempDir, "new", "winapp.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(newExe)!);
+
+        File.WriteAllText(currentExe, "old-content");
+        File.WriteAllText(newExe, "new-content");
+
+        CliUpgradeService.SwapExecutable(newExe, currentExe);
+
+        Assert.AreEqual("new-content", File.ReadAllText(currentExe));
+        Assert.IsFalse(File.Exists(newExe), "New exe should be moved, not copied");
+    }
+
+    [TestMethod]
+    public void SwapExecutable_CleansUpLeftoverBackup()
+    {
+        var currentExe = Path.Combine(_tempDir, "winapp.exe");
+        var backupExe = currentExe + ".old";
+        var newExe = Path.Combine(_tempDir, "new", "winapp.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(newExe)!);
+
+        File.WriteAllText(currentExe, "current");
+        File.WriteAllText(backupExe, "stale-backup");
+        File.WriteAllText(newExe, "new-content");
+
+        CliUpgradeService.SwapExecutable(newExe, currentExe);
+
+        Assert.AreEqual("new-content", File.ReadAllText(currentExe));
+        // Backup should be cleaned up (or replaced)
+        Assert.IsFalse(File.Exists(backupExe), "Old backup should be cleaned up");
+    }
+
+    [TestMethod]
+    public void SwapExecutable_RollsBackOnFailure()
+    {
+        var currentExe = Path.Combine(_tempDir, "winapp.exe");
+        // newExe does not exist — will cause File.Move to throw
+        var newExe = Path.Combine(_tempDir, "nonexistent", "winapp.exe");
+
+        File.WriteAllText(currentExe, "original-content");
+
+        Assert.ThrowsExactly<FileNotFoundException>(
+            () => CliUpgradeService.SwapExecutable(newExe, currentExe));
+
+        // Current exe should be rolled back to original
+        Assert.AreEqual("original-content", File.ReadAllText(currentExe));
     }
 }
 
