@@ -370,29 +370,98 @@ internal class CliUpgradeService(
 
     internal static bool IsNewerVersion(string latest, string current)
     {
-        // Strip prerelease/build metadata suffixes (e.g. "0.2.2-beta.1+abc" → "0.2.2")
-        static string StripSuffix(string v)
+        static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
         {
-            var dashIdx = v.IndexOf('-');
-            if (dashIdx >= 0)
-            {
-                v = v[..dashIdx];
-            }
+            coreVersion = default!;
+            prerelease = null;
 
-            var plusIdx = v.IndexOf('+');
+            var plusIdx = value.IndexOf('+');
             if (plusIdx >= 0)
             {
-                v = v[..plusIdx];
+                value = value[..plusIdx];
             }
 
-            return v;
+            var dashIdx = value.IndexOf('-');
+            if (dashIdx >= 0)
+            {
+                prerelease = value[(dashIdx + 1)..];
+                value = value[..dashIdx];
+            }
+
+            return Version.TryParse(value, out coreVersion);
         }
 
-        if (Version.TryParse(StripSuffix(latest), out var latestVer) && Version.TryParse(StripSuffix(current), out var currentVer))
+        static int ComparePrerelease(string? left, string? right)
         {
-            return latestVer > currentVer;
+            var leftIsStable = string.IsNullOrEmpty(left);
+            var rightIsStable = string.IsNullOrEmpty(right);
+
+            if (leftIsStable && rightIsStable)
+            {
+                return 0;
+            }
+
+            if (leftIsStable)
+            {
+                return 1;
+            }
+
+            if (rightIsStable)
+            {
+                return -1;
+            }
+
+            var leftParts = left!.Split('.');
+            var rightParts = right!.Split('.');
+            var count = Math.Min(leftParts.Length, rightParts.Length);
+
+            for (var i = 0; i < count; i++)
+            {
+                var leftPart = leftParts[i];
+                var rightPart = rightParts[i];
+
+                var leftIsNumeric = int.TryParse(leftPart, NumberStyles.None, CultureInfo.InvariantCulture, out var leftNumber);
+                var rightIsNumeric = int.TryParse(rightPart, NumberStyles.None, CultureInfo.InvariantCulture, out var rightNumber);
+
+                if (leftIsNumeric && rightIsNumeric)
+                {
+                    var numberComparison = leftNumber.CompareTo(rightNumber);
+                    if (numberComparison != 0)
+                    {
+                        return numberComparison;
+                    }
+                }
+                else if (leftIsNumeric != rightIsNumeric)
+                {
+                    // Numeric identifiers have lower precedence than non-numeric identifiers.
+                    return leftIsNumeric ? -1 : 1;
+                }
+                else
+                {
+                    var textComparison = string.CompareOrdinal(leftPart, rightPart);
+                    if (textComparison != 0)
+                    {
+                        return textComparison;
+                    }
+                }
+            }
+
+            return leftParts.Length.CompareTo(rightParts.Length);
         }
-        return false;
+
+        if (!TryParseSemVer(latest, out var latestCore, out var latestPrerelease) ||
+            !TryParseSemVer(current, out var currentCore, out var currentPrerelease))
+        {
+            return false;
+        }
+
+        var coreComparison = latestCore.CompareTo(currentCore);
+        if (coreComparison != 0)
+        {
+            return coreComparison > 0;
+        }
+
+        return ComparePrerelease(latestPrerelease, currentPrerelease) > 0;
     }
 
     internal static void SwapExecutable(string newExePath, string currentExePath)
