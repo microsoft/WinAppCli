@@ -232,7 +232,8 @@ internal class CliUpgradeService(
                     var deploymentResult = await packageManager.AddPackageAsync(
                         new Uri(Path.GetFullPath(msixPath)),
                         null,
-                        Windows.Management.Deployment.DeploymentOptions.ForceApplicationShutdown);
+                        Windows.Management.Deployment.DeploymentOptions.ForceApplicationShutdown)
+                        .AsTask(ct);
 
                     if (!string.IsNullOrEmpty(deploymentResult.ErrorText))
                     {
