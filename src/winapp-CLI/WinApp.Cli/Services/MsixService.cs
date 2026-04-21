@@ -476,6 +476,64 @@ internal partial class MsixService(
                 MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
 
+            // Validate that all manifest-referenced assets exist in staging.
+            // If any are missing (e.g., SplashScreen or other assets not in the input folder),
+            // try to backfill them from the original manifest directory.
+            var stagingManifestForValidation = new FileInfo(updatedManifestPath);
+            var requiredAssetRefs = ManifestService.ExtractAssetReferencesFromManifest(stagingManifestForValidation, taskContext);
+            if (requiredAssetRefs.Count > 0)
+            {
+                var missingAssetPaths = new List<string>();
+                foreach (var assetRef in requiredAssetRefs)
+                {
+                    var expanded = MrtAssetHelper.ExpandManifestReferencedFiles(
+                        stagingDir, [assetRef.RelativePath], taskContext: null);
+                    if (expanded.Count == 0)
+                    {
+                        missingAssetPaths.Add(assetRef.RelativePath);
+                    }
+                }
+
+                // Backfill missing assets from the original manifest directory
+                if (missingAssetPaths.Count > 0 && resolvedManifestPath.Directory is { Exists: true } originalManifestDir)
+                {
+                    var backfillFiles = MrtAssetHelper.ExpandManifestReferencedFiles(
+                        originalManifestDir, missingAssetPaths, taskContext);
+                    if (backfillFiles.Count > 0)
+                    {
+                        MrtAssetHelper.CopyAllAssets(backfillFiles, stagingDir, taskContext);
+                        taskContext.AddDebugMessage($"{UiSymbols.Note} Backfilled {backfillFiles.Count} missing asset(s) from manifest directory");
+                    }
+
+                    // Re-check for any still-missing assets
+                    var stillMissing = new List<string>();
+                    foreach (var assetPath in missingAssetPaths)
+                    {
+                        var expanded = MrtAssetHelper.ExpandManifestReferencedFiles(
+                            stagingDir, [assetPath], taskContext: null);
+                        if (expanded.Count == 0)
+                        {
+                            stillMissing.Add(assetPath);
+                        }
+                    }
+
+                    if (stillMissing.Count > 0)
+                    {
+                        var missingList = string.Join(", ", stillMissing);
+                        throw new FileNotFoundException(
+                            $"The following assets are referenced in the manifest but could not be found: {missingList}. " +
+                            $"Ensure the asset files exist relative to the manifest ({resolvedManifestPath.Directory.FullName}) or in the input folder ({inputFolder.FullName}).");
+                    }
+                }
+                else if (missingAssetPaths.Count > 0)
+                {
+                    var missingList = string.Join(", ", missingAssetPaths);
+                    throw new FileNotFoundException(
+                        $"The following assets are referenced in the manifest but could not be found: {missingList}. " +
+                        $"Ensure the asset files exist relative to the manifest or in the input folder ({inputFolder.FullName}).");
+                }
+            }
+
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
 
