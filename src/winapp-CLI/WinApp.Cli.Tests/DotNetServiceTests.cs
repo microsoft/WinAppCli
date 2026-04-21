@@ -1012,7 +1012,53 @@ public class DotNetServiceTests : BaseCommandTests
             new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
 
         // Assert
-        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");
+        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_DetectsInlinePackageReference_WithoutDotnetRestore()
+    {
+        // Arrange — write an SDK-style csproj with an inline PackageReference. Use a non-existent
+        // SDK so a `dotnet list package` fallback would fail; success here proves the XML fast path
+        // returned true without invoking dotnet (#463).
+        var csprojPath = Path.Combine(_testTempDirectory, "Inline.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should detect inline <PackageReference Include=\"Microsoft.WindowsAppSDK\"/>.");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_CaseInsensitiveOnIncludeAttribute()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Cased.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <ItemGroup>
+    <PackageReference Include="microsoft.windowsappsdk" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should be case-insensitive on the Include attribute.");
     }
 
     #endregion
