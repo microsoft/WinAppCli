@@ -4,6 +4,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -201,6 +202,45 @@ public class CliUpgradeServiceTests : BaseCommandTests
         Assert.AreEqual(firstWriteTime, secondWriteTime,
             "Second call within check interval should not rewrite cache file");
     }
+    [TestMethod]
+    public async Task UpgradeAsync_WhenLatestIsOlderThanCurrent_ReturnsSuccessWithoutDownloading()
+    {
+        // Arrange - WINAPP_CLI_LATEST_VERSION is set to "0.0.0" in Setup,
+        // which is older than any real current version
+        // Act
+        var exitCode = await _cliUpgradeService.UpgradeAsync(force: false, TestContext.CancellationToken);
+
+        // Assert - should return 0 ("already up to date") without attempting download
+        Assert.AreEqual(0, exitCode);
+    }
+
+    [TestMethod]
+    public async Task UpgradeAsync_WhenLatestEqualsCurrent_ReturnsSuccessWithoutDownloading()
+    {
+        // Arrange - Set latest to the current version
+        var currentVersion = VersionHelper.GetVersionString();
+        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", currentVersion);
+
+        // Act
+        var exitCode = await _cliUpgradeService.UpgradeAsync(force: false, TestContext.CancellationToken);
+
+        // Assert - same version means "already up to date"
+        Assert.AreEqual(0, exitCode);
+    }
+
+    [TestMethod]
+    public async Task UpgradeAsync_WhenNpmChannel_SkipsVersionCheck()
+    {
+        // Arrange - npm channel should just print instructions regardless of version
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "npm");
+        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
+
+        // Act
+        var exitCode = await _cliUpgradeService.UpgradeAsync(force: false, TestContext.CancellationToken);
+
+        // Assert - npm always returns 0 with instructions
+        Assert.AreEqual(0, exitCode);
+    }
 }
 
 [TestClass]
@@ -283,5 +323,14 @@ public class UpgradeCommandTests : BaseCommandTests
         Assert.IsNotNull(upgradeCmd, "upgrade command should exist");
         // Verify it's an UpgradeCommand type (used for help categorization)
         Assert.IsInstanceOfType<UpgradeCommand>(upgradeCmd);
+    }
+
+    [TestMethod]
+    public void UpgradeCommand_HasForceOption()
+    {
+        var upgradeCommand = GetRequiredService<UpgradeCommand>();
+        var forceOption = upgradeCommand.Options.FirstOrDefault(o => o.Name == "--force");
+
+        Assert.IsNotNull(forceOption, "upgrade command should have a --force option");
     }
 }

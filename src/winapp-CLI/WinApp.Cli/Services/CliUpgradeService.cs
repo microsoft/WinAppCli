@@ -133,7 +133,7 @@ internal class CliUpgradeService(
         }
     }
 
-    public async Task<int> UpgradeAsync(CancellationToken cancellationToken = default)
+    public async Task<int> UpgradeAsync(bool force = false, CancellationToken cancellationToken = default)
     {
         var channel = DetectInstallChannel();
 
@@ -148,10 +148,28 @@ internal class CliUpgradeService(
                 return 0;
 
             case InstallChannel.Msix:
-                return await UpgradeMsixAsync(cancellationToken);
-
             case InstallChannel.StandaloneExe:
-                return await UpgradeExeAsync(cancellationToken);
+                if (!force)
+                {
+                    var latestVersion = await GetLatestVersionAsync(cancellationToken);
+                    var currentVersion = VersionHelper.GetVersionString();
+
+                    if (latestVersion == null)
+                    {
+                        logger.LogError("Could not determine the latest version. Use --force to upgrade anyway.");
+                        return 1;
+                    }
+
+                    if (!IsNewerVersion(latestVersion, currentVersion))
+                    {
+                        logger.LogInformation("Already up to date (v{CurrentVersion}).", currentVersion);
+                        return 0;
+                    }
+                }
+
+                return channel == InstallChannel.Msix
+                    ? await UpgradeMsixAsync(cancellationToken)
+                    : await UpgradeExeAsync(cancellationToken);
 
             default:
                 logger.LogError("Unknown install channel. Cannot upgrade automatically.");

@@ -40,3 +40,9 @@ winapp upgrade
 ### `winapp upgrade`
 
 Check for and install the latest version of the winapp CLI. For MSIX installs, downloads and installs the latest MSIX. For standalone exe installs, downloads and swaps the executable. For npm or NuGet installs, shows instructions for using the package manager.
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--force` | Force the upgrade even if the current version appears up to date | (none) |

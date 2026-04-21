@@ -31,7 +31,8 @@ internal interface ICliUpgradeService
 
     /// <summary>
     /// Performs the upgrade based on the detected install channel.
+    /// Skips the upgrade if the current version is already up to date (unless force is true).
     /// Returns 0 on success, non-zero on failure.
     /// </summary>
-    Task<int> UpgradeAsync(CancellationToken cancellationToken = default);
+    Task<int> UpgradeAsync(bool force = false, CancellationToken cancellationToken = default);
 }

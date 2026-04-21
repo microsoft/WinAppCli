@@ -1044,12 +1044,16 @@ export async function update(options: UpdateOptions = {}): Promise<WinappResult>
 // upgrade
 // ---------------------------------------------------------------------------
 
-export type UpgradeOptions = CommonOptions;
+export interface UpgradeOptions extends CommonOptions {
+  /** Force the upgrade even if the current version appears up to date */
+  force?: boolean;
+}
 
 /**
  * Check for and install the latest version of the winapp CLI. For MSIX installs, downloads and installs the latest MSIX. For standalone exe installs, downloads and swaps the executable. For npm or NuGet installs, shows instructions for using the package manager.
  */
 export async function upgrade(options: UpgradeOptions = {}): Promise<WinappResult> {
   const args: string[] = ['upgrade'];
+  if (options.force) args.push('--force');
   return execCommand(args, options);
 }
