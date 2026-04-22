@@ -27,7 +27,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P`). Type **Wi
 | **WinApp: Run Application** | Run your app as a loose-layout packaged application with full package identity — great for testing APIs that require identity. |
 | **WinApp: Create Debug Identity** | Add sparse package identity to an existing executable so you can launch and debug it directly from VS Code with identity. |
 | **WinApp: Create MSIX Package** | Package your application into an MSIX, with options to generate a certificate and bundle the runtime self-contained. |
-| **WinApp: Generate Manifest** | Generate an `Package.appxmanifest` from a template (packaged or sparse). |
+| **WinApp: Generate Manifest** | Generate a `Package.appxmanifest` from a template (packaged or sparse). |
 | **WinApp: Update Manifest Assets** | Auto-generate all required app icon assets from a single source image (PNG, JPG, GIF, or BMP). |
 | **WinApp: Generate Certificate** | Create a development certificate for signing, with an option to install it immediately. |
 | **WinApp: Install Certificate** | Install an existing `.pfx` or `.cer` certificate. (requires Admin elevation) |
