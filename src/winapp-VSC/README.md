@@ -162,7 +162,7 @@ For debugging, install the debugger extension that matches your app's language (
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| **"No build output folder found"** when pressing F5 | The project hasn't been built yet, or the build output is in an unexpected location. | Build your project first (e.g., `dotnet build`), or set `inputFolder` in `launch.json` to point to the folder containing your `.exe`. |
+| **"No folders containing .exe files found in the workspace..."** or **"No build output folder selected..."** when pressing F5 | The project hasn't been built yet, or the build output is in an unexpected location. | Build your project first (e.g., `dotnet build`), or set `inputFolder` in `launch.json` to point to the folder containing your `.exe`. |
 | **Debugger doesn't attach** | The required debugger extension isn't installed. | Install the matching extension for your language — see [Supported debuggers](#integrated-debugging). |
 | **App launches but changes aren't visible** | The `winapp` debug type does not build the project automatically. | Rebuild your project before pressing F5, or add a `preLaunchTask` to automate it (see the tip in [Integrated Debugging](#integrated-debugging)). |
 | **Certificate trust error when running** | The development certificate isn't installed or has expired. | Run **WinApp: Generate Certificate** and choose to install it, or run **WinApp: Install Certificate** with your existing `.pfx` file. (requires Admin elevation) |
