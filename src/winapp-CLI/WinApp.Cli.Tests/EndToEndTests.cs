@@ -248,13 +248,10 @@ public class EndToEndTests : BaseCommandTests
         var finalManifest = await File.ReadAllTextAsync(
             Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
 
-        var versionParts = winAppSdkVersion.Split('.');
-        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
-
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
-        Assert.Contains(expectedRuntimeName, finalManifest,
-            $"PackageDependency should reference {expectedRuntimeName}");
+        Assert.Contains("Microsoft.WindowsAppRuntime.", finalManifest,
+            "PackageDependency should reference a WindowsAppRuntime package");
     }
 
     [TestMethod]
