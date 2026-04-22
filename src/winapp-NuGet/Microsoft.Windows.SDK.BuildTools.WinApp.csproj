@@ -13,6 +13,7 @@
     <Company>Microsoft Corporation</Company>
     <Product>Windows SDK Build Tools MSIX Extras</Product>
     <Description>Enables 'dotnet run' for packaged Windows applications. This package provides MSBuild targets that integrate with the .NET CLI to build, register, and launch packaged applications seamlessly.</Description>
+    <Copyright>© Microsoft Corporation. All rights reserved.</Copyright>
     <PackageTags>winui;msix;packaged;dotnet-run;msbuild;build-tools</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/microsoft/WinAppCli</PackageProjectUrl>
