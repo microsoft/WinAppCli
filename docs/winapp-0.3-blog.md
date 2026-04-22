@@ -6,7 +6,7 @@ Windows App Development CLI v0.3 is here! This release brings some of our best f
 
 With v0.3, we've unlocked a whole class of agentic and automation scenarios. Agents or a script can now *run*, *see*, and *interact with* a running Windows app — not just build it.
 
-Whether you're building with **WinUI, WPF, WinForms, C++, Electron, Rust, Tauri, Flutter, or Avalonia** — the Windows App Development CLI is for you. It provides the tooling to package, run, and add Windows SDK support, and more to any Windows desktop app.
+Whether you're building with **WinUI, WPF, WinForms, C++, Electron, Rust, Tauri, Flutter, or Avalonia** — the Windows App Development CLI is for you. It provides the tooling to package, run, add Windows SDK support, and more to any Windows desktop app.
 
 And for **.NET developers** in particular, this release makes things even smoother with a new NuGet package that brings `dotnet run` support for packaged apps right out of the box.
 
@@ -63,25 +63,25 @@ UI Automation is now built right into the CLI. `winapp ui` lets you inspect and 
 
 ```
 # List all visible windows
-winapp ui list-windows -a "My App"
+winapp ui list-windows -app "My App"
 
 # Inspect the UI tree of a running app
-winapp ui inspect -a "My App" -i
+winapp ui inspect -app "My App" -i
 
 # Click a button by name
-winapp ui click "btn-save-d1" -a "My App"
+winapp ui click "btn-save-d1" -app "My App"
 
 # Take a screenshot
-winapp ui screenshot -a "My App" -o screenshot.png
+winapp ui screenshot -app "My App" -uutput screenshot.png
 
 # Find an element
-winapp ui search "Save" -a "My App"
+winapp ui search "Save" -app "My App"
 
 # Set a TextBox value
-winapp ui set-value "txt-name-a3" "Hello" -a "My App"
+winapp ui set-value "txt-name-a3" "Hello" -app "My App"
 
 # Block until element appears
-winapp ui wait-for "Done" -a "My App" -t 10000
+winapp ui wait-for "Done" -app "My App" -timeout 10000
 ```
 
 Here's what you can do:
@@ -144,6 +144,6 @@ winget install Microsoft.WinAppCli
 npm install -g @microsoft/winappcli
 ```
 
-Check out our [.NET](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md), [C++/CMAKE](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md), [Electron](https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md), Rust or Flutter guides for getting started quickly.
+Check out our [.NET](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md), [C++/CMAKE](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md), [Electron](https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md), [Rust](https://github.com/microsoft/winappCli/blob/main/docs/guides/rust.md) or [Flutter](https://github.com/microsoft/winappCli/blob/main/docs/guides/flutter.md) guides for getting started quickly.
 
 Happy coding!
