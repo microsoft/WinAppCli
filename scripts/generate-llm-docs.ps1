@@ -317,8 +317,128 @@ if ($SkillsDir -eq $DefaultSkillsPath) {
 Write-Host "[SKILLS] Generated $($SkillNames.Count) skills in:" -ForegroundColor Green
 Write-Host "  .github/plugin/skills/winapp-cli/" -ForegroundColor Gray
 
+# ==============================================================================
+# Step 3: Generate Claude Code plugin
+# ==============================================================================
 Write-Host ""
-Write-Host "[DOCS] All documentation and skills generated successfully!" -ForegroundColor Green
+Write-Host "[CLAUDE] Generating Claude Code plugin..." -ForegroundColor Blue
+
+$ClaudePluginDir = Join-Path $ProjectRoot "winapp-claude"
+$ClaudeSkillsDir = Join-Path $ClaudePluginDir "skills"
+$ClaudeAgentsDir = Join-Path $ClaudePluginDir "agents"
+$ClaudeManifestDir = Join-Path $ClaudePluginDir ".claude-plugin"
+$ClaudeMarketplaceDir = Join-Path $ProjectRoot ".claude-plugin"
+
+# Ensure directories exist
+foreach ($dir in @($ClaudeSkillsDir, $ClaudeAgentsDir, $ClaudeManifestDir, $ClaudeMarketplaceDir)) {
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+}
+
+# Generate Claude plugin.json
+$claudePluginJson = @{
+    name = "winapp"
+    version = $CliVersion
+    description = "Windows app development, packaging, and distribution. Helps with creating Windows installers (MSIX), code signing, certificates, Windows SDK and Windows App SDK setup, package identity for Windows APIs, appxmanifest authoring, and Microsoft Store distribution. Supports Electron, .NET, C++, Rust, Flutter, and Tauri apps."
+    author = @{
+        name = "Microsoft"
+        url = "https://github.com/microsoft/WinAppCli"
+    }
+    license = "MIT"
+    keywords = @("windows", "msix", "packaging", "installer", "identity", "electron", "winapp", "windows-app-sdk", "windows-sdk", "appxmanifest", "code-signing", "certificate", "microsoft-store", "tauri", "flutter", "rust", "dotnet", "cpp")
+    repository = "https://github.com/microsoft/WinAppCli"
+}
+$claudePluginJsonContent = $claudePluginJson | ConvertTo-Json -Depth 10
+$claudePluginJsonContent = $claudePluginJsonContent -replace "`r`n", "`n"
+$claudePluginJsonContent = $claudePluginJsonContent.TrimEnd() + "`n"
+$claudePluginJsonPath = Join-Path $ClaudeManifestDir "plugin.json"
+[System.IO.File]::WriteAllText($claudePluginJsonPath, $claudePluginJsonContent, [System.Text.UTF8Encoding]::new($false))
+Write-Host "[CLAUDE]   plugin.json - generated (version $CliVersion)" -ForegroundColor Gray
+
+# Generate marketplace.json (plugin index at repo root)
+$marketplaceJson = @{
+    name = "WinAppCli"
+    owner = @{
+        name = "Microsoft"
+        email = "WinAppCli@microsoft.com"
+    }
+    plugins = @(
+        @{
+            name = "winapp"
+            source = "./winapp-claude"
+            description = "Windows app development, packaging, and distribution. Helps with creating Windows installers (MSIX), code signing, certificates, Windows SDK and Windows App SDK setup, package identity for Windows APIs, appxmanifest authoring, and Microsoft Store distribution. Supports Electron, .NET, C++, Rust, Flutter, and Tauri apps."
+            version = $CliVersion
+            category = "development"
+            homepage = "https://github.com/microsoft/WinAppCli"
+        }
+    )
+}
+$marketplaceJsonContent = $marketplaceJson | ConvertTo-Json -Depth 10
+$marketplaceJsonContent = $marketplaceJsonContent -replace "`r`n", "`n"
+$marketplaceJsonContent = $marketplaceJsonContent.TrimEnd() + "`n"
+$marketplaceJsonPath = Join-Path $ClaudeMarketplaceDir "marketplace.json"
+[System.IO.File]::WriteAllText($marketplaceJsonPath, $marketplaceJsonContent, [System.Text.UTF8Encoding]::new($false))
+Write-Host "[CLAUDE]   marketplace.json - generated" -ForegroundColor Gray
+
+# Copy skill files from GHCP output to Claude plugin (skills are already compatible)
+foreach ($skillName in $SkillNames) {
+    $srcSkillDir = Join-Path $SkillsDir $skillName
+    $dstSkillDir = Join-Path $ClaudeSkillsDir $skillName
+    $srcSkillPath = Join-Path $srcSkillDir "SKILL.md"
+    
+    if (Test-Path $srcSkillPath) {
+        if (-not (Test-Path $dstSkillDir)) {
+            New-Item -ItemType Directory -Path $dstSkillDir -Force | Out-Null
+        }
+        Copy-Item $srcSkillPath (Join-Path $dstSkillDir "SKILL.md") -Force
+        Write-Host "[CLAUDE]   $skillName skill - copied" -ForegroundColor Gray
+    }
+}
+
+# Generate Claude agent file from GHCP agent (convert frontmatter)
+$GhcpAgentPath = Join-Path $ProjectRoot ".github\plugin\agents\winapp.agent.md"
+if (Test-Path $GhcpAgentPath) {
+    $agentContent = [System.IO.File]::ReadAllText($GhcpAgentPath, [System.Text.UTF8Encoding]::new($false))
+    
+    # Extract body after the closing --- frontmatter delimiter
+    $parts = $agentContent -split '---', 3
+    if ($parts.Count -ge 3) {
+        $agentBody = $parts[2]
+        
+        # Extract description from GHCP frontmatter
+        $descriptionMatch = [regex]::Match($parts[1], 'description:\s*(.+)')
+        $agentDescription = if ($descriptionMatch.Success) { $descriptionMatch.Groups[1].Value.Trim() } else { "Windows app development expert" }
+        
+        # Build Claude agent with Claude-specific frontmatter
+        $claudeAgent = @"
+---
+name: winapp
+description: $agentDescription
+model: sonnet
+effort: high
+maxTurns: 30
+---
+"@ + $agentBody
+        
+        $claudeAgent = $claudeAgent -replace "`r`n", "`n"
+        $claudeAgent = $claudeAgent.TrimEnd() + "`n"
+        
+        $claudeAgentPath = Join-Path $ClaudeAgentsDir "winapp.md"
+        [System.IO.File]::WriteAllText($claudeAgentPath, $claudeAgent, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "[CLAUDE]   winapp agent - generated" -ForegroundColor Gray
+    } else {
+        Write-Warning "Could not parse GHCP agent frontmatter from $GhcpAgentPath"
+    }
+} else {
+    Write-Warning "GHCP agent file not found: $GhcpAgentPath"
+}
+
+Write-Host "[CLAUDE] Generated Claude Code plugin in:" -ForegroundColor Green
+Write-Host "  winapp-claude/" -ForegroundColor Gray
+
+Write-Host ""
+Write-Host "[DOCS] All documentation, skills, and Claude Code plugin generated successfully!" -ForegroundColor Green
 
 # Warn if running directly (not from build-cli.ps1)
 if (-not $CalledFromBuildScript -and $UsingDefaultPaths) {

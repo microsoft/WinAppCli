@@ -254,7 +254,16 @@ AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files i
 copilot plugin install microsoft/WinAppCli
 ```
 
-This gives agents full understanding of winapp commands, workflows, and troubleshooting.
+**Claude Code Plugin** (global — works across all projects)
+```bash
+# Add the marketplace (one-time)
+/plugin marketplace add microsoft/WinAppCli
+
+# Install the winapp plugin
+/plugin install winapp@WinAppCli
+```
+
+This gives agents full understanding of winapp commands, workflows, and troubleshooting. See [Claude Code Plugin Guide](./docs/guides/claude-code-plugin.md) for details.
 
 
 ## 🔧 Feedback and Support
