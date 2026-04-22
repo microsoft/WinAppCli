@@ -249,7 +249,23 @@ public class EndToEndTests : BaseCommandTests
             Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
 
         var versionParts = winAppSdkVersion.Split('.');
-        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+
+        // Compute expected WindowsAppRuntime package name. Naming convention differs:
+        //   Stable      (e.g. 1.8.x)            -> Microsoft.WindowsAppRuntime.{major}.{minor}
+        //   Experimental 2.x (e.g. 2.0.0-experimental7) -> Microsoft.WindowsAppRuntime.{major}-experimental{N}
+        // The experimental suffix lives on the last dotted segment as "...-experimentalN",
+        // and ships in the runtime name without the minor component.
+        string expectedRuntimeName;
+        var experimentalIdx = winAppSdkVersion.IndexOf("-experimental", StringComparison.OrdinalIgnoreCase);
+        if (experimentalIdx >= 0)
+        {
+            var experimentalSuffix = winAppSdkVersion.Substring(experimentalIdx);
+            expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}{experimentalSuffix}";
+        }
+        else
+        {
+            expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+        }
 
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
