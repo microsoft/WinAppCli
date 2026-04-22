@@ -1,7 +1,7 @@
 ---
 name: winapp-signing
 description: Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues.
-version: 0.2.2
+version: 0.3.1
 ---
 ## When to use
 

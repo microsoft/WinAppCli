@@ -1,7 +1,7 @@
 ---
 name: winapp-identity
 description: Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app.
-version: 0.2.2
+version: 0.3.1
 ---
 ## When to use
 
