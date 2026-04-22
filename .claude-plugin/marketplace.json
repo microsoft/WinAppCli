@@ -9,7 +9,7 @@
       "name": "winapp",
       "source": "./winapp-claude",
       "description": "Windows app development, packaging, and distribution. Helps with creating Windows installers (MSIX), code signing, certificates, Windows SDK and Windows App SDK setup, package identity for Windows APIs, appxmanifest authoring, and Microsoft Store distribution. Supports Electron, .NET, C++, Rust, Flutter, and Tauri apps.",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "category": "development",
       "homepage": "https://github.com/microsoft/WinAppCli"
     }
