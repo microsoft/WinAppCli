@@ -1,0 +1,31 @@
+{
+  "name": "winapp",
+  "version": "0.3.1",
+  "description": "Windows app development, packaging, and distribution. Helps with creating Windows installers (MSIX), code signing, certificates, Windows SDK and Windows App SDK setup, package identity for Windows APIs, appxmanifest authoring, and Microsoft Store distribution. Supports Electron, .NET, C++, Rust, Flutter, and Tauri apps.",
+  "author": {
+    "name": "Microsoft",
+    "url": "https://github.com/microsoft/WinAppCli"
+  },
+  "license": "MIT",
+  "keywords": [
+    "windows",
+    "msix",
+    "packaging",
+    "installer",
+    "identity",
+    "electron",
+    "winapp",
+    "windows-app-sdk",
+    "windows-sdk",
+    "appxmanifest",
+    "code-signing",
+    "certificate",
+    "microsoft-store",
+    "tauri",
+    "flutter",
+    "rust",
+    "dotnet",
+    "cpp"
+  ],
+  "repository": "https://github.com/microsoft/WinAppCli"
+}
