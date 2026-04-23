@@ -28,7 +28,10 @@
     "onCommand:winapp.certInstall",
     "onCommand:winapp.sign",
     "onCommand:winapp.tool",
-    "onCommand:winapp.getWinappPath"
+    "onCommand:winapp.getWinappPath",
+    "onCommand:winapp.manifestAddAlias",
+    "onCommand:winapp.unregister",
+    "onCommand:winapp.certInfo"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -96,6 +99,21 @@
       {
         "command": "winapp.getWinappPath",
         "title": "WinApp: Get WinApp Path",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestAddAlias",
+        "title": "WinApp: Add Manifest Execution Alias",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.unregister",
+        "title": "WinApp: Unregister Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certInfo",
+        "title": "WinApp: Certificate Info",
         "category": "WinApp"
       }
     ],

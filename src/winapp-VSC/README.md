@@ -17,11 +17,14 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P`). Type **Wi
 | **WinApp: Update Packages** | Update packages and dependencies to the latest versions. |
 | **WinApp: Run Application** | Run your app as a loose-layout packaged application with full package identity — great for testing APIs that require identity. |
 | **WinApp: Create Debug Identity** | Add sparse package identity to an existing executable so you can launch and debug it directly from VS Code with identity. |
+| **WinApp: Unregister Package** | Unregister a sideloaded development package (e.g., one registered via Run or Create Debug Identity). |
 | **WinApp: Create MSIX Package** | Package your application into an MSIX, with options to generate a certificate and bundle the runtime self-contained. |
 | **WinApp: Generate Manifest** | Generate an `AppxManifest.xml` from a template (packaged or sparse). |
+| **WinApp: Add Manifest Execution Alias** | Add an execution alias to the manifest so the packaged app can be launched from the command line. |
 | **WinApp: Update Manifest Assets** | Auto-generate all required app icon assets from a single source image (PNG, JPG, GIF, or BMP). |
 | **WinApp: Generate Certificate** | Create a development certificate for signing, with an option to install it immediately. |
 | **WinApp: Install Certificate** | Install an existing `.pfx` or `.cer` certificate. |
+| **WinApp: Certificate Info** | Display certificate details (subject, thumbprint, expiry) to verify a certificate matches your manifest. |
 | **WinApp: Sign Package** | Sign an MSIX package or executable with a certificate. |
 | **WinApp: Run SDK Tool** | Run Windows SDK tools (`makeappx`, `signtool`, `mt`, `makepri`) with custom arguments. |
 | **WinApp: Get WinApp Path** | Show paths to installed SDK components. |
@@ -84,15 +87,17 @@ Many Windows APIs — notifications, background tasks, on-device AI, share targe
 
 For scenarios where you need to debug startup code from the very first instruction, use **WinApp: Create Debug Identity** to register a sparse package for your executable, then launch it normally with your preferred debugger.
 
+When you're done testing, use **WinApp: Unregister Package** to clean up sideloaded packages without leaving VS Code.
+
 See the full [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md) for more details.
 
 ### Generate manifests and assets
 
-Use **WinApp: Generate Manifest** to create an `AppxManifest.xml` from a template, then **WinApp: Update Manifest Assets** to auto-generate all required app icons from a single source image.
+Use **WinApp: Generate Manifest** to create an `AppxManifest.xml` from a template, then **WinApp: Update Manifest Assets** to auto-generate all required app icons from a single source image. Use **WinApp: Add Manifest Execution Alias** to add a command-line alias so your packaged app can be launched by typing its name in a terminal.
 
 ### Package and sign
 
-Use **WinApp: Create MSIX Package** to package your application. Pair it with **WinApp: Generate Certificate** and **WinApp: Sign Package** to produce a signed, ready-to-distribute MSIX.
+Use **WinApp: Create MSIX Package** to package your application. Pair it with **WinApp: Generate Certificate** and **WinApp: Sign Package** to produce a signed, ready-to-distribute MSIX. Use **WinApp: Certificate Info** to verify a certificate's details (subject, thumbprint, expiry) before signing.
 
 ### Access Windows SDK tools
 

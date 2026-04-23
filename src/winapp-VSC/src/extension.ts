@@ -698,6 +698,61 @@ export function activate(context: vscode.ExtensionContext) {
 			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
+
+	// Register winapp.manifestAddAlias command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.manifestAddAlias', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'manifest add-alias', workspacePath);
+		})
+	);
+
+	// Register winapp.unregister command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.unregister', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'unregister', workspacePath);
+		})
+	);
+
+	// Register winapp.certInfo command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.certInfo', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			const certPath = await selectFile('Select certificate file', {
+				'Certificates': ['pfx']
+			});
+
+			if (!certPath) {
+				vscode.window.showErrorMessage('A certificate file is required');
+				return;
+			}
+
+			const password = await vscode.window.showInputBox({
+				prompt: 'Enter certificate password (leave empty for default)',
+				password: true
+			});
+
+			let command = `cert info "${certPath}"`;
+			if (password) {
+				command += ` --password "${password}"`;
+			}
+
+			await runWinappCommand(extensionPath, command, workspacePath);
+		})
+	);
 }
 
 /**
