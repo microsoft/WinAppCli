@@ -732,7 +732,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const certPath = await selectFile('Select certificate file', {
-				'Certificates': ['pfx']
+				'Certificates': ['pfx', 'cer']
 			});
 
 			if (!certPath) {
