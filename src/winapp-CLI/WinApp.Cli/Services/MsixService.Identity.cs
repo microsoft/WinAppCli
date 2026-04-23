@@ -184,24 +184,31 @@ internal partial class MsixService
             : appxManifestPath.Name;
         var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
         manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
-        var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
-            .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
 
-        if (executableMatch == null)
-        {
-            throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
-        }
+        // Resolve $targetnametoken$ and other placeholders using the same logic as
+        // winapp package — searches the AppX root for a single non-runtime exe.
+        manifestContent = ResolveManifestPlaceholders(manifestContent, executable: null, outputAppXDirectory, taskContext);
+
+        // Determine the resolved executable for downstream operations (PRI rename, arch detection)
+        var resolvedDoc = AppxManifestDocument.Parse(manifestContent);
+        var resolvedExeName = resolvedDoc.ApplicationExecutable;
+        var executableMatch = resolvedExeName != null
+            ? new FileInfo(Path.Combine(outputAppXDirectory.FullName, resolvedExeName))
+            : null;
 
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
-        var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
-        if (File.Exists(priFilePath))
+        if (executableMatch != null)
         {
-            var resourcesPriPath = Path.Combine(outputAppXDirectory.FullName, "resources.pri");
-            File.Move(priFilePath, resourcesPriPath, overwrite: true);
-            taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {Path.GetFileName(priFilePath)} to resources.pri");
+            var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
+            if (File.Exists(priFilePath))
+            {
+                var resourcesPriPath = Path.Combine(outputAppXDirectory.FullName, "resources.pri");
+                File.Move(priFilePath, resourcesPriPath, overwrite: true);
+                taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {Path.GetFileName(priFilePath)} to resources.pri");
+            }
         }
 
         // Generate resources.pri if not present (matches winapp package behavior)
@@ -232,20 +239,13 @@ internal partial class MsixService
             }
         }
 
-        // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [PlaceholderHelper.TargetNameToken] = Path.GetFileNameWithoutExtension(executableMatch.Name)
-        };
-        manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
-
         // Resolve <Resource Language="x-generate"/> — falls back to "en-US" if no PRI found
         manifestContent = manifestContent.Replace("x-generate", "EN-US");
 
         // Unified manifest processing: WinAppSDK dependency, third-party WinRT components,
         // ProcessorArchitecture auto-detection, and build metadata
         (manifestContent, _) = await UpdateAppxManifestContentAsync(
-            manifestContent, null, null, executableMatch.FullName,
+            manifestContent, null, null, executableMatch?.FullName,
             sparse: false, selfContained: false,
             dotNetPackageList, taskContext, cancellationToken);
 
