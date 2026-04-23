@@ -728,7 +728,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.certInfo', async () => {
 			const certPath = await selectFile('Select certificate file', {
-				'Certificates': ['pfx']
+				'Certificates': ['pfx', 'cer']
 			});
 
 			if (!certPath) {
