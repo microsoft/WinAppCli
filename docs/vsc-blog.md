@@ -31,14 +31,14 @@ No separate CLI installation required. The WinApp CLI is bundled with the extens
 
 Many Windows APIs — notifications, background tasks, on-device AI, share targets — require your app to have **package identity**. Traditionally, getting identity meant building a full MSIX installer or running from Visual Studio. The WinApp extension changes that.
 
-The extension provides a custom **`winapp` debug type** that gives your app package identity and attaches your debugger, all from a single **F5** press.
+The extension provides a custom **`winapp` debug type** that gives your app package identity, launches your app, and attaches your debugger, all from a single **F5** press.
 
 **How it works:**
 
-1. Press **F5** (or start a debug session)
-2. The extension locates your build output and manifest
-3. It launches your app via `winapp run` to give it package identity
-4. A child debug session attaches using your preferred debugger
+1. Press **F5** (or start a debug session).
+2. The extension locates your build output and manifest.
+3. It launches your app via `winapp run` to give it package identity.
+4. A child debug session attaches using your preferred debugger.
 
 **Supported debuggers:**
 
