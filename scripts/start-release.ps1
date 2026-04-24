@@ -26,6 +26,11 @@
     stay on main only and are not committed to the release or bump branches), so
     you do not have to land a version-bump PR (or a script tweak) before cutting
     the release.
+.PARAMETER VscVersion
+    Override the VS Code extension version in src/winapp-VSC/package.json on the
+    release branch. Must be Major.Minor.Patch format. Use this when you want to
+    bump the extension's minor or major version for the release (e.g., 0.2.0).
+    If not specified, the extension version in package.json is left unchanged.
 .EXAMPLE
     .\scripts\start-release.ps1
 .EXAMPLE
@@ -34,17 +39,21 @@
     .\scripts\start-release.ps1 -DryRun
 .EXAMPLE
     .\scripts\start-release.ps1 -Version 0.3.0
+.EXAMPLE
+    .\scripts\start-release.ps1 -Version 0.3.0 -VscVersion 0.2.0
 #>
 
 param(
     [switch]$SkipConfirmation = $false,
     [switch]$DryRun = $false,
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$VscVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 $VersionFilePath = Join-Path $ProjectRoot "version.json"
+$VscPackageJsonPath = Join-Path $ProjectRoot "src\winapp-VSC\package.json"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -197,6 +206,15 @@ try {
     $nextVersion = "$major.$minor.$nextPatch"
     $bumpBranch = "bump/v$nextVersion"
 
+    # Validate VscVersion if provided
+    if ($VscVersion) {
+        if ($VscVersion -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "VscVersion '$VscVersion' is not in the expected Major.Minor.Patch format"
+            exit 1
+        }
+        Write-Ok "VS Code extension version override: $VscVersion"
+    }
+
     # 5. Check that the release branch doesn't already exist, and (when an
     #    override is supplied) that the version is strictly higher than every
     #    previously released rel/v* branch.
@@ -250,6 +268,9 @@ try {
     Write-Host "  │                                             │" -ForegroundColor White
     Write-Host "  │  Release version : $releaseVersion$((' ' * (25 - $releaseVersion.Length)))│" -ForegroundColor White
     Write-Host "  │  Release branch  : $releaseBranch$((' ' * (25 - $releaseBranch.Length)))│" -ForegroundColor White
+    if ($VscVersion) {
+    Write-Host "  │  VSC ext version : $VscVersion$((' ' * (25 - $VscVersion.Length)))│" -ForegroundColor White
+    }
     Write-Host "  │  Next dev version: $nextVersion$((' ' * (25 - $nextVersion.Length)))│" -ForegroundColor White
     Write-Host "  │  Bump branch     : $bumpBranch$((' ' * (25 - $bumpBranch.Length)))│" -ForegroundColor White
     Write-Host "  │                                             │" -ForegroundColor White
@@ -302,6 +323,24 @@ try {
         }
         Invoke-GitOrDryRun -Description "Stage version override" -Arguments @("add", "--all")
         Invoke-GitOrDryRun -Description "Commit version override" -Arguments @("commit", "-m", "Set version to $releaseVersion for release")
+    }
+
+    # When -VscVersion is supplied, update the VS Code extension's package.json
+    # on the release branch so the pipeline builds the VSIX with the correct version.
+    if ($VscVersion) {
+        Write-Step "Writing VS Code extension version '$VscVersion' into package.json on release branch..."
+
+        if ($DryRun) {
+            Write-Warn "[DRY RUN] Would update src/winapp-VSC/package.json version to $VscVersion and commit on $releaseBranch"
+        } else {
+            $vscRaw = Get-Content $VscPackageJsonPath -Raw
+            $vscCurrentVersion = (ConvertFrom-Json $vscRaw).version
+            $vscRaw = $vscRaw -replace "`"version`":\s*`"$vscCurrentVersion`"", "`"version`": `"$VscVersion`""
+            Set-Content -Path $VscPackageJsonPath -Value $vscRaw -NoNewline
+            Write-Info "Updated VS Code extension version: $vscCurrentVersion -> $VscVersion"
+        }
+        Invoke-GitOrDryRun -Description "Stage VSC version update" -Arguments @("add", $VscPackageJsonPath)
+        Invoke-GitOrDryRun -Description "Commit VSC version update" -Arguments @("commit", "-m", "Set VS Code extension version to $VscVersion for release")
     }
 
     Confirm-Step "Push '$releaseBranch' to origin? This will kick off the release pipeline"

@@ -82,15 +82,15 @@ try
     if ([string]::IsNullOrEmpty($Version)) {
         Write-Host "[VERSION] Calculating package version..." -ForegroundColor Blue
 
-        # Read base version from version.json
-        $VersionJsonPath = "$ProjectRoot\version.json"
-        if (-not (Test-Path $VersionJsonPath)) {
-            Write-Error "version.json not found at $VersionJsonPath"
+        # Read base version from VS Code extension package.json
+        $VscPackageJsonPath = Join-Path $ProjectRoot "src\winapp-VSC\package.json"
+        if (-not (Test-Path $VscPackageJsonPath)) {
+            Write-Error "VS Code extension package.json not found at $VscPackageJsonPath"
             exit 1
         }
 
-        $VersionJson = Get-Content $VersionJsonPath | ConvertFrom-Json
-        $BaseVersion = $VersionJson.version
+        $VscPackageJson = Get-Content $VscPackageJsonPath -Raw | ConvertFrom-Json
+        $BaseVersion = $VscPackageJson.version
 
         # Get build number
         $GetBuildNumberScript = Join-Path $PSScriptRoot "get-build-number.ps1"
