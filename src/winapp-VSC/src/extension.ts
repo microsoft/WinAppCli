@@ -698,6 +698,94 @@ export function activate(context: vscode.ExtensionContext) {
 			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
+
+	// Register winapp.manifestAddAlias command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.manifestAddAlias', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'manifest add-alias', workspacePath);
+		})
+	);
+
+	// Register winapp.unregister command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.unregister', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'unregister', workspacePath);
+		})
+	);
+
+	// Register winapp.certInfo command
+	// This command only inspects a certificate file and does not require a workspace.
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.certInfo', async () => {
+			const certPath = await selectFile('Select certificate file', {
+				'Certificates': ['pfx', 'cer']
+			});
+
+			if (!certPath) {
+				vscode.window.showErrorMessage('A certificate file is required');
+				return;
+			}
+
+			const password = await vscode.window.showInputBox({
+				prompt: 'Enter certificate password (leave empty for default)',
+				password: true
+			});
+
+			// Use spawn with an args array (shell: false) to avoid exposing
+			// the password in terminal history and to prevent argument injection.
+			const cliPath = getWinappCliPath(extensionPath);
+			const args = ['cert', 'info', certPath];
+			if (password) {
+				args.push('--password', password);
+			}
+
+			// Use the certificate's parent directory as cwd since no workspace is required.
+			const cwd = path.dirname(certPath);
+
+			const outputChannel = vscode.window.createOutputChannel('WinApp Cert Info');
+			outputChannel.show();
+			outputChannel.appendLine(`Running: winapp cert info "${certPath}"`);
+
+			await new Promise<void>((resolve) => {
+				const child = spawn(cliPath, args, {
+					cwd,
+					env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE },
+					shell: false
+				});
+
+				child.stdout!.on('data', (data: Buffer) => {
+					outputChannel.append(data.toString());
+				});
+
+				child.stderr!.on('data', (data: Buffer) => {
+					outputChannel.append(data.toString());
+				});
+
+				child.on('error', (err) => {
+					vscode.window.showErrorMessage(`Failed to run cert info: ${err.message}`);
+					resolve();
+				});
+
+				child.on('close', (code) => {
+					if (code !== 0) {
+						outputChannel.appendLine(`\nCommand exited with code ${code}`);
+						vscode.window.showErrorMessage('Certificate info command failed. See output for details.');
+					}
+					resolve();
+				});
+			});
+		})
+	);
 }
 
 /**
