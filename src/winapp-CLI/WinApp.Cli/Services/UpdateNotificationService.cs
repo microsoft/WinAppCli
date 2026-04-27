@@ -210,7 +210,7 @@ internal class UpdateNotificationService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug("Failed to write update check cache: {Error}", ex.Message);
+            logger.LogDebug(ex, "Failed to write update check cache.");
         }
     }
 }
