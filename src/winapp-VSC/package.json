@@ -38,82 +38,82 @@
     "commands": [
       {
         "command": "winapp.init",
-        "title": "WinApp: Initialize Project",
+        "title": "Initialize Project",
         "category": "WinApp"
       },
       {
         "command": "winapp.restore",
-        "title": "WinApp: Restore Packages",
+        "title": "Restore Packages",
         "category": "WinApp"
       },
       {
         "command": "winapp.update",
-        "title": "WinApp: Update Packages",
+        "title": "Update Packages",
         "category": "WinApp"
       },
       {
         "command": "winapp.pack",
-        "title": "WinApp: Create MSIX Package",
+        "title": "Create MSIX Package",
         "category": "WinApp"
       },
       {
         "command": "winapp.run",
-        "title": "WinApp: Run Application",
+        "title": "Run Application",
         "category": "WinApp"
       },
       {
         "command": "winapp.createDebugIdentity",
-        "title": "WinApp: Create Debug Identity",
+        "title": "Create Debug Identity",
         "category": "WinApp"
       },
       {
         "command": "winapp.manifestGenerate",
-        "title": "WinApp: Generate Manifest",
+        "title": "Generate Manifest",
         "category": "WinApp"
       },
       {
         "command": "winapp.manifestUpdateAssets",
-        "title": "WinApp: Update Manifest Assets",
+        "title": "Update Manifest Assets",
         "category": "WinApp"
       },
       {
         "command": "winapp.certGenerate",
-        "title": "WinApp: Generate Certificate",
+        "title": "Generate Certificate",
         "category": "WinApp"
       },
       {
         "command": "winapp.certInstall",
-        "title": "WinApp: Install Certificate",
+        "title": "Install Certificate",
         "category": "WinApp"
       },
       {
         "command": "winapp.sign",
-        "title": "WinApp: Sign Package",
+        "title": "Sign Package",
         "category": "WinApp"
       },
       {
         "command": "winapp.tool",
-        "title": "WinApp: Run SDK Tool",
+        "title": "Run SDK Tool",
         "category": "WinApp"
       },
       {
         "command": "winapp.getWinappPath",
-        "title": "WinApp: Get WinApp Path",
+        "title": "Get WinApp Path",
         "category": "WinApp"
       },
       {
         "command": "winapp.manifestAddAlias",
-        "title": "WinApp: Add Manifest Execution Alias",
+        "title": "Add Manifest Execution Alias",
         "category": "WinApp"
       },
       {
         "command": "winapp.unregister",
-        "title": "WinApp: Unregister Package",
+        "title": "Unregister Package",
         "category": "WinApp"
       },
       {
         "command": "winapp.certInfo",
-        "title": "WinApp: Certificate Info",
+        "title": "Certificate Info",
         "category": "WinApp"
       }
     ],
