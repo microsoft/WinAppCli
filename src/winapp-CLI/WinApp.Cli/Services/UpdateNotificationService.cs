@@ -4,7 +4,6 @@
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using WinApp.Cli.Helpers;
 
