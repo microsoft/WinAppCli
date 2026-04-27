@@ -52,15 +52,13 @@ public class UpdateNotificationServiceTests : BaseCommandTests
 
         var cacheFile = new FileInfo(Path.Combine(_testCacheDirectory.FullName, ".update-check"));
         cacheFile.Refresh();
-        var firstWriteTime = cacheFile.LastWriteTimeUtc;
-
-        // Small delay to detect write time difference
-        await Task.Delay(50);
+        Assert.IsTrue(cacheFile.Exists, "Update check cache file should be created");
+        var initialCacheContents = await File.ReadAllTextAsync(cacheFile.FullName, TestContext.CancellationToken);
 
         // Second call should skip (cache is fresh)
         await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
-        cacheFile.Refresh();
-        Assert.AreEqual(firstWriteTime, cacheFile.LastWriteTimeUtc, "Cache file should not be rewritten within threshold");
+        var subsequentCacheContents = await File.ReadAllTextAsync(cacheFile.FullName, TestContext.CancellationToken);
+        Assert.AreEqual(initialCacheContents, subsequentCacheContents, "Cache file should not be rewritten within threshold");
     }
 
     [TestMethod]
