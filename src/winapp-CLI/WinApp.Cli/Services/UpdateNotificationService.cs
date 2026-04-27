@@ -97,7 +97,7 @@ internal class UpdateNotificationService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug("Failed to check for CLI updates: {Error}", ex.Message);
+            logger.LogDebug(ex, "Failed to check for CLI updates.");
             return null;
         }
     }
