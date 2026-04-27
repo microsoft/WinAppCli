@@ -190,7 +190,7 @@ To avoid forgetting to rebuild, add a `preLaunchTask` that builds your project b
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `inputFolder` | string | | Path to the build output folder containing your app binaries (e.g., `${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621`). If not set, you will be prompted to select a folder. |
-| `manifest` | string | | Path to the `Package.appxmanifest` file. If not set, the CLI auto-detects from the input folder or current directory. |
+| `manifest` | string | | Path to an AppX manifest file (e.g., `AppxManifest.xml`, `Package.appxmanifest`, or `appxmanifest.xml`). If not set, the CLI auto-detects from the input folder or current directory. |
 | `debuggerType` | string | `coreclr` | Underlying debugger to use (`coreclr`, `cppvsdbg`, or `node`). |
 | `workingDirectory` | string | workspace folder | Working directory for the application. |
 | `args` | string | | Command-line arguments to pass to the application. |
