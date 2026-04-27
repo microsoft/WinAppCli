@@ -108,7 +108,7 @@ internal class UpdateNotificationService(
         var upgradeHint = DetectInstallChannel() switch
         {
             InstallChannel.Npm => "npm update -g @microsoft/winappcli",
-            InstallChannel.NuGet => "dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp",
+            InstallChannel.NuGet => "visit https://github.com/microsoft/winappcli/releases",
             _ => "visit https://github.com/microsoft/winappcli/releases"
         };
 
