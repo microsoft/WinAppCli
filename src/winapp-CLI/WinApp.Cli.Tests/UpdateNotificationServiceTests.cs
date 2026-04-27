@@ -210,4 +210,45 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     {
         Assert.IsFalse(UpdateNotificationService.IsNewerVersion("2.0.0", "not-a-version"));
     }
+
+    [TestMethod]
+    public void IsNewerVersion_NewerPreReleaseNumericIdentifier_ReturnsTrue()
+    {
+        // beta.2 > beta.1 because the numeric identifier 2 > 1
+        Assert.IsTrue(UpdateNotificationService.IsNewerVersion("1.0.0-beta.2", "1.0.0-beta.1"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_OlderPreReleaseNumericIdentifier_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsNewerVersion("1.0.0-beta.1", "1.0.0-beta.2"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_SamePreRelease_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsNewerVersion("1.0.0-beta.1", "1.0.0-beta.1"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_LaterAlphaPreRelease_ReturnsTrue()
+    {
+        // "rc" > "beta" lexically
+        Assert.IsTrue(UpdateNotificationService.IsNewerVersion("1.0.0-rc.1", "1.0.0-beta.1"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_NumericVsAlphanumericPreRelease_ReturnsCorrectOrder()
+    {
+        // Per SemVer: numeric identifiers have lower precedence than alphanumeric ones
+        Assert.IsFalse(UpdateNotificationService.IsNewerVersion("1.0.0-1", "1.0.0-alpha"));
+        Assert.IsTrue(UpdateNotificationService.IsNewerVersion("1.0.0-alpha", "1.0.0-1"));
+    }
+
+    [TestMethod]
+    public void IsNewerVersion_LongerPreReleaseWithMatchingPrefix_ReturnsTrue()
+    {
+        // "beta.1.2" > "beta.1" because more fields when prefix matches
+        Assert.IsTrue(UpdateNotificationService.IsNewerVersion("1.0.0-beta.1.2", "1.0.0-beta.1"));
+    }
 }

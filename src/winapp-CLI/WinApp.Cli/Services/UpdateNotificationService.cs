@@ -153,13 +153,52 @@ internal class UpdateNotificationService(
             return coreCompare > 0;
         }
 
-        // Same core version: a stable release (no pre-release) is newer than a pre-release
-        if (currentPre != null && latestPre == null)
+        // Same core version: compare pre-release identifiers per SemVer 2.0.0
+        return ComparePreRelease(latestPre, currentPre) > 0;
+    }
+
+    // Compares two SemVer pre-release strings identifier-by-identifier.
+    // Returns positive if a > b, negative if a < b, zero if equal.
+    // A null value (stable release) is always greater than any pre-release string.
+    private static int ComparePreRelease(string? a, string? b)
+    {
+        if (a == null && b == null) { return 0; }
+        if (a == null) { return 1; }   // stable > pre-release
+        if (b == null) { return -1; }  // pre-release < stable
+
+        var aIds = a.Split('.');
+        var bIds = b.Split('.');
+        var len = Math.Min(aIds.Length, bIds.Length);
+
+        for (var i = 0; i < len; i++)
         {
-            return true;
+            var aIsNum = int.TryParse(aIds[i], out var aNum);
+            var bIsNum = int.TryParse(bIds[i], out var bNum);
+
+            int cmp;
+            if (aIsNum && bIsNum)
+            {
+                cmp = aNum.CompareTo(bNum);
+            }
+            else if (aIsNum)
+            {
+                // Per SemVer: numeric identifiers have lower precedence than alphanumeric
+                cmp = -1;
+            }
+            else if (bIsNum)
+            {
+                cmp = 1;
+            }
+            else
+            {
+                cmp = string.Compare(aIds[i], bIds[i], StringComparison.Ordinal);
+            }
+
+            if (cmp != 0) { return cmp; }
         }
 
-        return false;
+        // All compared identifiers are equal; a longer pre-release has higher precedence
+        return aIds.Length.CompareTo(bIds.Length);
     }
 
     private static InstallChannel DetectInstallChannel()
