@@ -1,8 +1,10 @@
 # Announcing the WinApp VS Code Extension — Run, Debug, and Package Windows Apps in VS Code
 
-VS Code is where many cross-platform and web developers already work, but getting package identity, MSIX packaging, and Windows SDK tooling meant reaching for Visual Studio or command-line tools. The **WinApp VS Code extension** brings the full power of the [Windows App Development CLI](https://github.com/microsoft/WinAppCli) directly into VS Code, so you can initialize, run, debug, package, and sign Windows applications without ever leaving the editor. 
+VS Code is where many cross-platform and web developers already work, but getting package identity, MSIX packaging, and Windows SDK tooling often meant reaching for Visual Studio or command-line tools. The **WinApp VS Code extension** brings the full power of the [Windows App Development CLI](https://github.com/microsoft/WinAppCli) directly into VS Code. Via the extension, you can initialize, run, debug, package, and sign Windows applications from a variety of development frameworks without ever leaving the editor.
 
-Whether you're building with **.NET, WPF, WinUI, C++, Electron, Rust, Tauri, or Flutter** this extension is for you. The **WinApp VS Code extension** is now available in public preview on the [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=TODO-PLACEHOLDER).
+Whether you're building with **.NET, WPF, WinUI, C++, Electron, Rust, Tauri, or Flutter** this extension can help you streamline your Windows development process. 
+
+Ready to get packaging? The **WinApp VS Code extension** is now available in public preview on the [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=TODO-PLACEHOLDER).
 
 Let's walk through what's included.
 
