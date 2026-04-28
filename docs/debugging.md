@@ -195,6 +195,7 @@ To avoid forgetting to rebuild, add a `preLaunchTask` that builds your project b
 | `workingDirectory` | string | workspace folder | Working directory for the application. |
 | `args` | string | | Command-line arguments to pass to the application. |
 | `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
+| `port` | number | `9229` | (`node` only) The port used for the Node.js `--inspect` listener and the attach connection. Override when the default port is already in use. |
 
 #### Supported debuggers
 
