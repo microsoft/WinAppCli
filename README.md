@@ -245,6 +245,15 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
+## 🧩 VS Code Extension
+
+The **WinApp VS Code Extension** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
+
+> [!IMPORTANT]
+> The extension is not yet available in the VS Code Marketplace. Download the latest prerelease: [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip)
+
+For setup, configuration, and troubleshooting details, see the [VS Code Extension README](./src/winapp-VSC/README.md).
+
 ## 🤖 Using with AI Coding Agents
 
 AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
