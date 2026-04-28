@@ -4,43 +4,23 @@ VS Code is where many cross-platform and web developers already work, but gettin
 
 Whether you're building with **.NET, WPF, WinUI, C++, Electron, Rust, Tauri, or Flutter** this extension can help you streamline your Windows development process. 
 
-Ready to get packaging? The **WinApp VS Code extension** is now available in public preview on the [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=TODO-PLACEHOLDER).
+Ready to get started? The **WinApp VS Code extension** is now available in public preview on the [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=TODO-PLACEHOLDER).
 
 Let's walk through what's included.
 
-## 🎨 Command Palette Commands
-
-Many of the WinApp CLI commands are available from the VS Code Command Palette (`Ctrl+Shift+P`). Type **WinApp** and you'll see the full list:
-
-- **Initialize Project**: configure your project with the Windows SDK and/or Windows App SDK
-- **Restore / Update Packages**: manage project dependencies
-- **Run Application**: launch your app as a loose-layout packaged app with full package identity
-- **Create Debug Identity**: add sparse package identity to an existing executable for F5 debugging
-- **Unregister Package**: clean up sideloaded development packages when you're don
-- **Create MSIX Package**: package your app into an MSIX, with options for certificates and self-contained runtime
-- **Generate Manifest**: create an `Package.manifest` from a template
-- **Add Manifest Execution Alias**: add a command-line alias so your packaged app can be launched by name
-- **Update Manifest Assets**: auto-generate all required app icons from a single source image
-- **Generate / Install Certificate**: create or install development certificates for signing
-- **Certificate Info**: display certificate details (subject, thumbprint, expiry) to verify a certificate matches your manifest
-- **Sign Package**: sign an MSIX package or executable
-- **Run SDK Tool**: run `makeappx`, `signtool`, `mt`, or `makepri` with custom arguments
-- **Get WinApp Path**: show paths to installed SDK components
-
-No separate CLI installation required. The WinApp CLI is bundled with the extension.
-
 ## 🐛 Integrated Launching and Debugging with Package Identity
 
-Many Windows APIs — notifications, background tasks, on-device AI, share targets — require your app to have **package identity**. Traditionally, getting identity meant building a full MSIX installer or running from Visual Studio. The WinApp extension changes that.
+Many Windows APIs — notifications, background tasks, on-device AI, share targets — require your app to have **package identity**. Traditionally, getting identity meant building a full MSIX installer or running from Visual Studio. With the WinApp extension, you can run Windows apps with package identity without having to leave VS Code.
 
 The extension provides a custom **`winapp` debug type** that gives your app package identity, launches your app, and attaches your debugger, all from a single **F5** press.
 
 **How it works:**
 
-1. Press **F5** (or start a debug session).
-2. The extension locates your build output and manifest.
-3. It launches your app via `winapp run` to give it package identity.
-4. A child debug session attaches using your preferred debugger.
+After the user presses **F5** to start a debug session, the extension:
+
+1. Locates your build output and manifest
+2. Launches your app via `winapp run` to give it package identity
+3. Attaches a child debug session using your preferred debugger
 
 **Supported debuggers:**
 
@@ -103,9 +83,28 @@ Now every time you press F5, VS Code will build your project first, then launch 
 
 See the full [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md) for more details.
 
-## 🧰 Works with Any Windows App Framework
+## 🎨 Command Palette Commands
 
-The extension works with the same frameworks as the WinApp CLI:
+Many of the WinApp CLI commands are available from the VS Code Command Palette (`Ctrl+Shift+P`). Type **WinApp** and you'll see the full list:
+
+- **Initialize Project**: configure your project with the Windows SDK and/or Windows App SDK
+- **Restore / Update Packages**: manage project dependencies
+- **Run Application**: launch your app as a loose-layout packaged app with full package identity
+- **Create Debug Identity**: add sparse package identity to an existing executable for F5 debugging
+- **Unregister Package**: clean up sideloaded development packages when you're don
+- **Create MSIX Package**: package your app into an MSIX, with options for certificates and self-contained runtime
+- **Generate Manifest**: create an `Package.manifest` from a template
+- **Add Manifest Execution Alias**: add a command-line alias so your packaged app can be launched by name
+- **Update Manifest Assets**: auto-generate all required app icons from a single source image
+- **Generate / Install Certificate**: create or install development certificates for signing
+- **Certificate Info**: display certificate details (subject, thumbprint, expiry) to verify a certificate matches your manifest
+- **Sign Package**: sign an MSIX package or executable
+- **Run SDK Tool**: run `makeappx`, `signtool`, `mt`, or `makepri` with custom arguments
+- **Get WinApp Path**: show paths to installed SDK components
+
+No separate CLI installation required. The WinApp CLI is bundled with the extension.
+
+The WinApp extension commands work with the same frameworks as the WinApp CLI:
 
 - **.NET**: WPF, WinForms, Console, WinUI3
 - **C / C++**: Win32, CMake, MSBuild
@@ -113,8 +112,6 @@ The extension works with the same frameworks as the WinApp CLI:
 - **Rust**
 - **Tauri**
 - **Flutter**
-
-If it builds to a Windows desktop app, the WinApp extension can help you package, debug, and ship it.
 
 ## 🚀 Get Started
 
@@ -145,9 +142,9 @@ Head over to [WinApp VS Code Extension](https://github.com/microsoft/winappCli/b
 
 This is a **public preview**; we're actively developing the extension and want to hear from you. Your feedback directly shapes what we build next.
 
-- **Found a bug?** [File an issue](https://github.com/microsoft/WinAppCli/issues)
-- **Have a feature request?** [Open an issue](https://github.com/microsoft/WinAppCli/issues) and tell us what would make your workflow better
-- **Something confusing?** Let us know. We want the experience to be smooth from day one
+- **Found a bug?** [File a bug](https://github.com/microsoft/winappCli/issues/new?template=bug-report.yml)
+- **Have a feature request?** [Open a feature request](https://github.com/microsoft/winappCli/issues/new?template=feature_request.yml) and tell us what would make your workflow better.
+- **Something confusing?** Let us know. We want the experience to be smooth from day one.
 
 Want to see what we're working on? Check out our [open VS Code extension issues](https://github.com/microsoft/winappCli/issues?q=is%3Aissue%20state%3Aopen%20label%3Avs-code-extension) on GitHub. Feel free to upvote, comment, or open new issues for features you'd like to see.
 
