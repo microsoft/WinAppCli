@@ -105,7 +105,7 @@ See the full [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/
 
 ## 🧰 Works with Any Windows App Framework
 
-The extension works with the same broad set of frameworks as the WinApp CLI:
+The extension works with the same frameworks as the WinApp CLI:
 
 - **.NET**: WPF, WinForms, Console, WinUI3
 - **C / C++**: Win32, CMake, MSBuild
