@@ -15,33 +15,47 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     private IUpdateNotificationService _updateNotificationService = null!;
     private UpdateNotificationService _concreteService = null!;
     private string? _originalCaller;
-    private string? _originalLatestVersion;
     private string? _originalUpdateCheck;
-    private string? _originalCI;
+
+    // All environment variable names checked by CIEnvironmentDetectorForTelemetry
+    private static readonly string[] CiVarNames =
+    [
+        "CI", "GITHUB_ACTIONS", "TF_BUILD", "APPVEYOR", "TRAVIS", "CIRCLECI",
+        "TEAMCITY_VERSION", "JB_SPACE_API_URL",
+        "CODEBUILD_BUILD_ID", "AWS_REGION", "BUILD_ID", "BUILD_URL", "PROJECT_ID"
+    ];
+    private Dictionary<string, string?> _savedCiVars = [];
 
     [TestInitialize]
     public void Setup()
     {
         _updateNotificationService = GetRequiredService<IUpdateNotificationService>();
         _concreteService = (UpdateNotificationService)_updateNotificationService;
+        // Prevent background HTTP calls during unit tests
+        _concreteService.SkipBackgroundRefreshForTesting = true;
+
         // Save and clear env vars to avoid interference
         _originalCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
-        _originalLatestVersion = Environment.GetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION");
         _originalUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
-        _originalCI = Environment.GetEnvironmentVariable("CI");
+        _savedCiVars = CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
+
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "0.0.0");
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", null);
-        Environment.SetEnvironmentVariable("CI", null);
+        foreach (var name in CiVarNames)
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
     }
 
     [TestCleanup]
     public void Cleanup()
     {
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", _originalCaller);
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", _originalLatestVersion);
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", _originalUpdateCheck);
-        Environment.SetEnvironmentVariable("CI", _originalCI);
+        foreach (var (name, value) in _savedCiVars)
+        {
+            Environment.SetEnvironmentVariable(name, value);
+        }
     }
 
     [TestMethod]

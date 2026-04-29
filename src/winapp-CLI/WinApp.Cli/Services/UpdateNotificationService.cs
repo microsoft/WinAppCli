@@ -16,9 +16,15 @@ internal class UpdateNotificationService(
     ILogger<UpdateNotificationService> logger) : IUpdateNotificationService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private static int _refreshScheduled;  // guarded by Interlocked; see NotScheduled/Scheduled constants
+    private const int NotScheduled = 0;
+    private const int Scheduled = 1;
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/winappcli/releases/latest";
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
+
+    // For testing only — when true, skips the fire-and-forget background network refresh
+    internal bool SkipBackgroundRefreshForTesting;
 
     // Cache file format (one value per line):
     //   Line 0: last-check timestamp (round-trip "O" format, UTC)
@@ -50,8 +56,10 @@ internal class UpdateNotificationService(
             }
 
             // If cache is stale (or missing), refresh in the background — fire and forget
-            if (!cache.LastCheck.HasValue
-                || (DateTimeOffset.UtcNow - cache.LastCheck.Value).TotalHours >= CheckIntervalHours)
+            if (!SkipBackgroundRefreshForTesting
+                && (!cache.LastCheck.HasValue
+                    || (DateTimeOffset.UtcNow - cache.LastCheck.Value).TotalHours >= CheckIntervalHours)
+                && Interlocked.CompareExchange(ref _refreshScheduled, Scheduled, NotScheduled) == NotScheduled)
             {
                 _ = Task.Run(async () =>
                 {
@@ -62,6 +70,10 @@ internal class UpdateNotificationService(
                     catch
                     {
                         // Best-effort — never crash the process
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _refreshScheduled, NotScheduled);
                     }
                 });
             }
@@ -130,7 +142,7 @@ internal class UpdateNotificationService(
             _ => "visit https://github.com/microsoft/winappcli/releases"
         };
 
-        ansiConsole.MarkupLine($"[yellow]v{newVersion} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
+        ansiConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
     }
 
     internal static bool IsNewerVersion(string latest, string current)
@@ -294,7 +306,7 @@ internal class UpdateNotificationService(
 
             // Write to a temp file then move for atomic replacement
             var tempPath = cacheFile.FullName + ".tmp";
-            var content = $"{cache.LastCheck?.ToString("O") ?? ""}\n{cache.LatestVersion ?? ""}\n{cache.LastShownDate ?? ""}";
+            var content = $"{cache.LastCheck?.ToString("O", CultureInfo.InvariantCulture) ?? ""}\n{cache.LatestVersion ?? ""}\n{cache.LastShownDate ?? ""}";
             File.WriteAllText(tempPath, content);
             File.Move(tempPath, cacheFile.FullName, overwrite: true);
 
