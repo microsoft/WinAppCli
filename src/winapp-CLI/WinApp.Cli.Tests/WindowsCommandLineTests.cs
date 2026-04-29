@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.CommandLine;
 using System.CommandLine.Parsing;
 using WinApp.Cli.Helpers;
 
@@ -448,4 +449,120 @@ public class WindowsCommandLineTests
     }
 
     #endregion
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Direct System.CommandLine behaviour tests — validate our assumptions about
+// how S.CL handles '--' with and without a ZeroOrMore argument.
+// These are specification tests, not unit tests of our own code.
+// ────────────────────────────────────────────────────────────────────────────
+
+[TestClass]
+public class SystemCommandLineDoubleDashBehaviourTests
+{
+    private static Argument<string> FolderArg() =>
+        new Argument<string>("folder") { Arity = ArgumentArity.ExactlyOne };
+
+    private static Argument<string[]> ZeroOrMoreArg() =>
+        new Argument<string[]>("app-args") { Arity = ArgumentArity.ZeroOrMore };
+
+    // ─── WITHOUT ZeroOrMore ───────────────────────────────────────────────
+
+    [TestMethod]
+    public void SCL_WithoutZeroOrMore_PostDashTokens_ProduceParseErrors()
+    {
+        // PROVES: without a ZeroOrMore argument, post-'--' tokens are unmatched
+        // and TreatUnmatchedTokensAsErrors=true (default) turns them into parse errors.
+        // This validates why RunCommand NEEDS PassthroughArgument (ZeroOrMore).
+        var cmd = new Command("run");
+        cmd.Arguments.Add(FolderArg());
+        // No ZeroOrMore, TreatUnmatchedTokensAsErrors is true by default
+
+        var result = cmd.Parse([".", "--", "--app-flag"]);
+
+        Assert.IsNotEmpty(result.Errors,
+            "Without ZeroOrMore, post-'--' tokens have nowhere to go and produce parse errors");
+    }
+
+    [TestMethod]
+    public void SCL_WithoutZeroOrMore_TreatUnmatchedFalse_PostDashTokens_NoErrors()
+    {
+        // PROVES: TreatUnmatchedTokensAsErrors=false suppresses errors for post-'--' tokens,
+        // but they appear in UnmatchedTokens (not accessible to the launched app without extra work).
+        var cmd = new Command("run");
+        cmd.Arguments.Add(FolderArg());
+        cmd.TreatUnmatchedTokensAsErrors = false;
+
+        var result = cmd.Parse([".", "--", "--app-flag"]);
+
+        Assert.IsEmpty(result.Errors);
+        Assert.IsNotEmpty(result.UnmatchedTokens,
+            "Post-'--' tokens end up in UnmatchedTokens when TreatUnmatchedTokensAsErrors=false");
+    }
+
+    // ─── WITH ZeroOrMore ─────────────────────────────────────────────────
+
+    [TestMethod]
+    public void SCL_WithZeroOrMore_PostDashTokens_NoErrors_CapturedByArgument()
+    {
+        // PROVES: with ZeroOrMore, post-'--' tokens are absorbed cleanly — no errors,
+        // no UnmatchedTokens, and they're accessible via GetValue.
+        var passArg = ZeroOrMoreArg();
+        var cmd = new Command("run");
+        cmd.Arguments.Add(FolderArg());
+        cmd.Arguments.Add(passArg);
+
+        var result = cmd.Parse([".", "--", "--app-flag", "value"]);
+
+        Assert.IsEmpty(result.Errors, "Post-'--' tokens should not be parse errors with ZeroOrMore");
+        Assert.IsEmpty(result.UnmatchedTokens);
+        var captured = result.GetValue(passArg);
+        CollectionAssert.AreEqual(new List<string> { "--app-flag", "value" }, captured,
+            "ZeroOrMore argument captures exactly the post-'--' tokens");
+    }
+
+    [TestMethod]
+    public void SCL_WithZeroOrMore_UnknownPreDashOption_AbsorbedSilently_NoParseError()
+    {
+        // PROVES the caveat: ZeroOrMore also absorbs unrecognised pre-'--' option-like tokens.
+        // '--bad-opt' before '--' is NOT a parse error — it ends up in GetValue alongside the
+        // legitimate post-'--' token. This is why SplitPassthroughTokens is needed to separate them.
+        var passArg = ZeroOrMoreArg();
+        var cmd = new Command("run");
+        cmd.Arguments.Add(FolderArg());
+        cmd.Arguments.Add(passArg);
+
+        var result = cmd.Parse([".", "--bad-opt", "--", "--app-flag"]);
+
+        Assert.IsEmpty(result.Errors,
+            "ZeroOrMore absorbs pre-'--' unknown tokens silently — no parse error");
+        Assert.IsEmpty(result.UnmatchedTokens);
+        var captured = result.GetValue(passArg) ?? [];
+        Assert.AreEqual(2, captured.Length,
+            "GetValue returns BOTH the pre-dash absorbed token AND the post-dash token");
+        CollectionAssert.Contains(captured, "--bad-opt");
+        CollectionAssert.Contains(captured, "--app-flag");
+    }
+
+    [TestMethod]
+    public void SCL_WithZeroOrMore_OptionValue_NotAbsorbed_OnlyPostDashInGetValue()
+    {
+        // PROVES: option values (e.g. '--args "--existing"') are consumed by their option
+        // and do NOT appear in the ZeroOrMore argument's GetValue — so SplitPassthroughTokens
+        // does not need to filter them out.
+        var passArg = ZeroOrMoreArg();
+        var argsOpt = new Option<string>("--args");
+        var cmd = new Command("run");
+        cmd.Arguments.Add(FolderArg());
+        cmd.Arguments.Add(passArg);
+        cmd.Options.Add(argsOpt);
+
+        var result = cmd.Parse([".", "--args", "--existing", "--", "--new-flag"]);
+
+        Assert.IsEmpty(result.Errors);
+        var captured = result.GetValue(passArg) ?? [];
+        CollectionAssert.AreEqual(new List<string> { "--new-flag" }, captured,
+            "Only the post-'--' token is in ZeroOrMore; '--existing' is consumed by --args");
+        Assert.AreEqual("--existing", result.GetValue(argsOpt));
+    }
 }
