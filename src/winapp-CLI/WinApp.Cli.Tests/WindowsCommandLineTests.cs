@@ -466,6 +466,50 @@ public class SystemCommandLineDoubleDashBehaviourTests
     private static Argument<string[]> ZeroOrMoreArg() =>
         new Argument<string[]>("app-args") { Arity = ArgumentArity.ZeroOrMore };
 
+    // ─── DOCUMENTED -- BEHAVIOUR (POSIX convention) ───────────────────────
+    // S.CL docs: "System.CommandLine supports this double-dash functionality."
+    // Tokens after -- are routed to positional arguments, not treated as options.
+    // BUT: this only routes post-'--' tokens. With ZeroOrMore, pre-'--' unknowns
+    // are ALSO absorbed into the same argument — the docs do not address this case.
+
+    [TestMethod]
+    public void SCL_DoubleDash_PostDashOptionLike_RoutedToArgument_NotTreatedAsOption()
+    {
+        // PROVES the documented POSIX behaviour: '-- --interactive' routes --interactive
+        // to the positional argument, not the --interactive option (if one exists).
+        // (Mirrors the exact example from the S.CL docs.)
+        var msgArg = new Argument<string>("message") { Arity = ArgumentArity.ExactlyOne };
+        var interactiveOpt = new Option<bool>("--interactive");
+        var cmd = new Command("myapp");
+        cmd.Arguments.Add(msgArg);
+        cmd.Options.Add(interactiveOpt);
+
+        var result = cmd.Parse(["--", "--interactive"]);
+
+        Assert.IsEmpty(result.Errors);
+        Assert.AreEqual("--interactive", result.GetValue(msgArg),
+            "Post-'--' token goes to the positional argument, not the option");
+        Assert.IsFalse(result.GetValue(interactiveOpt),
+            "The --interactive option is NOT set");
+    }
+
+    [TestMethod]
+    public void SCL_DoubleDash_UnknownPreDash_WithExactlyOne_ProducesParseError()
+    {
+        // PROVES the ZeroOrMore caveat is specific to ZeroOrMore's greedy arity.
+        // With ExactlyOne, a pre-'--' unknown token IS a parse error — it is NOT absorbed.
+        // Only ZeroOrMore silently absorbs unknowns because it greedily takes anything
+        // that isn't consumed by another symbol.
+        var msgArg = new Argument<string>("message") { Arity = ArgumentArity.ExactlyOne };
+        var cmd = new Command("myapp");
+        cmd.Arguments.Add(msgArg);
+
+        var result = cmd.Parse(["--bad-opt", "--", "--interactive"]);
+
+        Assert.IsNotEmpty(result.Errors,
+            "With ExactlyOne, pre-'--' unknown token is an error — absorption is ZeroOrMore-specific");
+    }
+
     // ─── WITHOUT ZeroOrMore ───────────────────────────────────────────────
 
     [TestMethod]
