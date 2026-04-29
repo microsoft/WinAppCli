@@ -146,16 +146,40 @@ internal partial class RunCommand : Command, IShortDescription
             foreach (var token in parseResult.Tokens)
             {
                 if (token.Type == TokenType.DoubleDash) { seenDoubleDash = true; continue; }
-                if (seenDoubleDash) passthroughArgs.Add(token.Value);
+                if (seenDoubleDash) { passthroughArgs.Add(token.Value); }
             }
 
             // Any unmatched tokens that did NOT come after '--' are unknown options — report them
             // as errors so typos like '--detch' still get caught (TreatUnmatchedTokensAsErrors is
             // false on this command to allow the '--' passthrough pattern without parse errors).
+            //
+            // A count-based approach is used instead of a HashSet so that duplicate token values
+            // (e.g. winapp run . --flag -- --flag) are handled correctly: only as many occurrences
+            // of a token as appear in the passthrough list are considered "accounted for".
             if (parseResult.UnmatchedTokens.Count > 0)
             {
-                var passthroughSet = new HashSet<string>(passthroughArgs);
-                var badTokens = parseResult.UnmatchedTokens.Where(t => !passthroughSet.Contains(t)).ToList();
+                // Build a count of each distinct value in the passthrough list.
+                var remainingPassthrough = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var a in passthroughArgs)
+                {
+                    remainingPassthrough[a] = remainingPassthrough.GetValueOrDefault(a) + 1;
+                }
+
+                // Walk UnmatchedTokens in order (pre-dash tokens appear first). For each token,
+                // consume one slot from the passthrough budget; anything left over is a bad token.
+                var badTokens = new List<string>();
+                foreach (var t in parseResult.UnmatchedTokens)
+                {
+                    if (remainingPassthrough.TryGetValue(t, out var count) && count > 0)
+                    {
+                        remainingPassthrough[t] = count - 1;
+                    }
+                    else
+                    {
+                        badTokens.Add(t);
+                    }
+                }
+
                 if (badTokens.Count > 0)
                 {
                     foreach (var bad in badTokens)

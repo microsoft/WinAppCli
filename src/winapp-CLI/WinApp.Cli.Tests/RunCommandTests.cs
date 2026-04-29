@@ -812,31 +812,50 @@ public class RunCommandTests : BaseCommandTests
 
     #region -- passthrough argument tests
 
+    // --- Parse-level behaviour ---
+
     [TestMethod]
     public void ParseOptions_DoubleDashPassthrough_ProducesNoParseErrors()
     {
-        // Arrange
         var command = GetRequiredService<RunCommand>();
-
-        // Act
         var parseResult = command.Parse([_tempDirectory.FullName, "--", "--flag", "value"]);
-
-        // Assert
         Assert.IsEmpty(parseResult.Errors, "Tokens after -- should not cause parse errors");
     }
 
     [TestMethod]
+    public void ParseOptions_BareDoubleDash_ProducesNoParseErrors()
+    {
+        // A bare '--' with nothing after it is valid; the app simply receives no passthrough args.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--"]);
+        Assert.IsEmpty(parseResult.Errors, "A bare -- with nothing following should not cause parse errors");
+    }
+
+    [TestMethod]
+    public void ParseOptions_UnknownOptionBeforeDoubleDash_NoParseError_HandlerValidates()
+    {
+        // TreatUnmatchedTokensAsErrors = false means the parser itself does NOT error on unknown
+        // tokens — the handler catches them instead.  This test documents that guarantee so a
+        // future refactor cannot accidentally re-enable parse-time errors and break the feature.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--unknown-opt", "--", "--app-flag"]);
+        Assert.IsEmpty(parseResult.Errors,
+            "Unknown tokens before -- should NOT produce parse errors (handler validates them)");
+        Assert.AreEqual(2, parseResult.UnmatchedTokens.Count,
+            "Both the unknown pre-dash token and the passthrough token land in UnmatchedTokens");
+    }
+
+    // --- Handler: basic passthrough scenarios ---
+
+    [TestMethod]
     public async Task RunCommand_DoubleDashPassthrough_ForwardsArgsToLauncher()
     {
-        // Arrange
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             [_tempDirectory.FullName, "--", "--my-flag", "value"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
         Assert.AreEqual("--my-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
@@ -844,19 +863,47 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_DoubleDashPassthrough_MergesWithArgsOption()
+    public async Task RunCommand_BareDoubleDash_LaunchesWithNoArgs()
     {
-        // Arrange - --args and -- args should be combined
+        // A bare '--' separator with nothing after it should launch successfully with no app args.
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
-        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed with a bare --");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.IsNull(_fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "No app args should be passed when nothing follows --");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_MultipleArgs_AllForwarded()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--flag1", "v1", "--flag2", "v2", "--flag3"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual("--flag1 v1 --flag2 v2 --flag3",
+            _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "All passthrough tokens should be forwarded in order");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_MergesWithArgsOption()
+    {
+        // --args value and tokens after -- are both forwarded, --args first.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             [_tempDirectory.FullName, "--args", "--existing", "--", "--flag"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
-        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
         Assert.AreEqual("--existing --flag", _fakeAppLauncherService.LaunchCalls[0].Arguments,
             "--args value and -- passthrough args should both be forwarded");
     }
@@ -864,35 +911,110 @@ public class RunCommandTests : BaseCommandTests
     [TestMethod]
     public async Task RunCommand_DoubleDashPassthrough_WithSpacesInValue_QuotesArg()
     {
-        // Arrange
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             [_tempDirectory.FullName, "--", "--title", "hello world"]);
 
-        // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
-        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
         Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
-            "Passthrough args with spaces should be quoted");
+            "Passthrough args containing spaces should be quoted");
     }
+
+    // --- Handler: unknown-token rejection ---
 
     [TestMethod]
     public async Task RunCommand_UnknownOptionBeforeDoubleDash_ReturnsError()
     {
-        // Arrange
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
-        // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             [_tempDirectory.FullName, "--unknown-winapp-option", "--", "--app-flag"]);
 
-        // Assert
         Assert.AreEqual(1, exitCode, "Unknown winapp options before -- should still fail");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_UnknownOptionWithNoDoubleDash_ReturnsError()
+    {
+        // Ensures the guard fires even when the user never typed '--'.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--unknown-winapp-option"]);
+
+        Assert.AreEqual(1, exitCode, "Unknown options without -- should fail");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_SameTokenBeforeAndAfterDoubleDash_ReturnsError()
+    {
+        // The duplicate-value edge case: the same string appears before '--' (bad) and after '--'
+        // (legitimate passthrough).  A naïve set-based check would cancel them out and let the bad
+        // token through.  The count-based implementation must catch it.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--flag", "--", "--flag"]);
+
+        Assert.AreEqual(1, exitCode,
+            "The pre-dash unknown token must be rejected even when the same value appears as passthrough");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    // --- Handler: passthrough interacts correctly with other mode flags ---
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithNoLaunch_Succeeds()
+    {
+        // --no-launch registers the package without launching; passthrough args are collected but
+        // irrelevant — the important thing is the command does NOT error just because -- was used.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--no-launch", "--", "--app-flag"]);
+
+        Assert.AreEqual(0, exitCode, "-- passthrough should not cause an error when combined with --no-launch");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Package should still be registered");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched with --no-launch");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithDetach_ForwardsArgs()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--detach", "--", "--app-flag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--app-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args should be forwarded to the launcher in --detach mode");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithDebugOutput_ForwardsArgs()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--debug-output", "--", "--app-flag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--app-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args should be forwarded to the launcher in --debug-output mode");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should still be called");
     }
 
     #endregion
