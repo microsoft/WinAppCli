@@ -941,6 +941,24 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_BadTokenBeforeDoubleDash_RejectsWithError_DoesNotForwardGoodToken()
+    {
+        // Explicit test for: winapp run . --badtoken -- --cooltoken
+        // --badtoken is an unrecognised winapp option BEFORE '--' → error, exit 1
+        // --cooltoken is a legitimate passthrough AFTER '--' → NOT forwarded (command aborts)
+        // This ensures the bad pre-dash token is caught and no launch occurs.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--badtoken", "--", "--cooltoken"]);
+
+        Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
+            "App must NOT be launched when a bad pre-dash token is present");
+    }
+
+    [TestMethod]
     public async Task RunCommand_UnknownOptionWithNoDoubleDash_ReturnsError()
     {
         // Ensures the guard fires even when the user never typed '--'.
