@@ -476,6 +476,11 @@ internal partial class MsixService(
                 MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
 
+            // Copy any non-image files referenced in the manifest that are missing from
+            // staging. This handles files like manifest.json or other extension-referenced
+            // resources that aren't discovered by the image-asset extractor.
+            CopyManifestReferencedFiles(manifestContent, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext);
+
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
 
@@ -673,6 +678,70 @@ internal partial class MsixService(
 
             var destSubDir = new DirectoryInfo(Path.Combine(destination.FullName, subDir.Name));
             CopyDirectoryRecursive(subDir, destSubDir);
+        }
+    }
+
+    /// <summary>
+    /// Copies files referenced in the manifest that are missing from the staging directory.
+    /// Resolves file paths relative to the manifest directory first, then the input folder.
+    /// This ensures non-image referenced files (e.g., manifest.json) are included in the package.
+    /// </summary>
+    private static void CopyManifestReferencedFiles(
+        string manifestContent,
+        DirectoryInfo manifestDir,
+        DirectoryInfo inputFolder,
+        DirectoryInfo stagingDir,
+        TaskContext taskContext)
+    {
+        var referencedFiles = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+        if (referencedFiles.Count == 0)
+        {
+            return;
+        }
+
+        int copied = 0;
+
+        foreach (var relativePath in referencedFiles)
+        {
+            var stagingPath = Path.Combine(stagingDir.FullName, relativePath);
+            if (File.Exists(stagingPath))
+            {
+                continue;
+            }
+
+            // Try manifest directory first, then input folder
+            FileInfo? sourceFile = null;
+            var manifestRelative = new FileInfo(Path.Combine(manifestDir.FullName, relativePath));
+            var inputRelative = new FileInfo(Path.Combine(inputFolder.FullName, relativePath));
+
+            if (manifestRelative.Exists)
+            {
+                sourceFile = manifestRelative;
+            }
+            else if (inputRelative.Exists)
+            {
+                sourceFile = inputRelative;
+            }
+
+            if (sourceFile == null)
+            {
+                continue;
+            }
+
+            var destDir = Path.GetDirectoryName(stagingPath);
+            if (destDir != null)
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            sourceFile.CopyTo(stagingPath, overwrite: true);
+            copied++;
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied manifest-referenced file: {relativePath}");
+        }
+
+        if (copied > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Manifest-referenced files: {copied} copied to staging");
         }
     }
 

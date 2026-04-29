@@ -488,6 +488,159 @@ internal partial class ManifestService(
         return (50, 50);
     }
 
+    /// <summary>
+    /// Extracts all file path references from an AppxManifest XML document.
+    /// Walks all attribute values and element text content looking for relative
+    /// file paths (values with a file extension that are not URIs, versions, or
+    /// other non-path values). Returns a deduplicated set of relative paths.
+    /// </summary>
+    internal static HashSet<string> ExtractAllFileReferencesFromManifest(string manifestContent)
+    {
+        var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var doc = XDocument.Parse(manifestContent);
+            if (doc.Root == null)
+            {
+                return references;
+            }
+
+            foreach (var element in doc.Root.DescendantsAndSelf())
+            {
+                // Check attribute values
+                foreach (var attr in element.Attributes())
+                {
+                    if (IsLikelyFilePath(attr.Value))
+                    {
+                        references.Add(NormalizePathSeparators(attr.Value.Trim()));
+                    }
+                }
+
+                // Check text content (only leaf elements with no child elements)
+                if (!element.HasElements && !string.IsNullOrWhiteSpace(element.Value))
+                {
+                    if (IsLikelyFilePath(element.Value))
+                    {
+                        references.Add(NormalizePathSeparators(element.Value.Trim()));
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // If manifest cannot be parsed, return empty set
+        }
+
+        return references;
+    }
+
+    /// <summary>
+    /// Determines whether a string value looks like a relative file path.
+    /// Rejects URIs, version strings, GUIDs, class names, and other non-path values.
+    /// </summary>
+    private static bool IsLikelyFilePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        value = value.Trim();
+
+        // Must contain a dot (for file extension)
+        if (!value.Contains('.'))
+        {
+            return false;
+        }
+
+        // Reject URIs and namespaces
+        if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("ms-appx:", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Reject absolute paths and UNC paths
+        if (Path.IsPathRooted(value) || value.StartsWith(@"\\"))
+        {
+            return false;
+        }
+
+        // Reject path traversal
+        if (value.Contains(".."))
+        {
+            return false;
+        }
+
+        // Reject values with invalid path characters
+        if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+        {
+            return false;
+        }
+
+        // Reject version-like strings (e.g., "1.0.0.0", "10.0.18362.0")
+        if (VersionLikeRegex().IsMatch(value))
+        {
+            return false;
+        }
+
+        // Reject GUID-like strings
+        if (Guid.TryParse(value, out _))
+        {
+            return false;
+        }
+
+        // Reject dotted identifiers that look like class/namespace names (e.g., "MyApp.App", "Windows.Universal")
+        // File paths typically contain a path separator or have a short well-known extension
+        var extension = Path.GetExtension(value);
+        if (string.IsNullOrEmpty(extension))
+        {
+            return false;
+        }
+
+        // Must have a reasonable file extension (1-10 chars after the dot)
+        var ext = extension.TrimStart('.');
+        if (ext.Length == 0 || ext.Length > 10 || !ext.All(c => char.IsLetterOrDigit(c)))
+        {
+            return false;
+        }
+
+        // Reject values that are just a dotted name without path structure and have no
+        // known file extension (e.g., "Windows.Universal", "TestApp.App")
+        var knownFileExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".exe", ".dll", ".json", ".xml", ".yaml", ".yml", ".txt", ".cfg", ".config",
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
+            ".html", ".htm", ".css", ".js", ".ts", ".wasm",
+            ".pri", ".resw", ".resx", ".resources",
+            ".pfx", ".cer", ".p7x", ".cat",
+            ".appx", ".msix", ".appxbundle", ".msixbundle",
+            ".winmd", ".xbf", ".xaml",
+            ".mp3", ".mp4", ".wav", ".avi", ".wmv",
+            ".pdf", ".doc", ".docx", ".rtf",
+            ".py", ".ps1", ".cmd", ".bat", ".sh",
+            ".node", ".so", ".dylib"
+        };
+
+        if (!knownFileExtensions.Contains(extension))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string NormalizePathSeparators(string path)
+    {
+        return path.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    [GeneratedRegex(@"^\d+(\.\d+){1,3}$")]
+    private static partial Regex VersionLikeRegex();
+
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
 

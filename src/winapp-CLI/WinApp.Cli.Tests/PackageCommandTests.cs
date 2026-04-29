@@ -1888,5 +1888,278 @@ public class PackageCommandTests : BaseCommandTests
             "MSIX should include TestApp.exe");
     }
 
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestWithNonImageFile_IncludesReferencedFileInMsix()
+    {
+        // Arrange — external manifest references a manifest.json file alongside image assets
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_WithExternalNonImageFile");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_WithNonImageFile");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalAssetsDir = Path.Combine(externalManifestDir, "Assets");
+        Directory.CreateDirectory(externalAssetsDir);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        // Create manifest.json alongside the manifest — simulates an MCP server config
+        await File.WriteAllTextAsync(Path.Combine(externalManifestDir, "manifest.json"), """{"name":"test-mcp-server"}""", TestContext.CancellationToken);
+
+        // Manifest that references manifest.json via an extension element
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:uap3=""http://schemas.microsoft.com/appx/manifest/uap/windows10/3""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap uap3 rescap"">
+  <Identity Name=""ExternalTestPackage""
+            Publisher=""CN=ExternalTestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>External Test Package</DisplayName>
+    <PublisherDisplayName>External Test Publisher</PublisherDisplayName>
+    <Description>Test package with manifest.json reference</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""ExternalTestApp"" Executable=""TestApp.exe"" EntryPoint=""ExternalTestApp.App"">
+      <uap:VisualElements DisplayName=""External Test App"" Description=""Test application""
+                          BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+      <Extensions>
+        <uap3:Extension Category=""windows.appExtension"">
+          <uap3:AppExtension Name=""com.test.mcp"" Id=""mcp"" DisplayName=""Test MCP"" PublicFolder=""public"">
+            <uap3:Properties>
+              <ManifestFile>manifest.json</ManifestFile>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+</Package>";
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, manifestContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalNonImageFilePackage",
+            skipPri: true,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("manifest.json", StringComparison.OrdinalIgnoreCase)),
+            $"MSIX should include manifest.json referenced in the manifest. Entries: {string.Join(", ", entryNames)}");
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/Logo.png");
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("Assets/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/StoreLogo.png");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_WithAppxRecipe_IncludesManifestReferencedFileMissingFromRecipe()
+    {
+        // Arrange — recipe-based packaging where a manifest-referenced file is not in the recipe
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "RecipeManifestRefPackage"));
+        packageDir.Create();
+
+        // Manifest content that references config.json via a custom properties element
+        var manifestWithRef = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:uap3=""http://schemas.microsoft.com/appx/manifest/uap/windows10/3""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+         IgnorableNamespaces=""uap uap3 rescap build"">
+  <Identity Name=""RecipeRefPackage""
+            Publisher=""CN=TestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>Recipe Ref Package</DisplayName>
+    <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+    <Description>Test package with manifest-referenced file not in recipe</Description>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""TestApp.exe"" EntryPoint=""TestApp.App"">
+      <uap:VisualElements DisplayName=""Test App"" Description=""Test application""
+                          BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+      <Extensions>
+        <uap3:Extension Category=""windows.appExtension"">
+          <uap3:AppExtension Name=""com.test.server"" Id=""srv"" DisplayName=""Test Server"">
+            <uap3:Properties>
+              <ServerConfig>config.json</ServerConfig>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+  <build:Metadata>
+    <build:Item Name=""makepri.exe"" Version=""10.0.22621.3233"" />
+  </build:Metadata>
+</Package>";
+
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "AppxManifest.xml"), manifestWithRef, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.dll"), "fake dll content", TestContext.CancellationToken);
+
+        // config.json is NOT listed in the recipe but IS referenced in the manifest
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "config.json"), """{"server":"test"}""", TestContext.CancellationToken);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        await File.WriteAllTextAsync(Path.Combine(assetsDir, "Logo.png"), "fake logo content", TestContext.CancellationToken);
+
+        // Recipe only lists exe, dll, and logo — NOT config.json
+        var recipeContent = CreateAppxRecipeContent(packageDir.FullName,
+        [
+            ("TestApp.exe", "TestApp.exe"),
+            ("TestApp.dll", "TestApp.dll"),
+            (@"Assets\Logo.png", @"Assets\Logo.png"),
+        ]);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.build.appxrecipe"), recipeContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "RecipeManifestRefPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        // config.json should be included because it's referenced in the manifest
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("config.json", StringComparison.OrdinalIgnoreCase)),
+            $"MSIX should include config.json referenced in manifest. Entries: {string.Join(", ", entryNames)}");
+
+        // Recipe files should still be present
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe from recipe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.dll", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.dll from recipe");
+    }
+
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_ExtractsReferencedFiles()
+    {
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""TestPackage"" Publisher=""CN=Test"" Version=""1.0.0.0"" />
+  <Properties>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"" EntryPoint=""App.Main"">
+      <uap:VisualElements DisplayName=""App"" Description=""Test""
+                          BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\SmallLogo.png"" />
+      <Extensions>
+        <uap:Extension Category=""windows.appExtension"">
+          <uap:AppExtension Name=""com.test"" Id=""ext"" DisplayName=""Extension"">
+            <uap:Properties>
+              <Config>settings.json</Config>
+              <Data>data\config.yaml</Data>
+            </uap:Properties>
+          </uap:AppExtension>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>";
+
+        var references = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+
+        // Should include image assets
+        Assert.IsTrue(references.Contains(@"Assets\StoreLogo.png"), "Should find StoreLogo.png");
+        Assert.IsTrue(references.Contains(@"Assets\Logo.png"), "Should find Logo.png");
+        Assert.IsTrue(references.Contains(@"Assets\SmallLogo.png"), "Should find SmallLogo.png");
+
+        // Should include the executable
+        Assert.IsTrue(references.Contains("app.exe"), "Should find app.exe");
+
+        // Should include non-image referenced files
+        Assert.IsTrue(references.Contains("settings.json"), "Should find settings.json");
+        Assert.IsTrue(references.Contains(@"data\config.yaml"), "Should find data\\config.yaml");
+
+        // Should NOT include non-file values
+        Assert.IsFalse(references.Any(r => r.Contains("1.0.0.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("10.0.18362.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("10.0.26100.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("http")), "Should not include URIs");
+        Assert.IsFalse(references.Any(r => r.Contains("Windows.Universal")), "Should not include dotted identifiers");
+    }
+
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_RejectsPathTraversal()
+    {
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""TestPackage"" Publisher=""CN=Test"" Version=""1.0.0.0"" />
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"">
+      <Extensions>
+        <Extension>
+          <Properties>
+            <File>..\secret.json</File>
+          </Properties>
+        </Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>";
+
+        var references = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+
+        Assert.IsFalse(references.Any(r => r.Contains("secret.json")),
+            "Should reject path traversal references");
+        Assert.IsTrue(references.Contains("app.exe"),
+            "Should still include valid references");
+    }
+
     #endregion
 }
