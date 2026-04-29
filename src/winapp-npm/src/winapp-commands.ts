@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.2.2
+ * Source schema version: 0.3.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -172,7 +172,7 @@ export interface CreateDebugIdentityOptions extends CommonOptions {
 }
 
 /**
- * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
+ * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
  */
 export async function createDebugIdentity(options: CreateDebugIdentityOptions = {}): Promise<WinappResult> {
   const args: string[] = ['create-debug-identity'];
@@ -256,7 +256,7 @@ export interface InitOptions extends CommonOptions {
 }
 
 /**
- * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates appxmanifest.xml with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+ * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
@@ -381,7 +381,7 @@ export interface PackageOptions extends CommonOptions {
   manifest?: string;
   /** Package name (default: from manifest) */
   name?: string;
-  /** Output msix file name for the generated package (defaults to <name>.msix) */
+  /** Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) */
   output?: string;
   /** Publisher name for certificate generation */
   publisher?: string;
@@ -449,7 +449,7 @@ export interface RunOptions extends CommonOptions {
   detach?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the app manifest file, such as appxmanifest.xml or Package.appxmanifest (default: auto-detect from input folder or current directory) */
+  /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
@@ -1007,7 +1007,7 @@ export interface UnregisterOptions extends CommonOptions {
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Path to the app manifest file, such as Package.appxmanifest or appxmanifest.xml (default: auto-detect from current directory) */
+  /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
 }
 
@@ -1037,23 +1037,5 @@ export interface UpdateOptions extends CommonOptions {
 export async function update(options: UpdateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['update'];
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// upgrade
-// ---------------------------------------------------------------------------
-
-export interface UpgradeOptions extends CommonOptions {
-  /** Force the upgrade even if the current version appears up to date */
-  force?: boolean;
-}
-
-/**
- * Check for and install the latest version of the winapp CLI. For MSIX installs, downloads and installs the latest MSIX. For standalone exe installs, downloads and swaps the executable. For npm or NuGet installs, shows instructions for using the package manager.
- */
-export async function upgrade(options: UpgradeOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['upgrade'];
-  if (options.force) args.push('--force');
   return execCommand(args, options);
 }
