@@ -832,54 +832,16 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void ParseOptions_UnknownOptionBeforeDoubleDash_NoParseError_HandlerValidates()
+    public void ParseOptions_UnknownOptionBeforeDoubleDash_AbsorbedIntoZeroOrMore_NoParseError()
     {
-        // TreatUnmatchedTokensAsErrors = false means the parser itself does NOT error on unknown
-        // tokens — the handler catches them instead.  This test documents that guarantee so a
-        // future refactor cannot accidentally re-enable parse-time errors and break the feature.
+        // With a ZeroOrMore positional argument, System.CommandLine absorbs unrecognised
+        // option-like tokens (e.g. '--unknown-opt') into the argument rather than reporting
+        // them as parse errors. The handler uses SplitPassthroughTokens to detect and reject
+        // these tokens at invocation time.
         var command = GetRequiredService<RunCommand>();
         var parseResult = command.Parse([_tempDirectory.FullName, "--unknown-opt", "--", "--app-flag"]);
         Assert.IsEmpty(parseResult.Errors,
-            "Unknown tokens before -- should NOT produce parse errors (handler validates them)");
-        Assert.AreEqual(2, parseResult.UnmatchedTokens.Count,
-            "Both the unknown pre-dash token and the passthrough token land in UnmatchedTokens");
-    }
-
-    [TestMethod]
-    public void ParseOptions_SingleDashTypo_NoParseError_HandlerValidates()
-    {
-        // A single-dash typo like '-manifest' is not caught at parse time (because
-        // TreatUnmatchedTokensAsErrors = false) — it is caught in the handler, which
-        // can then emit a "Did you mean '--manifest'?" suggestion.
-        var command = GetRequiredService<RunCommand>();
-        var parseResult = command.Parse([_tempDirectory.FullName, "-manifest", "foo.appxmanifest"]);
-        Assert.IsEmpty(parseResult.Errors,
-            "Single-dash typos are not parse errors; the handler catches them");
-    }
-
-    [TestMethod]
-    public async Task RunCommand_SingleDashTypo_ReturnsError()
-    {
-        // The handler must reject a single-dash typo and return a non-zero exit code.
-        await CreateTestManifestAsync();
-        var command = GetRequiredService<RunCommand>();
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
-            [_tempDirectory.FullName, "-manifest", "foo.appxmanifest"]);
-
-        Assert.AreNotEqual(0, exitCode, "A single-dash typo should fail");
-        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
-    }
-
-    [TestMethod]
-    public void ParseOptions_SingleDashTypo_AfterDoubleDash_NoError()
-    {
-        // A single-dash token AFTER '--' is a passthrough arg intended for the launched app.
-        // It must not trigger the typo validator.
-        var command = GetRequiredService<RunCommand>();
-        var parseResult = command.Parse([_tempDirectory.FullName, "--", "-manifest"]);
-        Assert.IsEmpty(parseResult.Errors,
-            "A single-dash token after -- is a passthrough arg and must not be flagged as a typo");
+            "ZeroOrMore absorbs pre-'--' unknown tokens silently; the handler validates them");
     }
 
     // --- Handler: basic passthrough scenarios ---

@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -31,6 +30,13 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> CleanOption { get; }
     public static Option<bool> SymbolsOption { get; }
 
+    /// <summary>
+    /// Captures zero or more arguments after the <c>--</c> separator and forwards them to the
+    /// launched application. System.CommandLine routes all post-<c>--</c> tokens here as
+    /// positional arguments; anything typed before <c>--</c> is validated normally.
+    /// </summary>
+    public static Argument<string[]> PassthroughArgument { get; }
+
     static RunCommand()
     {
         InputFolderArgument = new Argument<DirectoryInfo>("input-folder")
@@ -39,6 +45,12 @@ internal partial class RunCommand : Command, IShortDescription
             Arity = ArgumentArity.ExactlyOne
         };
         InputFolderArgument.AcceptExistingOnly();
+
+        PassthroughArgument = new Argument<string[]>("app-args")
+        {
+            Description = "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
+            Arity = ArgumentArity.ZeroOrMore
+        };
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
@@ -94,12 +106,8 @@ internal partial class RunCommand : Command, IShortDescription
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
     {
-        // Allow unmatched tokens so that 'winapp run . -- --flag value' passes '--flag value'
-        // to the launched app without escaping. Unknown options before '--' are caught manually
-        // in the handler so typo detection still works.
-        TreatUnmatchedTokensAsErrors = false;
-
         Arguments.Add(InputFolderArgument);
+        Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
@@ -138,25 +146,20 @@ internal partial class RunCommand : Command, IShortDescription
             var useSymbols = parseResult.GetValue(SymbolsOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
-            // Collect tokens after '--' as pass-through arguments to the launched application.
-            // This lets users write: winapp run . -- --flag value
-            // instead of having to escape: winapp run . --args "--flag value"
-            var (passthroughArgs, unknownTokens) = WindowsCommandLine.ExtractPassthroughArgs(
-                parseResult.Tokens, parseResult.UnmatchedTokens);
-
-            if (unknownTokens.Count > 0)
+            // Collect passthrough args from the token stream.
+            // With a ZeroOrMore positional argument, System.CommandLine absorbs ALL extra
+            // Argument-typed tokens — including unrecognised option-like tokens before '--'.
+            // SplitPassthroughTokens uses a count-based diff between the post-'--' token walk
+            // and what ZeroOrMore actually absorbed to detect pre-dash invalids without needing
+            // to categorise each token by type (which would confuse option values with positionals).
+            var allAbsorbed = parseResult.GetValue(PassthroughArgument) ?? [];
+            var (passthroughArgs, invalidPreDashTokens) = WindowsCommandLine.SplitPassthroughTokens(
+                parseResult.Tokens, allAbsorbed);
+            if (invalidPreDashTokens.Count > 0)
             {
-                foreach (var bad in unknownTokens)
+                foreach (var bad in invalidPreDashTokens)
                 {
-                    var suggestion = OptionTypoValidator.TryGetTypoSuggestion(bad, parseResult.CommandResult);
-                    if (suggestion is not null)
-                    {
-                        logger.LogError("{UISymbol} {Suggestion}", UiSymbols.Error, suggestion);
-                    }
-                    else
-                    {
-                        logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
-                    }
+                    logger.LogError("{UISymbol} Unrecognized argument: '{Arg}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).", UiSymbols.Error, bad);
                 }
                 return 1;
             }

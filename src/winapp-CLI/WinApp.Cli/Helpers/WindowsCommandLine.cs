@@ -48,45 +48,45 @@ namespace WinApp.Cli.Helpers;
 internal static class WindowsCommandLine
 {
     /// <summary>
-    /// Extracts passthrough arguments from a parsed token stream and identifies
-    /// any unrecognised tokens that appeared before the <c>--</c> separator.
+    /// Splits a parsed token stream into legitimate post-<c>--</c> passthrough arguments
+    /// and invalid pre-<c>--</c> absorbed tokens.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The first <see cref="TokenType.DoubleDash"/> token is treated as the separator.
-    /// Everything after it is collected as a passthrough argument for the launched application.
-    /// Any subsequent <c>--</c> tokens (e.g. <c>winapp run . -- -- --flag</c>) are forwarded
-    /// as the literal string <c>"--"</c>.
+    /// When a command uses a <c>ZeroOrMore</c> positional <see cref="Argument{T}"/> to collect
+    /// post-<c>--</c> tokens, System.CommandLine also absorbs any unrecognised option-like tokens
+    /// that appear <em>before</em> <c>--</c> into that same argument. This method separates the
+    /// two groups without relying on token types (which are <c>Argument</c> for both option values
+    /// and positionals):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>PassthroughArgs</c> — tokens from the stream that appeared after <c>--</c>;
+    ///         these should be forwarded to the launched application.</item>
+    ///   <item><c>InvalidPreDashTokens</c> — entries from <paramref name="allAbsorbedArgs"/> that
+    ///         cannot be matched to a post-<c>--</c> token; these are unrecognised tokens that were
+    ///         absorbed by the ZeroOrMore argument from before <c>--</c> and should be rejected.</item>
+    /// </list>
+    /// <para>
+    /// Matching is count-based so duplicate values are handled correctly: e.g.,
+    /// <c>winapp run . --flag -- --flag</c> yields two <c>--flag</c> entries in
+    /// <paramref name="allAbsorbedArgs"/> but only one in the post-dash walk, so exactly one is
+    /// classified as invalid.
     /// </para>
     /// <para>
-    /// Because <c>TreatUnmatchedTokensAsErrors</c> must be <see langword="false"/> to allow the
-    /// passthrough pattern, the parser cannot distinguish between tokens the user intentionally
-    /// placed after <c>--</c> and tokens that are genuinely unrecognised options typed before it.
-    /// This method reconciles the two using a count-based approach: for every token value in
-    /// <paramref name="unmatchedTokens"/>, one occurrence is consumed from the passthrough budget;
-    /// any remainder is classified as unknown.
+    /// A second <c>--</c> token after the separator is forwarded to the app as the literal
+    /// string <c>"--"</c>.
     /// </para>
     /// </remarks>
-    /// <param name="tokens">
-    /// The full token list from <see cref="ParseResult.Tokens"/>.
+    /// <param name="tokens">The full token list from <see cref="ParseResult.Tokens"/>.</param>
+    /// <param name="allAbsorbedArgs">
+    /// All values absorbed by the <c>ZeroOrMore</c> passthrough argument
+    /// (i.e., the result of <c>GetValue(PassthroughArgument)</c>).
     /// </param>
-    /// <param name="unmatchedTokens">
-    /// The unmatched token values from <see cref="ParseResult.UnmatchedTokens"/>.
-    /// </param>
-    /// <returns>
-    /// A tuple of:
-    /// <list type="bullet">
-    ///   <item><c>PassthroughArgs</c> — tokens to forward to the launched application.</item>
-    ///   <item><c>UnknownTokens</c> — tokens that appeared before <c>--</c> and were not
-    ///         recognised by the parser.</item>
-    /// </list>
-    /// </returns>
-    public static (IReadOnlyList<string> PassthroughArgs, IReadOnlyList<string> UnknownTokens)
-        ExtractPassthroughArgs(IEnumerable<Token> tokens, IReadOnlyList<string> unmatchedTokens)
+    public static (IReadOnlyList<string> PassthroughArgs, IReadOnlyList<string> InvalidPreDashTokens)
+        SplitPassthroughTokens(IEnumerable<Token> tokens, IEnumerable<string> allAbsorbedArgs)
     {
-        // Walk the token stream once: the first DoubleDash is the separator; everything after
-        // it is a passthrough argument. Subsequent DoubleDash tokens become literal "--" values.
-        var passthrough = new List<string>();
+        // Walk the token list to find all tokens that appear AFTER the '--' separator.
+        var postDash = new List<string>();
         var seenDoubleDash = false;
         foreach (var token in tokens)
         {
@@ -98,37 +98,32 @@ internal static class WindowsCommandLine
 
             if (seenDoubleDash)
             {
-                passthrough.Add(token.Value);
+                postDash.Add(token.Value);
             }
         }
 
-        // Identify pre-dash unknown tokens by consuming from the passthrough budget.
-        // A count-based dictionary handles the case where the same value appears both
-        // before '--' (bad) and after '--' (legitimate passthrough) — a naïve set would
-        // cancel them out and silently swallow the unknown token.
-        var unknown = new List<string>();
-        if (unmatchedTokens.Count > 0)
+        // Any value in allAbsorbedArgs that cannot be matched to a post-'--' token
+        // was absorbed from before '--' and represents an invalid unrecognised option.
+        var budget = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var t in postDash)
         {
-            var budget = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var a in passthrough)
-            {
-                budget[a] = budget.GetValueOrDefault(a) + 1;
-            }
+            budget[t] = budget.GetValueOrDefault(t) + 1;
+        }
 
-            foreach (var t in unmatchedTokens)
+        var invalid = new List<string>();
+        foreach (var a in allAbsorbedArgs)
+        {
+            if (budget.TryGetValue(a, out var count) && count > 0)
             {
-                if (budget.TryGetValue(t, out var count) && count > 0)
-                {
-                    budget[t] = count - 1;
-                }
-                else
-                {
-                    unknown.Add(t);
-                }
+                budget[a] = count - 1;
+            }
+            else
+            {
+                invalid.Add(a);
             }
         }
 
-        return (passthrough, unknown);
+        return (postDash, invalid);
     }
 
     /// <summary>

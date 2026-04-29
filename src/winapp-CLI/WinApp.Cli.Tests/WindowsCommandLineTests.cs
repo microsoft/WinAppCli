@@ -321,53 +321,53 @@ public class WindowsCommandLineTests
     #endregion
 
     // ──────────────────────────────────────────────────────────────────────────
-    // ExtractPassthroughArgs
+    // SplitPassthroughTokens
     // ──────────────────────────────────────────────────────────────────────────
 
-    #region ExtractPassthroughArgs
+    #region SplitPassthroughTokens
 
-    // Helper: build a minimal Token list from (value, type) pairs without needing
-    // a full System.CommandLine parse tree.
+    // Helper: build a minimal Token list from (value, type) pairs.
     private static IEnumerable<Token> MakeTokens(params (string Value, TokenType Type)[] items)
         => items.Select(i => new Token(i.Value, i.Type, default!));
 
     [TestMethod]
-    public void ExtractPassthroughArgs_NoDoubleDash_NoUnmatched_ReturnsEmpty()
+    public void SplitPassthroughTokens_NoDoubleDash_ReturnsEmpty()
     {
         var tokens = MakeTokens((".", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, []);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(tokens, []);
 
         Assert.AreEqual(0, passthrough.Count);
-        Assert.AreEqual(0, unknown.Count);
+        Assert.AreEqual(0, invalid.Count);
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_BareDoubleDash_ReturnsEmptyPassthrough()
+    public void SplitPassthroughTokens_BareDoubleDash_ReturnsEmptyPassthrough()
     {
         var tokens = MakeTokens((".", TokenType.Argument), ("--", TokenType.DoubleDash));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, []);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(tokens, []);
 
         Assert.AreEqual(0, passthrough.Count);
-        Assert.AreEqual(0, unknown.Count);
+        Assert.AreEqual(0, invalid.Count);
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_TokensAfterDoubleDash_ReturnedAsPassthrough()
+    public void SplitPassthroughTokens_TokensAfterDoubleDash_ReturnedAsPassthrough()
     {
+        // allAbsorbed matches postDash exactly → no invalids
         var tokens = MakeTokens(
             (".", TokenType.Argument),
             ("--", TokenType.DoubleDash),
             ("--flag", TokenType.Argument),
             ("value", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, ["--flag", "value"]);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--flag", "value"]);
 
-        var expectedPassthrough = new List<string> { "--flag", "value" };
-        CollectionAssert.AreEqual(expectedPassthrough, passthrough.ToList());
-        Assert.AreEqual(0, unknown.Count);
+        CollectionAssert.AreEqual(new List<string> { "--flag", "value" }, passthrough.ToList());
+        Assert.AreEqual(0, invalid.Count);
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_SecondDoubleDashAfterSeparator_ForwardedAsLiteralValue()
+    public void SplitPassthroughTokens_SecondDoubleDashAfterSeparator_ForwardedAsLiteralValue()
     {
         // winapp run . -- -- --flag  →  app receives "--" and "--flag"
         var tokens = MakeTokens(
@@ -375,58 +375,76 @@ public class WindowsCommandLineTests
             ("--", TokenType.DoubleDash),
             ("--", TokenType.DoubleDash),
             ("--flag", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, ["--", "--flag"]);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--", "--flag"]);
 
-        var expectedPassthrough = new List<string> { "--", "--flag" };
-        CollectionAssert.AreEqual(expectedPassthrough, passthrough.ToList());
-        Assert.AreEqual(0, unknown.Count);
+        CollectionAssert.AreEqual(new List<string> { "--", "--flag" }, passthrough.ToList());
+        Assert.AreEqual(0, invalid.Count);
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_UnknownTokenBeforeDash_ReportedAsUnknown()
+    public void SplitPassthroughTokens_UnknownTokenAbsorbedBeforeDash_ReportedAsInvalid()
     {
         // winapp run . --bad-opt -- --app-flag
-        // UnmatchedTokens = ["--bad-opt", "--app-flag"]
+        // allAbsorbed contains both --bad-opt (pre-dash) and --app-flag (post-dash)
         var tokens = MakeTokens(
             (".", TokenType.Argument),
             ("--", TokenType.DoubleDash),
             ("--app-flag", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, ["--bad-opt", "--app-flag"]);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--bad-opt", "--app-flag"]);
 
-        var expectedPassthrough = new List<string> { "--app-flag" };
-        var expectedUnknown = new List<string> { "--bad-opt" };
-        CollectionAssert.AreEqual(expectedPassthrough, passthrough.ToList());
-        CollectionAssert.AreEqual(expectedUnknown, unknown.ToList());
+        CollectionAssert.AreEqual(new List<string> { "--app-flag" }, passthrough.ToList());
+        CollectionAssert.AreEqual(new List<string> { "--bad-opt" }, invalid.ToList());
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_UnknownTokenWithNoDoubleDash_ReportedAsUnknown()
+    public void SplitPassthroughTokens_UnknownTokenWithNoDoubleDash_ReportedAsInvalid()
     {
-        // winapp run . --bad-opt  (no -- at all)
+        // winapp run . --bad-opt  (no -- at all): allAbsorbed has --bad-opt, postDash empty
         var tokens = MakeTokens((".", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, ["--bad-opt"]);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--bad-opt"]);
 
-        var expectedUnknown = new List<string> { "--bad-opt" };
         Assert.AreEqual(0, passthrough.Count);
-        CollectionAssert.AreEqual(expectedUnknown, unknown.ToList());
+        CollectionAssert.AreEqual(new List<string> { "--bad-opt" }, invalid.ToList());
     }
 
     [TestMethod]
-    public void ExtractPassthroughArgs_SameValueBeforeAndAfterDash_PreDashCountedAsUnknown()
+    public void SplitPassthroughTokens_SameValueBeforeAndAfterDash_PreDashCountedAsInvalid()
     {
         // winapp run . --flag -- --flag
-        // Both "--flag" land in UnmatchedTokens; the one after '--' fills the budget of 1,
-        // so the one before '--' is classified as unknown.
+        // allAbsorbed = ["--flag", "--flag"], postDash = ["--flag"]
+        // The budget has count 1 for "--flag"; one entry matches, the other is invalid.
         var tokens = MakeTokens(
             (".", TokenType.Argument),
             ("--", TokenType.DoubleDash),
             ("--flag", TokenType.Argument));
-        var (passthrough, unknown) = WindowsCommandLine.ExtractPassthroughArgs(tokens, ["--flag", "--flag"]);
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--flag", "--flag"]);
 
-        var expectedPassthrough = new List<string> { "--flag" };
-        var expectedUnknown = new List<string> { "--flag" };
-        CollectionAssert.AreEqual(expectedPassthrough, passthrough.ToList());
-        CollectionAssert.AreEqual(expectedUnknown, unknown.ToList());
+        CollectionAssert.AreEqual(new List<string> { "--flag" }, passthrough.ToList());
+        CollectionAssert.AreEqual(new List<string> { "--flag" }, invalid.ToList());
+    }
+
+    [TestMethod]
+    public void SplitPassthroughTokens_OptionValueBeforeDash_NotFlaggedAsInvalid()
+    {
+        // winapp run . --args "--existing" -- --new-flag
+        // Option values like "--existing" (value of --args) are NOT in allAbsorbed
+        // because they are consumed by their option, not by the ZeroOrMore argument.
+        // So SplitPassthroughTokens must not flag them as invalid.
+        var tokens = MakeTokens(
+            (".", TokenType.Argument),
+            ("--args", TokenType.Option),
+            ("--existing", TokenType.Argument),  // option value: NOT in allAbsorbed
+            ("--", TokenType.DoubleDash),
+            ("--new-flag", TokenType.Argument));
+        var (passthrough, invalid) = WindowsCommandLine.SplitPassthroughTokens(
+            tokens, ["--new-flag"]);  // allAbsorbed only contains the post-dash token
+
+        CollectionAssert.AreEqual(new List<string> { "--new-flag" }, passthrough.ToList());
+        Assert.AreEqual(0, invalid.Count);
     }
 
     #endregion
