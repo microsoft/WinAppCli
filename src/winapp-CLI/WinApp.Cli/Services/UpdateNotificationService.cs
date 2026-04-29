@@ -6,6 +6,7 @@ using Spectre.Console;
 using System.Globalization;
 using System.Text.Json;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Telemetry;
 
 namespace WinApp.Cli.Services;
 
@@ -19,46 +20,71 @@ internal class UpdateNotificationService(
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
 
-    public async Task CheckAndNotifyAsync(CancellationToken cancellationToken = default)
+    // Cache file format (one value per line):
+    //   Line 0: last-check timestamp (round-trip "O" format, UTC)
+    //   Line 1: latest version found (or empty)
+    //   Line 2: date when notice was last shown (yyyy-MM-dd, or empty)
+
+    public void CheckAndNotify()
     {
         try
         {
+            // Opt-out: user explicitly disabled update checks, or running in CI
+            if (Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK") == "0"
+                || CIEnvironmentDetectorForTelemetry.IsCIEnvironment())
+            {
+                return;
+            }
+
             var cacheFile = GetUpdateCheckFile();
+            var cache = ReadCache(cacheFile);
 
-            // Read cache to see if we already checked recently
-            if (cacheFile.Exists)
+            // Show notice if a newer version is cached and not yet shown today
+            if (!string.IsNullOrEmpty(cache.LatestVersion)
+                && IsNewerVersion(cache.LatestVersion, VersionHelper.GetVersionString())
+                && cache.LastShownDate != DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             {
-                var lines = await File.ReadAllLinesAsync(cacheFile.FullName, cancellationToken);
-                if (lines.Length >= 1
-                    && DateTimeOffset.TryParse(lines[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var lastCheck)
-                    && (DateTimeOffset.UtcNow - lastCheck).TotalHours < CheckIntervalHours)
+                DisplayUpdateNotification(cache.LatestVersion);
+                cache = cache with { LastShownDate = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) };
+                WriteCacheFile(cacheFile, cache);
+            }
+
+            // If cache is stale (or missing), refresh in the background — fire and forget
+            if (!cache.LastCheck.HasValue
+                || (DateTimeOffset.UtcNow - cache.LastCheck.Value).TotalHours >= CheckIntervalHours)
+            {
+                _ = Task.Run(async () =>
                 {
-                    // Already checked and notified within the last 24 hours — skip
-                    return;
-                }
+                    try
+                    {
+                        await RefreshCacheAsync(cacheFile);
+                    }
+                    catch
+                    {
+                        // Best-effort — never crash the process
+                    }
+                });
             }
-
-            var latestVersion = await GetLatestVersionAsync(cancellationToken);
-            var currentVersion = VersionHelper.GetVersionString();
-            string? newVersion = null;
-
-            if (latestVersion != null && IsNewerVersion(latestVersion, currentVersion))
-            {
-                newVersion = latestVersion;
-                DisplayUpdateNotification(newVersion);
-            }
-
-            // Write cache with timestamp so we don't check again for 24 hours
-            WriteCacheFile(cacheFile, newVersion);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
         }
         catch
         {
             // Silent failure — never disrupt the user's command
         }
+    }
+
+    internal async Task RefreshCacheAsync(FileInfo? cacheFileOverride = null)
+    {
+        var cacheFile = cacheFileOverride ?? GetUpdateCheckFile();
+        var latestVersion = await GetLatestVersionAsync();
+
+        // Preserve lastShownDate from existing cache
+        var existingCache = ReadCache(cacheFile);
+        var newCache = new UpdateCheckCache(
+            LastCheck: DateTimeOffset.UtcNow,
+            LatestVersion: latestVersion ?? "",
+            LastShownDate: existingCache.LastShownDate);
+
+        WriteCacheFile(cacheFile, newCache);
     }
 
     internal async Task<string?> GetLatestVersionAsync(CancellationToken cancellationToken = default)
@@ -238,12 +264,47 @@ internal class UpdateNotificationService(
         return new FileInfo(Path.Combine(globalDir.FullName, UpdateCheckFileName));
     }
 
-    private void WriteCacheFile(FileInfo cacheFile, string? newVersion)
+    internal static UpdateCheckCache ReadCache(FileInfo cacheFile)
+    {
+        if (!cacheFile.Exists)
+        {
+            return UpdateCheckCache.Empty;
+        }
+
+        try
+        {
+            var lines = File.ReadAllLines(cacheFile.FullName);
+
+            DateTimeOffset? lastCheck = null;
+            if (lines.Length >= 1
+                && DateTimeOffset.TryParse(lines[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+            {
+                lastCheck = parsed;
+            }
+
+            var latestVersion = lines.Length >= 2 ? lines[1] : "";
+            var lastShownDate = lines.Length >= 3 ? lines[2] : "";
+
+            return new UpdateCheckCache(lastCheck, latestVersion, lastShownDate);
+        }
+        catch
+        {
+            return UpdateCheckCache.Empty;
+        }
+    }
+
+    private void WriteCacheFile(FileInfo cacheFile, UpdateCheckCache cache)
     {
         try
         {
             cacheFile.Directory?.Create();
-            File.WriteAllText(cacheFile.FullName, $"{DateTime.UtcNow:O}\n{newVersion ?? ""}");
+
+            // Write to a temp file then move for atomic replacement
+            var tempPath = cacheFile.FullName + ".tmp";
+            var content = $"{cache.LastCheck?.ToString("O") ?? ""}\n{cache.LatestVersion ?? ""}\n{cache.LastShownDate ?? ""}";
+            File.WriteAllText(tempPath, content);
+            File.Move(tempPath, cacheFile.FullName, overwrite: true);
+
             cacheFile.Refresh();
             cacheFile.Attributes |= FileAttributes.Hidden;
         }
@@ -251,6 +312,14 @@ internal class UpdateNotificationService(
         {
             logger.LogDebug(ex, "Failed to write update check cache.");
         }
+    }
+
+    internal record UpdateCheckCache(
+        DateTimeOffset? LastCheck,
+        string LatestVersion,
+        string LastShownDate)
+    {
+        public static readonly UpdateCheckCache Empty = new(null, "", "");
     }
 }
 

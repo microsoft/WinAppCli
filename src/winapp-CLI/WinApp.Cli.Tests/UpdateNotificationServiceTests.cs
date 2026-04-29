@@ -13,18 +13,26 @@ namespace WinApp.Cli.Tests;
 public class UpdateNotificationServiceTests : BaseCommandTests
 {
     private IUpdateNotificationService _updateNotificationService = null!;
+    private UpdateNotificationService _concreteService = null!;
     private string? _originalCaller;
     private string? _originalLatestVersion;
+    private string? _originalUpdateCheck;
+    private string? _originalCI;
 
     [TestInitialize]
     public void Setup()
     {
         _updateNotificationService = GetRequiredService<IUpdateNotificationService>();
+        _concreteService = (UpdateNotificationService)_updateNotificationService;
         // Save and clear env vars to avoid interference
         _originalCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
         _originalLatestVersion = Environment.GetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION");
+        _originalUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
+        _originalCI = Environment.GetEnvironmentVariable("CI");
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
         Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "0.0.0");
+        Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", null);
+        Environment.SetEnvironmentVariable("CI", null);
     }
 
     [TestCleanup]
@@ -32,60 +40,55 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     {
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", _originalCaller);
         Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", _originalLatestVersion);
+        Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", _originalUpdateCheck);
+        Environment.SetEnvironmentVariable("CI", _originalCI);
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_FirstCall_WritesUpdateCheckCacheFile()
+    public void CheckAndNotify_NoCacheFile_NoNotificationAndStartsBackgroundRefresh()
     {
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        // First run with no cache — nothing to show, background refresh should start
+        _updateNotificationService.CheckAndNotify();
 
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify on first run (no cache), got: {output}");
+    }
+
+    [TestMethod]
+    public async Task RefreshCacheAsync_WritesUpdateCheckCacheFile()
+    {
         var cacheFile = new FileInfo(Path.Combine(_testCacheDirectory.FullName, ".update-check"));
+
+        await _concreteService.RefreshCacheAsync(cacheFile);
+
         cacheFile.Refresh();
         Assert.IsTrue(cacheFile.Exists, "Update check cache file should be created");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_SecondCallWithinThreshold_SkipsCheck()
+    public async Task RefreshCacheAsync_PreservesLastShownDate()
     {
-        // First call writes cache
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
-
         var cacheFile = new FileInfo(Path.Combine(_testCacheDirectory.FullName, ".update-check"));
-        cacheFile.Refresh();
-        Assert.IsTrue(cacheFile.Exists, "Update check cache file should be created");
-        var initialCacheContents = await File.ReadAllTextAsync(cacheFile.FullName, TestContext.CancellationToken);
+        // Write an existing cache with a lastShownDate
+        cacheFile.Directory?.Create();
+        File.WriteAllText(cacheFile.FullName, $"{DateTime.UtcNow.AddHours(-25):O}\n999.0.0\n2026-01-15");
 
-        // Second call should skip (cache is fresh)
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
-        var subsequentCacheContents = await File.ReadAllTextAsync(cacheFile.FullName, TestContext.CancellationToken);
-        Assert.AreEqual(initialCacheContents, subsequentCacheContents, "Cache file should not be rewritten within threshold");
+        await _concreteService.RefreshCacheAsync(cacheFile);
+
+        var cache = UpdateNotificationService.ReadCache(cacheFile);
+        Assert.AreEqual("2026-01-15", cache.LastShownDate, "LastShownDate should be preserved after refresh");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_ExpiredCache_RechecksAndWritesCache()
+    public void CheckAndNotify_CachedNewerVersion_DisplaysNotification()
     {
-        // Write an expired cache entry
+        // Pre-populate cache with a newer version and stale "shown" date
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
-        var expiredTime = DateTime.UtcNow.AddHours(-25).ToString("O");
-        File.WriteAllText(cacheFile, $"{expiredTime}\n");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
-
-        // Cache should be refreshed with a new timestamp
-        var lines = await File.ReadAllLinesAsync(cacheFile, TestContext.CancellationToken);
-        Assert.IsTrue(lines.Length >= 1);
-        Assert.IsTrue(DateTimeOffset.TryParse(lines[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var newTimestamp));
-        Assert.IsTrue((DateTimeOffset.UtcNow - newTimestamp).TotalMinutes < 1, "Cache timestamp should be recent");
-    }
-
-    [TestMethod]
-    public async Task CheckAndNotifyAsync_NewerVersionAvailable_DisplaysNotification()
-    {
-        // Set a version that is newer than the current CLI version
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
-
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsTrue(output.Contains("999.0.0"), $"Expected notification with version, got: {output}");
@@ -93,74 +96,186 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_SameVersion_NoNotification()
+    public void CheckAndNotify_CachedNewerVersion_AlreadyShownToday_NoNotification()
+    {
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n{today}");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify when already shown today, got: {output}");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_CachedSameVersion_NoNotification()
     {
         var currentVersion = VersionHelper.GetVersionString();
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", currentVersion);
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n{currentVersion}\n");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsFalse(output.Contains("available"), $"Should not notify for same version, got: {output}");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_OlderVersion_NoNotification()
+    public void CheckAndNotify_CachedOlderVersion_NoNotification()
     {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "0.0.1");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n0.0.1\n");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsFalse(output.Contains("available"), $"Should not notify for older version, got: {output}");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_NpmCaller_ShowsNpmUpgradeHint()
+    public void CheckAndNotify_ShowsNotice_UpdatesLastShownDate()
     {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFilePath = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFilePath));
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        Assert.AreEqual(today, cache.LastShownDate, "LastShownDate should be updated to today after showing notice");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_StaleCache_DoesNotBlockOnNetwork()
+    {
+        // Write an expired cache entry — CheckAndNotify should return instantly
+        // (the background refresh is fire-and-forget)
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        var expiredTime = DateTime.UtcNow.AddHours(-25).ToString("O");
+        File.WriteAllText(cacheFile, $"{expiredTime}\n0.0.0\n");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _updateNotificationService.CheckAndNotify();
+        sw.Stop();
+
+        // Should complete nearly instantly (no network call in the foreground)
+        Assert.IsTrue(sw.ElapsedMilliseconds < 1000, $"CheckAndNotify took {sw.ElapsedMilliseconds}ms — should be instant (no blocking network call)");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_NpmCaller_ShowsNpmUpgradeHint()
+    {
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "npm");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsTrue(output.Contains("npm update -g @microsoft/winappcli"), $"Expected npm hint, got: {output}");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_NodejsPackageCaller_ShowsNpmUpgradeHint()
+    public void CheckAndNotify_NodejsPackageCaller_ShowsNpmUpgradeHint()
     {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsTrue(output.Contains("npm update -g @microsoft/winappcli"), $"Expected npm hint, got: {output}");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_NuGetCaller_ShowsNuGetUpgradeHint()
+    public void CheckAndNotify_NuGetCaller_ShowsNuGetUpgradeHint()
     {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nuget-package");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
-        Assert.IsTrue(output.Contains("Microsoft.Windows.SDK.BuildTools.WinApp"), $"Expected NuGet hint, got: {output}");
+        Assert.IsTrue(output.Contains("github.com/microsoft/winappcli/releases"), $"Expected NuGet releases page hint, got: {output}");
     }
 
     [TestMethod]
-    public async Task CheckAndNotifyAsync_StandaloneExe_ShowsReleasesPageHint()
+    public void CheckAndNotify_StandaloneExe_ShowsReleasesPageHint()
     {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION", "999.0.0");
         // No WINAPP_CLI_CALLER set, defaults to standalone exe
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
 
-        await _updateNotificationService.CheckAndNotifyAsync(TestContext.CancellationToken);
+        _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
         Assert.IsTrue(output.Contains("github.com/microsoft/winappcli/releases"), $"Expected releases page hint, got: {output}");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_OptOutEnvVar_NoNotification()
+    {
+        Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", "0");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify when opted out, got: {output}");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_CIEnvironment_NoNotification()
+    {
+        Environment.SetEnvironmentVariable("CI", "true");
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify in CI, got: {output}");
+    }
+
+    [TestMethod]
+    public void ReadCache_BackwardCompatible_TwoLineFormat()
+    {
+        // Old cache format (2 lines, no lastShownDate)
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFilePath = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n999.0.0");
+
+        var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFilePath));
+
+        Assert.AreEqual("999.0.0", cache.LatestVersion);
+        Assert.AreEqual("", cache.LastShownDate, "Missing lastShownDate should default to empty (never shown)");
     }
 
     [TestMethod]

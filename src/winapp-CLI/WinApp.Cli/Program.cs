@@ -106,21 +106,12 @@ internal static class Program
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
 
-            // Check for CLI updates (at most once per day, silent on failure)
+            // Check for CLI updates — shows cached notice instantly (no network),
+            // and starts a background refresh if the cache is stale (fire-and-forget).
             if (!quiet)
             {
                 var updateNotificationService = serviceProvider.GetRequiredService<IUpdateNotificationService>();
-
-                using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-
-                try
-                {
-                    await updateNotificationService.CheckAndNotifyAsync(cancellationTokenSource.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Keep startup responsive if the update check is slow/unreachable or canceled.
-                }
+                updateNotificationService.CheckAndNotify();
             }
         }
 

@@ -6,8 +6,9 @@ namespace WinApp.Cli.Services;
 internal interface IUpdateNotificationService
 {
     /// <summary>
-    /// Checks if an update is available (at most once per day) and prints a notification.
-    /// Failures are silently ignored; cancellation is allowed to propagate.
+    /// Shows a cached update notice (if available and not yet shown today) with zero network I/O.
+    /// If the cache is stale (&gt;24 h), a background refresh is started (fire-and-forget).
+    /// This method is synchronous and never blocks on the network.
     /// </summary>
-    Task CheckAndNotifyAsync(CancellationToken cancellationToken = default);
+    void CheckAndNotify();
 }
