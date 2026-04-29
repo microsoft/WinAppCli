@@ -465,6 +465,25 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
         .btn-remove-field:hover {
             background: rgba(128, 128, 128, 0.5);
         }
+        .btn-remove-section {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            border-radius: 2px;
+            background: rgba(128, 128, 128, 0.3);
+            color: var(--vscode-editor-foreground, #ffffff);
+            font-size: 14px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        .btn-remove-section:hover {
+            background: rgba(128, 128, 128, 0.5);
+        }
         .list-item .item-title {
             font-weight: 600;
             font-size: 13px;
@@ -715,8 +734,9 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <div class="validation-msg"></div>
         </div>
         <button class="btn-add-field" type="button" id="add-identity-resourceid" data-target="identity-resourceid-group" data-section="identity" data-field-name="resourceId" data-default="" title="Add Resource ID attribute">+ Add Resource ID</button>
+        <button class="btn-add-field" type="button" id="add-phone-identity-btn" title="Add Phone Identity element">+ Phone Identity</button>
         <div id="phone-identity-section" class="section-header-spaced" style="display:none;">
-            <div class="section-header">Phone Identity</div>
+            <div class="section-header">Phone Identity <button class="btn-remove-section" type="button" id="remove-phone-identity-btn" title="Remove Phone Identity element">✕</button></div>
             <p class="page-description">Use this section to configure legacy phone identity fields. These are commonly included in WinUI 3 app manifests for backward compatibility.</p>
             <div class="form-group" data-field="phoneIdentity.phoneProductId">
                 <label for="phone-product-id">Phone Product ID:</label>
@@ -1259,6 +1279,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             });
         });
 
+        // ─── Phone Identity Add/Remove buttons ─────────────
+        document.getElementById('add-phone-identity-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ type: 'addPhoneIdentity' });
+        });
+        document.getElementById('remove-phone-identity-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ type: 'removePhoneIdentity' });
+        });
+
         // ─── Optional field Add/Remove buttons ─────────────
         document.addEventListener('click', (e) => {
             const addBtn = e.target.closest('.btn-add-field');
@@ -1365,12 +1393,15 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
             // Phone Identity
             const phoneSection = document.getElementById('phone-identity-section');
+            const addPhoneBtn = document.getElementById('add-phone-identity-btn');
             if (data.phoneIdentity) {
                 if (phoneSection) phoneSection.style.display = '';
+                if (addPhoneBtn) addPhoneBtn.style.display = 'none';
                 setValueIfNotFocused('phone-product-id', data.phoneIdentity.phoneProductId, focused);
                 setValueIfNotFocused('phone-publisher-id', data.phoneIdentity.phonePublisherId, focused);
             } else {
                 if (phoneSection) phoneSection.style.display = 'none';
+                if (addPhoneBtn) addPhoneBtn.style.display = '';
             }
 
             // Properties

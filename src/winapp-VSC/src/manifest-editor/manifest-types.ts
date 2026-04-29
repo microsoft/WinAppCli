@@ -187,6 +187,8 @@ export type WebviewToExtensionMessage =
     | { type: 'moveExternalDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'updateAssets' }
     | { type: 'openAsText' }
+    | { type: 'addPhoneIdentity' }
+    | { type: 'removePhoneIdentity' }
     | { type: 'packageTypeChanged'; value: string }
     | { type: 'ready' };
 

@@ -607,6 +607,80 @@ export function moveResource(xmlText: string, index: number, direction: 'up' | '
     return swapAdjacentElements(xmlText, resources[index], resources[swapIdx]);
 }
 
+/** Add an mp:PhoneIdentity element to the manifest. */
+export function addPhoneIdentity(xmlText: string): string {
+    // Check if PhoneIdentity already exists
+    if (/<[a-zA-Z0-9]*:?PhoneIdentity\b/s.test(xmlText)) { return xmlText; }
+
+    // Generate a random GUID for PhoneProductId, use all-zeros for PhonePublisherId
+    const productId = generateGuid();
+    const publisherId = '00000000-0000-0000-0000-000000000000';
+
+    // Ensure mp namespace is declared
+    let result = ensureNamespace(xmlText, 'mp', 'http://schemas.microsoft.com/appx/2014/phone/manifest');
+
+    // Add IgnorableNamespaces="mp" if not already present
+    result = ensureIgnorableNamespace(result, 'mp');
+
+    const phoneElement = `<mp:PhoneIdentity PhoneProductId="${productId}" PhonePublisherId="${publisherId}" />`;
+
+    // Insert after <Identity .../> element
+    const identityPattern = /<(?:[a-zA-Z0-9]+:)?Identity\b[^>]*\/>/s;
+    const identityMatch = identityPattern.exec(result);
+    if (identityMatch) {
+        const insertPos = identityMatch.index + identityMatch[0].length;
+        const indent = detectIndent(result, identityMatch.index);
+        return result.substring(0, insertPos) + '\n' + indent + phoneElement + result.substring(insertPos);
+    }
+
+    // Fallback: insert before </Package>
+    const pkgClose = result.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return result; }
+    const pkgIndent = detectIndent(result, pkgClose);
+    const childIndent = pkgIndent + '  ';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
+    return result.substring(0, lineStart) + childIndent + phoneElement + '\n' + result.substring(lineStart);
+}
+
+/** Remove the mp:PhoneIdentity element from the manifest. */
+export function removePhoneIdentity(xmlText: string): string {
+    // Match the full self-closing or open+close PhoneIdentity element with optional leading whitespace
+    const pattern = /[ \t]*<[a-zA-Z0-9]*:?PhoneIdentity\b[^>]*(?:\/>|>[^<]*<\/[a-zA-Z0-9]*:?PhoneIdentity\s*>)[ \t]*\r?\n?/s;
+    return xmlText.replace(pattern, '');
+}
+
+/** Generate a random GUID in the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. */
+function generateGuid(): string {
+    const hex = '0123456789abcdef';
+    const parts = [8, 4, 4, 4, 12];
+    return parts.map(len => {
+        let s = '';
+        for (let i = 0; i < len; i++) { s += hex[Math.floor(Math.random() * 16)]; }
+        return s;
+    }).join('-');
+}
+
+/** Ensure a prefix is listed in the IgnorableNamespaces attribute on Package. */
+function ensureIgnorableNamespace(xmlText: string, prefix: string): string {
+    const pkgMatch = /<Package\b[^>]*>/s.exec(xmlText);
+    if (!pkgMatch) { return xmlText; }
+    const pkgTag = pkgMatch[0];
+
+    const ignorableMatch = /IgnorableNamespaces="([^"]*)"/.exec(pkgTag);
+    if (ignorableMatch) {
+        const namespaces = ignorableMatch[1].split(/\s+/);
+        if (namespaces.includes(prefix)) { return xmlText; }
+        const newAttr = `IgnorableNamespaces="${ignorableMatch[1]} ${prefix}"`;
+        const newTag = pkgTag.replace(ignorableMatch[0], newAttr);
+        return xmlText.substring(0, pkgMatch.index) + newTag + xmlText.substring(pkgMatch.index + pkgTag.length);
+    }
+
+    // No IgnorableNamespaces attribute — add one
+    const newTag = pkgTag.replace(/<Package\b/, `<Package IgnorableNamespaces="${prefix}"`);
+    return xmlText.substring(0, pkgMatch.index) + newTag + xmlText.substring(pkgMatch.index + pkgTag.length);
+}
+
 /** Set the ShowNameOnTiles entriesfor an application by index.
  *  `tiles` is an array of tile values like ['square150x150Logo', 'wide310x150Logo'].
  *  An empty array removes ShowNameOnTiles entirely. */
