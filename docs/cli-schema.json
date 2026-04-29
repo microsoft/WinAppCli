@@ -1345,7 +1345,7 @@
       },
       "options": {
         "--args": {
-          "description": "Command-line arguments to pass to the application",
+          "description": "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value).",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
