@@ -20,22 +20,6 @@ internal partial class ManifestService(
     IImageAssetService imageAssetService,
     IAnsiConsole ansiConsole) : IManifestService
 {
-
-    static readonly HashSet<string> _knownFileExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".dll", ".json", ".xml", ".yaml", ".yml", ".txt", ".cfg", ".config",
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
-        ".html", ".htm", ".css", ".js", ".ts", ".wasm",
-        ".pri", ".resw", ".resx", ".resources",
-        ".pfx", ".cer", ".p7x", ".cat",
-        ".appx", ".msix", ".appxbundle", ".msixbundle",
-        ".winmd", ".xbf", ".xaml",
-        ".mp3", ".mp4", ".wav", ".avi", ".wmv",
-        ".pdf", ".doc", ".docx", ".rtf",
-        ".py", ".ps1", ".cmd", ".bat", ".sh",
-        ".node", ".so", ".dylib"
-    };
-
     public async Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
         DirectoryInfo directory,
         string? packageName,
@@ -623,11 +607,6 @@ internal partial class ManifestService(
         {
             return false;
         }        
-
-        if (!_knownFileExtensions.Contains(extension))
-        {
-            return false;
-        }
 
         return true;
     }
