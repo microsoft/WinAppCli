@@ -98,8 +98,17 @@ internal sealed class PlainProgressRenderer
             return;
         }
 
+        // Match the live renderer: tasks whose tuple result carries a non-zero return
+        // code are reported via StatusService.LogError instead, so suppress the line
+        // here to avoid duplicate error output.
+        if (task.IsFailedTupleResult)
+        {
+            return;
+        }
+
         var symbol = success ? UiSymbols.Check : UiSymbols.Error;
-        _console.WriteLine($"{indent}{symbol} {task.InProgressMessage}");
+        var message = task.CompletedDisplayMessage ?? task.InProgressMessage;
+        _console.WriteLine($"{indent}{symbol} {message}");
     }
 
     private static string Indent(int depth) => depth <= 0 ? string.Empty : new string(' ', depth * 2);
