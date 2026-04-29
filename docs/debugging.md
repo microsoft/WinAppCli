@@ -126,7 +126,114 @@ winapp run .\build\Debug --debug-output --symbols
 
 ### VS Code
 
-**Attach to running process** — add to `.vscode/launch.json`:
+The [WinApp VS Code extension](https://github.com/microsoft/WinAppCli/blob/main/src/winapp-VSC/README.md) provides a custom **`winapp` debug type** that launches your app with package identity and attaches the debugger — all from a single **F5** press.
+
+#### One-press F5 debugging with identity
+
+Add a `winapp` launch configuration to `.vscode/launch.json`:
+
+```jsonc
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "winapp",
+            "request": "launch",
+            "name": "WinApp: Launch and Attach"
+        }
+    ]
+}
+```
+
+When you press **F5**:
+
+1. The extension scans your workspace for build output directories containing `.exe` files.
+2. You select the build folder to run (or set `inputFolder` to skip the prompt).
+3. It launches your app via `winapp run` to give it package identity.
+4. A child debug session attaches to the running process using the debugger you specified.
+
+Once the debugger attaches, you get the full VS Code debugging experience — set breakpoints by clicking the gutter, step through code line-by-line (`F10`), step into functions (`F11`), inspect variables in the **Variables** pane, and evaluate expressions in the **Debug Console**. The app runs with package identity throughout, so identity-dependent APIs behave exactly as they would in production.
+
+> **Important:** The `winapp` debug type does **not** build your project automatically. After making code changes, rebuild before pressing F5.
+
+#### Automate builds with `preLaunchTask`
+
+To avoid forgetting to rebuild, add a `preLaunchTask` that builds your project before every debug session:
+
+1. Define a build task in `.vscode/tasks.json` (example for .NET):
+    ```jsonc
+    {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "build",
+                "command": "dotnet",
+                "type": "process",
+                "args": ["build", "${workspaceFolder}"],
+                "problemMatcher": "$msCompile"
+            }
+        ]
+    }
+    ```
+2. Reference it in your `launch.json`:
+    ```jsonc
+    {
+        "type": "winapp",
+        "request": "launch",
+        "name": "WinApp: Launch and Attach",
+        "preLaunchTask": "build"
+    }
+    ```
+
+#### Configuration properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `inputFolder` | string | | Path to the build output folder containing your app binaries (e.g., `${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621`). If not set, you will be prompted to select a folder. |
+| `manifest` | string | | Path to an AppX manifest file (e.g., `AppxManifest.xml`, `Package.appxmanifest`, or `appxmanifest.xml`). If not set, the CLI auto-detects from the input folder or current directory. |
+| `debuggerType` | string | `coreclr` | Underlying debugger to use (`coreclr`, `cppvsdbg`, or `node`). |
+| `workingDirectory` | string | workspace folder | Working directory for the application. |
+| `args` | string | | Command-line arguments to pass to the application. |
+| `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
+| `port` | number | `9229` | (`node` only) The port used for the Node.js `--inspect` listener and the attach connection. Override when the default port is already in use. |
+
+#### Supported debuggers
+
+| `debuggerType` | Language | Required Extension |
+|----------------|----------|--------------------|
+| `coreclr` (default) | C# / .NET | [C# Dev Kit](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csharp) |
+| `cppvsdbg` | C / C++ | [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) |
+| `node` | Node.js / Electron | Built-in |
+
+Example for a C++ project:
+
+```jsonc
+{
+    "type": "winapp",
+    "request": "launch",
+    "name": "WinApp: Launch C++ App",
+    "debuggerType": "cppvsdbg"
+}
+```
+
+#### Startup debugging with Create Debug Identity
+
+If you need to debug startup code from the very first instruction, the F5 attach approach may miss early code. Instead, use the **WinApp: Create Debug Identity** command from the Command Palette (`Ctrl+Shift+P`) to register a sparse package for your executable, then launch it with your standard debugger:
+
+```jsonc
+{
+    "name": "Launch (with identity)",
+    "type": "coreclr",
+    "request": "launch",
+    "program": "${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621/myapp.exe"
+}
+```
+
+Since `create-debug-identity` registers identity on the exe itself, the app has identity no matter how it's launched — including from a standard VS Code launch configuration.
+
+#### Attach to a running process
+
+If you prefer to launch with `winapp run` from the terminal and then attach, use a standard attach configuration:
 
 ```json
 {
@@ -147,3 +254,7 @@ For C++/Rust, use `"type": "cppvsdbg"` (MSVC) or `"type": "lldb"` (LLDB):
     "processId": "${command:pickProcess}"
 }
 ```
+
+#### Cleaning up
+
+When you're done testing, run **WinApp: Unregister Package** from the Command Palette to remove sideloaded development packages without leaving VS Code.
