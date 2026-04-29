@@ -141,12 +141,23 @@ internal partial class RunCommand : Command, IShortDescription
             // Collect tokens after '--' as pass-through arguments to the launched application.
             // This lets users write: winapp run . -- --flag value
             // instead of having to escape: winapp run . --args "--flag value"
+            //
+            // Only the FIRST DoubleDash token is treated as the separator; any subsequent '--'
+            // tokens (e.g. winapp run . -- -- --flag) are forwarded to the app as literal values.
             var passthroughArgs = new List<string>();
             var seenDoubleDash = false;
             foreach (var token in parseResult.Tokens)
             {
-                if (token.Type == TokenType.DoubleDash) { seenDoubleDash = true; continue; }
-                if (seenDoubleDash) { passthroughArgs.Add(token.Value); }
+                if (!seenDoubleDash && token.Type == TokenType.DoubleDash)
+                {
+                    seenDoubleDash = true;
+                    continue;
+                }
+
+                if (seenDoubleDash)
+                {
+                    passthroughArgs.Add(token.Value);
+                }
             }
 
             // Any unmatched tokens that did NOT come after '--' are unknown options — report them
@@ -193,7 +204,7 @@ internal partial class RunCommand : Command, IShortDescription
             // Merge '--args' value with any tokens collected after '--'.
             if (passthroughArgs.Count > 0)
             {
-                var passthroughStr = string.Join(" ", passthroughArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+                var passthroughStr = string.Join(" ", passthroughArgs.Select(EscapeWindowsArg));
                 appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
             }
 
@@ -591,6 +602,72 @@ internal partial class RunCommand : Command, IShortDescription
                 logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}': {Error}", UiSymbols.Error, alias, ex.Message);
                 return 1;
             }
+        }
+        /// <summary>
+        /// Encodes a single argument token using the Windows CommandLineToArgvW-compatible
+        /// quoting rules so that the launched application receives exactly the original value.
+        /// </summary>
+        /// <remarks>
+        /// The algorithm follows the escaping rules documented at
+        /// https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-commandlinetoargvw:
+        /// <list type="bullet">
+        /// <item>Backslashes are literal unless they precede a double-quote.</item>
+        /// <item>Before a double-quote, each backslash must be doubled, and the quote escaped with \.</item>
+        /// <item>At the end of a quoted string, trailing backslashes must be doubled.</item>
+        /// </list>
+        /// </remarks>
+        private static string EscapeWindowsArg(string argument)
+        {
+            if (argument.Length == 0)
+            {
+                return "\"\"";
+            }
+
+            // If the value contains no whitespace or double-quotes it does not need quoting.
+            var needsQuotes = argument.Any(c => char.IsWhiteSpace(c) || c == '"');
+            if (!needsQuotes)
+            {
+                return argument;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append('"');
+
+            var backslashes = 0;
+            foreach (var c in argument)
+            {
+                if (c == '\\')
+                {
+                    backslashes++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    // Each preceding backslash must be doubled, plus one extra to escape the quote.
+                    sb.Append('\\', (backslashes * 2) + 1);
+                    sb.Append('"');
+                    backslashes = 0;
+                    continue;
+                }
+
+                if (backslashes > 0)
+                {
+                    sb.Append('\\', backslashes);
+                    backslashes = 0;
+                }
+
+                sb.Append(c);
+            }
+
+            // Trailing backslashes inside the closing quote must be doubled.
+            if (backslashes > 0)
+            {
+                sb.Append('\\', backslashes * 2);
+            }
+
+            sb.Append('"');
+            return sb.ToString();
         }
     }
 }

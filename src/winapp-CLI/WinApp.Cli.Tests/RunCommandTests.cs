@@ -1017,5 +1017,44 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should still be called");
     }
 
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ForwardsLiteralDoubleDash()
+    {
+        // A '--' that appears AFTER the separator is an app argument, not another separator.
+        // It must be forwarded as the literal string "--".
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "A literal -- after the passthrough separator should be forwarded to the app");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_EmbeddedQuotesAndBackslashes_EscapesCorrectly()
+    {
+        // Tokens containing embedded quotes or trailing backslashes need full Windows
+        // CommandLineToArgvW-compatible escaping, not just simple space-quoting.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Token: C:\temp\bin "quoted"  (contains space, backslash before quote, trailing quote)
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--message", "C:\\temp\\bin \"quoted\""]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        // Expected: --message "C:\temp\bin \"quoted\""
+        // Breakdown: --message needs no quoting; the second token has a space so gets quoted,
+        // the backslash before " is doubled (\\") and the final " is \".
+        Assert.AreEqual("--message \"C:\\temp\\bin \\\"quoted\\\"\"",
+            _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Tokens with embedded quotes and backslashes must use Windows CommandLineToArgvW escaping");
+    }
+
     #endregion
 }
