@@ -111,14 +111,20 @@ internal static class WindowsCommandLine
         {
             var budget = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var a in passthrough)
+            {
                 budget[a] = budget.GetValueOrDefault(a) + 1;
+            }
 
             foreach (var t in unmatchedTokens)
             {
                 if (budget.TryGetValue(t, out var count) && count > 0)
+                {
                     budget[t] = count - 1;
+                }
                 else
+                {
                     unknown.Add(t);
+                }
             }
         }
 
