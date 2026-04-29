@@ -908,6 +908,24 @@ public class RunCommandTests : BaseCommandTests
             "--args value and -- passthrough args should both be forwarded");
     }
 
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ValueWithSpace_QuotedInLaunchArgs()
+    {
+        // This test verifies the full pipeline: token → JoinArguments → launcher.
+        // A value that contains a space must be quoted so the launched app's CommandLineToArgvW
+        // recovers the original token correctly.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--title", "hello world"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Values containing spaces must be quoted in the final command-line string");
+    }
+
     // --- Handler: unknown-token rejection ---
 
     [TestMethod]
