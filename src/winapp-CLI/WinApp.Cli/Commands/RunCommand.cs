@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -52,7 +53,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ArgsOption = new Option<string>("--args")
         {
-            Description = "Command-line arguments to pass to the application"
+            Description = "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value)."
         };
 
         NoLaunchOption = new Option<bool>("--no-launch")
@@ -93,6 +94,11 @@ internal partial class RunCommand : Command, IShortDescription
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
     {
+        // Allow unmatched tokens so that 'winapp run . -- --flag value' passes '--flag value'
+        // to the launched app without escaping. Unknown options before '--' are caught manually
+        // in the handler so typo detection still works.
+        TreatUnmatchedTokensAsErrors = false;
+
         Arguments.Add(InputFolderArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
@@ -131,6 +137,41 @@ internal partial class RunCommand : Command, IShortDescription
             var clean = parseResult.GetValue(CleanOption);
             var useSymbols = parseResult.GetValue(SymbolsOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Collect tokens after '--' as pass-through arguments to the launched application.
+            // This lets users write: winapp run . -- --flag value
+            // instead of having to escape: winapp run . --args "--flag value"
+            var passthroughArgs = new List<string>();
+            var seenDoubleDash = false;
+            foreach (var token in parseResult.Tokens)
+            {
+                if (token.Type == TokenType.DoubleDash) { seenDoubleDash = true; continue; }
+                if (seenDoubleDash) passthroughArgs.Add(token.Value);
+            }
+
+            // Any unmatched tokens that did NOT come after '--' are unknown options — report them
+            // as errors so typos like '--detch' still get caught (TreatUnmatchedTokensAsErrors is
+            // false on this command to allow the '--' passthrough pattern without parse errors).
+            if (parseResult.UnmatchedTokens.Count > 0)
+            {
+                var passthroughSet = new HashSet<string>(passthroughArgs);
+                var badTokens = parseResult.UnmatchedTokens.Where(t => !passthroughSet.Contains(t)).ToList();
+                if (badTokens.Count > 0)
+                {
+                    foreach (var bad in badTokens)
+                    {
+                        logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
+                    }
+                    return 1;
+                }
+            }
+
+            // Merge '--args' value with any tokens collected after '--'.
+            if (passthroughArgs.Count > 0)
+            {
+                var passthroughStr = string.Join(" ", passthroughArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+                appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
+            }
 
             // Validate mutually exclusive options
             if (withAlias && noLaunch)

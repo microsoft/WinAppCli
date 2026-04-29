@@ -809,4 +809,91 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    #region -- passthrough argument tests
+
+    [TestMethod]
+    public void ParseOptions_DoubleDashPassthrough_ProducesNoParseErrors()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--", "--flag", "value"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "Tokens after -- should not cause parse errors");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ForwardsArgsToLauncher()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--my-flag", "value"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--my-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args after -- should be forwarded to the launcher");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_MergesWithArgsOption()
+    {
+        // Arrange - --args and -- args should be combined
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--args", "--existing", "--", "--flag"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--existing --flag", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "--args value and -- passthrough args should both be forwarded");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithSpacesInValue_QuotesArg()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--title", "hello world"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args with spaces should be quoted");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_UnknownOptionBeforeDoubleDash_ReturnsError()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--unknown-winapp-option", "--", "--app-flag"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Unknown winapp options before -- should still fail");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    #endregion
 }
