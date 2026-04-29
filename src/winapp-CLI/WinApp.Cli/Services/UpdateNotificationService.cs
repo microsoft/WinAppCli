@@ -89,13 +89,6 @@ internal class UpdateNotificationService(
 
     internal async Task<string?> GetLatestVersionAsync(CancellationToken cancellationToken = default)
     {
-        // Allow overriding the latest version for testing (skips GitHub API call)
-        var overrideVersion = Environment.GetEnvironmentVariable("WINAPP_CLI_LATEST_VERSION");
-        if (!string.IsNullOrEmpty(overrideVersion))
-        {
-            return overrideVersion;
-        }
-
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, GitHubApiLatestRelease);
