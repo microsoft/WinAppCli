@@ -85,6 +85,48 @@ internal static class OptionTypoValidator
         return null;
     }
 
+    /// <summary>
+    /// Returns a "Did you mean '--foo'?" message if <paramref name="token"/> looks like a
+    /// single-dash long-option typo on the given command, or <see langword="null"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Used by commands that set <c>TreatUnmatchedTokensAsErrors = false</c> (so the global
+    /// <see cref="FindLikelyLongOptionTypo"/> check is skipped) but still want to surface the
+    /// "Did you mean?" suggestion for tokens before any <c>--</c> separator.
+    /// </remarks>
+    internal static string? TryGetTypoSuggestion(string token, CommandResult commandResult)
+    {
+        if (token.Length <= 2 || token[0] != '-' || token[1] == '-')
+        {
+            return null;
+        }
+
+        if (!char.IsLetter(token[1]))
+        {
+            return null;
+        }
+
+        var rest = token.AsSpan(1);
+        var end = rest.IndexOf('=');
+        if (end < 0) { end = rest.Length; }
+
+        var nameSpan = rest[..end];
+        for (var i = 0; i < nameSpan.Length; i++)
+        {
+            var c = nameSpan[i];
+            if (!char.IsLetterOrDigit(c) && c != '-')
+            {
+                return null;
+            }
+        }
+
+        var candidate = "--" + nameSpan.ToString();
+        var longNames = CollectLongOptionNames(commandResult);
+        return longNames.Contains(candidate)
+            ? $"Unknown option '{token}'. Did you mean '{candidate}'?"
+            : null;
+    }
+
     private static HashSet<string> CollectLongOptionNames(CommandResult leaf)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);

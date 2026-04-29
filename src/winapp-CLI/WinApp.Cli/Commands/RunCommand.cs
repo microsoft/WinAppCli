@@ -148,7 +148,15 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 foreach (var bad in unknownTokens)
                 {
-                    logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
+                    var suggestion = OptionTypoValidator.TryGetTypoSuggestion(bad, parseResult.CommandResult);
+                    if (suggestion is not null)
+                    {
+                        logger.LogError("{UISymbol} {Suggestion}", UiSymbols.Error, suggestion);
+                    }
+                    else
+                    {
+                        logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
+                    }
                 }
                 return 1;
             }

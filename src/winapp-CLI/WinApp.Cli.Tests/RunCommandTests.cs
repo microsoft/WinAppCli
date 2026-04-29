@@ -845,6 +845,43 @@ public class RunCommandTests : BaseCommandTests
             "Both the unknown pre-dash token and the passthrough token land in UnmatchedTokens");
     }
 
+    [TestMethod]
+    public void ParseOptions_SingleDashTypo_NoParseError_HandlerValidates()
+    {
+        // A single-dash typo like '-manifest' is not caught at parse time (because
+        // TreatUnmatchedTokensAsErrors = false) — it is caught in the handler, which
+        // can then emit a "Did you mean '--manifest'?" suggestion.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "-manifest", "foo.appxmanifest"]);
+        Assert.IsEmpty(parseResult.Errors,
+            "Single-dash typos are not parse errors; the handler catches them");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_SingleDashTypo_ReturnsError()
+    {
+        // The handler must reject a single-dash typo and return a non-zero exit code.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "-manifest", "foo.appxmanifest"]);
+
+        Assert.AreNotEqual(0, exitCode, "A single-dash typo should fail");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public void ParseOptions_SingleDashTypo_AfterDoubleDash_NoError()
+    {
+        // A single-dash token AFTER '--' is a passthrough arg intended for the launched app.
+        // It must not trigger the typo validator.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--", "-manifest"]);
+        Assert.IsEmpty(parseResult.Errors,
+            "A single-dash token after -- is a passthrough arg and must not be flagged as a typo");
+    }
+
     // --- Handler: basic passthrough scenarios ---
 
     [TestMethod]
