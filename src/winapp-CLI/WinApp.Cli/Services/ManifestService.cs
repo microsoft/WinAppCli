@@ -570,7 +570,8 @@ internal partial class ManifestService(
         }
 
         // Reject path traversal
-        if (value.Contains(".."))
+        var pathSegments = value.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.None);
+        if (pathSegments.Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)))
         {
             return false;
         }
