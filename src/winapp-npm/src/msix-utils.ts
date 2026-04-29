@@ -29,9 +29,9 @@ export interface ClearElectronDebugIdentityResult {
 }
 
 /**
- * Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
+ * Adds package identity information from a Package.appxmanifest or appxmanifest.xml file to an executable's embedded manifest
  * @param exePath - Path to the executable file
- * @param appxManifestPath - Path to the appxmanifest.xml file containing package identity data
+ * @param appxManifestPath - Path to the Package.appxmanifest or appxmanifest.xml file containing package identity data
  * @param options - Optional configuration
  */
 export async function addMsixIdentityToExe(
