@@ -141,70 +141,22 @@ internal partial class RunCommand : Command, IShortDescription
             // Collect tokens after '--' as pass-through arguments to the launched application.
             // This lets users write: winapp run . -- --flag value
             // instead of having to escape: winapp run . --args "--flag value"
-            //
-            // Only the FIRST DoubleDash token is treated as the separator; any subsequent '--'
-            // tokens (e.g. winapp run . -- -- --flag) are forwarded to the app as literal values.
-            var passthroughArgs = new List<string>();
-            var seenDoubleDash = false;
-            foreach (var token in parseResult.Tokens)
+            var (passthroughArgs, unknownTokens) = WindowsCommandLine.ExtractPassthroughArgs(
+                parseResult.Tokens, parseResult.UnmatchedTokens);
+
+            if (unknownTokens.Count > 0)
             {
-                if (!seenDoubleDash && token.Type == TokenType.DoubleDash)
+                foreach (var bad in unknownTokens)
                 {
-                    seenDoubleDash = true;
-                    continue;
+                    logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
                 }
-
-                if (seenDoubleDash)
-                {
-                    passthroughArgs.Add(token.Value);
-                }
-            }
-
-            // Any unmatched tokens that did NOT come after '--' are unknown options — report them
-            // as errors so typos like '--detch' still get caught (TreatUnmatchedTokensAsErrors is
-            // false on this command to allow the '--' passthrough pattern without parse errors).
-            //
-            // A count-based approach is used instead of a HashSet so that duplicate token values
-            // (e.g. winapp run . --flag -- --flag) are handled correctly: only as many occurrences
-            // of a token as appear in the passthrough list are considered "accounted for".
-            if (parseResult.UnmatchedTokens.Count > 0)
-            {
-                // Build a count of each distinct value in the passthrough list.
-                var remainingPassthrough = new Dictionary<string, int>(StringComparer.Ordinal);
-                foreach (var a in passthroughArgs)
-                {
-                    remainingPassthrough[a] = remainingPassthrough.GetValueOrDefault(a) + 1;
-                }
-
-                // Walk UnmatchedTokens in order (pre-dash tokens appear first). For each token,
-                // consume one slot from the passthrough budget; anything left over is a bad token.
-                var badTokens = new List<string>();
-                foreach (var t in parseResult.UnmatchedTokens)
-                {
-                    if (remainingPassthrough.TryGetValue(t, out var count) && count > 0)
-                    {
-                        remainingPassthrough[t] = count - 1;
-                    }
-                    else
-                    {
-                        badTokens.Add(t);
-                    }
-                }
-
-                if (badTokens.Count > 0)
-                {
-                    foreach (var bad in badTokens)
-                    {
-                        logger.LogError("{UISymbol} Unrecognized option or argument: '{Token}'. Check the option name and try again.", UiSymbols.Error, bad);
-                    }
-                    return 1;
-                }
+                return 1;
             }
 
             // Merge '--args' value with any tokens collected after '--'.
-            if (passthroughArgs.Count > 0)
+            var passthroughStr = WindowsCommandLine.JoinArguments(passthroughArgs);
+            if (passthroughStr != null)
             {
-                var passthroughStr = string.Join(" ", passthroughArgs.Select(EscapeWindowsArg));
                 appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
             }
 
@@ -602,72 +554,6 @@ internal partial class RunCommand : Command, IShortDescription
                 logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}': {Error}", UiSymbols.Error, alias, ex.Message);
                 return 1;
             }
-        }
-        /// <summary>
-        /// Encodes a single argument token using the Windows CommandLineToArgvW-compatible
-        /// quoting rules so that the launched application receives exactly the original value.
-        /// </summary>
-        /// <remarks>
-        /// The algorithm follows the escaping rules documented at
-        /// https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-commandlinetoargvw:
-        /// <list type="bullet">
-        /// <item>Backslashes are literal unless they precede a double-quote.</item>
-        /// <item>Before a double-quote, each backslash must be doubled, and the quote escaped with \.</item>
-        /// <item>At the end of a quoted string, trailing backslashes must be doubled.</item>
-        /// </list>
-        /// </remarks>
-        private static string EscapeWindowsArg(string argument)
-        {
-            if (argument.Length == 0)
-            {
-                return "\"\"";
-            }
-
-            // If the value contains no whitespace or double-quotes it does not need quoting.
-            var needsQuotes = argument.Any(c => char.IsWhiteSpace(c) || c == '"');
-            if (!needsQuotes)
-            {
-                return argument;
-            }
-
-            var sb = new StringBuilder();
-            sb.Append('"');
-
-            var backslashes = 0;
-            foreach (var c in argument)
-            {
-                if (c == '\\')
-                {
-                    backslashes++;
-                    continue;
-                }
-
-                if (c == '"')
-                {
-                    // Each preceding backslash must be doubled, plus one extra to escape the quote.
-                    sb.Append('\\', (backslashes * 2) + 1);
-                    sb.Append('"');
-                    backslashes = 0;
-                    continue;
-                }
-
-                if (backslashes > 0)
-                {
-                    sb.Append('\\', backslashes);
-                    backslashes = 0;
-                }
-
-                sb.Append(c);
-            }
-
-            // Trailing backslashes inside the closing quote must be doubled.
-            if (backslashes > 0)
-            {
-                sb.Append('\\', backslashes * 2);
-            }
-
-            sb.Append('"');
-            return sb.ToString();
         }
     }
 }
