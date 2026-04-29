@@ -49,7 +49,7 @@ internal static class ProgressDisplay
             return false;
         }
 
-        if (Console.IsOutputRedirected || Console.IsErrorRedirected)
+        if (Console.IsOutputRedirected)
         {
             return false;
         }
