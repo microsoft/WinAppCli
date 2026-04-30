@@ -16,6 +16,10 @@ parameters:
     displayName: CLI release tag to bundle in VS Code extension (empty = latest stable)
     type: string
     default: ''
+  - name: SkipPublish
+    displayName: Skip publishing to VS Code Marketplace
+    type: boolean
+    default: true
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
@@ -125,6 +129,7 @@ extends:
     - stage: Release_VSC
       displayName: Publish VS Code Extension
       dependsOn: Build
+      condition: and(succeeded(), eq('${{ parameters.SkipPublish }}', 'false'))
       variables:
       - group: vsceMarketplaceIdentity
       jobs:
