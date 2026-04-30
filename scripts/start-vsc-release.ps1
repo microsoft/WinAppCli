@@ -1,13 +1,13 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Automate the release process for Windows App Development CLI
+    Automate the release process for the WinApp VS Code Extension
 .DESCRIPTION
-    This script automates the release workflow:
+    This script automates the VS Code extension release workflow:
     1. Verifies you are on the main branch with a clean working tree and latest changes
-    2. Reads and confirms the version from version.json
-    3. Creates and pushes a rel/v{version} branch to origin (triggers the release pipeline)
-    4. Returns to main, bumps the patch version in version.json
+    2. Reads and optionally overrides the extension version from src/winapp-VSC/package.json
+    3. Creates and pushes a vsc-rel/v{version} branch to origin (triggers the VSC release pipeline)
+    4. Returns to main, bumps the patch version in src/winapp-VSC/package.json
     5. Creates a PR to merge the version bump back into main
 
     Prerequisites:
@@ -18,22 +18,16 @@
 .PARAMETER DryRun
     Show what would happen without making any changes (no branches created, no pushes, no PRs)
 .PARAMETER Version
-    Override the release version instead of reading from version.json. The override
-    must be Major.Minor.Patch, must not match an existing rel/v* branch on origin,
-    and must be strictly higher than every previously released version. When this
-    parameter is used, locally modified version.json and scripts/start-release.ps1
-    are tolerated (version.json is restored from HEAD; the in-flight script edits
-    stay on main only and are not committed to the release or bump branches), so
-    you do not have to land a version-bump PR (or a script tweak) before cutting
-    the release.
+    Override the VS Code extension version instead of reading from package.json.
+    Must be Major.Minor.Patch format.
 .EXAMPLE
-    .\scripts\start-release.ps1
+    .\scripts\start-vsc-release.ps1
 .EXAMPLE
-    .\scripts\start-release.ps1 -SkipConfirmation
+    .\scripts\start-vsc-release.ps1 -SkipConfirmation
 .EXAMPLE
-    .\scripts\start-release.ps1 -DryRun
+    .\scripts\start-vsc-release.ps1 -DryRun
 .EXAMPLE
-    .\scripts\start-release.ps1 -Version 0.3.0
+    .\scripts\start-vsc-release.ps1 -Version 0.2.0
 #>
 
 param(
@@ -44,7 +38,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
-$VersionFilePath = Join-Path $ProjectRoot "version.json"
+$VscPackageJsonPath = Join-Path $ProjectRoot "src\winapp-VSC\package.json"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -96,7 +90,7 @@ Push-Location $ProjectRoot
 try {
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Magenta
-    Write-Host "║     Windows App Development CLI - Release    ║" -ForegroundColor Magenta
+    Write-Host "║   WinApp VS Code Extension - Release         ║" -ForegroundColor Magenta
     Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Magenta
 
     if ($DryRun) {
@@ -117,41 +111,8 @@ try {
     Write-Step "Checking working tree..."
     $status = git status --porcelain
     if ($status) {
-        # When the caller supplies an explicit -Version, allow a small allowlist
-        # of files to be dirty so you don't have to land a version-bump PR (or a
-        # tweak to this script) just to cut a release. version.json is restored
-        # from HEAD; the release script itself is left as-is so the in-flight
-        # edits keep applying for the rest of this run.
-        $allowDirtyWithOverride = @('version.json', 'scripts/start-release.ps1')
-        $dirtyLines = @($status -split "`n" | Where-Object { $_.Trim() })
-
-        $disallowed = @()
-        $needsRestore = $false
-        foreach ($line in $dirtyLines) {
-            if ($line -notmatch '^\s*[MARCD]+\s+(.+?)\s*$') {
-                $disallowed += $line
-                continue
-            }
-            $path = $matches[1].Trim() -replace '\\', '/'
-            if (-not $Version -or $allowDirtyWithOverride -notcontains $path) {
-                $disallowed += $line
-            } elseif ($path -eq 'version.json') {
-                $needsRestore = $true
-            }
-        }
-
-        if ($disallowed.Count -gt 0) {
-            Write-Error "Working tree is not clean. Please commit or stash your changes first.`n$($disallowed -join "`n")"
-            exit 1
-        }
-
-        if ($needsRestore) {
-            Write-Warn "version.json has local changes; restoring from HEAD because -Version was provided"
-            Invoke-GitOrDryRun -Description "Restore version.json" -Arguments @("checkout", "--", "version.json")
-        }
-        if ($Version -and ($dirtyLines | Where-Object { $_ -match 'scripts/start-release\.ps1' })) {
-            Write-Warn "scripts/start-release.ps1 has local changes; allowed because -Version was provided (will not be committed to the release branch)"
-        }
+        Write-Error "Working tree is not clean. Please commit or stash your changes first.`n$status"
+        exit 1
     }
     Write-Ok "Working tree is clean"
 
@@ -160,48 +121,45 @@ try {
     Invoke-GitOrDryRun -Description "Fetch and pull latest" -Arguments @("pull", "--ff-only", "origin", "main")
     Write-Ok "Up to date with origin/main"
 
-    # 4. Determine the release version (override or version.json)
+    # 4. Determine the release version
     if ($Version) {
-        Write-Step "Using release version override: $Version"
+        Write-Step "Using extension version override: $Version"
         $releaseVersion = $Version.Trim()
     } else {
-        Write-Step "Reading version from version.json..."
-        if (-not (Test-Path $VersionFilePath)) {
-            Write-Error "version.json not found at: $VersionFilePath"
+        Write-Step "Reading version from src/winapp-VSC/package.json..."
+        if (-not (Test-Path $VscPackageJsonPath)) {
+            Write-Error "package.json not found at: $VscPackageJsonPath"
             exit 1
         }
 
-        $versionJson = Get-Content $VersionFilePath -Raw | ConvertFrom-Json
-        $releaseVersion = $versionJson.version
+        $packageJson = Get-Content $VscPackageJsonPath -Raw | ConvertFrom-Json
+        $releaseVersion = $packageJson.version
         if (-not $releaseVersion) {
-            Write-Error "Could not read 'version' property from version.json"
+            Write-Error "Could not read 'version' property from package.json"
             exit 1
         }
     }
-    Write-Ok "Release version: $releaseVersion"
+    Write-Ok "Extension version: $releaseVersion"
 
-    Confirm-Step "Is '$releaseVersion' the correct version to release?"
-
-    # Parse version components
+    # Validate version format
     if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') {
         Write-Error "Version '$releaseVersion' is not in the expected Major.Minor.Patch format"
         exit 1
     }
+
     $versionParts = $releaseVersion -split '\.'
     $major = [int]$versionParts[0]
     $minor = [int]$versionParts[1]
     $patch = [int]$versionParts[2]
 
-    $releaseBranch = "rel/v$releaseVersion"
+    $releaseBranch = "vsc-rel/v$releaseVersion"
     $nextPatch = $patch + 1
     $nextVersion = "$major.$minor.$nextPatch"
-    $bumpBranch = "bump/v$nextVersion"
+    $bumpBranch = "bump/vsc-v$nextVersion"
 
-    # 5. Check that the release branch doesn't already exist, and (when an
-    #    override is supplied) that the version is strictly higher than every
-    #    previously released rel/v* branch.
+    # 5. Check that the release branch doesn't already exist
     Write-Step "Checking for existing release branch..."
-    $remoteBranches = git ls-remote --heads origin "rel/v*" 2>$null
+    $remoteBranches = git ls-remote --heads origin "vsc-rel/v*" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to list remote release branches from origin"
         exit 1
@@ -209,7 +167,7 @@ try {
 
     $releasedVersions = @()
     foreach ($line in ($remoteBranches -split "`n")) {
-        if ($line -match 'refs/heads/rel/v(.+)$') {
+        if ($line -match 'refs/heads/vsc-rel/v(.+)$') {
             $releasedVersions += $matches[1].Trim()
         }
     }
@@ -220,33 +178,12 @@ try {
     }
     Write-Ok "Branch '$releaseBranch' does not exist yet — good to go"
 
-    if ($Version) {
-        Write-Step "Validating override version is higher than all released versions..."
-        $newVer = [version]$releaseVersion
-        $highestExisting = $null
-        $highestVer = $null
-        foreach ($v in $releasedVersions) {
-            # Strip any prerelease suffix (e.g. 0.1.0-rc1) for comparison purposes
-            $core = ($v -split '-', 2)[0]
-            if ($core -notmatch '^\d+\.\d+\.\d+$') { continue }
-            $ver = [version]$core
-            if ($null -eq $highestVer -or $ver -gt $highestVer) {
-                $highestVer = $ver
-                $highestExisting = $v
-            }
-        }
-
-        if ($highestVer -and $newVer -le $highestVer) {
-            Write-Error "Override version '$releaseVersion' is not higher than the latest released version '$highestExisting'."
-            exit 1
-        }
-        Write-Ok "Override version '$releaseVersion' is higher than latest released ('$highestExisting')"
-    }
+    Confirm-Step "Is '$releaseVersion' the correct version to release?"
 
     # 6. Confirm with user
     Write-Host ""
     Write-Host "  ┌─────────────────────────────────────────────┐" -ForegroundColor White
-    Write-Host "  │  Release Plan                               │" -ForegroundColor White
+    Write-Host "  │  VSC Extension Release Plan                  │" -ForegroundColor White
     Write-Host "  │                                             │" -ForegroundColor White
     Write-Host "  │  Release version : $releaseVersion$((' ' * (25 - $releaseVersion.Length)))│" -ForegroundColor White
     Write-Host "  │  Release branch  : $releaseBranch$((' ' * (25 - $releaseBranch.Length)))│" -ForegroundColor White
@@ -254,8 +191,8 @@ try {
     Write-Host "  │  Bump branch     : $bumpBranch$((' ' * (25 - $bumpBranch.Length)))│" -ForegroundColor White
     Write-Host "  │                                             │" -ForegroundColor White
     Write-Host "  │  Steps:                                     │" -ForegroundColor White
-    Write-Host "  │  1. Create & push $releaseBranch$((' ' * (18 - $releaseBranch.Length)))│" -ForegroundColor White
-    Write-Host "  │  2. Bump version.json to $nextVersion$((' ' * (12 - $nextVersion.Length)))│" -ForegroundColor White
+    Write-Host "  │  1. Create & push '$releaseBranch'$((' ' * (10 - $releaseBranch.Length)))│" -ForegroundColor White
+    Write-Host "  │  2. Bump version to $nextVersion on main$((' ' * (9 - $nextVersion.Length)))│" -ForegroundColor White
     Write-Host "  │  3. Create PR to merge bump into main       │" -ForegroundColor White
     Write-Host "  └─────────────────────────────────────────────┘" -ForegroundColor White
 
@@ -267,91 +204,50 @@ try {
     Invoke-GitOrDryRun -Description "Create release branch" -Arguments @("checkout", "-b", $releaseBranch)
     Write-Ok "Local branch '$releaseBranch' created"
 
-    # When -Version is supplied, version.json on main is out-of-date relative to
-    # the release we're cutting. Write it on the release branch and commit so
-    # the release pipeline sees the correct version.
+    # If -Version was provided, update the package.json on the release branch
     if ($Version) {
-        Write-Step "Writing override version '$releaseVersion' into version.json on release branch..."
-
-        # If the user is iterating on this script itself, that change traveled
-        # with the checkout. Restore it from HEAD on the release branch so it
-        # doesn't get committed into the release. PowerShell has already parsed
-        # the file, so this doesn't affect the running script.
-        $scriptRel = 'scripts/start-release.ps1'
-        $scriptStillDirty = (git status --porcelain -- $scriptRel) -ne $null -and
-                            (git status --porcelain -- $scriptRel).Trim() -ne ''
-        if ($scriptStillDirty) {
-            Write-Info "Reverting in-flight changes to $scriptRel on release branch (they stay on main only)"
-            Invoke-GitOrDryRun -Description "Restore release script on release branch" -Arguments @("checkout", "--", $scriptRel)
-        }
+        Write-Step "Writing extension version '$releaseVersion' into package.json on release branch..."
 
         if ($DryRun) {
-            Write-Warn "[DRY RUN] Would update version.json to $releaseVersion and commit on $releaseBranch"
+            Write-Warn "[DRY RUN] Would update src/winapp-VSC/package.json version to $releaseVersion and commit on $releaseBranch"
         } else {
-            $newVersionJson = @{ version = $releaseVersion } | ConvertTo-Json
-            Set-Content -Path $VersionFilePath -Value $newVersionJson -NoNewline
-
-            # Regenerate version-dependent files (cli-schema.json, etc.)
-            Write-Info "Running build to regenerate version-dependent files..."
-            $buildScript = Join-Path $PSScriptRoot "build-cli.ps1"
-            & $buildScript -SkipTests -SkipNpm -SkipMsix
-            if ($LASTEXITCODE -ne 0) {
-                throw "Build failed with exit code $LASTEXITCODE"
-            }
-            Write-Ok "Build completed successfully"
+            $vscPackageJson = Get-Content $VscPackageJsonPath -Raw | ConvertFrom-Json
+            $vscCurrentVersion = $vscPackageJson.version
+            $vscPackageJson.version = $releaseVersion
+            $updatedJson = $vscPackageJson | ConvertTo-Json -Depth 100
+            Set-Content -Path $VscPackageJsonPath -Value $updatedJson -NoNewline
+            Write-Info "Updated VS Code extension version: $vscCurrentVersion -> $releaseVersion"
         }
-        Invoke-GitOrDryRun -Description "Stage version override" -Arguments @("add", "--all")
-        Invoke-GitOrDryRun -Description "Commit version override" -Arguments @("commit", "-m", "Set version to $releaseVersion for release")
+        Invoke-GitOrDryRun -Description "Stage version update" -Arguments @("add", $VscPackageJsonPath)
+        Invoke-GitOrDryRun -Description "Commit version update" -Arguments @("commit", "-m", "Set VS Code extension version to $releaseVersion for release")
     }
 
-    Confirm-Step "Push '$releaseBranch' to origin? This will kick off the release pipeline"
+    Confirm-Step "Push '$releaseBranch' to origin? This will kick off the VSC release pipeline"
 
     Invoke-GitOrDryRun -Description "Push release branch" -Arguments @("push", "-u", "origin", $releaseBranch)
     Write-Ok "Release branch '$releaseBranch' pushed to origin"
 
     # ─── Step 2: Go back to main and bump the version ───────────────────────────
 
-    Write-Step "Step 2/3: Bumping version to $nextVersion..."
+    Write-Step "Step 2/3: Bumping extension version to $nextVersion..."
     Invoke-GitOrDryRun -Description "Switch back to main" -Arguments @("checkout", "main")
 
     # Create the bump branch from main
     Invoke-GitOrDryRun -Description "Create bump branch" -Arguments @("checkout", "-b", $bumpBranch)
 
-    # Update version.json
+    # Update package.json
     if ($DryRun) {
-        Write-Warn "[DRY RUN] Would update version.json: $releaseVersion -> $nextVersion"
+        Write-Warn "[DRY RUN] Would update src/winapp-VSC/package.json: $releaseVersion -> $nextVersion"
     } else {
-        $newVersionJson = @{ version = $nextVersion } | ConvertTo-Json
-        Set-Content -Path $VersionFilePath -Value $newVersionJson -NoNewline
-        Write-Info "Updated version.json: $releaseVersion -> $nextVersion"
+        $vscPackageJson = Get-Content $VscPackageJsonPath -Raw | ConvertFrom-Json
+        $vscPackageJson.version = $nextVersion
+        $updatedJson = $vscPackageJson | ConvertTo-Json -Depth 100
+        Set-Content -Path $VscPackageJsonPath -Value $updatedJson -NoNewline
+        Write-Info "Updated package.json: $releaseVersion -> $nextVersion"
     }
 
-    # Run a full build to regenerate LLM docs and any other version-dependent files
-    Write-Info "Running full build to regenerate version-dependent files..."
-    $buildScript = Join-Path $PSScriptRoot "build-cli.ps1"
-    if ($DryRun) {
-        Write-Warn "[DRY RUN] Would run: $buildScript -SkipTests"
-    } else {
-        & $buildScript -SkipTests -SkipNpm -SkipMsix
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed with exit code $LASTEXITCODE"
-        }
-        Write-Ok "Build completed successfully"
-    }
-
-    # Stage all changes (version.json + regenerated docs/artifacts)
-    if ($Version) {
-        # Don't carry in-flight edits to this script onto the bump branch either.
-        $scriptRel = 'scripts/start-release.ps1'
-        $scriptStillDirty = (git status --porcelain -- $scriptRel) -ne $null -and
-                            (git status --porcelain -- $scriptRel).Trim() -ne ''
-        if ($scriptStillDirty) {
-            Write-Info "Reverting in-flight changes to $scriptRel on bump branch"
-            Invoke-GitOrDryRun -Description "Restore release script on bump branch" -Arguments @("checkout", "--", $scriptRel)
-        }
-    }
-    Invoke-GitOrDryRun -Description "Stage all changes" -Arguments @("add", "--all")
-    Invoke-GitOrDryRun -Description "Commit version bump" -Arguments @("commit", "-m", "Bump version to $nextVersion for development")
+    Invoke-GitOrDryRun -Description "Stage version bump" -Arguments @("add", $VscPackageJsonPath)
+    Invoke-GitOrDryRun -Description "Commit version bump" -Arguments @("commit", "-m", "Bump VS Code extension version to $nextVersion for development")
 
     Confirm-Step "Push version bump branch '$bumpBranch' to origin and create PR?"
 
@@ -362,11 +258,9 @@ try {
 
     Write-Step "Step 3/3: Creating pull request..."
 
-    # Build the PR details
-    $prTitle = "Bump version to $nextVersion for development"
-    $prBody  = "Auto-generated version bump after releasing v$releaseVersion.`n`nThis PR bumps the patch version in ``version.json`` from ``$releaseVersion`` to ``$nextVersion`` so that prerelease builds pick up the new version number."
+    $prTitle = "Bump VS Code extension version to $nextVersion for development"
+    $prBody  = "Auto-generated version bump after releasing VS Code extension v$releaseVersion.`n`nThis PR bumps the patch version in ``src/winapp-VSC/package.json`` from ``$releaseVersion`` to ``$nextVersion`` so that prerelease builds pick up the new version number."
 
-    # Check that gh CLI is available
     $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
     if (-not $ghAvailable -and -not $DryRun) {
         $encodedTitle = [System.Uri]::EscapeDataString($prTitle)
@@ -389,19 +283,18 @@ try {
 
     # ─── Done ───────────────────────────────────────────────────────────────────
 
-    # Return to main so you're in a good state
     Invoke-GitOrDryRun -Description "Switch back to main" -Arguments @("checkout", "main")
 
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║  Release started successfully!               ║" -ForegroundColor Green
+    Write-Host "║  VSC Extension release started!              ║" -ForegroundColor Green
     Write-Host "╠══════════════════════════════════════════════╣" -ForegroundColor Green
     Write-Host "║                                              ║" -ForegroundColor Green
-    Write-Host "║  • Release branch '$releaseBranch' pushed$((' ' * (14 - $releaseBranch.Length)))║" -ForegroundColor Green
+    Write-Host "║  • Release branch '$releaseBranch' pushed$((' ' * (10 - $releaseBranch.Length)))║" -ForegroundColor Green
     Write-Host "║  • Version bump PR created for $nextVersion$((' ' * (10 - $nextVersion.Length)))║" -ForegroundColor Green
     Write-Host "║                                              ║" -ForegroundColor Green
     Write-Host "║  Next steps:                                 ║" -ForegroundColor Green
-    Write-Host "║  1. Monitor the release pipeline              ║" -ForegroundColor Green
+    Write-Host "║  1. Monitor the VSC release pipeline         ║" -ForegroundColor Green
     Write-Host "║  2. Review & merge the version bump PR       ║" -ForegroundColor Green
     Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
@@ -418,9 +311,7 @@ try {
     }
     if ($bumpBranch) {
         Write-Warn "  - Delete local bump branch:    git branch -D $bumpBranch"
-        Write-Warn "  - Restore version.json:        git checkout -- version.json"
     }
-
     exit 1
 } finally {
     Pop-Location

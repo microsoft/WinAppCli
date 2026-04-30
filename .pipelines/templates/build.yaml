@@ -1,6 +1,5 @@
 parameters:
   stable: 'false'
-  skipVsc: false
   DoEsrp: false
   signingIdentity:
     serviceName: ''
@@ -16,7 +15,7 @@ steps:
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\build-cli.ps1
-    arguments: "-Stable:$${{ parameters.stable }} -SkipMsix ${{ if eq(parameters.skipVsc, true) }}-SkipVsc${{ endif }}"
+    arguments: "-Stable:$${{ parameters.stable }} -SkipMsix"
 - ${{ if eq(parameters['DoEsrp'], 'true') }}:
   - task: EsrpCodeSigning@5
     displayName: Code Sign ESRP - CLI
@@ -183,15 +182,14 @@ steps:
   inputs:
     path: '$(Build.ArtifactStagingDirectory)/nuget-packages'
     artifactName: nuget-packages
-- ${{ if ne(parameters.skipVsc, true) }}:
-  - task: CopyFiles@2
-    displayName: Copy Artifacts - VS Code Extension
-    inputs:
-      sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/'
-      contents: '*.vsix'
-      targetFolder: '$(Build.ArtifactStagingDirectory)/vscode-extension'
-  - task: 1ES.PublishPipelineArtifact@1
-    displayName: Upload Artifact - VS Code Extension
-    inputs:
-      path: '$(Build.ArtifactStagingDirectory)/vscode-extension'
-      artifactName: vscode-extension
+- task: CopyFiles@2
+  displayName: Copy Artifacts - VS Code Extension
+  inputs:
+    sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/'
+    contents: '*.vsix'
+    targetFolder: '$(Build.ArtifactStagingDirectory)/vscode-extension'
+- task: 1ES.PublishPipelineArtifact@1
+  displayName: Upload Artifact - VS Code Extension
+  inputs:
+    path: '$(Build.ArtifactStagingDirectory)/vscode-extension'
+    artifactName: vscode-extension

@@ -75,7 +75,6 @@ extends:
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'true'
-              skipVsc: true
               DoEsrp: ${{ parameters.DoEsrp }}
               signingIdentity: ${{ parameters.signingIdentity }}
           - task: PowerShell@2
