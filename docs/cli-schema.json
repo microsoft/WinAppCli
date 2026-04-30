@@ -1345,7 +1345,7 @@
         "app-args": {
           "description": "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
           "order": 1,
-          "hidden": false,
+          "hidden": true,
           "valueType": "System.String[]",
           "hasDefaultValue": false,
           "arity": {

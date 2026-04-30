@@ -49,7 +49,12 @@ internal partial class RunCommand : Command, IShortDescription
         PassthroughArgument = new Argument<string[]>("app-args")
         {
             Description = "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
-            Arity = ArgumentArity.ZeroOrMore
+            Arity = ArgumentArity.ZeroOrMore,
+            // Hidden from help/schema: this argument exists only to absorb tokens after '--'
+            // so System.CommandLine doesn't reject them. Exposing it would mislead users and
+            // schema consumers into thinking `winapp run <input-folder> [<app-args>...]` is
+            // a valid direct invocation; in reality, app args MUST be preceded by '--'.
+            Hidden = true,
         };
 
         ManifestOption = new Option<FileInfo>("--manifest")
@@ -160,6 +165,18 @@ internal partial class RunCommand : Command, IShortDescription
                 foreach (var bad in invalidPreDashTokens)
                 {
                     logger.LogError("{UISymbol} Unrecognized argument: '{Arg}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).", UiSymbols.Error, bad);
+                }
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                if (isJson)
+                {
+                    var firstBad = invalidPreDashTokens[0];
+                    var jsonError = invalidPreDashTokens.Count == 1
+                        ? $"Unrecognized argument: '{firstBad}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value)."
+                        : $"Unrecognized arguments: {string.Join(", ", invalidPreDashTokens.Select(t => $"'{t}'"))}. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).";
+                    PrintJson(aumid: null, processId: null, errorMessage: jsonError);
                 }
                 return 1;
             }
@@ -481,6 +498,31 @@ internal partial class RunCommand : Command, IShortDescription
         }
 
         /// <summary>
+        /// Builds the <see cref="ProcessStartInfo"/> used to launch an app via its execution
+        /// alias. Extracted so tests can verify that passthrough args (from <c>--args</c> /
+        /// <c>--</c>) are forwarded into <see cref="ProcessStartInfo.Arguments"/> without
+        /// having to spawn a real process.
+        /// </summary>
+        internal static ProcessStartInfo BuildAliasProcessStartInfo(string alias, string? appArgs)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = alias,
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+            };
+
+            if (!string.IsNullOrEmpty(appArgs))
+            {
+                psi.Arguments = appArgs;
+            }
+
+            return psi;
+        }
+
+        /// <summary>
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
@@ -512,21 +554,9 @@ internal partial class RunCommand : Command, IShortDescription
 
             var alias = aliases[0]; // Use the first alias
 
-
-            // Launch the execution alias process with inherited stdio
-            var psi = new ProcessStartInfo
-            {
-                FileName = alias,
-                UseShellExecute = false,
-                RedirectStandardInput = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-            };
-
-            if (!string.IsNullOrEmpty(appArgs))
-            {
-                psi.Arguments = appArgs;
-            }
+            // Build the ProcessStartInfo via a static helper so the argument-forwarding
+            // contract is unit-testable without spawning a real process.
+            var psi = BuildAliasProcessStartInfo(alias, appArgs);
 
             try
             {

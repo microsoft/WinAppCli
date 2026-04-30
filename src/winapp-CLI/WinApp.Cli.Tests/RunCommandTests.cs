@@ -1055,5 +1055,80 @@ public class RunCommandTests : BaseCommandTests
             "A literal -- after the passthrough separator should be forwarded to the app");
     }
 
+    [TestMethod]
+    public async Task RunCommand_BadTokenBeforeDoubleDash_WithJson_EmitsJsonErrorBody()
+    {
+        // Regression for: in --json mode the logger is suppressed, so a bad pre-dash token
+        // would otherwise produce only exit code 1 with empty stdout. The handler must emit
+        // a structured JSON error body so machine-readable callers can surface a useful message.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--json", "--badtoken", "--", "--cooltoken"]);
+
+        Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1 even in --json mode");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched");
+
+        // The handler must have written a JSON document (with an Error field that names the
+        // offending token) to stdout. We avoid full JsonDocument.Parse here because the test
+        // console wraps long string values at width boundaries; substring assertions are
+        // sufficient to demonstrate the error body was produced and references the bad token.
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, "\"Error\":",
+            "JSON output must contain an Error field in --json mode (got: " + output + ")");
+        StringAssert.Contains(output, "--badtoken",
+            "Error message should name the offending token");
+        StringAssert.Contains(output, "{",
+            "Output should contain a JSON object opening brace");
+        StringAssert.Contains(output, "}",
+            "Output should contain a JSON object closing brace");
+    }
+
+    // --- BuildAliasProcessStartInfo: passthrough forwarded into execution-alias ProcessStartInfo ---
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithAppArgs_SetsArgumentsOnProcessStartInfo()
+    {
+        // The execution-alias launch path uses a separate Process.Start, so this test
+        // verifies that passthrough args (after merge with --args) are forwarded into
+        // ProcessStartInfo.Arguments verbatim.
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", "--flag value");
+
+        Assert.AreEqual("myalias.exe", psi.FileName);
+        Assert.AreEqual("--flag value", psi.Arguments);
+        Assert.IsFalse(psi.UseShellExecute, "UseShellExecute must be false so stdio inherits");
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithQuotedAppArgs_PreservesQuoting()
+    {
+        // The merged appArgs string for the alias path has already been escaped via
+        // WindowsCommandLine.JoinArguments. BuildAliasProcessStartInfo must pass the
+        // escaped string through unchanged so CommandLineToArgvW recovers original tokens.
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", "--title \"hello world\"");
+
+        Assert.AreEqual("--title \"hello world\"", psi.Arguments);
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithNullAppArgs_LeavesArgumentsEmpty()
+    {
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", null);
+
+        Assert.AreEqual("myalias.exe", psi.FileName);
+        Assert.AreEqual(string.Empty, psi.Arguments,
+            "Null appArgs must NOT set Arguments (default ProcessStartInfo.Arguments is empty string)");
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithEmptyAppArgs_LeavesArgumentsEmpty()
+    {
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", string.Empty);
+
+        Assert.AreEqual(string.Empty, psi.Arguments,
+            "Empty appArgs must NOT set Arguments");
+    }
+
     #endregion
 }
