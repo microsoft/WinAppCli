@@ -34,6 +34,10 @@ parameters:
     displayName: Skip VS Code Marketplace publish (SkipVscRelease)
     type: boolean
     default: true
+  - name: CliReleaseTag
+    displayName: CLI release tag to bundle in VS Code extension (empty = latest stable)
+    type: string
+    default: ''
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
@@ -79,8 +83,90 @@ extends:
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'true'
+              skipVsc: true
               DoEsrp: ${{ parameters.DoEsrp }}
               signingIdentity: ${{ parameters.signingIdentity }}
+          - task: PowerShell@2
+            displayName: Download public CLI release for VS Code extension
+            inputs:
+              pwsh: true
+              targetType: 'inline'
+              script: |
+                $cliReleaseTag = "${{ parameters.CliReleaseTag }}"
+                $repo = "microsoft/winappcli"
+
+                if ([string]::IsNullOrWhiteSpace($cliReleaseTag)) {
+                    Write-Host "No CLI release tag specified, finding latest stable release..."
+                    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -Headers @{ "User-Agent" = "AzurePipelines" }
+                    $stableRelease = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
+                    if (-not $stableRelease) {
+                        Write-Error "No stable release found for $repo"
+                        exit 1
+                    }
+                    $cliReleaseTag = $stableRelease.tag_name
+                    Write-Host "Found latest stable release: $cliReleaseTag"
+                } else {
+                    Write-Host "Using specified CLI release tag: $cliReleaseTag"
+                }
+
+                Write-Host "##vso[task.setvariable variable=CliReleaseTag]$cliReleaseTag"
+
+                # Download x64 and arm64 CLI zips
+                $downloadBase = "https://github.com/$repo/releases/download/$cliReleaseTag"
+                $cliDir = "$(System.DefaultWorkingDirectory)/artifacts/public-cli"
+
+                New-Item -ItemType Directory -Path "$cliDir/win-x64" -Force | Out-Null
+                New-Item -ItemType Directory -Path "$cliDir/win-arm64" -Force | Out-Null
+
+                $x64Url = "$downloadBase/winappcli-x64.zip"
+                $arm64Url = "$downloadBase/winappcli-arm64.zip"
+
+                Write-Host "Downloading x64 CLI from: $x64Url"
+                Invoke-WebRequest -Uri $x64Url -OutFile "$cliDir/x64.zip"
+                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/x64.zip")) {
+                    Write-Error "Failed to download x64 CLI from $x64Url"
+                    exit 1
+                }
+
+                Write-Host "Downloading arm64 CLI from: $arm64Url"
+                Invoke-WebRequest -Uri $arm64Url -OutFile "$cliDir/arm64.zip"
+                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/arm64.zip")) {
+                    Write-Error "Failed to download arm64 CLI from $arm64Url"
+                    exit 1
+                }
+
+                # Extract
+                Expand-Archive -Path "$cliDir/x64.zip" -DestinationPath "$cliDir/win-x64" -Force
+                Expand-Archive -Path "$cliDir/arm64.zip" -DestinationPath "$cliDir/win-arm64" -Force
+
+                # Validate
+                if (-not (Test-Path "$cliDir/win-x64/winapp.exe")) {
+                    Write-Error "winapp.exe not found in extracted x64 archive"
+                    exit 1
+                }
+                if (-not (Test-Path "$cliDir/win-arm64/winapp.exe")) {
+                    Write-Error "winapp.exe not found in extracted arm64 archive"
+                    exit 1
+                }
+
+                Write-Host "CLI binaries ($cliReleaseTag) downloaded and validated successfully"
+          - task: PowerShell@2
+            displayName: Package VS Code extension with public CLI
+            inputs:
+              pwsh: true
+              filePath: $(System.DefaultWorkingDirectory)\scripts\package-vsc.ps1
+              arguments: "-Stable -CliBinariesPath '$(System.DefaultWorkingDirectory)/artifacts/public-cli'"
+          - task: CopyFiles@2
+            displayName: Copy Artifacts - VS Code Extension
+            inputs:
+              sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/'
+              contents: '*.vsix'
+              targetFolder: '$(Build.ArtifactStagingDirectory)/vscode-extension'
+          - task: 1ES.PublishPipelineArtifact@1
+            displayName: Upload Artifact - VS Code Extension
+            inputs:
+              path: '$(Build.ArtifactStagingDirectory)/vscode-extension'
+              artifactName: vscode-extension
           - task: PowerShell@2
             name: SetMeta
             displayName: Export version
