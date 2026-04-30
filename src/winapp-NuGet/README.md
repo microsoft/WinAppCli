@@ -15,17 +15,32 @@ This package provides MSBuild targets that seamlessly integrate with the .NET CL
 
 ## Usage
 
-1. Add this package to your WinUI project:
+### Direct consumption (head app)
+
+Add this package to your packaged Windows app project. `PrivateAssets="all"` is recommended so that downstream consumers of your app (if any) don't see this build tooling:
 
 ```xml
 <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.1.10" PrivateAssets="all" />
 ```
 
-2. Run your application:
+Then run your application:
 
 ```bash
 dotnet run
 ```
+
+### Transitive consumption (library author)
+
+If you ship a library that you want to expose this package's behavior to its consumers (e.g. a MAUI library wrapper), reference the package with `PrivateAssets="none"` and `IncludeAssets="build;buildTransitive"`:
+
+```xml
+<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp"
+                  Version="0.1.10"
+                  PrivateAssets="none"
+                  IncludeAssets="build;buildTransitive" />
+```
+
+The package ships its props and targets in both `build/` and `buildTransitive/`, so consumers of your library will pick them up automatically. The targets only activate when the consuming project is a packaged Windows app (has an appxmanifest, OutputType is not `Library`, target platform is `windows`); they are no-ops in unrelated TFMs (e.g. the `net*-android` / `net*-ios` TFMs of a multi-targeted MAUI app), libraries, and test projects.
 
 ## How It Works
 

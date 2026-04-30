@@ -33,7 +33,7 @@ dotnet run
 MSBuild Build Target
     │
     ▼
-_WinAppValidateRunSupport (validates prerequisites, WindowsPackageType != None)
+_WinAppValidateRunSupport (validates prerequisites; gated by _WinAppRunSupportActive)
     │
     ▼
 _WinAppPrepareRunArguments (overrides RunCommand with CLI path)
@@ -93,8 +93,15 @@ samples/
 
 ### Detection Logic
 
-The package detects a packaged app when:
-1. `WindowsPackageType` is **not** set to `None` (absence of the property means packaged)
+The package only activates when **all** of the following are true (gated by the internal `_WinAppRunSupportActive` property):
+
+1. `EnableWinAppRunSupport` is not set to `false` (master opt-out switch).
+2. `WindowsPackageType` is not set to `None` (absence of the property means packaged).
+3. `OutputType` is not `Library` — both `Exe` (packaged console apps via execution alias) and `WinExe` (WinUI apps) are supported.
+4. The target platform identifier is `windows` (derived from `$(TargetPlatformIdentifier)` if set, else from `$(TargetFramework)`). In multi-targeted projects (e.g. MAUI `net*-android;net*-ios;net*-windows10.0.19041.0`), the targets are inert for non-Windows TFMs.
+5. At least one of: `Package.appxmanifest`, `AppxManifest.xml`, or `appxmanifest.xml` exists in the project directory; **or** `WindowsPackageType` is explicitly `MSIX`; **or** a custom `WinAppManifestPath` was set and the file exists.
+
+This gating ensures the package is safe to consume transitively (e.g. when re-exported by a library): unrelated projects (libraries, test projects, console apps without manifests, non-Windows TFMs) see no winapp activity and no impact on `dotnet run`.
 
 ## Build Scripts
 
