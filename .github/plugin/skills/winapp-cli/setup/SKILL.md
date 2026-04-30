@@ -212,6 +212,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `<input-folder>` | Yes | Input folder containing the app to run |
+| `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->

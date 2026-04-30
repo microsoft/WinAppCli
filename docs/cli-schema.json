@@ -1341,6 +1341,16 @@
             "minimum": 1,
             "maximum": 1
           }
+        },
+        "app-args": {
+          "description": "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
+          "order": 1,
+          "hidden": false,
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0
+          }
         }
       },
       "options": {
