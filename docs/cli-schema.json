@@ -1405,6 +1405,21 @@
           "required": false,
           "recursive": false
         },
+        "--executable": {
+          "description": "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder.",
+          "hidden": false,
+          "aliases": [
+            "--exe"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Format output as JSON",
           "hidden": false,
