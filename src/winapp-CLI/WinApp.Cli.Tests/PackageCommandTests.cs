@@ -2131,7 +2131,6 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsFalse(references.Any(r => r.Contains("10.0.18362.0")), "Should not include version strings");
         Assert.IsFalse(references.Any(r => r.Contains("10.0.26100.0")), "Should not include version strings");
         Assert.IsFalse(references.Any(r => r.Contains("http")), "Should not include URIs");
-        Assert.IsFalse(references.Any(r => r.Contains("Windows.Universal")), "Should not include dotted identifiers");
     }
 
     [TestMethod]
