@@ -10,10 +10,11 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 /// <remarks>
 /// JSON consumers address elements via the public <c>selector</c> slug; the synthetic walk-order
-/// <c>id</c>, <c>parentSelector</c>, <c>windowHandle</c>, and <c>depth</c> are implementation
-/// detail that leaks if not scrubbed. This helper also flattens <c>InvokableAncestor</c> down
-/// to a hint (selector/name/type/isInvokable only) so it can never form a reference cycle with
-/// its parent's children — System.Text.Json (without ReferenceHandler) would otherwise throw.
+/// <c>id</c>, <c>parentSelector</c>, and <c>windowHandle</c> are implementation detail that leak
+/// if not scrubbed. This helper also flattens <c>InvokableAncestor</c> down to a non-recursive
+/// hint (<c>type</c>, <c>name</c>, <c>automationId</c>, <c>selector</c>, <c>isInvokable</c>) so
+/// it can never form a reference cycle with its parent's children — System.Text.Json (without
+/// ReferenceHandler) would otherwise throw.
 /// </remarks>
 internal static class UiElementScrubber
 {

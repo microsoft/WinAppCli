@@ -57,7 +57,6 @@ internal class FakeUiAutomationService : IUiAutomationService
         => Task.CompletedTask;
 
     public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
-    public bool FocusedResultSet { get; set; }
 
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
         => Task.FromResult(FocusedResult);

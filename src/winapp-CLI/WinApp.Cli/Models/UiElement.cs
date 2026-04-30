@@ -37,13 +37,18 @@ internal sealed class UiElement
     /// <summary>Scroll capability: "v" (vertical), "h" (horizontal), "vh" (both). Null if not scrollable.</summary>
     public string? ScrollDir { get; set; }
 
-    /// <summary>Depth in the tree (0 = root). Set on flat result lists (search) so consumers can reconstruct hierarchy. Null on nested inspect output where children are nested directly.</summary>
+    /// <summary>Depth in the tree (0 = root). Set on flat result lists from inspect (so the
+    /// command can rebuild a nested tree via the depth-stack); not populated by search /
+    /// wait-for / get-focused, and null on already-nested inspect output.</summary>
     public int? Depth { get; set; }
 
-    /// <summary>Selector of the parent element, when known. Set on flat result lists; null on nested output.</summary>
+    /// <summary>Selector of the parent element. Set during the inspect tree walk; not populated
+    /// by search / wait-for / get-focused, and null on already-nested inspect output.</summary>
     public string? ParentSelector { get; set; }
 
-    /// <summary>Ancestor element types from root to direct parent (e.g. ["Window","Pane","MenuBar"]). Set on flat result lists; null on nested output.</summary>
+    /// <summary>Ancestor element types from root to direct parent (e.g. ["Window","Pane","MenuBar"]).
+    /// Set on <c>inspect --interactive --json</c> output to surface the collapsed non-interactive
+    /// chain above each surviving element; not populated by search / wait-for / get-focused.</summary>
     public string[]? AncestorPath { get; set; }
 
     /// <summary>True when this element supports a directly invokable UIA pattern (Invoke/Toggle/SelectionItem/ExpandCollapse). Used by --interactive filtering.</summary>
