@@ -185,11 +185,10 @@ try
     $CliVersion = "unknown"
     if (Test-Path $CliExe) {
         try {
-            $CliVersion = & $CliExe --version 2>$null
-            if ([string]::IsNullOrWhiteSpace($CliVersion)) {
-                $CliVersion = "unknown"
-            } else {
-                $CliVersion = $CliVersion.Trim()
+            $RawCliVersion = & $CliExe --version 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($RawCliVersion)) {
+                # Strip git hash suffix (e.g., "1.0.0+abc123" -> "1.0.0")
+                $CliVersion = ($RawCliVersion.Trim() -split '\+')[0]
             }
         } catch {
             Write-Warning "Could not determine CLI version from binary"
