@@ -42,6 +42,14 @@
     <_WinAppPromoteManifest Condition="'$(EnableMsixTooling)' == 'true' And !Exists('$(MSBuildProjectDirectory)\Package.appxmanifest') And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">true</_WinAppPromoteManifest>
     
     <!--
+      Capture whether the user explicitly set WinAppManifestPath BEFORE auto-detection runs.
+      Only an explicit user-set value (or a project-dir manifest detected directly by the gate)
+      can satisfy the gate. Auto-detected output-dir paths must NOT count, otherwise a stale
+      bin/AppxManifest.xml from a previous build could activate the gate on rebuild.
+    -->
+    <_WinAppManifestPathUserSet Condition="'$(WinAppManifestPath)' != ''">true</_WinAppManifestPathUserSet>
+
+    <!--
       Path to the AppxManifest.xml file.
       Auto-detected from output directory first, then project directory.
       Checks all supported manifest filenames: Package.appxmanifest (VS convention), AppxManifest.xml (MSBuild output),
@@ -79,14 +87,13 @@
         Windows TFMs must build cleanly with no winapp activity. We prefer
         the explicitly-set $(TargetPlatformIdentifier) when present and
         fall back to deriving it from $(TargetFramework).
-      - A manifest exists in the project directory OR WindowsPackageType
-        is explicitly 'MSIX' OR a custom $(WinAppManifestPath) was set
-        and the file exists: the strongest "this is a packaged app" signal.
-        Output-directory manifest paths are NOT used for gating because
-        they only exist after Build, but the gate must be evaluable at
-        parse time so that targets like _WinAppPrepareRunArguments
-        (BeforeTargets="ComputeRunArguments") are skipped cleanly in
-        non-applicable projects.
+      - A manifest exists in the project directory OR a custom $(WinAppManifestPath)
+        was set EXPLICITLY by the user (captured in $(_WinAppManifestPathUserSet)
+        before auto-detection runs) and points to an existing file. We deliberately
+        do NOT count auto-detected output-directory manifest paths because a stale
+        AppxManifest.xml from a prior build could otherwise activate the gate on
+        a subsequent rebuild. The standalone WindowsPackageType=='MSIX' opt-in is
+        also not enough on its own; downstream targets need an actual manifest file.
     ============================================================================
   -->
   <PropertyGroup>
@@ -110,8 +117,7 @@
           Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')
           Or Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')
           Or Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')
-          Or '$(WindowsPackageType)' == 'MSIX'
-          Or ('$(WinAppManifestPath)' != '' And Exists('$(WinAppManifestPath)'))
+          Or ('$(_WinAppManifestPathUserSet)' == 'true' And Exists('$(WinAppManifestPath)'))
         )">true</_WinAppRunSupportActive>
     <_WinAppRunSupportActive Condition="'$(_WinAppRunSupportActive)' == ''">false</_WinAppRunSupportActive>
   </PropertyGroup>
@@ -339,10 +345,12 @@
     <Message Text="WindowsPackageType: $(WindowsPackageType)" Importance="high" />
     <Message Text="OutputType: $(OutputType)" Importance="high" />
     <Message Text="TargetFramework: $(TargetFramework)" Importance="high" />
-    <Message Text="TargetPlatformIdentifier: $([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))" Importance="high" />
+    <Message Text="TargetPlatformIdentifier (raw): $(TargetPlatformIdentifier)" Importance="high" />
+    <Message Text="_WinAppEffectiveTargetPlatformIdentifier (used by gate): $(_WinAppEffectiveTargetPlatformIdentifier)" Importance="high" />
     <Message Text="WinAppCliPath: $(WinAppCliPath)" Importance="high" />
     <Message Text="WinAppCliArch: $(WinAppCliArch)" Importance="high" />
     <Message Text="WinAppManifestPath: $(WinAppManifestPath)" Importance="high" />
+    <Message Text="_WinAppManifestPathUserSet: $(_WinAppManifestPathUserSet)" Importance="high" />
     <Message Text="WinAppLooseLayoutPath: $(WinAppLooseLayoutPath)" Importance="high" />
     <Message Text="======================================" Importance="high" />
   </Target>

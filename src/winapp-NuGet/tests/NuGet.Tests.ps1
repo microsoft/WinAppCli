@@ -26,7 +26,11 @@ param(
 )
 
 BeforeDiscovery {
-    $script:skip = $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)
+    $hasDotnet = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
+    # These tests are Windows-specific (manifest gating, MSBuild platform identifiers).
+    # On non-Windows hosts (e.g. Linux/macOS CI), skip rather than emit noisy failures.
+    $isWindowsHost = if ($null -ne (Get-Variable -Name 'IsWindows' -ErrorAction SilentlyContinue)) { $IsWindows } else { $true }
+    $script:skip = (-not $hasDotnet) -or (-not $isWindowsHost)
 }
 
 Describe "Microsoft.Windows.SDK.BuildTools.WinApp gating" -Skip:$script:skip {
@@ -42,14 +46,18 @@ Describe "Microsoft.Windows.SDK.BuildTools.WinApp gating" -Skip:$script:skip {
                 [string]$CaseName,
                 [string]$TargetFramework,
                 [string]$OutputType,
-                [bool]$ProjectDirManifest = $false,
+                [string]$ProjectDirManifestName = "",  # 'appxmanifest.xml' | 'Package.appxmanifest' | 'AppxManifest.xml'
+                [bool]$ProjectDirManifest = $false,    # convenience: same as -ProjectDirManifestName 'appxmanifest.xml'
                 [string]$WindowsPackageType = "",
                 [string]$CustomManifestPath = "",
-                [string]$EnableWinAppRunSupport = ""
+                [string]$EnableWinAppRunSupport = "",
+                [string]$TargetPlatformIdentifier = ""
             )
             $dir = Join-Path $script:tempRoot $CaseName
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            if ($ProjectDirManifest) {
+            if ($ProjectDirManifestName) {
+                Set-Content -Path (Join-Path $dir $ProjectDirManifestName) -Value '<x/>'
+            } elseif ($ProjectDirManifest) {
                 Set-Content -Path (Join-Path $dir "appxmanifest.xml") -Value '<x/>'
             }
             if ($CustomManifestPath) {
@@ -63,6 +71,7 @@ Describe "Microsoft.Windows.SDK.BuildTools.WinApp gating" -Skip:$script:skip {
             if ($WindowsPackageType) { $extraProps += "    <WindowsPackageType>$WindowsPackageType</WindowsPackageType>`n" }
             if ($CustomManifestPath) { $extraProps += "    <WinAppManifestPath>`$(MSBuildProjectDirectory)\$CustomManifestPath</WinAppManifestPath>`n" }
             if ($EnableWinAppRunSupport) { $extraProps += "    <EnableWinAppRunSupport>$EnableWinAppRunSupport</EnableWinAppRunSupport>`n" }
+            if ($TargetPlatformIdentifier) { $extraProps += "    <TargetPlatformIdentifier>$TargetPlatformIdentifier</TargetPlatformIdentifier>`n" }
             $csproj = @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -94,8 +103,16 @@ $extraProps  </PropertyGroup>
             Get-GateValue -CaseName 'console-pkg' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'Exe' -ProjectDirManifest $true | Should -Be 'true'
         }
 
-        It "Activates with explicit WindowsPackageType=MSIX even without project-dir manifest" {
-            Get-GateValue -CaseName 'explicit-msix' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'Exe' -WindowsPackageType 'MSIX' | Should -Be 'true'
+        It "Activates with project-dir Package.appxmanifest (VS convention)" {
+            Get-GateValue -CaseName 'package-appxmanifest' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -ProjectDirManifestName 'Package.appxmanifest' | Should -Be 'true'
+        }
+
+        It "Activates with project-dir AppxManifest.xml (MSBuild output convention)" {
+            Get-GateValue -CaseName 'appxmanifest-xml-cap' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -ProjectDirManifestName 'AppxManifest.xml' | Should -Be 'true'
+        }
+
+        It "Activates with explicit TargetPlatformIdentifier=windows on a non-windows TFM (non-SDK-style projects)" {
+            Get-GateValue -CaseName 'explicit-tpi-windows' -TargetFramework 'net8.0' -OutputType 'Exe' -ProjectDirManifest $true -TargetPlatformIdentifier 'windows' | Should -Be 'true'
         }
 
         It "Activates with custom WinAppManifestPath pointing to a manifest in a sub-directory" {
@@ -116,6 +133,13 @@ $extraProps  </PropertyGroup>
             Get-GateValue -CaseName 'console-no-mfst' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'Exe' | Should -Be 'false'
         }
 
+        It "Inactive when WindowsPackageType=MSIX is set but no manifest exists (downstream targets need a real manifest)" {
+            # Regression guard: previously the gate accepted WindowsPackageType=MSIX as a
+            # standalone activation signal, which let downstream targets proceed without a
+            # discoverable manifest and produce hard-to-diagnose failures.
+            Get-GateValue -CaseName 'msix-no-mfst' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'Exe' -WindowsPackageType 'MSIX' | Should -Be 'false'
+        }
+
         It "Inactive when WindowsPackageType=None (explicit opt-out, even with manifest)" {
             Get-GateValue -CaseName 'unpkg' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -ProjectDirManifest $true -WindowsPackageType 'None' | Should -Be 'false'
         }
@@ -130,6 +154,12 @@ $extraProps  </PropertyGroup>
 
         It "Inactive for the iOS TFM of a MAUI-style project" {
             Get-GateValue -CaseName 'maui-ios' -TargetFramework 'net8.0-ios' -OutputType 'Exe' | Should -Be 'false'
+        }
+
+        It "Inactive when explicit TargetPlatformIdentifier=android overrides a windows-style TFM" {
+            # If a non-SDK-style project explicitly sets TargetPlatformIdentifier, the
+            # explicit value must win over what would be derived from the TFM string.
+            Get-GateValue -CaseName 'explicit-tpi-android' -TargetFramework 'net8.0-windows10.0.19041.0' -OutputType 'Exe' -ProjectDirManifest $true -TargetPlatformIdentifier 'android' | Should -Be 'false'
         }
 
         It "Inactive for plain net8.0 (no Windows platform)" {
