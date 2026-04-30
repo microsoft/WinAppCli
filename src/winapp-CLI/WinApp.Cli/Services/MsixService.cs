@@ -147,7 +147,7 @@ internal partial class MsixService(
                 // Try to auto-infer by finding .exe files in the input folder root
                 var exeFiles = inputFolder.Exists
                     ? inputFolder.GetFiles("*.exe", SearchOption.TopDirectoryOnly)
-                        .Where(f => !string.Equals(f.Name, "createdump.exe", StringComparison.OrdinalIgnoreCase))
+                        .Where(f => !IsRuntimeToolExecutable(f.Name))
                         .ToArray()
                     : [];
 
@@ -697,6 +697,16 @@ internal partial class MsixService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true if the given file name belongs to a .NET runtime tool that should be
+    /// excluded when auto-detecting the application executable.
+    /// </summary>
+    internal static bool IsRuntimeToolExecutable(string fileName)
+    {
+        return string.Equals(fileName, "createdump.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, "apphost.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

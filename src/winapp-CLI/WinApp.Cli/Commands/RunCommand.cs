@@ -29,6 +29,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> DetachOption { get; }
     public static Option<bool> CleanOption { get; }
     public static Option<bool> SymbolsOption { get; }
+    public static Option<string?> ExecutableOption { get; }
 
     static RunCommand()
     {
@@ -89,6 +90,12 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
         };
+
+        ExecutableOption = new Option<string?>("--executable")
+        {
+            Description = "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder."
+        };
+        ExecutableOption.Aliases.Add("--exe");
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -104,6 +111,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(DetachOption);
         Options.Add(CleanOption);
         Options.Add(SymbolsOption);
+        Options.Add(ExecutableOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -130,6 +138,7 @@ internal partial class RunCommand : Command, IShortDescription
             var detach = parseResult.GetValue(DetachOption);
             var clean = parseResult.GetValue(CleanOption);
             var useSymbols = parseResult.GetValue(SymbolsOption);
+            var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Validate mutually exclusive options
@@ -259,6 +268,7 @@ internal partial class RunCommand : Command, IShortDescription
                         outputAppXDirectory,
                         taskContext,
                         clean,
+                        executable,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
