@@ -775,6 +775,36 @@ public partial class NugetServiceTests : BaseCommandTests
 
     #endregion
 
+    #region ParseMinimumVersion
+
+    [TestMethod]
+    // Plain versions
+    [DataRow("1.0.0", "1.0.0")]
+    [DataRow("  1.2.3  ", "1.2.3")]
+    [DataRow("1.0.0-preview", "1.0.0-preview")]
+    // Bracketed exact / open ranges
+    [DataRow("[1.0.0]", "1.0.0")]
+    [DataRow("[1.0.0, )", "1.0.0")]
+    [DataRow("[1.0.0,)", "1.0.0")]
+    [DataRow("(1.0.0, 2.0.0)", "1.0.0")]
+    [DataRow("[2.0.300, 3.0.0)", "2.0.300")]
+    // Bracket-stripped form (caller pre-cleaned brackets but left the comma).
+    // Regression guard for the bug where ParseMinimumVersion would short-circuit
+    // on "no brackets present" and return the comma-joined string verbatim,
+    // producing 404s when used as a download version.
+    [DataRow("2.0.300, 3.0.0", "2.0.300")]
+    [DataRow("1.0.0,2.0.0", "1.0.0")]
+    // Empty / whitespace
+    [DataRow("", "")]
+    [DataRow("   ", "")]
+    public void ParseMinimumVersion_ReturnsExpectedLowerBound(string input, string expected)
+    {
+        var actual = NugetService.ParseMinimumVersion(input);
+        Assert.AreEqual(expected, actual, $"ParseMinimumVersion(\"{input}\")");
+    }
+
+    #endregion
+
     #region Helper Methods
 
     /// <summary>
