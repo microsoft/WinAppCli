@@ -188,6 +188,9 @@ extends:
           - input: pipelineArtifact
             artifactName: release-notes
             targetPath: $(Pipeline.Workspace)/release-notes
+          - input: pipelineArtifact
+            artifactName: nuget-packages
+            targetPath: $(Pipeline.Workspace)/nuget-packages
         steps:
           - task: ArchiveFiles@2
             displayName: Archive CLI binaries - x64
@@ -220,6 +223,12 @@ extends:
                   Rename-Item -Path $_.FullName -NewName $newName
                 }
 
+                # Rename NuGet packages to remove the version from the filename
+                Get-ChildItem "$(Pipeline.Workspace)/nuget-packages/" -Filter "*.nupkg" | ForEach-Object {
+                  $newName = $_.Name -replace '\.(\d+\.\d+\.\d+.*)\.nupkg$', '.nupkg'
+                  Rename-Item -Path $_.FullName -NewName $newName
+                }
+
           - ${{ if ne(parameters.GitHubReleaseAlreadyExists, 'true') }}:
             - task: GitHubRelease@1
               displayName: "Create GitHub Release"
@@ -236,6 +245,7 @@ extends:
                   $(Pipeline.Workspace)/winappcli-*.zip
                   $(Pipeline.Workspace)/msix-packages/*.msix
                   $(Pipeline.Workspace)/npm-package/*.tgz
+                  $(Pipeline.Workspace)/nuget-packages/*.nupkg
                 assetUploadMode: 'delete'
                 addChangeLog: false
                 releaseNotesSource: 'filePath'
@@ -286,6 +296,34 @@ extends:
                 serviceendpointurl: 'https://api.esrp.microsoft.com'
                 mainpublisher: 'ESRPRELPACMAN'
                 domaintenantid: ${{ parameters.signingIdentity.tenantId }}
+
+    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+      - stage: Release_NuGet
+        displayName: Publish the NuGet Release
+        dependsOn: Release_GitHub
+        jobs:
+        - job: create_nuget_release
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          displayName: NuGet Release
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: nuget-packages
+              targetPath: $(Pipeline.Workspace)/nuget-packages
+          steps:
+            - task: 1ES.PublishNuget@1
+              displayName: 'NuGet push to nuget.org'
+              inputs:
+                packagesToPush: '$(Pipeline.Workspace)/nuget-packages/*.nupkg'
+                packageParentPath: '$(Pipeline.Workspace)/nuget-packages'
+                nuGetFeedType: external
+                publishFeedCredentials: 'NuGet-WinAppCLI'
 
     - stage: Release_WinGet
       displayName: Create WinGet Release

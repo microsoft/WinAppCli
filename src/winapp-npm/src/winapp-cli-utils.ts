@@ -33,11 +33,10 @@ export function getWinappCliPath(): string {
 
   // Look for the winapp-cli executable in various locations
   const possiblePaths = [
-    // Distribution build (single-file executable)
+    // Distribution build (single-file executable in npm package)
     path.join(__dirname, `../bin/${arch}/winapp.exe`),
-    // Development builds (when building from source)
-    path.join(__dirname, `../../winapp-CLI/WinApp.Cli/bin/Debug/net10.0-windows/${arch}/winapp.exe`),
-    path.join(__dirname, `../../winapp-CLI/WinApp.Cli/bin/Release/net10.0-windows/${arch}/winapp.exe`),
+    // Build artifacts (published by build-cli.ps1, TFM-independent)
+    path.join(__dirname, `../../../artifacts/cli/${arch}/winapp.exe`),
     // Global installation
     'winapp.exe',
   ];

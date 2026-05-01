@@ -6,6 +6,11 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
+public record AddExecutionAliasOptions(
+    FileInfo ManifestFile,
+    string? AliasName,
+    string? AppId);
+
 public record ManifestGenerationInfo(
     string PackageName,
     string PublisherName,
@@ -38,5 +43,9 @@ internal interface IManifestService
         FileInfo imagePath,
         TaskContext taskContext,
         FileInfo? lightImagePath = null,
+        CancellationToken cancellationToken = default);
+
+    public Task<AddExecutionAliasResult> AddExecutionAliasAsync(
+        AddExecutionAliasOptions options,
         CancellationToken cancellationToken = default);
 }

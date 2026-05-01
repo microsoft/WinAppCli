@@ -36,6 +36,13 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Action = new PrintCliSchemaAction()
     };
 
+    internal static readonly Option<string?> CallerOption = new("--caller")
+    {
+        Description = "Identifies the caller (e.g., nuget-package, npm). Used for telemetry.",
+        Recursive = true,
+        Hidden = true
+    };
+
     private class PrintCliSchemaAction : SynchronousCommandLineAction
     {
         public override bool Terminating => true;
@@ -54,13 +61,17 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         ManifestCommand manifestCommand,
         UpdateCommand updateCommand,
         CreateDebugIdentityCommand createDebugIdentityCommand,
+        RunCommand runCommand,
+        UnregisterCommand unregisterCommand,
         GetWinappPathCommand getWinappPathCommand,
         CertCommand certCommand,
         SignCommand signCommand,
         ToolCommand toolCommand,
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
-        CreateExternalCatalogCommand createExternalCatalogCommand) : base("CLI for Windows app development, including package identity, packaging, managing appxmanifest.xml, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        CreateExternalCatalogCommand createExternalCatalogCommand,
+        CompleteCommand completeCommand,
+        UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -68,21 +79,30 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(manifestCommand);
         Subcommands.Add(updateCommand);
         Subcommands.Add(createDebugIdentityCommand);
+        Subcommands.Add(runCommand);
+        Subcommands.Add(unregisterCommand);
         Subcommands.Add(getWinappPathCommand);
         Subcommands.Add(certCommand);
         Subcommands.Add(signCommand);
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
+        Subcommands.Add(uiCommand);
+        Subcommands.Add(completeCommand);
 
         Options.Add(CliSchemaOption);
+        Options.Add(CallerOption);
+
+        // Reject unknown options/arguments so typos and removed flags fail loudly
+        TreatUnmatchedTokensAsErrors = true;
 
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)])
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
+            ("UI Automation", [typeof(UiCommand)])
         );
     }
 }

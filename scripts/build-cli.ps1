@@ -1,21 +1,32 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Build script for Windows App Development CLI, npm package, and MSIX packages
+    Build script for Windows App Development CLI, npm package, NuGet packages, and MSIX packages
 .DESCRIPTION
     This script builds the Windows App Development CLI for both x64 and arm64 architectures,
-    creates the npm package, creates MSIX packages with distribution package, and 
-    places all artifacts in an artifacts folder. Run this script from the root of the project.
+    creates the npm package, NuGet package (BuildTools.WinApp), creates MSIX packages 
+    with distribution package, and places all artifacts in an artifacts folder. 
+    Run this script from the root of the project.
 .PARAMETER SkipTests
     Skip running unit tests
 .PARAMETER FailOnTestFailure
     Exit with error code if tests fail (default: true, stops build on test failures)
 .PARAMETER SkipNpm
     Skip npm package creation
+.PARAMETER SkipVsc
+    Skip VS Code extension packaging
+.PARAMETER SkipNuGet
+    Skip NuGet package creation (BuildTools.WinApp)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
     Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
+.PARAMETER SkipAll
+    Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
+.PARAMETER OnlyDocs
+    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs). Alias: DocsOnly
+.PARAMETER OnlyTests
+    Skip NuGet, MSIX, docs, and npm package creation (builds the CLI and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -25,7 +36,21 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipNpm
 .EXAMPLE
+    .\scripts\build-cli.ps1 -SkipVsc
+.EXAMPLE
+    .\scripts\build-cli.ps1 -SkipNuGet
+.EXAMPLE
     .\scripts\build-cli.ps1 -SkipMsix
+.EXAMPLE
+    .\scripts\build-cli.ps1 -SkipAll
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyDocs
+.EXAMPLE
+    .\scripts\build-cli.ps1 -DocsOnly
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyTests
+.EXAMPLE
+    .\scripts\build-cli.ps1 -TestsOnly
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
 #>
@@ -35,10 +60,43 @@ param(
     [switch]$SkipTests = $false,
     [switch]$FailOnTestFailure = $true,
     [switch]$SkipNpm = $false,
+    [switch]$SkipVsc = $false,
+    [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
+    [switch]$SkipAll = $false,
+    [Alias("DocsOnly")]
+    [switch]$OnlyDocs = $false,
+    [Alias("TestsOnly")]
+    [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
+
+# Validate compound flag usage
+$CompoundFlagsCount = @($SkipAll, $OnlyDocs, $OnlyTests) | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count
+if ($CompoundFlagsCount -gt 1) {
+    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests/-TestsOnly can be specified."
+    exit 1
+}
+
+# Apply compound skip flags
+if ($SkipAll) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+    $SkipDocs = $true
+} elseif ($OnlyDocs) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+} elseif ($OnlyTests) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipDocs = $true
+}
 
 # Ensure we're running from the project root
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
@@ -75,85 +133,7 @@ try
     Write-Host "[SETUP] Creating artifacts directory..." -ForegroundColor Blue
     New-Item -ItemType Directory -Path $ArtifactsPath -Force | Out-Null
 
-    # Step 1: Build CLI solution
-    Write-Host "[BUILD] Building CLI solution..." -ForegroundColor Blue
-    dotnet build $CliSolutionPath -c Release
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to build CLI solution"
-        exit 1
-    }
-
-    # Step 1b: Build Node CLI so E2E tests that invoke node cli.js can run
-    if (-not $SkipNpm) {
-        Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
-        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
-        try {
-            npm ci --ignore-scripts
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "npm ci failed, Node E2E tests will be skipped"
-            } else {
-                npm run generate-commands
-                npm run compile
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warning "Node CLI compile failed, Node E2E tests will be skipped"
-                } else {
-                    Write-Host "[BUILD] Node CLI built successfully" -ForegroundColor Green
-                }
-            }
-        } finally {
-            Pop-Location
-        }
-    }
-
-    # Step 2: Run tests (unless skipped)
-    if (-not $SkipTests) {
-        Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
-        $TestExitCode = $LASTEXITCODE
-    
-        # Copy test results to artifacts BEFORE checking for failure - find all TRX files
-        Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
-        New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
-        $TrxFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.trx" -Recurse -File
-        if ($TrxFiles) {
-            foreach ($trxFile in $TrxFiles) {
-                Copy-Item $trxFile.FullName "$ArtifactsPath\TestResults\" -Force
-                Write-Host "[TEST] Copied: $($trxFile.Name)" -ForegroundColor Gray
-            }
-            Write-Host "[TEST] Test results copied successfully ($($TrxFiles.Count) file(s))" -ForegroundColor Green
-        } else {
-            Write-Warning "No TRX test result files found in $CliSolutionDir"
-        }
-
-        # Copy coverage XML files to artifacts
-        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.cobertura.xml" -Recurse -File
-        if ($CoverageFiles) {
-            foreach ($coverageFile in $CoverageFiles) {
-                Copy-Item $coverageFile.FullName "$ArtifactsPath\TestResults\" -Force
-                Write-Host "[TEST] Copied coverage: $($coverageFile.Name)" -ForegroundColor Gray
-            }
-            Write-Host "[TEST] Coverage results copied successfully ($($CoverageFiles.Count) file(s))" -ForegroundColor Green
-        } else {
-            Write-Warning "No coverage XML files found in $CliSolutionDir"
-        }
-
-        # Now check test results and decide whether to exit
-        if ($TestExitCode -ne 0) {
-            Write-Warning "Tests failed with exit code $TestExitCode"
-            if ($FailOnTestFailure) {
-                Write-Error "Stopping build due to test failures (FailOnTestFailure flag set)"
-                exit 1
-            } else {
-                Write-Host "[TEST] Continuing build despite test failures..." -ForegroundColor Yellow
-            }
-        } else {
-            Write-Host "[TEST] Tests passed!" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "[TEST] Skipping tests (SkipTests flag set)" -ForegroundColor Yellow
-    }
-
-    # Step 3: Calculate version with build number (moved before publish)
+    # Step 1: Calculate version
     Write-Host "[VERSION] Calculating package version..." -ForegroundColor Blue
 
     # Read base version from version.json
@@ -205,7 +185,7 @@ try
     # InformationalVersion shows in --version output (e.g., "0.1.0-prerelease.73")
     $InformationalVersion = $FullVersion
 
-    # Step 4: Publish CLI for x64 with version properties
+    # Step 2: Publish CLI for x64 and arm64 (implicitly builds the CLI project)
     Write-Host "[PUBLISH] Publishing CLI for x64..." -ForegroundColor Blue
     dotnet publish $CliProjectPath -c Release -r win-x64 --self-contained -o "$ArtifactsPath\cli\win-x64" `
         /p:Version=$AssemblyVersion `
@@ -218,7 +198,6 @@ try
         exit 1
     }
 
-    # Step 5: Publish CLI for arm64 with version properties
     Write-Host "[PUBLISH] Publishing CLI for arm64..." -ForegroundColor Blue
     dotnet publish $CliProjectPath -c Release -r win-arm64 --self-contained -o "$ArtifactsPath\cli\win-arm64" `
         /p:Version=$AssemblyVersion `
@@ -229,6 +208,84 @@ try
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to publish CLI for arm64"
         exit 1
+    }
+
+    # Step 3: Build test project (CLI is already built from publish, this mainly compiles tests)
+    Write-Host "[BUILD] Building CLI solution..." -ForegroundColor Blue
+    dotnet build $CliSolutionPath -c Release
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to build CLI solution"
+        exit 1
+    }
+
+    # Step 4: Build Node CLI so E2E tests that invoke node cli.js can run
+    if ((-not $SkipNpm) -or (-not $SkipTests)) {
+        Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
+        Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
+        try {
+            npm ci --ignore-scripts
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm ci failed, Node E2E tests will be skipped"
+            } else {
+                npm run generate-commands
+                npm run compile
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Node CLI compile failed, Node E2E tests will be skipped"
+                } else {
+                    Write-Host "[BUILD] Node CLI built successfully" -ForegroundColor Green
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
+    # Step 5: Run tests (unless skipped)
+    if (-not $SkipTests) {
+        Write-Host "[TEST] Running tests..." -ForegroundColor Blue
+        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
+        $TestExitCode = $LASTEXITCODE
+    
+        # Copy test results to artifacts BEFORE checking for failure - find all TRX files
+        Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
+        New-Item -ItemType Directory -Path "$ArtifactsPath\TestResults" -Force | Out-Null
+        $TrxFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.trx" -Recurse -File
+        if ($TrxFiles) {
+            foreach ($trxFile in $TrxFiles) {
+                Copy-Item $trxFile.FullName "$ArtifactsPath\TestResults\" -Force
+                Write-Host "[TEST] Copied: $($trxFile.Name)" -ForegroundColor Gray
+            }
+            Write-Host "[TEST] Test results copied successfully ($($TrxFiles.Count) file(s))" -ForegroundColor Green
+        } else {
+            Write-Warning "No TRX test result files found in $CliSolutionDir"
+        }
+
+        # Copy coverage XML files to artifacts
+        $CoverageFiles = Get-ChildItem -Path $CliSolutionDir -Filter "*.cobertura.xml" -Recurse -File
+        if ($CoverageFiles) {
+            foreach ($coverageFile in $CoverageFiles) {
+                Copy-Item $coverageFile.FullName "$ArtifactsPath\TestResults\" -Force
+                Write-Host "[TEST] Copied coverage: $($coverageFile.Name)" -ForegroundColor Gray
+            }
+            Write-Host "[TEST] Coverage results copied successfully ($($CoverageFiles.Count) file(s))" -ForegroundColor Green
+        } else {
+            Write-Warning "No coverage XML files found in $CliSolutionDir"
+        }
+
+        # Now check test results and decide whether to exit
+        if ($TestExitCode -ne 0) {
+            Write-Warning "Tests failed with exit code $TestExitCode"
+            if ($FailOnTestFailure) {
+                Write-Error "Stopping build due to test failures (FailOnTestFailure flag set)"
+                exit 1
+            } else {
+                Write-Host "[TEST] Continuing build despite test failures..." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "[TEST] Tests passed!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "[TEST] Skipping tests (SkipTests flag set)" -ForegroundColor Yellow
     }
 
     # Step 6: Generate CLI schema and agent skills (optional)
@@ -283,7 +340,45 @@ try
         Write-Host "[NPM] Skipping npm package creation (use -SkipNpm:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 8: Create MSIX packages (optional)
+    # Step 8: Create VS Code extension package (optional)
+    if (-not $SkipVsc) {
+        Write-Host ""
+        Write-Host "[VSC] Creating VS Code extension package..." -ForegroundColor Blue
+    
+        $PackageVscScript = Join-Path $PSScriptRoot "package-vsc.ps1"
+
+        & $PackageVscScript -Version $FullVersion -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "VS Code extension packaging failed, but continuing..."
+        } else {
+            Write-Host "[VSC] VS Code extension packaged successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[VSC] Skipping VS Code extension packaging (use -SkipVsc:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Step 9: Create NuGet packages (optional)
+    if (-not $SkipNuGet) {
+        Write-Host ""
+        Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
+    
+        $PackageNuGetScript = Join-Path $PSScriptRoot "package-nuget.ps1"
+
+        & $PackageNuGetScript -Version $FullVersion -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "NuGet packages creation failed, but continuing..."
+        } else {
+            Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Step 9: Create MSIX packages (optional)
     if (-not $SkipMsix) {
         Write-Host ""
         Write-Host "[MSIX] Creating MSIX packages..." -ForegroundColor Blue
@@ -316,6 +411,17 @@ try
     }
 
     # Build process complete - all artifacts are ready
+
+    # Copy install-dev script into artifacts so the folder is self-contained
+    Write-Host ""
+    Write-Host "[INSTALL] Copying setup-winapprun.ps1 to artifacts..." -ForegroundColor Blue
+    $InstallDevScript = Join-Path $PSScriptRoot "setup-winapprun.ps1"
+    if (Test-Path $InstallDevScript) {
+        Copy-Item $InstallDevScript -Destination $ArtifactsPath -Force
+        Write-Host "[INSTALL] setup-winapprun.ps1 copied to artifacts" -ForegroundColor Green
+    } else {
+        Write-Warning "setup-winapprun.ps1 not found at $InstallDevScript"
+    }
 
     # Display results
     Write-Host ""

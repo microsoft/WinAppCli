@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -709,6 +710,439 @@ public class DotNetServiceTests : BaseCommandTests
                 "This.Package.Does.Not.Exist.12345",
                 "1.0.0",
                 TestContext.CancellationToken));
+    }
+
+    #endregion
+
+    #region EnsureRuntimeIdentifierAsync Tests (RuntimeIdentifierElementRegex)
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_NoRuntimeIdentifier_InsertsOne()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NoRid.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when RuntimeIdentifier was inserted");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifier_DoesNotModify()
+    {
+        // Arrange — singular <RuntimeIdentifier>
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRid.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when RuntimeIdentifier already exists");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifiers_StillInserts()
+    {
+        // Arrange — plural <RuntimeIdentifiers> should NOT prevent inserting singular <RuntimeIdentifier>
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRids.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier even when RuntimeIdentifiers (plural) exists");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+        // Verify it's inserted right after </RuntimeIdentifiers>
+        var ridsEnd = content.IndexOf("</RuntimeIdentifiers>", StringComparison.Ordinal);
+        var ridStart = content.IndexOf("<RuntimeIdentifier Condition=", StringComparison.Ordinal);
+        Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
+        // Nothing but whitespace between them
+        var between = content[(ridsEnd + "</RuntimeIdentifiers>".Length)..ridStart];
+        // The comment is expected between the elements
+        Assert.IsTrue(between.Contains("<!-- Added by winapp"), $"Expected comment between elements, got: '{between}'");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifierWithCondition_DoesNotModify()
+    {
+        // Arrange — <RuntimeIdentifier with a Condition attribute (whitespace after tag name)
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRidCondition.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier Condition=""'$(RuntimeIdentifier)' == ''"">win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when RuntimeIdentifier with attributes already exists");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_HasRuntimeIdentifiersWithCondition_StillInserts()
+    {
+        // Arrange — plural <RuntimeIdentifiers with a Condition attribute should NOT block insertion
+        var csprojPath = Path.Combine(_testTempDirectory, "HasRidsCondition.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifiers Condition=""'$(RuntimeIdentifiers)' == ''"">win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier even when RuntimeIdentifiers (plural) with attributes exists");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+        // Verify it's inserted right after </RuntimeIdentifiers>
+        var ridsEnd = content.IndexOf("</RuntimeIdentifiers>", StringComparison.Ordinal);
+        var ridStart = content.IndexOf("<RuntimeIdentifier Condition=", StringComparison.Ordinal);
+        Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_FileDoesNotExist_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NonExistent.csproj");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifierAsync_DoesNotMatchSimilarElementNames()
+    {
+        // Arrange — contains <RuntimeIdentifierGraph> which should NOT prevent insertion
+        var csprojPath = Path.Combine(_testTempDirectory, "SimilarName.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+  <!-- RuntimeIdentifierGraph should not be confused with RuntimeIdentifier -->
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert RuntimeIdentifier — RuntimeIdentifierGraph is not RuntimeIdentifier");
+    }
+
+    #endregion
+
+    #region HasPackageReferenceAsync Tests
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FileDoesNotExist_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "NonExistent.csproj");
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false for non-existent file");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_WithMatchingPackage_ReturnsTrue()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should detect existing PackageReference");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_CaseInsensitive_ReturnsTrue()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("microsoft.windowsappsdk", "1.6.0", "1.6.0")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Package name comparison should be case-insensitive");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_DifferentPackage_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [new DotNetPackage("Newtonsoft.Json", "13.0.3", "13.0.3")],
+                        [])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when a different package is referenced");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_NullPackageListResult_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService { PackageListResult = null };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when package list is null");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_EmptyProjects_ReturnsFalse()
+    {
+        // Arrange
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson([])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when project list is empty");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_TransitiveOnly_ReturnsFalse()
+    {
+        // Arrange — package exists only as a transitive dependency, not a top-level reference
+        var fake = new FakeDotNetService
+        {
+            PackageListResult = new DotNetPackageListJson(
+            [
+                new DotNetProject(
+                [
+                    new DotNetFramework("net10.0-windows10.0.26100.0",
+                        [],
+                        [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")])
+                ])
+            ])
+        };
+
+        // Act
+        var result = await fake.HasPackageReferenceAsync(
+            new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_DetectsInlinePackageReference_WithoutDotnetRestore()
+    {
+        // Arrange — write an SDK-style csproj with an inline PackageReference. Use a non-existent
+        // SDK so a `dotnet list package` fallback would fail; success here proves the XML fast path
+        // returned true without invoking dotnet (#463).
+        var csprojPath = Path.Combine(_testTempDirectory, "Inline.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should detect inline <PackageReference Include=\"Microsoft.WindowsAppSDK\"/>.");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_CaseInsensitiveOnIncludeAttribute()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Cased.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <ItemGroup>
+    <PackageReference Include="microsoft.windowsappsdk" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should be case-insensitive on the Include attribute.");
+    }
+
+    #endregion
+
+    #region EnsureAssetContentItemsAsync
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_AddsMissingAssetsGlob()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should modify csproj when no asset Content items exist");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**\*"" />"),
+            "Should add Assets glob Content item");
+        Assert.IsTrue(content.Contains("</Project>"),
+            "Should preserve </Project> closing tag");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenAlreadyPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include=""Assets\**\*"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when asset Content items already exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenIndividualAssetPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <Content Include=""Assets\StoreLogo.png"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when individual asset Content items exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_ReturnsFalseForMissingFile()
+    {
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "NonExistent.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
     }
 
     #endregion

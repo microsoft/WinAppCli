@@ -19,7 +19,6 @@ public class EndToEndTests : BaseCommandTests
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         return services
-            .AddSingleton<IPowerShellService, FakePowerShellService>()
             .AddSingleton<IDevModeService, FakeDevModeService>();
     }
 
@@ -51,11 +50,11 @@ public class EndToEndTests : BaseCommandTests
         var binFolder = new DirectoryInfo(Path.Combine(projectDir.FullName, "bin", "Release"));
         Assert.IsTrue(binFolder.Exists, "Build output directory should exist");
 
-        // Find the target framework folder (e.g., net10.0-windows)
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        // Find the build output folder (handles runtime-specific subfolders like win-x64)
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
-        var exePath = Path.Combine(targetFrameworkFolder.FullName, $"{projectName}.exe");
+        var exePath = Path.Combine(buildOutputFolder.FullName, $"{projectName}.exe");
         Assert.IsTrue(File.Exists(exePath), "Built executable should exist");
 
         // Step 3: Run 'winapp manifest generate' to create the manifest
@@ -72,8 +71,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify manifest generated the necessary files
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create Package.appxmanifest");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");
         Assert.IsTrue(Directory.Exists(assetsDir), "Manifest generate should create Assets directory");
@@ -83,7 +82,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageArgs = new[]
         {
-            targetFrameworkFolder.FullName,  // Input folder with built binaries
+            buildOutputFolder.FullName,  // Input folder with built binaries
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"                     // Skip PRI generation for faster tests
@@ -129,10 +128,10 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build WinForms app: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(projectDir.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
-        var exePath = Path.Combine(targetFrameworkFolder.FullName, $"{projectName}.exe");
+        var exePath = Path.Combine(buildOutputFolder.FullName, $"{projectName}.exe");
         Assert.IsTrue(File.Exists(exePath), "Built executable should exist");
 
         // Step 3: Generate manifest with custom options
@@ -152,7 +151,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify custom options were applied
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
@@ -169,7 +168,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageArgs = new[]
         {
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath
         };
@@ -212,16 +211,16 @@ public class EndToEndTests : BaseCommandTests
         var winAppSdkVersion = ExtractPackageVersion(csprojContent, "Microsoft.WindowsAppSDK");
         Assert.IsNotNull(winAppSdkVersion, "csproj should contain WindowsAppSDK version after init");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         // Step 3: Build
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Step 4: Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -231,7 +230,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"
@@ -250,12 +249,26 @@ public class EndToEndTests : BaseCommandTests
             Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
 
         var versionParts = winAppSdkVersion.Split('.');
-        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+
+        // Assert only on what's invariant across SDK naming-convention churn:
+        //   * The PackageDependency name MUST start with "Microsoft.WindowsAppRuntime.{major}".
+        //     Whether the framework is "Microsoft.WindowsAppRuntime.2" (2.0.1+ stable, major-only),
+        //     "Microsoft.WindowsAppRuntime.1.8" (per-minor SxS in 1.x), or
+        //     "Microsoft.WindowsAppRuntime.2-experimentalN" (2.x experimental) is the SDK's call,
+        //     not ours — the CLI faithfully propagates whatever name appears in MSIX.inventory.
+        //   * MinVersion's first three components must match the SDK version
+        //     (the inventory ships a Major.Minor.Patch.Revision quad; the leading triple is the SDK version).
+        var expectedNamePrefix = $"Name=\"Microsoft.WindowsAppRuntime.{versionParts[0]}";
+        var expectedMinVersionPrefix = versionParts.Length >= 3
+            ? $"MinVersion=\"{versionParts[0]}.{versionParts[1]}.{versionParts[2].Split('-')[0]}."
+            : $"MinVersion=\"{versionParts[0]}.";
 
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
-        Assert.Contains(expectedRuntimeName, finalManifest,
-            $"PackageDependency should reference {expectedRuntimeName}");
+        Assert.Contains(expectedNamePrefix, finalManifest,
+            $"PackageDependency Name should start with Microsoft.WindowsAppRuntime.{versionParts[0]}");
+        Assert.Contains(expectedMinVersionPrefix, finalManifest,
+            $"PackageDependency MinVersion should be derived from SDK version {winAppSdkVersion}");
     }
 
     [TestMethod]
@@ -286,15 +299,15 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -304,7 +317,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri"
@@ -359,15 +372,15 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
 
         var binFolder = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "bin", "Release"));
-        var targetFrameworkFolder = binFolder.GetDirectories("net*-windows*").FirstOrDefault();
-        Assert.IsNotNull(targetFrameworkFolder, "Target framework folder should exist");
+        var buildOutputFolder = FindBuildOutputFolder(binFolder);
+        Assert.IsNotNull(buildOutputFolder, "Build output folder should exist");
 
         // Install WinAppSDK packages to test cache (build tools + runtime)
         await EnsureWinAppSdkPackagesInTestCacheAsync();
@@ -377,7 +390,7 @@ public class EndToEndTests : BaseCommandTests
         var packageOutputPath = Path.Combine(_tempDirectory.FullName, $"{projectName}.msix");
         var packageParseResult = packageCommand.Parse(
         [
-            targetFrameworkFolder.FullName,
+            buildOutputFolder.FullName,
             "--output", packageOutputPath,
             "--manifest", manifestPath,
             "--skip-pri",
@@ -456,7 +469,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
 
         // Step 4: Manifest should still be created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
 
         Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
@@ -502,11 +515,6 @@ public class EndToEndTests : BaseCommandTests
             updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
             "csproj should contain Microsoft.WindowsAppSDK package reference");
 
-        // The init command should add BuildTools package reference
-        Assert.IsTrue(
-            updatedCsprojContent.Contains("Microsoft.Windows.SDK.BuildTools", StringComparison.OrdinalIgnoreCase),
-            "csproj should contain Microsoft.Windows.SDK.BuildTools package reference");
-
         // Step 4: Verify the TargetFramework was updated to a Windows TFM while preserving the .NET version
         Assert.IsTrue(
             updatedCsprojContent.Contains("-windows", StringComparison.OrdinalIgnoreCase),
@@ -521,7 +529,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj TargetFramework should preserve the .NET version with Windows SDK version added");
 
         // Step 5: Verify manifest and assets were created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");
@@ -755,6 +763,24 @@ public class EndToEndTests : BaseCommandTests
         }
 
     /// <summary>
+    /// Finds the build output folder under bin/Release, handling both direct TFM layouts
+    /// (e.g., net10.0-windows10.0.26100.0/) and runtime-specific layouts
+    /// (e.g., net10.0-windows10.0.26100.0/win-x64/).
+    /// </summary>
+    private static DirectoryInfo? FindBuildOutputFolder(DirectoryInfo binReleaseFolder)
+    {
+        var tfmFolder = binReleaseFolder.GetDirectories("net*-windows*").FirstOrDefault();
+        if (tfmFolder == null)
+        {
+            return null;
+        }
+
+        // Check for a runtime-specific subfolder (e.g., win-x64, win-arm64)
+        var runtimeFolder = tfmFolder.GetDirectories("win-*").FirstOrDefault();
+        return runtimeFolder ?? tfmFolder;
+    }
+
+    /// <summary>
     /// Helper method to run dotnet commands
     /// </summary>
     private static async Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
@@ -923,7 +949,7 @@ public class EndToEndTests : BaseCommandTests
             return;
         }
 
-        var packageList = await dotNetService.GetPackageListAsync(csprojFiles[0], TestContext.CancellationToken);
+        var packageList = await dotNetService.GetPackageListAsync(csprojFiles[0], cancellationToken: TestContext.CancellationToken);
         var frameworks = packageList?.Projects?
             .SelectMany(p => p.Frameworks ?? [])
             .ToList();

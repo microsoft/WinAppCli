@@ -95,14 +95,21 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         {
             if (result.Value.ReturnCode != 0)
             {
-                if (!logger.IsEnabled(LogLevel.Error))
+                // The task returned a non-zero code with an error message.
+                // Let the calling command handle JSON error output — it knows its own schema.
+                // StatusService only handles unhandled exceptions (caught above).
+                if (logger.IsEnabled(LogLevel.Error))
                 {
-                    return JsonErrorOutput.Write(ansiConsole, result.Value.CompletedMessage?.ToString() ?? "Unknown error");
-                }
-                logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
-                if (!logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogInformation("Run with --verbose for more details.");
+                    var completedMessageText = result.Value.CompletedMessage?.ToString();
+                    if (string.IsNullOrWhiteSpace(completedMessageText))
+                    {
+                        completedMessageText = "Operation failed without an error message.";
+                    }
+                    logger.LogError("{CompletedMessage}", completedMessageText);
+                    if (!logger.IsEnabled(LogLevel.Debug))
+                    {
+                        logger.LogInformation("Run with --verbose for more details.");
+                    }
                 }
             }
             else

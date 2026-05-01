@@ -1,7 +1,10 @@
 # winapp CLI
 
 > [!IMPORTANT]
-> :warning: **Status: Public Preview** - The Windows App Development CLI (winapp CLI) is experimental and in active development. We'd love your feedback! Share your thoughts by creating an [issue](https://github.com/microsoft/WinAppCli/issues).
+> :warning: **Status: Public Preview** — The Windows App Development CLI (winapp CLI) is experimental and in active development. We'd love your feedback! Share your thoughts by creating an [issue](https://github.com/microsoft/WinAppCli/issues).
+
+> [!NOTE]
+> The **`main` branch** contains work that is in **active development**. Documentation, features, and behavior here may differ from what is publicly released. For the latest stable version, see the [latest release](https://github.com/microsoft/WinAppCli/releases/latest). To try the newest in-progress build, see [Install from latest build](#install-from-latest-build-main-branch) below.
 
 <p align="center">
     <picture>
@@ -25,6 +28,9 @@
     <img alt="GitHub License" src="https://img.shields.io/github/license/microsoft/winappcli?style=for-the-badge">
   </a>
   <br />
+  <a href="https://github.com/microsoft/WinAppCli/actions/workflows/build-package.yml?query=branch%3Amain">
+    <img src="https://img.shields.io/github/actions/workflow/status/microsoft/WinAppCli/build-package.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=Build%20(main)" alt="Build Status">
+  </a>
 </p>
 
 <h3 align="center">
@@ -144,6 +150,33 @@ For CI/CD pipelines on GitHub Actions or Azure DevOps, use the [`setup-WinAppCli
 
 **[Download the latest build from GitHub Releases](https://github.com/microsoft/WinAppCli/releases/latest)**
 
+### Install from latest build (main branch)
+
+> [!CAUTION]
+> These builds are from the `main` branch and may include unreleased features, breaking changes, or experimental functionality. Use at your own risk.
+
+Download the latest CI build artifacts directly (no GitHub login required):
+
+| Artifact | Description |
+|----------|-------------|
+| [**CLI Binaries**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/cli-binaries.zip) | Native CLI executables (win-x64, win-arm64) |
+| [**npm Package**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/npm-package.zip) | `@microsoft/winappcli` .tgz package |
+| [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | MSIX installer bundle (self-signed) |
+| [**NuGet Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/nuget-packages.zip) | NuGet .nupkg packages |
+| [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip) | Pre-release `.vsix` for VS Code |
+
+<details>
+<summary>Download links not working?</summary>
+
+The direct links above are provided by [nightly.link](https://nightly.link), a third-party service. If they stop working, you can download the same artifacts from GitHub Actions directly:
+
+1. Go to the **[Build and Package workflow runs](https://github.com/microsoft/WinAppCli/actions/workflows/build-package.yml?query=branch%3Amain+is%3Asuccess)** (filtered to successful builds on `main`)
+2. Click the most recent workflow run
+3. Scroll down to the **Artifacts** section and download what you need
+
+Note: Downloading artifacts from GitHub Actions requires you to be signed in to GitHub.
+</details>
+
 ## 📋 Usage
 
 Once installed (see [Installation](#-installation) above), verify the installation by calling the CLI:
@@ -168,9 +201,13 @@ npx winapp --help
 
 **App Identity & Debugging:**
 
-- [`package`](./docs/usage.md#package) - Create MSIX packages from directories
-- [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add temporary app identity for debugging
+- [`pack`](./docs/usage.md#pack) - Create MSIX packages from directories
+- [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
+- [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
+- [`unregister`](./docs/usage.md#unregister) - Remove sideloaded dev packages registered by `run` or `create-debug-identity`
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
+
+See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp run` and `create-debug-identity`, IDE setup, and debugging scenarios.
 
 **Certificates & Signing:**
 
@@ -208,6 +245,15 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
+## 🧩 VS Code Extension
+
+The **WinApp VS Code Extension** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
+
+> [!IMPORTANT]
+> The extension is not yet available in the VS Code Marketplace. Download the latest prerelease: [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip)
+
+For setup, configuration, and troubleshooting details, see the [VS Code Extension README](./src/winapp-VSC/README.md).
+
 ## 🤖 Using with AI Coding Agents
 
 AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
@@ -237,11 +283,21 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm from the repo root
+# Build the CLI and package for npm, VS Code extension, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 
 The binaries and packages will be placed in the `artifacts` folder
+
+### Reviewing your changes before pushing
+
+Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
+Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
+files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
+skill fans out parallel sub-agents covering security, correctness, CLI UX,
+alternative-solution check, test coverage, docs/samples sync, packaging
+impact, and a multi-model cross-check, then prints a consolidated finding
+list to stdout.
 
 ## Trademarks
 

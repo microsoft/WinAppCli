@@ -143,11 +143,11 @@ internal static class CliSchema
             return null;
         }
         var dict = new Dictionary<string, OptionDetails>();
-        foreach (var option in options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var option in options.Where(o => !o.Hidden).OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
         {
             dict[option.Name] = CreateOptionDetails(option);
         }
-        return dict;
+        return dict.Count > 0 ? dict : null;
     }
 
     private static Dictionary<string, CommandDetails>? CreateSubcommandsDictionary(IList<Command> subcommands)
@@ -157,11 +157,11 @@ internal static class CliSchema
             return null;
         }
         var dict = new Dictionary<string, CommandDetails>();
-        foreach (var subcommand in subcommands.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var subcommand in subcommands.Where(c => !c.Hidden).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
         {
             dict[subcommand.Name] = CreateCommandDetails(subcommand);
         }
-        return dict;
+        return dict.Count > 0 ? dict : null;
     }
 
     private static string[]? DetermineAliases(ICollection<string> aliases)

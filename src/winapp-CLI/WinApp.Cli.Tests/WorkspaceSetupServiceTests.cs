@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -14,8 +15,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
 {
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
-        return services
-            .AddSingleton<IPowerShellService, FakePowerShellService>();
+        return services;
     }
 
     #region Helper methods
@@ -168,7 +168,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SetupWorkspace_WithRequireExistingConfig_FailsWhenConfigMissing()
+    public async Task SetupWorkspace_WithRequireExistingConfig_NoOpsWhenConfigMissing()
     {
         // Arrange - Don't create any config file
         var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
@@ -176,7 +176,7 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         {
             BaseDirectory = _tempDirectory,
             ConfigDir = _tempDirectory,
-            RequireExistingConfig = true, // This should fail when config doesn't exist
+            RequireExistingConfig = true, // Restore-style call
             UseDefaults = true,
             NoGitignore = true
         };
@@ -185,7 +185,11 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(1, exitCode, "Setup should fail when config is required but missing");
+        // Restore on a non-.NET project with no winapp.yaml is a graceful no-op:
+        // a project that doesn't declare SDK package versions has nothing to restore.
+        // (.NET projects without yaml are still rejected — handled separately by the
+        // csproj-detection branch in SetupWorkspaceAsync.)
+        Assert.AreEqual(0, exitCode, "Restore should be a no-op (exit 0) when no winapp.yaml exists on a non-.NET project");
     }
 }
 
@@ -207,7 +211,6 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         _fakeDotNetService = new FakeDotNetService();
 
         return services
-            .AddSingleton<IPowerShellService, FakePowerShellService>()
             .AddSingleton<IDevModeService, FakeDevModeService>()
             .AddSingleton<INugetService>(_fakeNugetService)
             .AddSingleton<IDotNetService>(_fakeDotNetService);
@@ -262,6 +265,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -320,6 +324,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -349,6 +354,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -407,25 +413,26 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
         // Verify that the correct NuGet packages were queried
-        Assert.Contains(BuildToolsService.BUILD_TOOLS_PACKAGE, _fakeNugetService.QueriedPackages,
-            "Should query for BuildTools package version");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, _fakeNugetService.QueriedPackages,
             "Should query for WindowsAppSDK package version");
+        Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, _fakeNugetService.QueriedPackages,
+            "Should query for WindowsAppSDK BuildTools Extras package version");
 
         // Verify that the correct NuGet packages were added to the project
         Assert.HasCount(2, _fakeDotNetService.AddedPackages, "Should add exactly 2 NuGet packages");
 
         var addedNames = _fakeDotNetService.AddedPackages.Select(p => p.PackageName).ToList();
-        Assert.Contains(BuildToolsService.BUILD_TOOLS_PACKAGE, addedNames,
-            "Should add BuildTools as PackageReference");
         Assert.Contains(DotNetService.WINAPP_SDK_NUGET_PACKAGE, addedNames,
             "Should add WindowsAppSDK as PackageReference");
+        Assert.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, addedNames,
+            "Should add WindowsAppSDK BuildTools Extras as PackageReference");
 
         // Verify the version used matches what the fake NuGet service returned
         foreach (var (_, _, version) in _fakeDotNetService.AddedPackages)
@@ -486,6 +493,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert - The overall setup should still succeed
@@ -502,6 +510,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         var combinedOutput = ansiOutput + logOutput;
 
         var runtimeInstallAttempted =
+            combinedOutput.Contains("WinAppSDK Runtime", StringComparison.OrdinalIgnoreCase) ||
             combinedOutput.Contains("Windows App SDK Runtime", StringComparison.OrdinalIgnoreCase) ||
             combinedOutput.Contains("MSIX", StringComparison.OrdinalIgnoreCase);
         Assert.IsTrue(runtimeInstallAttempted,
@@ -527,14 +536,15 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
         Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
-        // Verify no packages were queried or added (SdkInstallMode.None skips everything)
-        Assert.IsEmpty(_fakeDotNetService.AddedPackages,
-            "With SdkInstallMode.None, no packages should be added");
+        // Verify WinAppSDK was not added (SdkInstallMode.None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added when SdkInstallMode is None");
     }
 
     #endregion
@@ -561,6 +571,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -592,6 +603,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -640,6 +652,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -671,6 +684,7 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         };
 
         // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
@@ -686,16 +700,127 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
 
     #endregion
 
-    #region SDK None with TFM update tests
+    #region SDK install mode auto-detection tests
 
     [TestMethod]
-    public async Task SetupWorkspace_DotNet_NoSdks_StillUpdatesTfm()
+    public async Task SetupWorkspace_DotNet_SkipsSdkVersionPrompt_WhenCsprojAlreadyReferencesWinAppSdk()
     {
-        // When the user selects SdkInstallMode.None but has an unsupported TFM,
-        // the TFM should still be updated (with --use-defaults) and setup should succeed.
+        // When a .csproj already has a PackageReference for Microsoft.WindowsAppSDK,
+        // the SDK version selection prompt should be skipped and default to None.
 
-        // Arrange - Create a .csproj with an unsupported TFM (no -windows)
+        // Arrange - Create a .csproj that already references WinAppSDK
+        var csprojPath = Path.Combine(_tempDirectory.FullName, "TestApp.csproj");
+        await File.WriteAllTextAsync(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.6.0"" />
+  </ItemGroup>
+</Project>");
+
+        // Configure the fake to report WinAppSDK as an existing package reference
+        _fakeDotNetService.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework("net10.0-windows10.0.26100.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.0", "1.6.0")],
+                    [])
+            ])
+        ]);
+
+        DefaultAnswers();
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            // SdkInstallMode is NOT set — normally this would trigger the interactive prompt
+            UseDefaults = false,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act - Should NOT prompt for SDK version selection because the project already has the SDK
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully without prompting");
+
+        // Verify WinAppSDK was not added (SdkInstallMode auto-set to None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added because SDK install mode was auto-defaulted to None");
+    }
+
+    #endregion
+
+    #region TFM update with SdkInstallMode.None tests
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_UpdatesTfm_WhenSdkModeNone()
+    {
+        // Bug fix verification: when the user selects "Do not setup SDK", the
+        // TargetFramework should still be updated if the user agreed to it.
+
+        // Arrange - Create a .csproj with an unsupported TFM
         var csproj = await CreateCsprojAsync(_tempDirectory, "TestApp", "net8.0");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,  // UseDefaults auto-accepts TFM update
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter); // Answer "yes" to WinApp package install prompt
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully");
+
+        // Verify TFM was updated even though SDK install was skipped
+        var updatedContent = await File.ReadAllTextAsync(csproj.FullName);
+        Assert.Contains("-windows", updatedContent,
+            "TFM should be updated to include -windows even when SDK installation is skipped");
+        Assert.DoesNotContain(">net8.0<", updatedContent,
+            "Original unsupported TFM should be replaced");
+
+        // Verify WinAppSDK was not added (SDK install was None)
+        Assert.IsFalse(_fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
+            "Windows App SDK should not be added when SdkInstallMode is None");
+    }
+
+    #endregion
+
+    #region WinApp package opt-in behavior tests
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_PreservesExistingPackageVersions()
+    {
+        // Verifies that existing package versions are not overwritten during init,
+        // except for the WinApp integration package which is always updated.
+
+        // Arrange - Create a .csproj with an existing package at a pinned version
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+
+        _fakeDotNetService.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework("net10.0-windows10.0.26100.0",
+                    [],
+                    [])
+            ])
+        ]);
 
         var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
         var options = new WorkspaceSetupOptions
@@ -712,18 +837,158 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(0, exitCode, "Setup should complete successfully even with SdkInstallMode.None");
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully");
 
-        // Verify TFM was still updated in the csproj file
-        var updatedContent = await File.ReadAllTextAsync(csproj.FullName);
-        Assert.Contains("-windows", updatedContent,
-            "TFM should be updated to include -windows even when SDK installation is skipped");
-        Assert.DoesNotContain(">net8.0<", updatedContent,
-            "Original unsupported TFM should be replaced");
+        // WinApp package is always updated regardless of existing versions
+        Assert.IsTrue(
+            _fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE),
+            "WinApp package should always be added/updated");
+    }
 
-        // Verify no NuGet packages were added (SdkInstallMode.None skips package installation)
-        Assert.IsEmpty(_fakeDotNetService.AddedPackages,
-            "With SdkInstallMode.None, no packages should be added");
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_SkipsWinAppPrompt_WhenPackageAlreadyReferenced()
+    {
+        // When the WinApp package is already in the project, no prompt should appear
+        // and installWinAppPackage should be implicitly true.
+
+        // Arrange - Create a .csproj that already references the WinApp package
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+
+        _fakeDotNetService.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework("net10.0-windows10.0.26100.0",
+                    [new DotNetPackage(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, "1.0.0", "1.0.0")],
+                    [])
+            ])
+        ]);
+
+        // Do NOT push any console input — if the prompt appears it would throw "No input available"
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act - should NOT throw due to missing console input
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete without prompting when WinApp package is already referenced");
+
+        // WinApp package is still updated (always refreshed even when already present)
+        Assert.IsTrue(
+            _fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE),
+            "WinApp package should still be updated even when already referenced");
+    }
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_DoesNotApplyMsixProperties_WhenWinAppNotOptedIn()
+    {
+        // When the user declines the WinApp package, MSIX csproj properties
+        // should not be modified.
+
+        // Arrange
+        var csproj = await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = false, // Don't auto-accept; allow user to decline
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act - answer "No" to WinApp package install prompt
+        // (manifest prompts come first since UseDefaults = false)
+        DefaultAnswers(); // answer manifest prompts: packageName, publisherName, version, description
+        TestAnsiConsole.Input.PushKey(ConsoleKey.N);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Setup should complete successfully even when WinApp package is declined");
+
+        var csprojContent = await File.ReadAllTextAsync(csproj.FullName);
+        Assert.IsFalse(
+            csprojContent.Contains("EnableMsixTooling", StringComparison.OrdinalIgnoreCase),
+            "EnableMsixTooling should not be added when user declined the WinApp package");
+
+        Assert.IsFalse(
+            _fakeDotNetService.AddedPackages.Any(p => p.PackageName == DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE),
+            "WinApp package should not be added when user declined");
+    }
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_InitSucceeds_WhenNuGetThrowsForWinAppPackage()
+    {
+        // Verifies that init returns exit code 0 even when the NuGet service throws
+        // while fetching the version for Microsoft.Windows.SDK.BuildTools.WinApp.
+        // The WinApp integration package must be treated as non-fatal.
+
+        // Arrange
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+
+        // Configure NuGet service to throw specifically for the WinApp integration package
+        _fakeNugetService.PackagesToThrow.Add(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true, // auto-opts in to WinApp package
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert: init must succeed even though NuGet lookup failed for the WinApp package
+        Assert.AreEqual(0, exitCode,
+            "Init should succeed (exit code 0) even when NuGet version lookup fails for the WinApp integration package");
+    }
+
+    [TestMethod]
+    public async Task SetupWorkspace_DotNet_InitSucceeds_WhenOptionalWinAppPackageAddFails()
+    {
+        // Arrange
+        await CreateCsprojAsync(_tempDirectory, "TestApp", "net10.0-windows10.0.26100.0");
+        _fakeDotNetService.PackagesToThrowOnAdd.Add(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE);
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            NoGitignore = true
+        };
+
+        // Act
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, exitCode,
+            "Init should succeed (exit code 0) when optional WinApp package add fails");
+
+        var combinedOutput = TestAnsiConsole.Output + ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.IsTrue(
+            combinedOutput.Contains("Failed to add optional NuGet packages", StringComparison.OrdinalIgnoreCase) &&
+            combinedOutput.Contains(DotNetService.WINDOWS_SDK_BUILD_TOOLS_WINAPP_PACKAGE, StringComparison.OrdinalIgnoreCase),
+            $"Output should include the optional package failure message. Output:\n{combinedOutput}");
     }
 
     #endregion

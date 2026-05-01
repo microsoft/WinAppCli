@@ -28,7 +28,7 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
         EntryPointArgument.AcceptExistingOnly();
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the appxmanifest.xml"
+            Description = "Path to the Package.appxmanifest or appxmanifest.xml"
         };
         ManifestOption.AcceptExistingOnly();
         NoInstallOption = new Option<bool>("--no-install")
@@ -41,7 +41,7 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
         };
     }
 
-    public CreateDebugIdentityCommand() : base("create-debug-identity", "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires appxmanifest.xml in current directory or passed via --manifest. Re-run after changing appxmanifest.xml or Assets/.")
+    public CreateDebugIdentityCommand() : base("create-debug-identity", "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.")
     {
         Arguments.Add(EntryPointArgument);
         Options.Add(ManifestOption);
@@ -54,7 +54,7 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var entryPointPath = parseResult.GetValue(EntryPointArgument);
-            var manifest = parseResult.GetValue(ManifestOption) ?? new FileInfo(Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "appxmanifest.xml"));
+            var manifest = parseResult.GetValue(ManifestOption) ?? ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
             var noInstall = parseResult.GetValue(NoInstallOption);
             var keepIdentity = parseResult.GetValue(KeepIdentityOption);
 
@@ -68,7 +68,7 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
             {
                 try
                 {
-                    var result = await msixService.AddMsixIdentityAsync(entryPointPath?.ToString(), manifest, noInstall, keepIdentity, taskContext, cancellationToken);
+                    var result = await msixService.AddSparseIdentityAsync(entryPointPath?.ToString(), manifest, noInstall, keepIdentity, taskContext, cancellationToken);
 
                     taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.PackageName}");
                     taskContext.AddStatusMessage($"{UiSymbols.User} Publisher: {result.Publisher}");
@@ -76,7 +76,13 @@ internal class CreateDebugIdentityCommand : Command, IShortDescription
                 }
                 catch (Exception error)
                 {
-                    return (1, $"{UiSymbols.Error} Failed to add package identity: {error.GetBaseException().Message}");
+                    var baseEx = error.GetBaseException();
+                    var message = string.IsNullOrWhiteSpace(baseEx.Message) ? error.Message : baseEx.Message;
+                    if (baseEx.HResult != 0)
+                    {
+                        message += $" (0x{baseEx.HResult:X8})";
+                    }
+                    return (1, $"{UiSymbols.Error} Failed to add package identity: {message}");
                 }
 
                 return (0, "Package identity created successfully.");

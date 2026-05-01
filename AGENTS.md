@@ -47,6 +47,47 @@ When adding or changing public facing features, ensure all documentation is also
 
 If a feature is big enough and requires its own docs page, add it under docs\
 
+## Sample & guide testing
+
+Each sample under `samples/` has a self-contained **Pester 5.x** test file (`test.Tests.ps1`) that validates the corresponding guide workflow from scratch (Phase 1) and verifies the existing sample code still builds (Phase 2). Tests share infrastructure via `samples/SampleTestHelpers.psm1`.
+
+### Running sample & guide tests locally
+
+```powershell
+# Run all sample tests
+.\scripts\test-samples.ps1
+
+# Run a specific sample
+.\scripts\test-samples.ps1 -Samples dotnet-app
+
+# Run with a locally built winapp npm tarball (package-npm.ps1 outputs to .\artifacts\)
+.\scripts\test-samples.ps1 -WinappPath .\artifacts -Verbose
+
+# Or pass a specific .tgz / a directory containing one (e.g., a CI artifact download)
+.\scripts\test-samples.ps1 -WinappPath .\artifacts\npm -Verbose
+```
+
+### Writing a new sample & guide test
+
+1. Create `test.Tests.ps1` in the sample directory (Pester naming convention)
+2. Use `BeforeDiscovery` for skip logic (prerequisite checks run at discovery time)
+3. Import shared helpers in `BeforeAll`: `Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force`
+4. Accept `$WinappPath` and `$SkipCleanup` parameters via `param()` block
+5. Phase 1 (`Context`): from-scratch guide workflow in a temp directory (scaffold, winapp init, build, cert, pack)
+6. Phase 2 (`Context`): quick build of existing sample code to verify freshness
+7. Add the sample name to the matrix in `.github/workflows/test-samples.yml`
+
+#### Pester conventions for sample tests
+
+- **`BeforeDiscovery`**: Set `$script:skip` using inline `Get-Command` checks (no module import). Pester evaluates `-Skip:$variable` during discovery, before `BeforeAll` runs.
+- **`BeforeAll`**: Import `SampleTestHelpers.psm1`, install winapp, create temp directories. Guard with `if ($script:skip) { return }`.
+- **`AfterAll`**: Clean up temp directories using `Remove-TempTestDirectory`.
+- **`It` blocks**: Use `-Skip:$script:skip` for prerequisite gating. Use Pester `Should` assertions (`Should -Be 0`, `Should -Exist`, `Should -Not -BeNullOrEmpty`). When all setup happens in `BeforeAll` and depends on the prerequisite, you may apply `-Skip:$script:skip` to the enclosing `Context` instead.
+- **Shared helpers**: `Invoke-WinappCommand` (throws on failure), `Test-Prerequisite` (returns bool), `New-TempTestDirectory`, `Remove-TempTestDirectory`, `Install-WinappGlobal`.
+
+### CI integration
+
+Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub Actions matrix strategy. Each sample runs in its own parallel job after the main build completes. The workflow downloads the npm package artifact from the `Build and Package` workflow. Test results are uploaded as JUnit XML via `Invoke-Pester` with `TestResult` configuration.
 
 ## Where to look first
 
@@ -89,3 +130,31 @@ The following files are auto-generated from `cli-schema.json` via `scripts/gener
 **To edit skill content**, modify the hand-written templates in `docs/fragments/skills/winapp-cli/`. Each template file (e.g., `package.md`, `manifest.md`) contains the workflow docs, examples, and troubleshooting content. The auto-generation script appends command reference tables from the CLI schema. Running `scripts/build-cli.ps1` triggers regeneration automatically.
 
 Skill descriptions (used for Copilot skill matching) are defined in the `$SkillDescriptions` hashtable in `scripts/generate-llm-docs.ps1`.
+
+## C# service architecture guidelines
+
+### File size limits
+- **Target**: ≤500 lines per file
+- **Soft limit**: ~800 lines — if approaching this, look for extraction opportunities
+- **Hard limit**: Do not let any single file exceed ~1,000 lines. Split into partial classes or extract services.
+
+### Service patterns
+Use the appropriate pattern for new code:
+
+| Pattern | When to use | Example |
+|---------|------------|---------|
+| **Interface + DI service** | Stateful logic, needs dependencies | `IPriService` / `PriService` |
+| **Static helper** | Pure functions, no DI needed | `PeHelper`, `MrtAssetHelper` |
+| **Data document** | Wraps a file/data format with typed access | `AppxManifestDocument` |
+| **Partial class** | Splitting a large service with tight internal coupling | `MsixService.Runtime.cs` |
+
+### Separation of concerns
+- One responsibility per service/helper file
+- Extract shared logic into helpers rather than duplicating across services
+- If a method group only uses 1-2 of a service's 10+ dependencies, it's a candidate for extraction
+
+### XML handling
+- **Use `XDocument` / `XElement`** (System.Xml.Linq) for structured XML manipulation — never regex
+- Regex is acceptable ONLY for: pre-parse placeholder replacement (`$targetnametoken$`), raw text scanning before XML is valid
+- Use `AppxManifestDocument` for AppxManifest.xml operations — it provides typed access and namespace-aware queries
+- When adding new manifest manipulation, add methods to `AppxManifestDocument` rather than writing regex in consuming code

@@ -69,8 +69,11 @@ internal static class Program
         // and should not display any interactive messages like first-run notices
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
+        // Check if this is a completion request - completions must be fast and silent
+        bool isCompleteMode = args.Length > 0 && args[0] == "complete";
+
         var services = new ServiceCollection()
-            .ConfigureServices(Console.Out)
+            .ConfigureServices()
             .ConfigureCommands()
             .AddLogging(b =>
             {
@@ -81,9 +84,9 @@ internal static class Program
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        // Skip first-run notice for machine-readable output modes
+        // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json)
+        if (!isCliSchemaMode && !isCompleteMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
@@ -100,19 +103,50 @@ internal static class Program
             }
 
             // Show help by invoking with --help
-            await rootCommand.Parse(["--help"]).InvokeAsync();
+            await rootCommand.Parse(["--help"], WinAppParserConfiguration.Default).InvokeAsync();
             return 0;
         }
 
-        var parseResult = rootCommand.Parse(args);
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+        // Catch single-dash typos like "-app" before invocation so the user gets a clear
+        // "Did you mean --app?" message instead of System.CommandLine's confusing
+        // "Unrecognized command or argument" pointing at the wrong token (issue #467).
+        // Only run when parsing already failed — otherwise a command that legitimately
+        // accepts a "-foo"-shaped positional value would get a false-positive typo error.
+        if (parseResult.Errors.Count > 0)
+        {
+            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+            if (typo is not null)
+            {
+                var suggested = "-" + typo;
+                Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                Console.Error.WriteLine(
+                    "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                return 1;
+            }
+        }
+
+        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
+        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+        if (!string.IsNullOrWhiteSpace(caller))
+        {
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+        }
 
         try
         {
-            CommandInvokedEvent.Log(parseResult.CommandResult);
+            if (!isCompleteMode)
+            {
+                CommandInvokedEvent.Log(parseResult.CommandResult);
+            }
 
             var returnCode = await parseResult.InvokeAsync();
 
-            CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            if (!isCompleteMode)
+            {
+                CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            }
 
             return returnCode;
         }
