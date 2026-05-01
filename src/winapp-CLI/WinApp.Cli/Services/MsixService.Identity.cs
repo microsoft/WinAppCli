@@ -99,7 +99,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -184,12 +184,25 @@ internal partial class MsixService
             : appxManifestPath.Name;
         var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
         manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
-        var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
-            .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
 
-        if (executableMatch == null)
+        // Resolve $targetnametoken$ and other placeholders using the same logic as
+        // winapp package — uses --executable if provided, otherwise searches the AppX
+        // root for a single non-runtime exe.
+        manifestContent = ResolveManifestPlaceholders(manifestContent, executable, outputAppXDirectory, taskContext);
+
+        // Determine the resolved executable for downstream operations (PRI rename, arch detection).
+        // ResolveManifestPlaceholders guarantees the Executable attribute is non-placeholder
+        // on success, so we expect a concrete file name here.
+        var resolvedDoc = AppxManifestDocument.Parse(manifestContent);
+        var resolvedExeName = resolvedDoc.ApplicationExecutable
+            ?? throw new InvalidOperationException(
+                "Manifest has no Application/Executable attribute. Cannot determine the application executable.");
+        var executableMatch = new FileInfo(Path.Combine(outputAppXDirectory.FullName, resolvedExeName));
+        if (!executableMatch.Exists)
         {
-            throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
+            throw new FileNotFoundException(
+                $"Executable '{resolvedExeName}' (from manifest) was not found in the output directory '{outputAppXDirectory.FullName}'. " +
+                "Ensure the build output contains the exe, or pass --executable with the correct relative path.");
         }
 
         // Fetch dotnet package list once for all downstream operations
@@ -231,13 +244,6 @@ internal partial class MsixService
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
             }
         }
-
-        // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [PlaceholderHelper.TargetNameToken] = Path.GetFileNameWithoutExtension(executableMatch.Name)
-        };
-        manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
 
         // Resolve <Resource Language="x-generate"/> — falls back to "en-US" if no PRI found
         manifestContent = manifestContent.Replace("x-generate", "EN-US");
