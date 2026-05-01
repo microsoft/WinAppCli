@@ -82,13 +82,24 @@ runs:
           New-Item -ItemType Directory -Path "$stage/baseline" -Force | Out-Null
           Copy-Item "metrics-baseline/*.json" "$stage/baseline/" -ErrorAction SilentlyContinue
         }
-        # PR context — workflow_run can't reliably read PR number from a fork
+        # PR context (debug only — the post workflow re-derives PR identity from
+        # workflow_run metadata for security; never trusts these fields).
         $ctx = @{
           pr_number = [int]$env:PR_NUMBER
           head_sha = $env:HEAD_SHA
           run_id = [int64]$env:RUN_ID
         }
         $ctx | ConvertTo-Json | Set-Content "$stage/pr-context.json"
+        # Validate that core metric files are present before uploading. If
+        # collect-metrics ever regresses or paths change, we want the build
+        # to fail loudly here instead of publishing a mostly-empty report
+        # from the privileged post-metrics-comment workflow.
+        $required = @("binary-sizes.json", "test-summary.json")
+        $missing = $required | Where-Object { -not (Test-Path "$stage/$_") }
+        if ($missing) {
+          Write-Error "metrics staging is missing required file(s): $($missing -join ', '). Did collect-metrics run successfully?"
+          exit 1
+        }
 
     - name: Upload metrics-data artifact
       if: github.event_name == 'pull_request'

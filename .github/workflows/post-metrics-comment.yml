@@ -16,12 +16,15 @@ permissions:
 
 jobs:
   post-comment:
-    # Only run for PR-driven builds that succeeded; main-branch runs don't
-    # produce the artifact, and failed builds can produce empty/partial
-    # metric files that would overwrite a previously good comment.
-    if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+    # Only run for PR-driven builds. We intentionally do NOT gate on
+    # workflow_run.conclusion == 'success' — the *Build and Package*
+    # workflow contains additional jobs (e.g. e2e-test-ui) that run
+    # after metrics are collected, and a failure there shouldn't block
+    # posting valid metrics. The download step below is the real gate:
+    # it succeeds only if the source build produced a complete
+    # metrics-data artifact (binary-sizes.json + test-summary.json
+    # are required at upload time), and we skip the comment otherwise.
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Download metrics-data artifact
@@ -137,14 +140,20 @@ jobs:
               startup = { medianMs: safeNum(raw.medianMs) };
             } catch {}
 
+            // safePct: coerce to a finite number clamped to [0, 100], or null
+            function safePct(v) {
+              const n = Number(v);
+              if (!Number.isFinite(n)) return null;
+              if (n < 0 || n > 100) return null;
+              return n;
+            }
+
             let coverage = { lineCoverage: null, branchCoverage: null };
             try {
               const raw = JSON.parse(fs.readFileSync(`${dataPath}/coverage-summary.json`, 'utf8'));
-              const line = Number(raw.lineCoverage);
-              const branch = Number(raw.branchCoverage);
               coverage = {
-                lineCoverage: Number.isFinite(line) ? line : null,
-                branchCoverage: Number.isFinite(branch) ? branch : null,
+                lineCoverage: safePct(raw.lineCoverage),
+                branchCoverage: safePct(raw.branchCoverage),
               };
             } catch {}
 
@@ -168,8 +177,7 @@ jobs:
             } catch {}
             try {
               const raw = JSON.parse(fs.readFileSync(`${dataPath}/baseline/coverage.json`, 'utf8'));
-              const line = Number(raw.lineCoverage);
-              coverageBaseline = { lineCoverage: Number.isFinite(line) ? line : null };
+              coverageBaseline = { lineCoverage: safePct(raw.lineCoverage) };
             } catch {}
 
             // --- Artifact download links (resolved against the SOURCE run) ---
@@ -206,8 +214,9 @@ jobs:
             const COVERAGE_MIN_DELTA = 0.1;
 
             function formatBytes(bytes) {
-              const mb = bytes / (1024 * 1024);
-              if (mb >= 1) return `${mb.toFixed(2)} MB`;
+              const abs = Math.abs(bytes);
+              const mb = abs / (1024 * 1024);
+              if (mb >= 1) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
               const kb = bytes / 1024;
               return `${kb.toFixed(1)} KB`;
             }
