@@ -20,6 +20,24 @@ internal class GroupableTask(string inProgressMessage, GroupableTask? parent) : 
     public bool EscapeInProgressMessage { get; set; } = true;
     public string? SubStatus { get; set; }
 
+    /// <summary>
+    /// Returns the completed task's display message — typically the human-readable string
+    /// inside a <c>(int ReturnCode, string Message)</c> tuple result. Used by the plain
+    /// progress renderer, which doesn't have access to the task's generic <c>T</c> and so
+    /// cannot pattern-match <see cref="System.Runtime.CompilerServices.ITuple"/> directly.
+    /// Returns <c>null</c> when no completion message is available; callers should fall back
+    /// to <see cref="InProgressMessage"/>.
+    /// </summary>
+    public virtual string? CompletedDisplayMessage => null;
+
+    /// <summary>
+    /// True when the task completed with a non-zero <c>ReturnCode</c> as the first element
+    /// of an <see cref="System.Runtime.CompilerServices.ITuple"/> result. The live renderer
+    /// suppresses the line for these because <c>StatusService</c> logs the error to stderr
+    /// separately; the plain renderer does the same to avoid duplicate error output.
+    /// </summary>
+    public virtual bool IsFailedTupleResult => false;
+
     public void Dispose()
     {
         foreach (var subTask in SubTasks)
@@ -45,6 +63,40 @@ internal class GroupableTask<T> : GroupableTask
         _logger = logger;
         RenderLock = renderLock;
     }
+
+    public override string? CompletedDisplayMessage
+    {
+        get
+        {
+            if (CompletedMessage is null)
+            {
+                return null;
+            }
+
+            if (CompletedMessage is string s)
+            {
+                return s;
+            }
+
+            // (int ReturnCode, string Message) and similar shapes — match the live
+            // renderer's behaviour in RenderTask: prefer the first string element found.
+            if (CompletedMessage is ITuple tuple)
+            {
+                for (var i = 0; i < tuple.Length; i++)
+                {
+                    if (tuple[i] is string ts)
+                    {
+                        return ts;
+                    }
+                }
+            }
+
+            return CompletedMessage.ToString();
+        }
+    }
+
+    public override bool IsFailedTupleResult
+        => CompletedMessage is ITuple t && t.Length > 0 && t[0] is int rc && rc != 0;
 
     public virtual async Task<T?> ExecuteAsync(Action? onUpdate, CancellationToken cancellationToken, bool startSpinner = true)
     {
