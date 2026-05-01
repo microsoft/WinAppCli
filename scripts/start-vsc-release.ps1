@@ -182,19 +182,19 @@ try {
 
     # 6. Confirm with user
     Write-Host ""
-    Write-Host "  ┌─────────────────────────────────────────────┐" -ForegroundColor White
-    Write-Host "  │  VSC Extension Release Plan                  │" -ForegroundColor White
-    Write-Host "  │                                             │" -ForegroundColor White
-    Write-Host "  │  Release version : $releaseVersion$((' ' * (25 - $releaseVersion.Length)))│" -ForegroundColor White
-    Write-Host "  │  Release branch  : $releaseBranch$((' ' * (25 - $releaseBranch.Length)))│" -ForegroundColor White
-    Write-Host "  │  Next dev version: $nextVersion$((' ' * (25 - $nextVersion.Length)))│" -ForegroundColor White
-    Write-Host "  │  Bump branch     : $bumpBranch$((' ' * (25 - $bumpBranch.Length)))│" -ForegroundColor White
-    Write-Host "  │                                             │" -ForegroundColor White
-    Write-Host "  │  Steps:                                     │" -ForegroundColor White
-    Write-Host "  │  1. Create & push '$releaseBranch'$((' ' * (10 - $releaseBranch.Length)))│" -ForegroundColor White
-    Write-Host "  │  2. Bump version to $nextVersion on main$((' ' * (9 - $nextVersion.Length)))│" -ForegroundColor White
-    Write-Host "  │  3. Create PR to merge bump into main       │" -ForegroundColor White
-    Write-Host "  └─────────────────────────────────────────────┘" -ForegroundColor White
+    $pad = { param($s, $w) (' ' * [Math]::Max(0, $w - $s.Length)) }
+    Write-Host "  VSC Extension Release Plan" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor White
+    Write-Host "  Release version : $releaseVersion" -ForegroundColor White
+    Write-Host "  Release branch  : $releaseBranch" -ForegroundColor White
+    Write-Host "  Next dev version: $nextVersion" -ForegroundColor White
+    Write-Host "  Bump branch     : $bumpBranch" -ForegroundColor White
+    Write-Host "" -ForegroundColor White
+    Write-Host "  Steps:" -ForegroundColor White
+    Write-Host "  1. Create & push '$releaseBranch'" -ForegroundColor White
+    Write-Host "  2. Bump version to $nextVersion on main" -ForegroundColor White
+    Write-Host "  3. Create PR to merge bump into main" -ForegroundColor White
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor White
 
     Confirm-Step "Does this release plan look correct? Proceed?"
 
@@ -286,17 +286,15 @@ try {
     Invoke-GitOrDryRun -Description "Switch back to main" -Arguments @("checkout", "main")
 
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║  VSC Extension release started!              ║" -ForegroundColor Green
-    Write-Host "╠══════════════════════════════════════════════╣" -ForegroundColor Green
-    Write-Host "║                                              ║" -ForegroundColor Green
-    Write-Host "║  • Release branch '$releaseBranch' pushed$((' ' * (10 - $releaseBranch.Length)))║" -ForegroundColor Green
-    Write-Host "║  • Version bump PR created for $nextVersion$((' ' * (10 - $nextVersion.Length)))║" -ForegroundColor Green
-    Write-Host "║                                              ║" -ForegroundColor Green
-    Write-Host "║  Next steps:                                 ║" -ForegroundColor Green
-    Write-Host "║  1. Monitor the VSC release pipeline         ║" -ForegroundColor Green
-    Write-Host "║  2. Review & merge the version bump PR       ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "  VSC Extension release started!" -ForegroundColor Green
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Green
+    Write-Host "  • Release branch '$releaseBranch' pushed" -ForegroundColor Green
+    Write-Host "  • Version bump PR created for $nextVersion" -ForegroundColor Green
+    Write-Host "" -ForegroundColor Green
+    Write-Host "  Next steps:" -ForegroundColor Green
+    Write-Host "  1. Monitor the VSC release pipeline" -ForegroundColor Green
+    Write-Host "  2. Review & merge the version bump PR" -ForegroundColor Green
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Green
     Write-Host ""
 
 } catch {
