@@ -1,0 +1,57 @@
+name: Mark Metrics Comment Stale
+
+# Runs on pull_request_target so it gets write permissions even for PRs
+# from forks (the original placement under `pull_request` in
+# build-package.yml silently lost write perms for fork PRs and 403'd).
+#
+# This workflow does NOT check out the PR's code — it only calls the
+# GitHub API — so pull_request_target is safe here.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [ "main" ]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  mark-stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark metrics comment as stale
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allComments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const existing = allComments.find(c => c.body &&
+              (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
+
+            if (!existing) {
+              core.info('No existing metrics comment found, nothing to mark stale.');
+              return;
+            }
+
+            // Skip if already marked stale
+            if (existing.body.includes('<!-- build-metrics-stale -->')) {
+              core.info('Comment is already marked stale.');
+              return;
+            }
+
+            const staleBanner = '> :hourglass_flowing_sand: **Build in progress** — metrics below are from a previous commit and will update when the current build finishes.\n>\n<!-- build-metrics-stale -->\n\n';
+            const updatedBody = staleBanner + existing.body;
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body: updatedBody,
+            });
+            core.info(`Marked comment ${existing.id} as stale.`);
