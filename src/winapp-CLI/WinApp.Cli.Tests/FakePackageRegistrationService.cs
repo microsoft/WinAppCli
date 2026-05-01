@@ -55,8 +55,19 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.FromResult(FakeUnregisterResult);
     }
 
+    /// <summary>
+    /// When set to a non-null exception, <see cref="UnregisterByFullNameAsync"/> throws it
+    /// instead of recording the call. Useful for testing exception-propagation paths
+    /// (e.g. cancellation surfacing from MsixService.UnregisterExistingPackageAsync).
+    /// </summary>
+    public Exception? UnregisterByFullNameThrows { get; set; }
+
     public Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
+        if (UnregisterByFullNameThrows is not null)
+        {
+            throw UnregisterByFullNameThrows;
+        }
         UnregisterByFullNameCalls.Add((packageFullName, preserveAppData));
         return Task.CompletedTask;
     }

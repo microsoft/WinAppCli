@@ -805,6 +805,9 @@ internal partial class MsixService
             // Inspect installed packages first so we can make a safe, per-package decision
             // about non-dev-mode installations (where PreserveApplicationData is rejected
             // and a blind removal would wipe user data).
+            // NOTE: despite its name, IPackageRegistrationService.FindDevPackages returns
+            // *all* same-name packages (dev-mode AND non-dev-mode); the IsDevelopmentMode
+            // flag on each entry is what we classify on below.
             var installed = packageRegistrationService.FindDevPackages(packageName);
 
             if (installed.Count == 0)
@@ -873,11 +876,18 @@ internal partial class MsixService
             // Surface actionable conflicts (non-dev-mode package outside project tree) to the caller.
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation must propagate so callers (StatusService etc.) can treat it
+            // distinctly from a normal "no package removed" outcome.
+            throw;
+        }
         catch (Exception ex)
         {
-            // Other failures (e.g., transient deployment errors) shouldn't block the caller's
-            // overall flow — log and continue, matching prior behavior.
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not check for existing package: {ex.Message}");
+            // Other failures (e.g., transient deployment errors during inspection or
+            // removal) shouldn't block the caller's overall flow — log and continue,
+            // matching prior behavior.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not unregister existing package: {ex.Message}");
             return false;
         }
     }

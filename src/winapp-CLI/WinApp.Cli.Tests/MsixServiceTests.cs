@@ -1587,9 +1587,27 @@ public class MsixServiceTests
         Assert.IsFalse(MsixService.IsPathInsideDirectory(string.Empty, _tempDir.FullName));
     }
 
-    #endregion
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_CancellationFromRemoval_PropagatesNotSwallowed()
+    {
+        // Regression test: the catch-all in this method must not swallow OperationCanceledException
+        // (otherwise StatusService treats cancel as a normal "no package removed" outcome).
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_1.0.0.0_x64__abc", "MyApp", "1.0.0.0",
+                    Path.Combine(_tempDir.FullName, "AppX"), IsDevelopmentMode: true)
+            ],
+            UnregisterByFullNameThrows = new OperationCanceledException("user cancelled")
+        };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
 
-    #region Helpers
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext()));
+    }
+
+    #endregion
 
     private static int CountOccurrences(string text, string pattern)
     {
@@ -1602,6 +1620,4 @@ public class MsixServiceTests
         }
         return count;
     }
-
-    #endregion
 }

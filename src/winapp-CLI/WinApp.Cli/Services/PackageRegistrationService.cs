@@ -56,7 +56,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 "Sideloading is blocked by Group Policy on this machine. " +
                 "Contact your IT administrator to allow trusted app sideloading.", ex);
         }
-        catch (Exception ex) when (ex is not InvalidOperationException)
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
         {
             throw BuildRegistrationException(
                 "Failed to register package",
@@ -118,7 +118,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 "Sideloading is blocked by Group Policy on this machine. " +
                 "Contact your IT administrator to allow trusted app sideloading.", ex);
         }
-        catch (Exception ex) when (ex is not InvalidOperationException)
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
         {
             throw BuildRegistrationException(
                 "Failed to register sparse package",
