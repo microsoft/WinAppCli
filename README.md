@@ -17,6 +17,9 @@
   <a href="https://www.npmjs.com/package/@microsoft/winappcli">
     <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM">
   </a>
+  <a href="https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinApp">
+    <img src="https://img.shields.io/nuget/v/Microsoft.Windows.SDK.BuildTools.WinApp?style=for-the-badge&logo=nuget&label=NuGet&color=004880" alt="NuGet">
+  </a>
   <a href="https://github.com/microsoft/WinAppCli/releases/latest">
     <img src="https://img.shields.io/github/v/release/microsoft/WinAppCli?style=for-the-badge&logo=github&label=Latest%20Release&color=8ab4f8" alt="Latest Release">
   </a>
