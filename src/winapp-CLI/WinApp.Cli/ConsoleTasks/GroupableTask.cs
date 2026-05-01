@@ -65,11 +65,24 @@ internal class GroupableTask<T> : GroupableTask
             Debug.WriteLine(ex);
 
             // Handle if T is a ValueTuple with an int first element (e.g., (int ReturnCode, string Message))
-            // to return a non-zero ReturnCode on error, which prevents the spinner from continuing indefinitely.
+            // to return a non-zero ReturnCode on error, which prevents the spinner from continuing
+            // indefinitely. Surface the exception message (and stack when verbose) so callers like
+            // StatusService can present a real error instead of a blank "(null)".
             T? result = default;
             if (result is ValueTuple<int, string> v)
             {
+                var errorMessage = ex.Message;
+                if (string.IsNullOrWhiteSpace(errorMessage))
+                {
+                    errorMessage = ex.GetType().FullName ?? "Unknown error";
+                }
+                if (_logger.IsEnabled(LogLevel.Debug) && !string.IsNullOrEmpty(ex.StackTrace))
+                {
+                    errorMessage += Environment.NewLine + ex.StackTrace;
+                }
+
                 v.Item1 = 1;
+                v.Item2 = errorMessage;
                 CompletedMessage = (T?)(object)v;
             }
             else
