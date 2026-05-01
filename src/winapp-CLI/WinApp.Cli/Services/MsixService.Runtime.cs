@@ -15,7 +15,14 @@ namespace WinApp.Cli.Services;
 
 internal partial class MsixService
 {
-    [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+\.\d+.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
+    // Matches the framework MSIX filename across all naming conventions WinAppSDK has shipped:
+    //   * 1.x stable / per-minor SxS:        Microsoft.WindowsAppRuntime.1.8.msix
+    //   * 2.x stable / major-only (2.0.1+):  Microsoft.WindowsAppRuntime.2.msix
+    //   * 2.x experimental:                  Microsoft.WindowsAppRuntime.2-experimentalN.msix
+    // The minor-version segment is optional so a future 2.0.2 / 2.1.0 / 3.0 still match.
+    // DDLM/Singleton/Main/Framework variants are excluded by their own .Contains() filters
+    // at the call site, not by this regex.
+    [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+(\.\d+)?.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex WindowsAppRuntimeMsixRegex();
     [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AssemblyIdentityNameRegex();
