@@ -250,27 +250,25 @@ public class EndToEndTests : BaseCommandTests
 
         var versionParts = winAppSdkVersion.Split('.');
 
-        // Compute expected WindowsAppRuntime package name. Naming convention differs:
-        //   Stable      (e.g. 1.8.x)            -> Microsoft.WindowsAppRuntime.{major}.{minor}
-        //   Experimental 2.x (e.g. 2.0.0-experimental7) -> Microsoft.WindowsAppRuntime.{major}-experimental{N}
-        // The experimental suffix lives on the last dotted segment as "...-experimentalN",
-        // and ships in the runtime name without the minor component.
-        string expectedRuntimeName;
-        var experimentalIdx = winAppSdkVersion.IndexOf("-experimental", StringComparison.OrdinalIgnoreCase);
-        if (experimentalIdx >= 0)
-        {
-            var experimentalSuffix = winAppSdkVersion.Substring(experimentalIdx);
-            expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}{experimentalSuffix}";
-        }
-        else
-        {
-            expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
-        }
+        // Assert only on what's invariant across SDK naming-convention churn:
+        //   * The PackageDependency name MUST start with "Microsoft.WindowsAppRuntime.{major}".
+        //     Whether the framework is "Microsoft.WindowsAppRuntime.2" (2.0.1+ stable, major-only),
+        //     "Microsoft.WindowsAppRuntime.1.8" (per-minor SxS in 1.x), or
+        //     "Microsoft.WindowsAppRuntime.2-experimentalN" (2.x experimental) is the SDK's call,
+        //     not ours — the CLI faithfully propagates whatever name appears in MSIX.inventory.
+        //   * MinVersion's first three components must match the SDK version
+        //     (the inventory ships a Major.Minor.Patch.Revision quad; the leading triple is the SDK version).
+        var expectedNamePrefix = $"Name=\"Microsoft.WindowsAppRuntime.{versionParts[0]}";
+        var expectedMinVersionPrefix = versionParts.Length >= 3
+            ? $"MinVersion=\"{versionParts[0]}.{versionParts[1]}.{versionParts[2].Split('-')[0]}."
+            : $"MinVersion=\"{versionParts[0]}.";
 
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
-        Assert.Contains(expectedRuntimeName, finalManifest,
-            $"PackageDependency should reference {expectedRuntimeName}");
+        Assert.Contains(expectedNamePrefix, finalManifest,
+            $"PackageDependency Name should start with Microsoft.WindowsAppRuntime.{versionParts[0]}");
+        Assert.Contains(expectedMinVersionPrefix, finalManifest,
+            $"PackageDependency MinVersion should be derived from SDK version {winAppSdkVersion}");
     }
 
     [TestMethod]
