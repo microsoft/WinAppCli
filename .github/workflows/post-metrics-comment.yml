@@ -1,0 +1,365 @@
+name: Post PR Metrics Comment
+
+# Triggered after the "Build and Package" workflow completes. Runs in the
+# context of the *base* repository, so it has full GITHUB_TOKEN write access
+# even when the source build was for a PR opened from a fork — which is the
+# scenario where posting from inside the build job fails with 403.
+
+on:
+  workflow_run:
+    workflows: ["Build and Package"]
+    types: [completed]
+
+permissions:
+  pull-requests: write   # post / update the metrics comment
+  actions: read          # download the metrics-data artifact from the source run
+
+jobs:
+  post-comment:
+    # Only run for PR-driven builds that succeeded; main-branch runs don't
+    # produce the artifact, and failed builds can produce empty/partial
+    # metric files that would overwrite a previously good comment.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download metrics-data artifact
+        id: download
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics-data
+          path: metrics-data
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Skip if no metrics artifact
+        if: steps.download.outcome != 'success'
+        run: |
+          echo "::notice::Source build did not produce a metrics-data artifact (likely failed before the report-metrics step). Nothing to comment."
+
+      - name: Post / update PR metrics comment
+        if: steps.download.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const dataPath = 'metrics-data';
+
+            // === SECURITY MODEL ===
+            // The `metrics-data` artifact is produced by a `pull_request`
+            // build that ran the PR's code, so every byte in it must be
+            // treated as attacker-controlled. We:
+            //   * use ONLY trusted workflow_run metadata for head_sha and
+            //     the source run id (never the artifact's pr-context.json),
+            //   * resolve the PR number from the GitHub API by trusted
+            //     head_sha and verify the PR's current head still matches,
+            //   * whitelist all keys we render into the Markdown body so a
+            //     malicious build can't inject table breaks, mentions,
+            //     hidden HTML, or links.
+
+            const trustedHeadSha = context.payload.workflow_run.head_sha;
+            const sourceRunId = context.payload.workflow_run.id;
+
+            // Find the PR (or PRs) whose head is trustedHeadSha.
+            const { data: pulls } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: trustedHeadSha,
+            });
+
+            // Keep only OPEN PRs whose CURRENT head still matches (skip if the
+            // user has pushed a newer commit since this build started — an
+            // older run shouldn't overwrite metrics for a newer one).
+            const candidate = pulls.find(p => p.state === 'open' && p.head && p.head.sha === trustedHeadSha);
+            if (!candidate) {
+              core.info(`No open PR with current head ${trustedHeadSha}; skipping (likely a newer commit was pushed).`);
+              return;
+            }
+            const prNumber = candidate.number;
+
+            // === Whitelisted metric keys ===
+            const ALLOWED_SIZE_KEYS = new Set([
+              'cli-win-x64', 'cli-win-arm64',
+              'npm-package',
+              'msix-x64', 'msix-arm64',
+              'nuget-package',
+              'vscode-extension',
+            ]);
+            const labels = {
+              'cli-win-x64': 'CLI (x64)',
+              'cli-win-arm64': 'CLI (ARM64)',
+              'npm-package': 'NPM Package',
+              'msix-x64': 'MSIX (x64)',
+              'msix-arm64': 'MSIX (ARM64)',
+              'nuget-package': 'NuGet Package',
+              'vscode-extension': 'VS Code Extension',
+            };
+
+            // safeNum: coerce to a finite non-negative number or 0
+            function safeNum(v) {
+              const n = Number(v);
+              return Number.isFinite(n) && n >= 0 ? n : 0;
+            }
+
+            // sanitizeSizes: drop unknown keys, coerce values
+            function sanitizeSizes(obj) {
+              const out = {};
+              if (obj && typeof obj === 'object') {
+                for (const [k, v] of Object.entries(obj)) {
+                  if (ALLOWED_SIZE_KEYS.has(k)) out[k] = safeNum(v);
+                }
+              }
+              return out;
+            }
+
+            // --- Load + sanitize current metrics ---
+            let current = {};
+            try { current = sanitizeSizes(JSON.parse(fs.readFileSync(`${dataPath}/binary-sizes.json`, 'utf8'))); } catch {}
+
+            let tests = { total: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0 };
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/test-summary.json`, 'utf8'));
+              tests = {
+                total: safeNum(raw.total),
+                passed: safeNum(raw.passed),
+                failed: safeNum(raw.failed),
+                skipped: safeNum(raw.skipped),
+                durationMs: safeNum(raw.durationMs),
+              };
+            } catch {}
+
+            let startup = { medianMs: 0 };
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/startup-time.json`, 'utf8'));
+              startup = { medianMs: safeNum(raw.medianMs) };
+            } catch {}
+
+            let coverage = { lineCoverage: null, branchCoverage: null };
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/coverage-summary.json`, 'utf8'));
+              const line = Number(raw.lineCoverage);
+              const branch = Number(raw.branchCoverage);
+              coverage = {
+                lineCoverage: Number.isFinite(line) ? line : null,
+                branchCoverage: Number.isFinite(branch) ? branch : null,
+              };
+            } catch {}
+
+            // --- Load + sanitize baselines (may be missing on first-ever PR) ---
+            let sizeBaseline = {};
+            let testsBaseline = null;
+            let startupBaseline = null;
+            let coverageBaseline = null;
+            let hasBaseline = false;
+            try {
+              sizeBaseline = sanitizeSizes(JSON.parse(fs.readFileSync(`${dataPath}/baseline/sizes.json`, 'utf8')));
+              hasBaseline = true;
+            } catch {}
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/baseline/tests.json`, 'utf8'));
+              testsBaseline = { total: safeNum(raw.total), durationMs: safeNum(raw.durationMs) };
+            } catch {}
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/baseline/startup.json`, 'utf8'));
+              startupBaseline = { medianMs: safeNum(raw.medianMs) };
+            } catch {}
+            try {
+              const raw = JSON.parse(fs.readFileSync(`${dataPath}/baseline/coverage.json`, 'utf8'));
+              const line = Number(raw.lineCoverage);
+              coverageBaseline = { lineCoverage: Number.isFinite(line) ? line : null };
+            } catch {}
+
+            // --- Artifact download links (resolved against the SOURCE run) ---
+            const artifactLinks = {};
+            try {
+              const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: sourceRunId,
+              });
+              const artifactNameMap = {
+                'cli-win-x64': 'cli-binaries',
+                'cli-win-arm64': 'cli-binaries',
+                'npm-package': 'npm-package',
+                'msix-x64': 'msix-packages',
+                'msix-arm64': 'msix-packages',
+                'nuget-package': 'nuget-packages',
+                'vscode-extension': 'vscode-extension',
+              };
+              const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${sourceRunId}`;
+              for (const [sizeKey, artifactName] of Object.entries(artifactNameMap)) {
+                const artifact = artifacts.find(a => a.name === artifactName);
+                if (artifact) {
+                  artifactLinks[sizeKey] = `${runUrl}/artifacts/${artifact.id}`;
+                }
+              }
+            } catch (e) {
+              core.warning(`Could not fetch artifact links: ${e.message}`);
+            }
+
+            // --- Helpers ---
+            const COVERAGE_GOOD_THRESHOLD = 80;
+            const COVERAGE_WARN_THRESHOLD = 60;
+            const COVERAGE_MIN_DELTA = 0.1;
+
+            function formatBytes(bytes) {
+              const mb = bytes / (1024 * 1024);
+              if (mb >= 1) return `${mb.toFixed(2)} MB`;
+              const kb = bytes / 1024;
+              return `${kb.toFixed(1)} KB`;
+            }
+
+            function formatDelta(curr, base) {
+              const delta = curr - base;
+              const pct = base > 0 ? ((delta / base) * 100).toFixed(2) : 'N/A';
+              const sign = delta > 0 ? '+' : '';
+              let icon = ':white_check_mark:';
+              if (delta > 0) icon = ':chart_with_upwards_trend:';
+              else if (delta < 0) icon = ':chart_with_downwards_trend:';
+              return `${icon} ${sign}${formatBytes(delta)} (${sign}${pct}%)`;
+            }
+
+            function deltaMs(curr, base) {
+              const delta = curr - base;
+              if (Math.abs(delta) < 5) return ':white_check_mark: no change';
+              const sign = delta > 0 ? '+' : '';
+              const icon = delta > 10 ? ':warning:' : delta < -10 ? ':chart_with_downwards_trend:' : ':white_check_mark:';
+              return `${icon} ${sign}${delta}ms`;
+            }
+
+            function artifactLink(key, label) {
+              const url = artifactLinks[key];
+              return url ? `[${label}](${url})` : label;
+            }
+
+            let body = '## Build Metrics Report\n\n';
+
+            // --- Binary sizes ---
+            // (keys are already whitelisted via sanitizeSizes; labels[key] is always defined)
+            body += '### Binary Sizes\n\n';
+            if (hasBaseline) {
+              body += '| Artifact | Baseline | Current | Delta |\n';
+              body += '|----------|----------|---------|-------|\n';
+              const allKeys = [...new Set([...Object.keys(sizeBaseline), ...Object.keys(current)])].sort();
+              for (const key of allKeys) {
+                const label = labels[key];
+                if (!label) continue;
+                const linkedLabel = artifactLink(key, label);
+                const baseSize = sizeBaseline[key] || 0;
+                const currSize = current[key] || 0;
+                if (currSize === 0 && baseSize === 0) continue;
+                const baseStr = baseSize > 0 ? formatBytes(baseSize) : 'N/A';
+                const currStr = currSize > 0 ? formatBytes(currSize) : 'N/A';
+                const deltaStr = (baseSize > 0 && currSize > 0)
+                  ? formatDelta(currSize, baseSize) : 'N/A';
+                body += `| ${linkedLabel} | ${baseStr} | ${currStr} | ${deltaStr} |\n`;
+              }
+            } else {
+              body += '> No baseline found. Showing absolute sizes only.\n\n';
+              body += '| Artifact | Size |\n';
+              body += '|----------|------|\n';
+              for (const [key, size] of Object.entries(current).sort()) {
+                const label = labels[key];
+                if (!label) continue;
+                const linkedLabel = artifactLink(key, label);
+                body += `| ${linkedLabel} | ${formatBytes(size)} |\n`;
+              }
+            }
+
+            // --- Test summary ---
+            body += '\n### Test Results\n\n';
+            const testIcon = tests.failed > 0 ? ':x:' : ':white_check_mark:';
+            const durationSec = (tests.durationMs / 1000).toFixed(1);
+            body += `${testIcon} **${tests.passed}** passed`;
+            if (tests.failed > 0) body += `, **${tests.failed}** failed`;
+            if (tests.skipped > 0) body += `, **${tests.skipped}** skipped`;
+            body += ` out of **${tests.total}** tests in **${durationSec}s**`;
+
+            if (testsBaseline) {
+              const items = [];
+              const testDelta = tests.total - testsBaseline.total;
+              if (testDelta !== 0) {
+                const sign = testDelta > 0 ? '+' : '';
+                items.push(`${sign}${testDelta} test${Math.abs(testDelta) !== 1 ? 's' : ''}`);
+              }
+              const durDelta = tests.durationMs - testsBaseline.durationMs;
+              if (Math.abs(durDelta) >= 500) {
+                const sign = durDelta > 0 ? '+' : '';
+                items.push(`${sign}${(durDelta / 1000).toFixed(1)}s`);
+              }
+              if (items.length > 0) {
+                body += ` (${items.join(', ')} vs. baseline)`;
+              }
+            }
+            body += '\n';
+
+            // --- Test coverage ---
+            if (coverage.lineCoverage !== null) {
+              body += '\n### Test Coverage\n\n';
+              const coverageIcon = coverage.lineCoverage >= COVERAGE_GOOD_THRESHOLD ? ':white_check_mark:' : coverage.lineCoverage >= COVERAGE_WARN_THRESHOLD ? ':warning:' : ':x:';
+              body += `${coverageIcon} **${coverage.lineCoverage}%** line coverage`;
+              if (coverage.branchCoverage !== null) {
+                body += `, **${coverage.branchCoverage}%** branch coverage`;
+              }
+              if (coverageBaseline && coverageBaseline.lineCoverage !== null) {
+                const lineDelta = coverage.lineCoverage - coverageBaseline.lineCoverage;
+                if (Math.abs(lineDelta) >= COVERAGE_MIN_DELTA) {
+                  const sign = lineDelta > 0 ? '+' : '';
+                  const icon = lineDelta < 0 ? ':warning:' : ':white_check_mark:';
+                  body += ` · ${icon} ${sign}${lineDelta.toFixed(1)}% vs. baseline`;
+                } else {
+                  body += ' · :white_check_mark: no change vs. baseline';
+                }
+              }
+              body += '\n';
+            }
+
+            // --- Startup time ---
+            if (startup.medianMs > 0) {
+              body += '\n### CLI Startup Time\n\n';
+              body += `**${startup.medianMs}ms** median (x64, \`winapp --version\`)`;
+              if (startupBaseline && startupBaseline.medianMs > 0) {
+                body += ` · ${deltaMs(startup.medianMs, startupBaseline.medianMs)} vs. baseline`;
+              }
+              body += '\n';
+            }
+
+            // --- Footer (uses TRUSTED head_sha + source run id) ---
+            const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.[0-9]+Z$/, ' UTC');
+            const shortSha = trustedHeadSha.substring(0, 7);
+            const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${trustedHeadSha}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${sourceRunId}`;
+            body += `\n---\n*Updated ${timestamp} · commit [\`${shortSha}\`](${commitUrl}) · [workflow run](${runUrl})*\n`;
+            body += '\n<!-- build-metrics-report -->';
+
+            // --- Find existing comment (paginated) and update; otherwise create ---
+            const allComments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = allComments.find(c => c.body &&
+              (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info('Created new metrics report comment');
+            }

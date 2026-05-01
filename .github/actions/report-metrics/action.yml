@@ -1,9 +1,9 @@
 name: Report Build Metrics
-description: Cache baseline metrics on main, post comparison comment on PRs
+description: Cache baseline metrics on main, stage current+baseline metrics for the post-metrics-comment workflow on PRs
 
 inputs:
   github-token:
-    description: GitHub token for posting PR comments
+    description: GitHub token used to delete the old baseline cache on main
     required: true
   artifacts-path:
     description: Path to the artifacts directory containing metric JSON files
@@ -56,247 +56,45 @@ runs:
         path: metrics-baseline
         key: build-metrics-baseline
 
-    # On PRs, compare against baseline and post a comment
-    - name: Post PR metrics comment
+    # On PRs, package the current metrics + restored baseline + PR context
+    # into a single artifact. A separate `Post PR Metrics Comment` workflow
+    # (triggered by workflow_run) downloads this artifact and posts the
+    # comment. This split is required because PRs from forks don't grant
+    # GITHUB_TOKEN write access during the `pull_request` event, but
+    # workflow_run runs in the base repo and has full write permissions.
+    - name: Stage metrics data for comment workflow
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
+      shell: pwsh
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        $stage = "metrics-data"
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        # Current metrics (produced by collect-metrics)
+        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "$stage/binary-sizes.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "$stage/test-summary.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "$stage/startup-time.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/coverage-summary.json" "$stage/coverage-summary.json" -ErrorAction SilentlyContinue
+        # Baseline (restored by the cache step above; missing on first PR)
+        if (Test-Path "metrics-baseline") {
+          New-Item -ItemType Directory -Path "$stage/baseline" -Force | Out-Null
+          Copy-Item "metrics-baseline/*.json" "$stage/baseline/" -ErrorAction SilentlyContinue
+        }
+        # PR context — workflow_run can't reliably read PR number from a fork
+        $ctx = @{
+          pr_number = [int]$env:PR_NUMBER
+          head_sha = $env:HEAD_SHA
+          run_id = [int64]$env:RUN_ID
+        }
+        $ctx | ConvertTo-Json | Set-Content "$stage/pr-context.json"
+
+    - name: Upload metrics-data artifact
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v7
       with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const fs = require('fs');
-          const artifactsPath = '${{ inputs.artifacts-path }}';
-
-          // --- Load current metrics ---
-          let current = {};
-          try { current = JSON.parse(fs.readFileSync(`${artifactsPath}/binary-sizes.json`, 'utf8')); } catch {}
-
-          let tests = { total: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0 };
-          try { tests = JSON.parse(fs.readFileSync(`${artifactsPath}/test-summary.json`, 'utf8')); } catch {}
-
-          let startup = { medianMs: 0 };
-          try { startup = JSON.parse(fs.readFileSync(`${artifactsPath}/startup-time.json`, 'utf8')); } catch {}
-
-          let coverage = { lineCoverage: null, branchCoverage: null };
-          try { coverage = JSON.parse(fs.readFileSync(`${artifactsPath}/coverage-summary.json`, 'utf8')); } catch {}
-
-          // --- Load baselines ---
-          let sizeBaseline = {};
-          let testsBaseline = null;
-          let startupBaseline = null;
-          let hasBaseline = false;
-          try {
-            sizeBaseline = JSON.parse(fs.readFileSync('metrics-baseline/sizes.json', 'utf8'));
-            hasBaseline = true;
-          } catch {}
-          try { testsBaseline = JSON.parse(fs.readFileSync('metrics-baseline/tests.json', 'utf8')); } catch {}
-          try { startupBaseline = JSON.parse(fs.readFileSync('metrics-baseline/startup.json', 'utf8')); } catch {}
-
-          let coverageBaseline = null;
-          try { coverageBaseline = JSON.parse(fs.readFileSync('metrics-baseline/coverage.json', 'utf8')); } catch {}
-
-          // --- Artifact download links ---
-          const artifactLinks = {};
-          try {
-            const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId,
-            });
-            const artifactNameMap = {
-              'cli-win-x64': 'cli-binaries',
-              'cli-win-arm64': 'cli-binaries',
-              'npm-package': 'npm-package',
-              'msix-x64': 'msix-packages',
-              'msix-arm64': 'msix-packages',
-              'nuget-package': 'nuget-packages',
-              'vscode-extension': 'vscode-extension',
-            };
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            for (const [sizeKey, artifactName] of Object.entries(artifactNameMap)) {
-              const artifact = artifacts.find(a => a.name === artifactName);
-              if (artifact) {
-                artifactLinks[sizeKey] = `${runUrl}/artifacts/${artifact.id}`;
-              }
-            }
-          } catch (e) {
-            core.warning(`Could not fetch artifact links: ${e.message}`);
-          }
-
-          // --- Helpers ---
-          const COVERAGE_GOOD_THRESHOLD = 80;   // >= 80% line coverage: green
-          const COVERAGE_WARN_THRESHOLD = 60;   // >= 60% line coverage: yellow; below: red
-          const COVERAGE_MIN_DELTA = 0.1;       // ignore coverage changes smaller than 0.1%
-
-          function formatBytes(bytes) {
-            const mb = bytes / (1024 * 1024);
-            if (mb >= 1) return `${mb.toFixed(2)} MB`;
-            const kb = bytes / 1024;
-            return `${kb.toFixed(1)} KB`;
-          }
-
-          function formatDelta(curr, base) {
-            const delta = curr - base;
-            const pct = base > 0 ? ((delta / base) * 100).toFixed(2) : 'N/A';
-            const sign = delta > 0 ? '+' : '';
-            let icon = ':white_check_mark:';
-            if (delta > 0) icon = ':chart_with_upwards_trend:';
-            else if (delta < 0) icon = ':chart_with_downwards_trend:';
-            return `${icon} ${sign}${formatBytes(delta)} (${sign}${pct}%)`;
-          }
-
-          function deltaInt(curr, base, higherIsBad = true) {
-            const delta = curr - base;
-            if (delta === 0) return ':white_check_mark: no change';
-            const sign = delta > 0 ? '+' : '';
-            const icon = (higherIsBad ? delta > 0 : delta < 0) ? ':warning:' : ':white_check_mark:';
-            return `${icon} ${sign}${delta}`;
-          }
-
-          function deltaMs(curr, base) {
-            const delta = curr - base;
-            if (Math.abs(delta) < 5) return ':white_check_mark: no change';
-            const sign = delta > 0 ? '+' : '';
-            const icon = delta > 10 ? ':warning:' : delta < -10 ? ':chart_with_downwards_trend:' : ':white_check_mark:';
-            return `${icon} ${sign}${delta}ms`;
-          }
-
-          function artifactLink(key, label) {
-            const url = artifactLinks[key];
-            return url ? `[${label}](${url})` : label;
-          }
-
-          const labels = {
-            'cli-win-x64': 'CLI (x64)',
-            'cli-win-arm64': 'CLI (ARM64)',
-            'npm-package': 'NPM Package',
-            'msix-x64': 'MSIX (x64)',
-            'msix-arm64': 'MSIX (ARM64)',
-            'nuget-package': 'NuGet Package',
-            'vscode-extension': 'VS Code Extension',
-          };
-
-          let body = '## Build Metrics Report\n\n';
-
-          // --- Binary sizes ---
-          body += '### Binary Sizes\n\n';
-          if (hasBaseline) {
-            body += '| Artifact | Baseline | Current | Delta |\n';
-            body += '|----------|----------|---------|-------|\n';
-            const allKeys = [...new Set([...Object.keys(sizeBaseline), ...Object.keys(current)])].sort();
-            for (const key of allKeys) {
-              const label = labels[key] || key;
-              const linkedLabel = artifactLink(key, label);
-              const baseSize = sizeBaseline[key] || 0;
-              const currSize = current[key] || 0;
-              if (currSize === 0 && baseSize === 0) continue;
-              const baseStr = baseSize > 0 ? formatBytes(baseSize) : 'N/A';
-              const currStr = currSize > 0 ? formatBytes(currSize) : 'N/A';
-              const deltaStr = (baseSize > 0 && currSize > 0)
-                ? formatDelta(currSize, baseSize) : 'N/A';
-              body += `| ${linkedLabel} | ${baseStr} | ${currStr} | ${deltaStr} |\n`;
-            }
-          } else {
-            body += '> No baseline found. Showing absolute sizes only.\n\n';
-            body += '| Artifact | Size |\n';
-            body += '|----------|------|\n';
-            for (const [key, size] of Object.entries(current).sort()) {
-              const linkedLabel = artifactLink(key, labels[key] || key);
-              body += `| ${linkedLabel} | ${formatBytes(size)} |\n`;
-            }
-          }
-
-          // --- Test summary ---
-          body += '\n### Test Results\n\n';
-          const testIcon = tests.failed > 0 ? ':x:' : ':white_check_mark:';
-          const durationSec = (tests.durationMs / 1000).toFixed(1);
-          body += `${testIcon} **${tests.passed}** passed`;
-          if (tests.failed > 0) body += `, **${tests.failed}** failed`;
-          if (tests.skipped > 0) body += `, **${tests.skipped}** skipped`;
-          body += ` out of **${tests.total}** tests in **${durationSec}s**`;
-
-          if (testsBaseline) {
-            const items = [];
-            const testDelta = tests.total - testsBaseline.total;
-            if (testDelta !== 0) {
-              const sign = testDelta > 0 ? '+' : '';
-              items.push(`${sign}${testDelta} test${Math.abs(testDelta) !== 1 ? 's' : ''}`);
-            }
-            const durDelta = tests.durationMs - testsBaseline.durationMs;
-            if (Math.abs(durDelta) >= 500) {
-              const sign = durDelta > 0 ? '+' : '';
-              items.push(`${sign}${(durDelta / 1000).toFixed(1)}s`);
-            }
-            if (items.length > 0) {
-              body += ` (${items.join(', ')} vs. baseline)`;
-            }
-          }
-          body += '\n';
-
-          // --- Test coverage ---
-          if (coverage.lineCoverage !== null) {
-            body += '\n### Test Coverage\n\n';
-            const coverageIcon = coverage.lineCoverage >= COVERAGE_GOOD_THRESHOLD ? ':white_check_mark:' : coverage.lineCoverage >= COVERAGE_WARN_THRESHOLD ? ':warning:' : ':x:';
-            body += `${coverageIcon} **${coverage.lineCoverage}%** line coverage`;
-            if (coverage.branchCoverage !== null) {
-              body += `, **${coverage.branchCoverage}%** branch coverage`;
-            }
-            if (coverageBaseline && coverageBaseline.lineCoverage !== null) {
-              const lineDelta = coverage.lineCoverage - coverageBaseline.lineCoverage;
-              if (Math.abs(lineDelta) >= COVERAGE_MIN_DELTA) {
-                const sign = lineDelta > 0 ? '+' : '';
-                const icon = lineDelta < 0 ? ':warning:' : ':white_check_mark:';
-                body += ` · ${icon} ${sign}${lineDelta.toFixed(1)}% vs. baseline`;
-              } else {
-                body += ' · :white_check_mark: no change vs. baseline';
-              }
-            }
-            body += '\n';
-          }
-
-          // --- Startup time ---
-          if (startup.medianMs > 0) {
-            body += '\n### CLI Startup Time\n\n';
-            body += `**${startup.medianMs}ms** median (x64, \`winapp --version\`)`;
-            if (startupBaseline && startupBaseline.medianMs > 0) {
-              body += ` · ${deltaMs(startup.medianMs, startupBaseline.medianMs)} vs. baseline`;
-            }
-            body += '\n';
-          }
-
-          // --- Footer with timestamp, commit, and run link ---
-          const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.[0-9]+Z$/, ' UTC');
-          const shortSha = context.sha.substring(0, 7);
-          const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}`;
-          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-          body += `\n---\n*Updated ${timestamp} · commit [\`${shortSha}\`](${commitUrl}) · [workflow run](${runUrl})*\n`;
-
-          body += '\n<!-- build-metrics-report -->';
-
-          // Find and update existing comment to avoid spam
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          // Also clean up old-format comments
-          const existing = comments.find(c => c.body &&
-            (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
-
-          if (existing) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: existing.id,
-              body,
-            });
-            core.info(`Updated existing comment ${existing.id}`);
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body,
-            });
-            core.info('Created new metrics report comment');
-          }
+        name: metrics-data
+        path: metrics-data
+        if-no-files-found: error
+        retention-days: 7
