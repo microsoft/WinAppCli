@@ -186,7 +186,7 @@ function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
 
 ### `init()`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 ```typescript
 function init(options?: InitOptions): Promise<WinappResult>
@@ -799,7 +799,7 @@ function execWithBuildTools(command: string, options?: ExecSyncOptions): string 
 
 ### `addMsixIdentityToExe()`
 
-Adds package identity information from a Package.appxmanifest file to an executable's embedded manifest
+Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
 
 ```typescript
 function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undefined, options?: MsixIdentityOptions): Promise<MsixIdentityResult>
@@ -810,7 +810,7 @@ function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undef
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `exePath` | `string` | Yes | Path to the executable file |
-| `appxManifestPath` | `string \| undefined` | No | Path to the Package.appxmanifest file containing package identity data |
+| `appxManifestPath` | `string \| undefined` | No | Path to the appxmanifest.xml file containing package identity data |
 | `options` | `MsixIdentityOptions` | No | Optional configuration |
 
 ---
@@ -1502,3 +1502,4 @@ type ManifestTemplates = "packaged" | "sparse"
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
