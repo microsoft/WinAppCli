@@ -48,6 +48,7 @@ extends:
             displayName: Download public CLI release for VS Code extension
             inputs:
               pwsh: true
+              errorActionPreference: 'stop'
               targetType: 'inline'
               script: |
                 $cliReleaseTag = "${{ parameters.CliReleaseTag }}"
@@ -80,15 +81,25 @@ extends:
                 $arm64Url = "$downloadBase/winappcli-arm64.zip"
 
                 Write-Host "Downloading x64 CLI from: $x64Url"
-                Invoke-WebRequest -Uri $x64Url -OutFile "$cliDir/x64.zip"
-                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/x64.zip")) {
+                try {
+                    Invoke-WebRequest -Uri $x64Url -OutFile "$cliDir/x64.zip" -UseBasicParsing -MaximumRedirection 10
+                } catch {
+                    Write-Error "Failed to download x64 CLI from $x64Url : $_"
+                    exit 1
+                }
+                if (-not (Test-Path "$cliDir/x64.zip") -or (Get-Item "$cliDir/x64.zip").Length -eq 0) {
                     Write-Error "Failed to download x64 CLI from $x64Url"
                     exit 1
                 }
 
                 Write-Host "Downloading arm64 CLI from: $arm64Url"
-                Invoke-WebRequest -Uri $arm64Url -OutFile "$cliDir/arm64.zip"
-                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/arm64.zip")) {
+                try {
+                    Invoke-WebRequest -Uri $arm64Url -OutFile "$cliDir/arm64.zip" -UseBasicParsing -MaximumRedirection 10
+                } catch {
+                    Write-Error "Failed to download arm64 CLI from $arm64Url : $_"
+                    exit 1
+                }
+                if (-not (Test-Path "$cliDir/arm64.zip") -or (Get-Item "$cliDir/arm64.zip").Length -eq 0) {
                     Write-Error "Failed to download arm64 CLI from $arm64Url"
                     exit 1
                 }
