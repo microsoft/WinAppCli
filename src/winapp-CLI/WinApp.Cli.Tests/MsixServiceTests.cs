@@ -1420,6 +1420,175 @@ public class MsixServiceTests
 
     #endregion
 
+    #region UnregisterExistingPackageAsync Tests
+
+    private static MsixService CreateMsixServiceForUnregister(IPackageRegistrationService prs, string cwd)
+    {
+        return new MsixService(
+            null!, null!, null!, null!, null!, null!, null!, null!, null!, null!,
+            prs,
+            NullLogger<MsixService>.Instance,
+            new CurrentDirectoryProvider(cwd));
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_NoInstalls_ReturnsFalse()
+    {
+        var fake = new FakePackageRegistrationService { FakeDevPackages = [] };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        var result = await svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext());
+
+        Assert.IsFalse(result);
+        Assert.AreEqual(0, fake.UnregisterByFullNameCalls.Count);
+        Assert.AreEqual(0, fake.UnregisterCalls.Count, "Should never use the name-based API");
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_DevModePackage_RemovesByFullNameWithPreserve()
+    {
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_1.0.0.0_x64__abc", "MyApp", "1.0.0.0",
+                    Path.Combine(_tempDir.FullName, "AppX"), IsDevelopmentMode: true)
+            ]
+        };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        var result = await svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext(), preserveAppData: true);
+
+        Assert.IsTrue(result);
+        Assert.AreEqual(1, fake.UnregisterByFullNameCalls.Count);
+        Assert.AreEqual("MyApp_1.0.0.0_x64__abc", fake.UnregisterByFullNameCalls[0].PackageFullName);
+        Assert.IsTrue(fake.UnregisterByFullNameCalls[0].PreserveAppData);
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_NonDevInTree_RemovesWithoutPreservingAppData()
+    {
+        var inTreeLocation = Path.Combine(_tempDir.FullName, "PackageInstall");
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_1.0.0.0_x64__store", "MyApp", "1.0.0.0",
+                    inTreeLocation, IsDevelopmentMode: false)
+            ]
+        };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        var result = await svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext(), preserveAppData: true);
+
+        Assert.IsTrue(result);
+        Assert.AreEqual(1, fake.UnregisterByFullNameCalls.Count);
+        Assert.AreEqual("MyApp_1.0.0.0_x64__store", fake.UnregisterByFullNameCalls[0].PackageFullName);
+        Assert.IsFalse(fake.UnregisterByFullNameCalls[0].PreserveAppData,
+            "Non-dev-mode packages cannot be removed with PreserveApplicationData");
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_NonDevOutOfTree_ThrowsActionableException()
+    {
+        var outOfTreeLocation = Path.Combine(Path.GetTempPath(), $"OutsideTree_{Guid.NewGuid():N}");
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_2.0.0.0_x64__store", "MyApp", "2.0.0.0",
+                    outOfTreeLocation, IsDevelopmentMode: false)
+            ]
+        };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext()));
+
+        StringAssert.Contains(ex.Message, "MyApp_2.0.0.0_x64__store");
+        StringAssert.Contains(ex.Message, "Get-AppxPackage MyApp | Remove-AppxPackage");
+        Assert.AreEqual(0, fake.UnregisterByFullNameCalls.Count, "Must not remove anything when refusing");
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_SiblingDirectoryWithSharedPrefix_TreatedAsOutOfTree()
+    {
+        // Regression test for the StartsWith() prefix bug:
+        // cwd = ...\proj should NOT include a sibling at ...\project2.
+        var projDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "proj"));
+        projDir.Create();
+        var siblingDir = Path.Combine(_tempDir.FullName, "project2", "AppX");
+
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_1.0.0.0_x64__store", "MyApp", "1.0.0.0",
+                    siblingDir, IsDevelopmentMode: false)
+            ]
+        };
+        var svc = CreateMsixServiceForUnregister(fake, projDir.FullName);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext()));
+
+        Assert.AreEqual(0, fake.UnregisterByFullNameCalls.Count,
+            "Sibling directory must not be treated as inside the project tree");
+    }
+
+    [TestMethod]
+    public async Task UnregisterExistingPackageAsync_MixedPackages_OutOfTreeOneRefusesAllRemovals()
+    {
+        // Critical regression test for H1: classification must happen up front so that
+        // the dev-mode package isn't removed before the out-of-tree non-dev one is checked.
+        var inTreeDevLocation = Path.Combine(_tempDir.FullName, "DevAppX");
+        var outOfTreeStoreLocation = Path.Combine(Path.GetTempPath(), $"StoreOutside_{Guid.NewGuid():N}");
+        var fake = new FakePackageRegistrationService
+        {
+            FakeDevPackages =
+            [
+                new DevPackageInfo("MyApp_1.0.0.0_x64__dev", "MyApp", "1.0.0.0",
+                    inTreeDevLocation, IsDevelopmentMode: true),
+                new DevPackageInfo("MyApp_2.0.0.0_x64__store", "MyApp", "2.0.0.0",
+                    outOfTreeStoreLocation, IsDevelopmentMode: false),
+            ]
+        };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.UnregisterExistingPackageAsync("MyApp", CreateTestTaskContext()));
+
+        Assert.AreEqual(0, fake.UnregisterByFullNameCalls.Count,
+            "No package may be removed when an out-of-tree non-dev install is present");
+    }
+
+    [TestMethod]
+    public void IsPathInsideDirectory_RejectsSiblingWithSharedPrefix()
+    {
+        var container = Path.Combine(_tempDir.FullName, "proj");
+        var sibling = Path.Combine(_tempDir.FullName, "project2");
+
+        Assert.IsFalse(MsixService.IsPathInsideDirectory(sibling, container));
+    }
+
+    [TestMethod]
+    public void IsPathInsideDirectory_AcceptsActualChild()
+    {
+        var container = Path.Combine(_tempDir.FullName, "proj");
+        var child = Path.Combine(_tempDir.FullName, "proj", "sub", "AppX");
+
+        Assert.IsTrue(MsixService.IsPathInsideDirectory(child, container));
+    }
+
+    [TestMethod]
+    public void IsPathInsideDirectory_NullOrEmptyCandidate_ReturnsFalse()
+    {
+        Assert.IsFalse(MsixService.IsPathInsideDirectory(null, _tempDir.FullName));
+        Assert.IsFalse(MsixService.IsPathInsideDirectory(string.Empty, _tempDir.FullName));
+    }
+
+    #endregion
+
     #region Helpers
 
     private static int CountOccurrences(string text, string pattern)

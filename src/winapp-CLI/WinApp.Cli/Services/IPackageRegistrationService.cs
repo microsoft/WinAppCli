@@ -39,6 +39,21 @@ internal interface IPackageRegistrationService
     Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Unregisters a single installed package by its full name (e.g.
+    /// <c>MyCompany.MyApp_1.0.0.0_neutral__1abcd2efgh3jk</c>). Use this when you've
+    /// already enumerated installed packages via <see cref="FindDevPackages"/> and want
+    /// to apply removal policy per-package without affecting other packages that share
+    /// the same identity name.
+    /// </summary>
+    /// <param name="packageFullName">The package full name (Id.FullName).</param>
+    /// <param name="preserveAppData">
+    /// When true, preserves the package's application data during removal. Only supported
+    /// for packages registered in development mode.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Installs an MSIX/APPX package file, optionally forcing application shutdown.
     /// Used for installing framework dependencies like Windows App Runtime.
     /// </summary>
