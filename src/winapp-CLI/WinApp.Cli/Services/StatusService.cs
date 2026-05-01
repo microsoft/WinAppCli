@@ -122,7 +122,12 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
                 // StatusService only handles unhandled exceptions (caught above).
                 if (logger.IsEnabled(LogLevel.Error))
                 {
-                    logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
+                    var completedMessageText = result.Value.CompletedMessage?.ToString();
+                    if (string.IsNullOrWhiteSpace(completedMessageText))
+                    {
+                        completedMessageText = "Operation failed without an error message.";
+                    }
+                    logger.LogError("{CompletedMessage}", completedMessageText);
                     if (!logger.IsEnabled(LogLevel.Debug))
                     {
                         logger.LogInformation("Run with --verbose for more details.");
