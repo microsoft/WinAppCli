@@ -347,7 +347,7 @@ try
     
         $PackageVscScript = Join-Path $PSScriptRoot "package-vsc.ps1"
 
-        & $PackageVscScript -Version $FullVersion -Stable:$Stable
+        & $PackageVscScript -Stable:$Stable
 
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "VS Code extension packaging failed, but continuing..."

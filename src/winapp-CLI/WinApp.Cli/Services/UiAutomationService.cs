@@ -1278,10 +1278,10 @@ return Task.FromResult<UiElement?>(null);
     {
         // Use the element's source HWND if it came from a different window (popup/dialog)
         IUIAutomationElement? root;
-        if (element.WindowHandle != 0 && element.WindowHandle != session.WindowHandle)
+        if (element.WindowHandle is { } elHwnd && elHwnd != 0 && elHwnd != session.WindowHandle)
         {
-            root = GetRootElementForHwnd((nint)element.WindowHandle);
-            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.WindowHandle);
+            root = GetRootElementForHwnd((nint)elHwnd);
+            _logger.LogDebug("Resolving element on source HWND {Hwnd}", elHwnd);
         }
         else
         {
@@ -1753,31 +1753,46 @@ return Task.FromResult<UiElement?>(null);
         return null;
     }
 
-    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results, ref int nextElementId)
+    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results, ref int nextElementId,
+                          string? parentSelector = null, List<string>? ancestorTypes = null)
     {
         var uiElement = ToUiElement(element, path, ref nextElementId);
         uiElement.Depth = currentDepth;
+        uiElement.ParentSelector = parentSelector;
+        if (ancestorTypes is { Count: > 0 })
+        {
+            uiElement.AncestorPath = ancestorTypes.ToArray();
+        }
         results.Add(uiElement);
 
         if (currentDepth >= maxDepth)
-
-
         {
-
-
+            // Peek for children so we can hint that the tree was truncated.
+            try
+            {
+                var peekWalker = _automation.get_ControlViewWalker();
+                if (peekWalker.GetFirstChildElement(element) is not null)
+                {
+                    uiElement.HasMoreChildren = true;
+                }
+            }
+            catch { /* COM errors here are non-fatal — leave HasMoreChildren null */ }
             return;
-
-
         }
 
         var walker = _automation.get_ControlViewWalker();
         var child = walker.GetFirstChildElement(element);
         var childIndex = 0;
 
+        // Build ancestor list for children: parent's ancestors + this element's type.
+        var childAncestors = ancestorTypes is null ? new List<string>(currentDepth + 1) : new List<string>(ancestorTypes);
+        childAncestors.Add(uiElement.Type);
+        var childParentSelector = uiElement.Selector ?? uiElement.Id;
+
         while (child is not null)
         {
             var childPath = string.IsNullOrEmpty(path) ? $"/{childIndex}" : $"{path}/{childIndex}";
-            WalkTree(child, maxDepth, currentDepth + 1, childPath, results, ref nextElementId);
+            WalkTree(child, maxDepth, currentDepth + 1, childPath, results, ref nextElementId, childParentSelector, childAncestors);
 
             IUIAutomationElement? next;
             try
@@ -1788,10 +1803,10 @@ return Task.FromResult<UiElement?>(null);
             {
                 next = null;
             }
-child = next;
+            child = next;
             childIndex++;
         }
-}
+    }
 
     private static UiElement ToUiElement(IUIAutomationElement element, string path, ref int nextElementId)
     {
@@ -1873,6 +1888,14 @@ child = next;
         }
         catch { }
 
+        // Detect any actionable UIA pattern; used by inspect --interactive to surface
+        // truly clickable elements (including framework-Custom controls) instead of relying
+        // on a hard-coded ControlType allowlist.
+        var isInvokable = toggleState is not null
+                       || expandState is not null
+                       || HasPattern(element, UIA_PATTERN_ID.UIA_InvokePatternId)
+                       || HasPattern(element, UIA_PATTERN_ID.UIA_SelectionItemPatternId);
+
         return new UiElement
         {
             Id = id,
@@ -1891,7 +1914,20 @@ child = next;
             ExpandState = expandState,
             ScrollDir = scrollDir,
             Selector = selector,
+            IsInvokable = isInvokable,
         };
+    }
+
+    private static bool HasPattern(IUIAutomationElement element, UIA_PATTERN_ID patternId)
+    {
+        try
+        {
+            return element.GetCurrentPattern(patternId) is not null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>

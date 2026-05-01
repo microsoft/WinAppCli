@@ -56,8 +56,10 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
         => Task.CompletedTask;
 
+    public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
+
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
-        => Task.FromResult<UiElement?>(new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" });
+        => Task.FromResult(FocusedResult);
 
     public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
         => Task.FromResult<string?>("fake text content");

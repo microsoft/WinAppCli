@@ -49,23 +49,23 @@ internal class UiClickCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "click");
+                UiErrors.MissingSelector(logger, "click", json);
                 return 1;
             }
 
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var doubleClick = parseResult.GetValue(DoubleClickOption);
             var rightClick = parseResult.GetValue(RightClickOption);
 
@@ -77,7 +77,7 @@ internal class UiClickCommand : Command, IShortDescription
 
                 if (element is null)
                 {
-                    UiErrors.ElementNotFound(logger, selectorStr);
+                    UiErrors.ElementNotFound(logger, selectorStr, json);
                     return 1;
                 }
 
@@ -90,6 +90,7 @@ internal class UiClickCommand : Command, IShortDescription
                 if (element.Width == 0 || element.Height == 0)
                 {
                     logger.LogError("{Symbol} Element has zero size — cannot click.", UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot click.", selectorStr);
                     return 1;
                 }
 
@@ -104,7 +105,7 @@ internal class UiClickCommand : Command, IShortDescription
                 // Perform the click via SendInput
                 MouseInput.Click(centerX, centerY, doubleClick, rightClick);
 
-                var elementId = element.Selector ?? element.Id;
+                var elementId = (element.Selector ?? element.Id ?? "");
 
                 if (json)
                 {
@@ -130,12 +131,12 @@ internal class UiClickCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

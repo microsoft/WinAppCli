@@ -40,17 +40,17 @@ internal class UiScreenshotCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
 
             try
@@ -121,12 +121,12 @@ internal class UiScreenshotCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }
@@ -155,6 +155,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             // Capture each window
             var captures = new List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)>();
+            var windowDetails = new List<UiScreenshotWindowInfo>();
             foreach (var w in sorted)
             {
                 var info = UiSessionService.GetWindowInfo(w.Hwnd);
@@ -170,6 +171,15 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     };
                     var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, ct);
                     captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
+                    windowDetails.Add(new UiScreenshotWindowInfo
+                    {
+                        Hwnd = w.Hwnd,
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                        Label = info.Label,
+                        Width = width,
+                        Height = height,
+                        Captured = true,
+                    });
 
                     if (!json)
                     {
@@ -180,6 +190,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 catch (Exception ex)
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
+                    windowDetails.Add(new UiScreenshotWindowInfo
+                    {
+                        Hwnd = w.Hwnd,
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                        Label = info.Label,
+                        Captured = false,
+                        Error = ex.Message,
+                    });
                     if (!json)
                     {
                         ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
@@ -190,6 +208,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             if (captures.Count == 0)
             {
                 logger.LogError("No windows could be captured.");
+                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "No windows could be captured.");
                 return 1;
             }
 
@@ -216,7 +235,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     Height = compositeHeight,
                     ProcessId = session.ProcessId,
                     WindowTitle = session.WindowTitle,
-                    Hwnd = session.WindowHandle
+                    Hwnd = session.WindowHandle,
+                    Windows = windowDetails.ToArray(),
                 };
                 ansiConsole.Profile.Out.Writer.WriteLine(
                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
