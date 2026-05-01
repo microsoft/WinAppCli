@@ -22,6 +22,7 @@ internal class FakeMsixService : IMsixService
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
         bool clean = false,
+        string? executable = null,
         CancellationToken cancellationToken = default)
     {
         AddLooseLayoutCalls.Add((appxManifestPath.FullName, clean));
