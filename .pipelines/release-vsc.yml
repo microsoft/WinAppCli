@@ -46,6 +46,8 @@ extends:
               version: '24.x'
           - task: PowerShell@2
             displayName: Download public CLI release for VS Code extension
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN)
             inputs:
               pwsh: true
               errorActionPreference: 'stop'
