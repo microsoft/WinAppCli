@@ -92,7 +92,8 @@ Replace `yourcli.exe` with the desired command name for your CLI. Once a user in
 
 Update the following fields to match your CLI application.
 
-> **Important**: The `Publisher` value in your manifest must match the publisher in your signing certificate. If you generate a certificate later (step 5), it will use the publisher from your manifest. If you change the publisher after generating a certificate, you'll need to regenerate the certificate to match.
+> [!IMPORTANT]
+> The `Publisher` value in your manifest must match the publisher in your signing certificate. If you generate a certificate later (step 5), it will use the publisher from your manifest. If you change the publisher after generating a certificate, you'll need to regenerate the certificate to match.
 
 - **Identity**: Update `Name`, `Publisher`, and `Version`
   ```xml

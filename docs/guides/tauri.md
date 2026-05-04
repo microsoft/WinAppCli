@@ -13,7 +13,8 @@ For a complete working example, check out the [Tauri sample](../../samples/tauri
 1. **Rust Toolchain** - Install Rust using [rustup](https://rustup.rs/) or `winget install Rustlang.Rustup --source winget`
 1. **winapp CLI** - `winget install microsoft.winappcli --source winget`
 
-> **Tip**: If you already have these installed, run the `winget install` commands anyway to check for updates.
+> [!TIP]
+> If you already have these installed, run the `winget install` commands anyway to check for updates.
 
 ## 1. Create a New Tauri App
 
@@ -157,7 +158,8 @@ This command will:
 - Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 
-> **Note:** Because no SDK packages are being managed, no `winapp.yaml` is created — Tauri uses Rust's `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
+> [!NOTE]
+> Because no SDK packages are being managed, no `winapp.yaml` is created — Tauri uses Rust's `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
 
 You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
@@ -185,13 +187,16 @@ To debug with identity, we need to build the Rust backend and run it with `winap
     npm run tauri:dev:withidentity
     ```
 
-> **Tip**: You may see a terminal/console window appear behind the app window — this is normal for Tauri debug builds (it's the Rust process's console).
+> [!TIP]
+> You may see a terminal/console window appear behind the app window — this is normal for Tauri debug builds (it's the Rust process's console).
 
 You should now see the app open and display a "Package family name", confirming it is running with identity! You can now start using and debugging APIs that require package identity, such as Notifications or the new AI APIs like Phi Silica.
 
-> **Tip**: `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 5. Use `winapp unregister` to clean up development packages when done.
+> [!TIP]
+> `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 5. Use `winapp unregister` to clean up development packages when done.
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 5. Package with MSIX
 
@@ -220,7 +225,8 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Tip**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
+> [!TIP]
+> The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Build, Stage, and Pack
 
@@ -228,7 +234,8 @@ winapp cert generate --if-exists skip
 npm run pack:msix
 ```
 
-> **Tip**: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> [!TIP]
+> The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
@@ -240,7 +247,8 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-> **Tip**: If you used `winapp run` in step 4, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
+> [!TIP]
+> If you used `winapp run` in step 4, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
 
 Install the package by double-clicking the generated `.msix` file, or using PowerShell:
 
@@ -248,7 +256,8 @@ Install the package by double-clicking the generated `.msix` file, or using Powe
 Add-AppxPackage .\tauri-app.msix
 ```
 
-> **Tip**: The MSIX filename includes the version and architecture (e.g., `tauri-app_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
+> [!TIP]
+> The MSIX filename includes the version and architecture (e.g., `tauri-app_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
 
 Once installed, you can launch your app from the Start menu. You should see the app running with identity.
 

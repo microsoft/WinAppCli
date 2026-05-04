@@ -1,0 +1,77 @@
+name: Docs Update Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-docs:
+    # Skip dependabot and bot PRs
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for undocumented CLI changes
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const SKIP_LABEL = 'docs-not-needed';
+
+            // Check if the skip label is present
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            if (labels.includes(SKIP_LABEL)) {
+              console.log(`"${SKIP_LABEL}" label found — skipping docs check.`);
+              return;
+            }
+
+            // Get changed files
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const changedPaths = files.map(f => f.filename);
+
+            // Patterns that indicate user-facing CLI changes
+            const cliChangePatterns = [
+              /^docs\/cli-schema\.json$/,
+              /^src\/winapp-CLI\/.*\/Commands\//,
+              /^src\/winapp-npm\/src\/cli\.ts$/,
+              /^winapp\.example\.yaml$/,
+            ];
+
+            // Check if any CLI-related files changed
+            const cliChanges = changedPaths.filter(p =>
+              cliChangePatterns.some(pattern => pattern.test(p))
+            );
+
+            if (cliChanges.length === 0) {
+              console.log('No CLI-related changes detected — docs check not applicable.');
+              return;
+            }
+
+            // Check if any docs were updated (excluding cli-schema.json which is auto-generated)
+            const docsChanges = changedPaths.filter(p =>
+              (p.startsWith('docs/') && p !== 'docs/cli-schema.json') ||
+              p === 'README.md'
+            );
+
+            if (docsChanges.length > 0) {
+              console.log('CLI changes detected and docs were updated:');
+              console.log('  CLI changes:', cliChanges.join(', '));
+              console.log('  Docs changes:', docsChanges.join(', '));
+              return;
+            }
+
+            // CLI changed but no docs updated — fail the check
+            core.setFailed(
+              `This PR changes CLI commands or options but no documentation was updated.\n\n` +
+              `Changed CLI files:\n${cliChanges.map(f => `  - ${f}`).join('\n')}\n\n` +
+              `Please update the relevant docs under \`docs/\`, or add the \`${SKIP_LABEL}\` label ` +
+              `if no documentation changes are needed (e.g., internal refactor, bug fix with no user-facing impact).`
+            );

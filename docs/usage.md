@@ -101,7 +101,8 @@ winapp restore [options]
 - Regenerates C++/WinRT headers and binaries
 - Stores sharable files in the global cache directory
 
-> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
+> [!NOTE]
+> For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
