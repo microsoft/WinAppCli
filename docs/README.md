@@ -71,6 +71,7 @@ winapp CLI works with a variety of app frameworks:
 
 Additional guides:
 - [Packaging an EXE/CLI](guides/packaging-cli.md): step-by-step guide for packaging an existing EXE/CLI as MSIX
+- [Shell Completion](guides/shell-completion.md): enable tab completion for commands, options, and values in PowerShell, bash, zsh, and fish
 
 ## Commands overview
 

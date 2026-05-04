@@ -54,6 +54,7 @@ $FileMapping = [ordered]@{
     "docs/guides/rust.md"                            = "guides/rust.md"
     "docs/guides/tauri.md"                           = "guides/tauri.md"
     "docs/guides/packaging-cli.md"                   = "guides/packaging-cli.md"
+    "docs/guides/shell-completion.md"                = "guides/shell-completion.md"
     "docs/guides/electron/setup.md"                  = "guides/electron-setup.md"
     "docs/guides/electron/packaging.md"              = "guides/electron-packaging.md"
     "docs/guides/electron/phi-silica-addon.md"       = "guides/electron-phi-silica-addon.md"
@@ -94,6 +95,10 @@ $FrontMatterOverrides = @{
     }
     "guides/packaging-cli.md" = @{
         description = "Step-by-step guide to packaging an existing EXE or CLI tool as an MSIX package using the winapp CLI."
+        topic       = "how-to"
+    }
+    "guides/shell-completion.md" = @{
+        description = "Enable tab completion for winapp CLI commands, options, and values in PowerShell, bash, zsh, and fish."
         topic       = "how-to"
     }
     "guides/electron-setup.md" = @{
@@ -175,7 +180,6 @@ $repoOnlyFiles = @(
     "docs/npm-usage.md"
     "docs/ui-automation.md"
     "docs/telemetry.md"
-    "docs/guides/shell-completion.md"
     "docs/guides/claude-code-plugin.md"
     "samples/dotnet-app"
     "samples/wpf-app"
@@ -456,6 +460,7 @@ These guides walk you through using the winapp CLI with your app framework — f
 ## Additional guides
 
 - [Packaging an EXE/CLI](packaging-cli.md) — Package an existing executable as MSIX
+- [Shell Completion](shell-completion.md) — Enable tab completion for commands, options, and values
 
 ## Electron deep-dive guides
 
