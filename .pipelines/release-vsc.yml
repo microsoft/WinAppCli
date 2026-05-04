@@ -28,7 +28,7 @@ parameters:
   - name: signingIdentity
     type: object
     default:
-      serviceName: $(SigningServiceName)
+      serviceName: 'WinSDKCLI - ESRP Code Signing MI'
       appId: $(SigningAppId)
       tenantId: $(SigningTenantId)
       akvName: $(SigningAKVName)
@@ -154,6 +154,17 @@ extends:
               filePath: $(System.DefaultWorkingDirectory)\scripts\package-vsc.ps1
               arguments: "-Stable -CliBinariesPath '$(System.DefaultWorkingDirectory)/artifacts/public-cli'"
           - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: PowerShell@2
+              displayName: Debug - Check signing variables
+              inputs:
+                targetType: inline
+                pwsh: true
+                script: |
+                  Write-Host "SigningAppId length: $('$(SigningAppId)'.Length)"
+                  Write-Host "SigningTenantId length: $('$(SigningTenantId)'.Length)"
+                  Write-Host "SigningAKVName length: $('$(SigningAKVName)'.Length)"
+                  Write-Host "SigningAuthCertName length: $('$(SigningAuthCertName)'.Length)"
+                  Write-Host "SigningSignCertName length: $('$(SigningSignCertName)'.Length)"
             - task: EsrpCodeSigning@5
               displayName: Code Sign ESRP - VSIX Package
               inputs:
