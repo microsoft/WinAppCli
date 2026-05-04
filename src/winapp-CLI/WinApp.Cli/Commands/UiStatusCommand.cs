@@ -33,15 +33,15 @@ internal class UiStatusCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             try
             {
@@ -78,7 +78,7 @@ internal class UiStatusCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

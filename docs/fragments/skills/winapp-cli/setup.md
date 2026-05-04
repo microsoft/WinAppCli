@@ -87,6 +87,9 @@ winapp run ./bin/Debug
 # Launch with custom manifest and pass arguments to the app
 winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
 
+# Pass arguments after -- to avoid escaping (equivalent to --args)
+winapp run ./bin/Debug -- --my-flag value
+
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
 

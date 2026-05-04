@@ -32,62 +32,57 @@ internal class UiGetFocusedCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
                 var element = await uiAutomation.GetFocusedElementAsync(session, cancellationToken);
 
-                if (element is null)
+                if (json)
                 {
-                    if (!json)
-                    {
-                        logger.LogInformation("No element has keyboard focus in this app");
-                    }
+                    UiElementScrubber.Scrub(element);
+                    var result = new UiFocusedResult { HasFocus = element is not null, Element = element };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiFocusedResult));
                     return 0;
                 }
 
-                if (json)
+                if (element is null)
                 {
-                    ansiConsole.Profile.Out.Writer.WriteLine(
-                        JsonSerializer.Serialize(element, UiJsonContext.Default.UiElement));
-                }
-                else
-                {
-                    var sel = element.Selector ?? element.Id;
-                    var displayName = element.Name ?? element.AutomationId;
-                    var name = displayName is not null && displayName != sel
-                        ? $" [green]\"{Markup.Escape(displayName)}\"[/]" : "";
-                    var value = element.Value is not null && element.Value != element.Name
-                        ? $" [yellow]value=\"{Markup.Escape(element.Value)}\"[/]" : "";
-                    var bounds = element.Width > 0 ? $" [grey]({element.X},{element.Y} {element.Width}x{element.Height})[/]" : "";
-                    ansiConsole.MarkupLine($"[bold cyan]{Markup.Escape(sel)}[/] {element.Type}{name}{value}{bounds}");
+                    logger.LogInformation("No element has keyboard focus in this app");
+                    return 0;
                 }
 
-                if (!json)
-                {
-                    logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");
-                }
+                var sel = element.Selector ?? element.Id ?? "";
+                var displayName = element.Name ?? element.AutomationId;
+                var name = displayName is not null && displayName != sel
+                    ? $" [green]\"{Markup.Escape(displayName)}\"[/]" : "";
+                var value = element.Value is not null && element.Value != element.Name
+                    ? $" [yellow]value=\"{Markup.Escape(element.Value)}\"[/]" : "";
+                var bounds = element.Width > 0 ? $" [grey]({element.X},{element.Y} {element.Width}x{element.Height})[/]" : "";
+                ansiConsole.MarkupLine($"[bold cyan]{Markup.Escape(sel)}[/] {element.Type}{name}{value}{bounds}");
+
+                logger.LogInformation("Focused: {Type} {Name}", element.Type, element.Name ?? "(unnamed)");
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

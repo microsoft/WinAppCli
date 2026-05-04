@@ -32,8 +32,8 @@ internal class UiListWindowsCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
 
             try
             {
@@ -135,7 +135,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

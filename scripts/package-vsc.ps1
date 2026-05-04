@@ -4,16 +4,21 @@
     Package Windows App Development CLI as VS Code extension (VSIX)
 .DESCRIPTION
     This script creates a VSIX package from pre-built CLI binaries for x64 and arm64 architectures.
-    Uses artifacts/cli for binaries and outputs to artifacts directory.
+    By default, uses artifacts/cli for binaries and outputs to artifacts directory.
+    Use -CliBinariesPath to override the CLI binaries location (e.g., to bundle a public release).
 .PARAMETER Version
     Version number for the VSIX package (e.g., "0.1.0" or "0.1.0-prerelease.73").
     If not specified, reads from version.json and calculates based on Stable flag.
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
+.PARAMETER CliBinariesPath
+    Path to CLI binaries directory containing win-x64/ and win-arm64/ subdirectories.
+    If not specified, defaults to artifacts/cli in the project root.
 .EXAMPLE
     .\scripts\package-vsc.ps1
     .\scripts\package-vsc.ps1 -Version "0.1.0" -Stable
     .\scripts\package-vsc.ps1 -Version "0.1.0-prerelease.73"
+    .\scripts\package-vsc.ps1 -CliBinariesPath "C:\path\to\cli-release" -Stable
 #>
 
 param(
@@ -21,7 +26,10 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory=$false)]
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+
+    [Parameter(Mandatory=$false)]
+    [string]$CliBinariesPath
 )
 
 # Ensure we're running from the project root
@@ -30,7 +38,9 @@ Push-Location $ProjectRoot
 try
 {
     # Define standard paths
-    $CliBinariesPath = Join-Path $ProjectRoot "artifacts\cli"
+    if ([string]::IsNullOrEmpty($CliBinariesPath)) {
+        $CliBinariesPath = Join-Path $ProjectRoot "artifacts\cli"
+    }
     $OutputPath = Join-Path $ProjectRoot "artifacts"
 
     Write-Host "[VSC] Starting VS Code extension packaging..." -ForegroundColor Green
@@ -82,15 +92,15 @@ try
     if ([string]::IsNullOrEmpty($Version)) {
         Write-Host "[VERSION] Calculating package version..." -ForegroundColor Blue
 
-        # Read base version from version.json
-        $VersionJsonPath = "$ProjectRoot\version.json"
-        if (-not (Test-Path $VersionJsonPath)) {
-            Write-Error "version.json not found at $VersionJsonPath"
+        # Read base version from VS Code extension package.json
+        $VscPackageJsonPath = Join-Path $ProjectRoot "src\winapp-VSC\package.json"
+        if (-not (Test-Path $VscPackageJsonPath)) {
+            Write-Error "VS Code extension package.json not found at $VscPackageJsonPath"
             exit 1
         }
 
-        $VersionJson = Get-Content $VersionJsonPath | ConvertFrom-Json
-        $BaseVersion = $VersionJson.version
+        $VscPackageJson = Get-Content $VscPackageJsonPath -Raw | ConvertFrom-Json
+        $BaseVersion = $VscPackageJson.version
 
         # Get build number
         $GetBuildNumberScript = Join-Path $PSScriptRoot "get-build-number.ps1"
@@ -165,6 +175,33 @@ try
     # Copy LICENSE from project root
     Copy-Item "$ProjectRoot\LICENSE" "LICENSE" -Force
 
+    # Stamp version information into README.md
+    Write-Host "[VSC] Stamping version info into README.md..." -ForegroundColor Blue
+    $ReadmePath = "README.md"
+    Copy-Item $ReadmePath "$ReadmePath.backup" -Force
+
+    # Get CLI version from the bundled x64 binary
+    $CliExe = Join-Path $VscBinPath "win-x64\winapp.exe"
+    $CliVersion = "unknown"
+    if (Test-Path $CliExe) {
+        try {
+            $RawCliVersion = & $CliExe --version 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($RawCliVersion)) {
+                # Strip git hash suffix (e.g., "1.0.0+abc123" -> "1.0.0")
+                $CliVersion = ($RawCliVersion.Trim() -split '\+')[0]
+            }
+        } catch {
+            Write-Warning "Could not determine CLI version from binary"
+        }
+    }
+    Write-Host "[VERSION] Bundled CLI version: $CliVersion" -ForegroundColor Cyan
+
+    # Replace version placeholders in README
+    $ReadmeContent = Get-Content $ReadmePath -Raw
+    $ReadmeContent = $ReadmeContent -replace '(?<=<!-- EXT_VERSION -->).*?(?=<!-- /EXT_VERSION -->)', $Version
+    $ReadmeContent = $ReadmeContent -replace '(?<=<!-- CLI_VERSION -->).*?(?=<!-- /CLI_VERSION -->)', $CliVersion
+    Set-Content $ReadmePath -Value $ReadmeContent -NoNewline
+
     # Backup original package.json
     Write-Host "[VSC] Setting package version to $Version..." -ForegroundColor Blue
     $PackageJsonPath = "package.json"
@@ -182,8 +219,11 @@ try
         npm install -g @vscode/vsce
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to install @vscode/vsce"
-            # Restore package.json before exiting
+            # Restore package.json and README.md before exiting
             Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
+            if (Test-Path "$ReadmePath.backup") {
+                Move-Item "$ReadmePath.backup" $ReadmePath -Force
+            }
             Pop-Location
             exit 1
         }
@@ -201,6 +241,11 @@ try
     Write-Host "[VSC] Restoring original package.json..." -ForegroundColor Blue
     if (Test-Path "$PackageJsonPath.backup") {
         Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
+    }
+
+    # Restore original README.md
+    if (Test-Path "$ReadmePath.backup") {
+        Move-Item "$ReadmePath.backup" $ReadmePath -Force
     }
 
     # Remove copied LICENSE

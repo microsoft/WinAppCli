@@ -1128,6 +1128,85 @@ public class PackageCommandTests : BaseCommandTests
         Assert.Contains("no", ex.Message, "Error message should mention no exe files found");
     }
 
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndCreatedump_InfersAppExe()
+    {
+        // Arrange - .NET self-contained build outputs include createdump.exe alongside the app exe.
+        // Auto-inference must skip createdump.exe and pick the app exe.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderCreatedumpTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "createdump.exe");
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderCreatedumpExtracted");
+        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "createdump.exe should be filtered out, MyApp.exe should be picked");
+        Assert.DoesNotContain("createdump", manifestContent, "createdump should not appear in resolved manifest");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndApphost_InfersAppExe()
+    {
+        // Arrange - apphost.exe is a .NET runtime artifact that should also be filtered
+        // during executable auto-inference.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderApphostTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "apphost.exe");
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderApphostExtracted");
+        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "apphost.exe should be filtered out, MyApp.exe should be picked");
+        Assert.DoesNotContain("apphost", manifestContent, "apphost should not appear in resolved manifest");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithOnlyRuntimeTools_Throws()
+    {
+        // Arrange - only runtime-tool exes present; auto-inference should fail with the
+        // same multi-/no-exe guidance rather than silently picking createdump.exe.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderOnlyRuntimeToolsTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "createdump.exe", "apphost.exe");
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+        {
+            await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "TestPackage",
+                skipPri: true,
+                autoSign: false,
+                cancellationToken: TestContext.CancellationToken
+            );
+        });
+
+        Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
+    }
+
     #endregion
 
     #region Third-Party WinRT Component Integration Tests

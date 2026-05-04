@@ -99,7 +99,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -184,12 +184,25 @@ internal partial class MsixService
             : appxManifestPath.Name;
         var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
         manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
-        var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
-            .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
 
-        if (executableMatch == null)
+        // Resolve $targetnametoken$ and other placeholders using the same logic as
+        // winapp package — uses --executable if provided, otherwise searches the AppX
+        // root for a single non-runtime exe.
+        manifestContent = ResolveManifestPlaceholders(manifestContent, executable, outputAppXDirectory, taskContext);
+
+        // Determine the resolved executable for downstream operations (PRI rename, arch detection).
+        // ResolveManifestPlaceholders guarantees the Executable attribute is non-placeholder
+        // on success, so we expect a concrete file name here.
+        var resolvedDoc = AppxManifestDocument.Parse(manifestContent);
+        var resolvedExeName = resolvedDoc.ApplicationExecutable
+            ?? throw new InvalidOperationException(
+                "Manifest has no Application/Executable attribute. Cannot determine the application executable.");
+        var executableMatch = new FileInfo(Path.Combine(outputAppXDirectory.FullName, resolvedExeName));
+        if (!executableMatch.Exists)
         {
-            throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
+            throw new FileNotFoundException(
+                $"Executable '{resolvedExeName}' (from manifest) was not found in the output directory '{outputAppXDirectory.FullName}'. " +
+                "Ensure the build output contains the exe, or pass --executable with the correct relative path.");
         }
 
         // Fetch dotnet package list once for all downstream operations
@@ -231,13 +244,6 @@ internal partial class MsixService
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
             }
         }
-
-        // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [PlaceholderHelper.TargetNameToken] = Path.GetFileNameWithoutExtension(executableMatch.Name)
-        };
-        manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
 
         // Resolve <Resource Language="x-generate"/> — falls back to "en-US" if no PRI found
         manifestContent = manifestContent.Replace("x-generate", "EN-US");
@@ -796,25 +802,136 @@ internal partial class MsixService
 
         try
         {
-            var removed = await packageRegistrationService.UnregisterAsync(packageName, preserveAppData, cancellationToken);
+            // Inspect installed packages first so we can make a safe, per-package decision
+            // about non-dev-mode installations (where PreserveApplicationData is rejected
+            // and a blind removal would wipe user data).
+            // NOTE: despite its name, IPackageRegistrationService.FindDevPackages returns
+            // *all* same-name packages (dev-mode AND non-dev-mode); the IsDevelopmentMode
+            // flag on each entry is what we classify on below.
+            var installed = packageRegistrationService.FindDevPackages(packageName);
 
-            if (removed)
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully{(preserveAppData ? " (app data preserved)" : "")}");
-            }
-            else
+            if (installed.Count == 0)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Note} No existing package found");
+                return false;
             }
 
-            return removed;
+            var cwd = Path.GetFullPath(currentDirectoryProvider.GetCurrentDirectory());
+
+            // First pass: classify packages and refuse the whole operation if any
+            // out-of-tree non-dev install is present. Doing this up front (instead of
+            // mid-loop) prevents the first removal from racing ahead and wiping data
+            // that the safety check on a *later* package was meant to protect.
+            foreach (var pkg in installed)
+            {
+                if (pkg.IsDevelopmentMode)
+                {
+                    continue;
+                }
+
+                if (!IsPathInsideDirectory(pkg.InstallLocation, cwd))
+                {
+                    var locationDescription = string.IsNullOrEmpty(pkg.InstallLocation)
+                        ? "."
+                        : $" at '{Path.GetFullPath(pkg.InstallLocation)}'.";
+                    throw new InvalidOperationException(
+                        $"A package with the same identity ('{pkg.FullName}') is already installed " +
+                        $"as a non-development-mode package" + locationDescription + Environment.NewLine +
+                        "Remove it manually if you intended to replace it:" + Environment.NewLine +
+                        $"  Get-AppxPackage {packageName} | Remove-AppxPackage");
+                }
+            }
+
+            // Second pass: safe to remove each package individually using its full name.
+            // Using the per-FullName API ensures one iteration cannot wipe packages the
+            // first pass approved or rejected separately.
+            var anyRemoved = false;
+            foreach (var pkg in installed)
+            {
+                if (pkg.IsDevelopmentMode)
+                {
+                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData, cancellationToken);
+                }
+                else
+                {
+                    // Verified in-tree above: safe to remove (app data deleted, since
+                    // PreserveApplicationData isn't valid for non-dev-mode packages).
+                    taskContext.AddDebugMessage(
+                        $"{UiSymbols.Warning} Existing non-dev-mode package {pkg.FullName} is rooted in the current " +
+                        $"project tree ({pkg.InstallLocation}); removing it (application data will be deleted).");
+                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData: false, cancellationToken);
+                }
+                anyRemoved = true;
+            }
+
+            if (anyRemoved)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully{(preserveAppData ? " (app data preserved where possible)" : "")}");
+            }
+
+            return anyRemoved;
+        }
+        catch (InvalidOperationException)
+        {
+            // Surface actionable conflicts (non-dev-mode package outside project tree) to the caller.
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation must propagate so callers (StatusService etc.) can treat it
+            // distinctly from a normal "no package removed" outcome.
+            throw;
         }
         catch (Exception ex)
         {
-            // If check fails, package likely doesn't exist or we don't have permission
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not check for existing package: {ex.Message}");
+            // Other failures (e.g., transient deployment errors during inspection or
+            // removal) shouldn't block the caller's overall flow — log and continue,
+            // matching prior behavior.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not unregister existing package: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Segment-aware containment check: returns true iff <paramref name="candidatePath"/>
+    /// lives inside <paramref name="containerPath"/>. Uses <see cref="Path.GetRelativePath"/>
+    /// so that sibling directories sharing a string prefix (e.g. <c>C:\proj</c> vs
+    /// <c>C:\project2</c>) are correctly treated as outside.
+    /// </summary>
+    internal static bool IsPathInsideDirectory(string? candidatePath, string containerPath)
+    {
+        if (string.IsNullOrEmpty(candidatePath))
+        {
+            return false;
+        }
+
+        string fullCandidate;
+        string fullContainer;
+        try
+        {
+            fullCandidate = Path.GetFullPath(candidatePath);
+            fullContainer = Path.GetFullPath(containerPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var relative = Path.GetRelativePath(fullContainer, fullCandidate);
+        if (Path.IsPathRooted(relative))
+        {
+            // Different volume / UNC root — definitely not contained.
+            return false;
+        }
+
+        // Reject any traversal out of the container ("..", "..\foo", etc.).
+        if (relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                             || relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
