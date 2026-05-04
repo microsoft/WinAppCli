@@ -421,6 +421,7 @@ extends:
             env:
               GH_TOKEN: $(MSLEARN_GH_TOKEN)
             inputs:
+              targetType: 'inline'
               pwsh: true
               errorActionPreference: 'stop'
               script: |

@@ -70,7 +70,7 @@ winapp CLI works with a variety of app frameworks:
 | Flutter | [Get started with Flutter](guides/flutter.md) |
 
 Additional guides:
-- [Packaging an EXE/CLI](guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- [Packaging an EXE/CLI](guides/packaging-cli.md): step-by-step guide for packaging an existing EXE/CLI as MSIX
 
 ## Commands overview
 

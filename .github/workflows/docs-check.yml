@@ -7,10 +7,11 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   check-docs:
-    # Skip dependabot and bot PRs
+    # Skip dependabot PRs
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
