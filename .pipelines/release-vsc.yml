@@ -66,14 +66,6 @@ extends:
               errorActionPreference: 'stop'
               targetType: 'inline'
               script: |
-                # Debug: verify token and gh CLI availability
-                Write-Host "GH_TOKEN is set: $(-not [string]::IsNullOrEmpty($env:GH_TOKEN))"
-                Write-Host "GH_TOKEN length: $($env:GH_TOKEN.Length)"
-                Write-Host "gh CLI version:"
-                gh --version
-                Write-Host "gh auth status:"
-                gh auth status 2>&1 | ForEach-Object { Write-Host $_ }
-
                 $cliReleaseTag = "${{ parameters.CliReleaseTag }}"
                 $repo = "microsoft/winappcli"
 
@@ -147,17 +139,6 @@ extends:
               filePath: $(System.DefaultWorkingDirectory)\scripts\package-vsc.ps1
               arguments: "-Stable -CliBinariesPath '$(System.DefaultWorkingDirectory)/artifacts/public-cli'"
           - ${{ if eq(parameters.DoEsrp, 'true') }}:
-            - task: PowerShell@2
-              displayName: Debug - Check signing variables
-              inputs:
-                targetType: inline
-                pwsh: true
-                script: |
-                  Write-Host "SigningAppId length: $('$(SigningAppId)'.Length)"
-                  Write-Host "SigningTenantId length: $('$(SigningTenantId)'.Length)"
-                  Write-Host "SigningAKVName length: $('$(SigningAKVName)'.Length)"
-                  Write-Host "SigningAuthCertName length: $('$(SigningAuthCertName)'.Length)"
-                  Write-Host "SigningSignCertName length: $('$(SigningSignCertName)'.Length)"
             - task: EsrpCodeSigning@5
               displayName: Code Sign ESRP - VSIX Package
               inputs:
