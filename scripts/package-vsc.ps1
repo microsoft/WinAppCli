@@ -212,21 +212,7 @@ try
     $PackageJson.version = $Version
     $PackageJson | ConvertTo-Json -Depth 100 | Set-Content $PackageJsonPath
 
-    # Install @vscode/vsce locally (uses project .npmrc for registry auth)
-    Write-Host "[VSC] Installing @vscode/vsce..." -ForegroundColor Blue
-    npm install @vscode/vsce
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to install @vscode/vsce"
-        # Restore package.json and README.md before exiting
-        Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
-        if (Test-Path "$ReadmePath.backup") {
-            Move-Item "$ReadmePath.backup" $ReadmePath -Force
-        }
-        Pop-Location
-        exit 1
-    }
-
-    # Package the VSIX
+    # Package the VSIX (vsce installed via npm ci from devDependencies)
     Write-Host "[PACK] Creating VSIX package..." -ForegroundColor Blue
 
     $RelativeOutputPath = [System.IO.Path]::GetRelativePath($VscProjectPath, $OutputPath)
