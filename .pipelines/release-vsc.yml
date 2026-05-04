@@ -116,6 +116,19 @@ extends:
 
                 Write-Host "CLI binaries ($cliReleaseTag) downloaded and validated successfully"
           - task: PowerShell@2
+            displayName: Create temporary .npmrc for Build
+            inputs:
+              targetType: inline
+              pwsh: true
+              script: |
+                $npmrcContent = "registry=https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/winapp-npm-feed/npm/registry/`nalways-auth=true"
+                Set-Content -Path "$(System.DefaultWorkingDirectory)/src/winapp-VSC/.npmrc" -Value $npmrcContent
+                Write-Host "Created .npmrc for Azure Artifacts feed in winapp-VSC directory"
+          - task: npmAuthenticate@0
+            displayName: Authenticate with Azure Artifacts feed
+            inputs:
+              workingFile: '$(System.DefaultWorkingDirectory)/src/winapp-VSC/.npmrc'
+          - task: PowerShell@2
             displayName: Package VS Code extension with public CLI
             inputs:
               pwsh: true
