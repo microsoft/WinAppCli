@@ -20,7 +20,7 @@ parameters:
   - name: SkipPublish
     displayName: Skip publishing to VS Code Marketplace
     type: boolean
-    default: true
+    default: false
   - name: DoEsrp
     displayName: Sign the VSIX package (DoEsrp)
     type: boolean
