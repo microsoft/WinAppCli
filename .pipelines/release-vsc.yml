@@ -25,15 +25,6 @@ parameters:
     displayName: Sign the VSIX package (DoEsrp)
     type: boolean
     default: true
-  - name: signingIdentity
-    type: object
-    default:
-      serviceName: 'WinSDKCLI - ESRP Code Signing MI'
-      appId: $(SigningAppId)
-      tenantId: $(SigningTenantId)
-      akvName: $(SigningAKVName)
-      authCertName: $(SigningAuthCertName)
-      signCertName: $(SigningSignCertName)
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
@@ -168,12 +159,12 @@ extends:
             - task: EsrpCodeSigning@5
               displayName: Code Sign ESRP - VSIX Package
               inputs:
-                ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
-                AppRegistrationClientId: ${{ parameters.signingIdentity.appId }}
-                AppRegistrationTenantId: ${{ parameters.signingIdentity.tenantId }}
-                AuthAKVName: ${{ parameters.signingIdentity.akvName }}
-                AuthCertName: ${{ parameters.signingIdentity.authCertName }}
-                AuthSignCertName: ${{ parameters.signingIdentity.signCertName }}
+                ConnectedServiceName: 'WinSDKCLI - ESRP Code Signing MI'
+                AppRegistrationClientId: $(SigningAppId)
+                AppRegistrationTenantId: $(SigningTenantId)
+                AuthAKVName: $(SigningAKVName)
+                AuthCertName: $(SigningAuthCertName)
+                AuthSignCertName: $(SigningSignCertName)
                 FolderPath: '$(System.DefaultWorkingDirectory)/artifacts/'
                 Pattern: '*.vsix'
                 UseMinimatch: true
