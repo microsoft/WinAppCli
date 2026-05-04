@@ -21,6 +21,19 @@ parameters:
     displayName: Skip publishing to VS Code Marketplace
     type: boolean
     default: true
+  - name: DoEsrp
+    displayName: Sign the VSIX package (DoEsrp)
+    type: boolean
+    default: true
+  - name: signingIdentity
+    type: object
+    default:
+      serviceName: $(SigningServiceName)
+      appId: $(SigningAppId)
+      tenantId: $(SigningTenantId)
+      akvName: $(SigningAKVName)
+      authCertName: $(SigningAuthCertName)
+      signCertName: $(SigningSignCertName)
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
@@ -45,6 +58,12 @@ extends:
             displayName: Setup Node.js 24
             inputs:
               version: '24.x'
+          - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: UseDotNet@2
+              displayName: Setup .NET 6.0 (For ESRP Task)
+              inputs:
+                packageType: runtime
+                version: 6.0.x
           - task: PowerShell@2
             displayName: Download public CLI release for VS Code extension
             env:
@@ -134,6 +153,37 @@ extends:
               pwsh: true
               filePath: $(System.DefaultWorkingDirectory)\scripts\package-vsc.ps1
               arguments: "-Stable -CliBinariesPath '$(System.DefaultWorkingDirectory)/artifacts/public-cli'"
+          - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: EsrpCodeSigning@5
+              displayName: Code Sign ESRP - VSIX Package
+              inputs:
+                ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
+                AppRegistrationClientId: ${{ parameters.signingIdentity.appId }}
+                AppRegistrationTenantId: ${{ parameters.signingIdentity.tenantId }}
+                AuthAKVName: ${{ parameters.signingIdentity.akvName }}
+                AuthCertName: ${{ parameters.signingIdentity.authCertName }}
+                AuthSignCertName: ${{ parameters.signingIdentity.signCertName }}
+                FolderPath: '$(System.DefaultWorkingDirectory)/artifacts/'
+                Pattern: '*.vsix'
+                UseMinimatch: true
+                signConfigType: inlineSignParams
+                inlineOperation: |
+                  [
+                      {
+                          "KeyCode": "CP-401405",
+                          "OperationCode": "OpcSign",
+                          "Parameters": {},
+                          "ToolName": "sign",
+                          "ToolVersion": "1.0"
+                      },
+                      {
+                          "KeyCode": "CP-401405",
+                          "OperationCode": "OpcVerify",
+                          "Parameters": {},
+                          "ToolName": "sign",
+                          "ToolVersion": "1.0"
+                      }
+                  ]
           - task: CopyFiles@2
             displayName: Copy Artifacts - VS Code Extension
             inputs:
