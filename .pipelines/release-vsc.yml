@@ -176,7 +176,9 @@ extends:
                       {
                           "KeyCode": "CP-401405",
                           "OperationCode": "OpcSign",
-                          "Parameters": {},
+                          "Parameters": {
+                              "FileDigest": "/fd SHA256"
+                          },
                           "ToolName": "sign",
                           "ToolVersion": "1.0"
                       },
