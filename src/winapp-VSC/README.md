@@ -6,8 +6,7 @@ The **WinApp** extension brings the [Windows App Development CLI (WinApp CLI)](h
 
 ## Get Started
 
-> [!IMPORTANT]
-> The WinApp VS Code Extension is not yet available in the VS Code Marketplace. We plan to publish the extension publicly soon. 
+> The WinApp VS Code Extension is not yet available in the VS Code Marketplace. We plan to publish the extension publicly soon.
 
 Try the WinApp extension today by downloading our latest prerelease: [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip)
 
@@ -55,10 +54,8 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 4. It launches your app via `winapp run` to give it package identity.
 5. A child debug session attaches to the running process using the debugger you specified.
 
-> [!IMPORTANT]
 > The `winapp` debug type assumes your project has already been built and that a build output folder containing an `.exe` exists in your project. It **does not** build your project automatically — so after making code changes, you must rebuild your project before launching to see those changes reflected in the running app.
 
-> [!TIP]
 > You can automate the build step by adding a `preLaunchTask` to your `launch.json` configuration. This tells VS Code to run a build task before every debug session, so your changes are always compiled before launch.
 >
 > 1. Define a build task in `.vscode/tasks.json` (example for .NET):

@@ -185,10 +185,12 @@ try
     $CliVersion = "unknown"
     if (Test-Path $CliExe) {
         try {
-            $RawCliVersion = & $CliExe --version 2>$null
-            if (-not [string]::IsNullOrWhiteSpace($RawCliVersion)) {
+            $RawOutput = & $CliExe --version 2>$null
+            # Output may contain ASCII banner art; find the line matching semver pattern
+            $VersionLine = $RawOutput | Where-Object { $_ -match '^\d+\.\d+\.\d+' } | Select-Object -First 1
+            if (-not [string]::IsNullOrWhiteSpace($VersionLine)) {
                 # Strip git hash suffix (e.g., "1.0.0+abc123" -> "1.0.0")
-                $CliVersion = ($RawCliVersion.Trim() -split '\+')[0]
+                $CliVersion = ($VersionLine.Trim() -split '\+')[0]
             }
         } catch {
             Write-Warning "Could not determine CLI version from binary"
