@@ -212,21 +212,18 @@ try
     $PackageJson.version = $Version
     $PackageJson | ConvertTo-Json -Depth 100 | Set-Content $PackageJsonPath
 
-    # Check if vsce is available, install if needed
-    $VsceCmd = Get-Command vsce -ErrorAction SilentlyContinue
-    if (-not $VsceCmd) {
-        Write-Host "[VSC] Installing @vscode/vsce..." -ForegroundColor Blue
-        npm install -g @vscode/vsce
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to install @vscode/vsce"
-            # Restore package.json and README.md before exiting
-            Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
-            if (Test-Path "$ReadmePath.backup") {
-                Move-Item "$ReadmePath.backup" $ReadmePath -Force
-            }
-            Pop-Location
-            exit 1
+    # Install @vscode/vsce locally (uses project .npmrc for registry auth)
+    Write-Host "[VSC] Installing @vscode/vsce..." -ForegroundColor Blue
+    npm install @vscode/vsce
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to install @vscode/vsce"
+        # Restore package.json and README.md before exiting
+        Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
+        if (Test-Path "$ReadmePath.backup") {
+            Move-Item "$ReadmePath.backup" $ReadmePath -Force
         }
+        Pop-Location
+        exit 1
     }
 
     # Package the VSIX
@@ -234,7 +231,7 @@ try
 
     $RelativeOutputPath = [System.IO.Path]::GetRelativePath($VscProjectPath, $OutputPath)
 
-    vsce package --no-dependencies -o "$RelativeOutputPath\winapp-$Version.vsix"
+    npx vsce package --no-dependencies -o "$RelativeOutputPath\winapp-$Version.vsix"
     $PackResult = $LASTEXITCODE
 
     # Restore original package.json
