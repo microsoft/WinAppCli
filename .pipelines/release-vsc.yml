@@ -36,6 +36,8 @@ extends:
         os: windows
     stages:
     - stage: Build
+      variables:
+      - group: signingIdentity
       jobs:
       - job: Build
         pool:
