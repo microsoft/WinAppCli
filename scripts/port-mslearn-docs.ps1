@@ -55,6 +55,7 @@ $FileMapping = [ordered]@{
     "docs/guides/tauri.md"                           = "guides/tauri.md"
     "docs/guides/packaging-cli.md"                   = "guides/packaging-cli.md"
     "docs/guides/shell-completion.md"                = "guides/shell-completion.md"
+    "docs/ui-automation.md"                          = "ui-automation.md"
     "docs/guides/electron/setup.md"                  = "guides/electron-setup.md"
     "docs/guides/electron/packaging.md"              = "guides/electron-packaging.md"
     "docs/guides/electron/phi-silica-addon.md"       = "guides/electron-phi-silica-addon.md"
@@ -100,6 +101,10 @@ $FrontMatterOverrides = @{
     "guides/shell-completion.md" = @{
         description = "Enable tab completion for winapp CLI commands, options, and values in PowerShell, bash, zsh, and fish."
         topic       = "how-to"
+    }
+    "ui-automation.md" = @{
+        description = "Inspect and interact with running Windows application UIs from the command line using winapp CLI UI automation commands."
+        topic       = "reference"
     }
     "guides/electron-setup.md" = @{
         description = "Set up your Electron development environment for Windows API development with the winapp CLI."
@@ -178,7 +183,6 @@ $repoOnlyFiles = @(
     "docs/dotnet-run-support.md"
     "docs/electron-get-started.md"
     "docs/npm-usage.md"
-    "docs/ui-automation.md"
     "docs/telemetry.md"
     "docs/guides/claude-code-plugin.md"
     "samples/dotnet-app"
@@ -327,15 +331,16 @@ function Get-FrontMatter {
     $topic = if ($overrides -and $overrides.topic) { $overrides.topic }
              else { "how-to" }
 
-    return @"
----
-title: $title
-description: $description
-ms.date: $msDate
-ms.topic: $topic
----
-
-"@
+    $lines = @(
+        "---"
+        "title: $title"
+        "description: $description"
+        "ms.date: $msDate"
+        "ms.topic: $topic"
+        "---"
+        ""
+    )
+    return ($lines -join "`r`n") + "`r`n"
 }
 
 # ─── Step 3: Process and copy files ─────────────────────────────────────────────
@@ -405,7 +410,7 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     if (-not (Test-Path $destDir)) {
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
-    Set-Content -Path $destPath -Value $content -NoNewline -Encoding UTF8
+    [System.IO.File]::WriteAllText($destPath, $content, [System.Text.UTF8Encoding]::new($false))
 
     Write-Info "  $($entry.Key) -> $destRelPath"
 }
