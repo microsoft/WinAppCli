@@ -46,7 +46,7 @@ $GitHubRepoBase = "https://github.com/microsoft/WinAppCli"
 # File mapping: repo source path (relative to repo root, forward slash) → output path (relative to output dir)
 # This is the single source of truth for all link resolution.
 $FileMapping = [ordered]@{
-    "docs/index.md"                                  = "index.md"
+    "docs/README.md"                                  = "index.md"
     "docs/usage.md"                                  = "usage.md"
     "docs/guides/dotnet.md"                          = "guides/dotnet.md"
     "docs/guides/cpp.md"                             = "guides/cpp.md"
