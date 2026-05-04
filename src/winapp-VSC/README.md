@@ -13,6 +13,11 @@ Try the WinApp extension today by downloading our latest prerelease: [**VS Code 
 
 Simply navigate to the 'Extensions' tab in VS Code, and select the option to 'Install via VSIX...'. You may need to restart VS Code for the extension to begin working. 
 
+| | Version |
+|--|---------|
+| **Extension** | <!-- EXT_VERSION -->0.1.0<!-- /EXT_VERSION --> |
+| **Bundled WinApp CLI** | <!-- CLI_VERSION -->development<!-- /CLI_VERSION --> |
+
 ## Features
 
 ### Command Palette
