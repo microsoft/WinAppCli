@@ -45,7 +45,7 @@ dotnet run
 
 This will launch your app with package identity, allowing you to easily add and test Windows features within your app.
 
-For more details on how exactly the winapp CLI works with dotnet under the hood, checkout the [Dotnet run support docs.](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md)
+For more details on how exactly the winapp CLI works with dotnet under the hood, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
 
 ### 3. Adding an execution alias for console applications (optional)
 
