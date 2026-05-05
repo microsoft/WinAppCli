@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
+using System.Text.Json;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -33,6 +34,8 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         _concreteService = (UpdateNotificationService)_updateNotificationService;
         // Prevent background HTTP calls during unit tests
         _concreteService.SkipBackgroundRefreshForTesting = true;
+        // Redirect notification output to the test console for assertion capture
+        _concreteService.NotificationConsole = TestAnsiConsole;
 
         // Save and clear env vars to avoid interference
         _originalCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
@@ -379,5 +382,47 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     {
         // "beta.1.2" > "beta.1" because more fields when prefix matches
         Assert.IsTrue(UpdateNotificationService.IsNewerVersion("1.0.0-beta.1.2", "1.0.0-beta.1"));
+    }
+
+    [TestMethod]
+    public void ParseTagName_WithVPrefix_StripsPrefix()
+    {
+        using var doc = JsonDocument.Parse("""{"tag_name":"v1.2.3"}""");
+        Assert.AreEqual("1.2.3", UpdateNotificationService.ParseTagName(doc));
+    }
+
+    [TestMethod]
+    public void ParseTagName_WithoutVPrefix_ReturnsAsIs()
+    {
+        using var doc = JsonDocument.Parse("""{"tag_name":"1.2.3"}""");
+        Assert.AreEqual("1.2.3", UpdateNotificationService.ParseTagName(doc));
+    }
+
+    [TestMethod]
+    public void ParseTagName_MissingProperty_ReturnsNull()
+    {
+        using var doc = JsonDocument.Parse("""{"other":"value"}""");
+        Assert.IsNull(UpdateNotificationService.ParseTagName(doc));
+    }
+
+    [TestMethod]
+    public void ParseTagName_NullValue_ReturnsNull()
+    {
+        using var doc = JsonDocument.Parse("""{"tag_name":null}""");
+        Assert.IsNull(UpdateNotificationService.ParseTagName(doc));
+    }
+
+    [TestMethod]
+    public void ParseTagName_EmptyString_ReturnsNull()
+    {
+        using var doc = JsonDocument.Parse("""{"tag_name":""}""");
+        Assert.IsNull(UpdateNotificationService.ParseTagName(doc));
+    }
+
+    [TestMethod]
+    public void ParseTagName_PreReleaseWithVPrefix_StripsOnlyV()
+    {
+        using var doc = JsonDocument.Parse("""{"tag_name":"v2.0.0-beta.1"}""");
+        Assert.AreEqual("2.0.0-beta.1", UpdateNotificationService.ParseTagName(doc));
     }
 }

@@ -12,7 +12,6 @@ namespace WinApp.Cli.Services;
 
 internal class UpdateNotificationService(
     IWinappDirectoryService winappDirectoryService,
-    IAnsiConsole ansiConsole,
     ILogger<UpdateNotificationService> logger) : IUpdateNotificationService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -22,9 +21,15 @@ internal class UpdateNotificationService(
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/winappcli/releases/latest";
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
+    private static readonly TimeSpan FirstRunRefreshTimeout = TimeSpan.FromMilliseconds(250);
 
     // For testing only — when true, skips the fire-and-forget background network refresh
     internal bool SkipBackgroundRefreshForTesting;
+
+    // The console used for upgrade notices. Defaults to stderr so scripted commands
+    // (e.g. get-winapp-path, --version) are never corrupted. Tests can override to capture output.
+    internal IAnsiConsole NotificationConsole { get; set; } = AnsiConsole.Create(
+        new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) });
 
     // Cache file format (one value per line):
     //   Line 0: last-check timestamp (round-trip "O" format, UTC)
@@ -55,13 +60,15 @@ internal class UpdateNotificationService(
                 WriteCacheFile(cacheFile, cache);
             }
 
-            // If cache is stale (or missing), refresh in the background — fire and forget
+            // If cache is stale (or missing), refresh in the background — fire and forget.
+            // On first run (no cache at all), do a short bounded foreground wait so the cache
+            // has a real chance of being populated before the process exits.
             if (!SkipBackgroundRefreshForTesting
                 && (!cache.LastCheck.HasValue
                     || (DateTimeOffset.UtcNow - cache.LastCheck.Value).TotalHours >= CheckIntervalHours)
                 && Interlocked.CompareExchange(ref _refreshScheduled, Scheduled, NotScheduled) == NotScheduled)
             {
-                _ = Task.Run(async () =>
+                var refreshTask = Task.Run(async () =>
                 {
                     try
                     {
@@ -76,6 +83,12 @@ internal class UpdateNotificationService(
                         Interlocked.Exchange(ref _refreshScheduled, NotScheduled);
                     }
                 });
+
+                // First-run: briefly wait so short-lived commands can still populate the cache
+                if (!cache.LastCheck.HasValue)
+                {
+                    refreshTask.Wait(FirstRunRefreshTimeout);
+                }
             }
         }
         catch
@@ -113,14 +126,7 @@ internal class UpdateNotificationService(
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-            var tagName = doc.RootElement.GetProperty("tag_name").GetString();
-            if (string.IsNullOrEmpty(tagName))
-            {
-                return null;
-            }
-
-            // Strip leading "v" prefix (e.g. "v0.3.0" → "0.3.0")
-            return tagName.StartsWith('v') ? tagName[1..] : tagName;
+            return ParseTagName(doc);
         }
         catch (OperationCanceledException)
         {
@@ -133,6 +139,27 @@ internal class UpdateNotificationService(
         }
     }
 
+    /// <summary>
+    /// Extracts the version string from a GitHub release JSON document.
+    /// Strips the leading "v" prefix if present (e.g. "v0.3.0" → "0.3.0").
+    /// Returns null if the tag_name property is missing, null, or empty.
+    /// </summary>
+    internal static string? ParseTagName(JsonDocument doc)
+    {
+        if (!doc.RootElement.TryGetProperty("tag_name", out var tagNameElement))
+        {
+            return null;
+        }
+
+        var tagName = tagNameElement.GetString();
+        if (string.IsNullOrEmpty(tagName))
+        {
+            return null;
+        }
+
+        return tagName.StartsWith('v') ? tagName[1..] : tagName;
+    }
+
     private void DisplayUpdateNotification(string newVersion)
     {
         var upgradeHint = DetectInstallChannel() switch
@@ -142,7 +169,7 @@ internal class UpdateNotificationService(
             _ => "visit https://github.com/microsoft/winappcli/releases"
         };
 
-        ansiConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
+        NotificationConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
     }
 
     internal static bool IsNewerVersion(string latest, string current)

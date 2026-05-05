@@ -15,7 +15,7 @@ namespace WinApp.Cli;
 
 internal static class Program
 {
-    static async Task<int> Main(string[] args)
+    internal static async Task<int> Main(string[] args)
     {
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
         try
