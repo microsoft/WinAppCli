@@ -171,16 +171,6 @@ extends:
                           "ToolVersion": "1.0"
                       }
                   ]
-          - task: AzureCLI@2
-            displayName: Debug - Get Azure DevOps profile
-            inputs:
-              azureSubscription: 'WinSDKCLI - ESRP Code Signing MI'
-              scriptType: bash
-              scriptLocation: inlineScript
-              inlineScript: |
-                az rest \
-                  --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
-                  --resource 499b84ac-1321-427f-aa17-267ca6975798
           - task: CopyFiles@2
             displayName: Copy Artifacts - VS Code Extension
             inputs:
