@@ -1,4 +1,4 @@
-# Packaging and Package Identity for .NET apps with Winapp CLI
+# Packaging and Package Identity for .NET apps with winapp CLI
 
 Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed.
 
