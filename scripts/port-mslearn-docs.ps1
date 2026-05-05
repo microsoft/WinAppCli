@@ -371,10 +371,7 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     # Strip the mslearn marker comment
     $content = $content -replace '(?m)^\s*<!--\s*mslearn:\s*true\s*-->\s*\r?\n?', ''
 
-    # Rewrite learn.microsoft.com URLs to relative paths
-    $content = Rewrite-LearnUrls $content
-
-    # Protect code blocks from link rewriting by temporarily replacing them
+    # Protect code blocks from link rewriting and URL rewriting by temporarily replacing them
     $codeBlocks = [System.Collections.Generic.List[string]]::new()
     $content = [regex]::Replace($content, '(?ms)(```[^\n]*\n.*?```)', {
         param($match)
@@ -383,7 +380,7 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
         return "%%CODEBLOCK_${idx}%%"
     })
 
-    # Protect inline code spans from placeholder escaping
+    # Protect inline code spans from placeholder escaping and URL rewriting
     $inlineCode = [System.Collections.Generic.List[string]]::new()
     $content = [regex]::Replace($content, '(`[^`]+`)', {
         param($match)
@@ -391,6 +388,9 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
         $inlineCode.Add($match.Value)
         return "%%INLINECODE_${idx}%%"
     })
+
+    # Rewrite learn.microsoft.com URLs to relative paths (after code protection)
+    $content = Rewrite-LearnUrls $content
 
     # Escape bare <placeholder> patterns that MS Learn treats as HTML tags.
     # Matches <word>, <word-word>, <word word> not already inside backticks or code blocks.

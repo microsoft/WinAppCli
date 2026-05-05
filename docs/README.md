@@ -100,5 +100,6 @@ winapp CLI is open source. You can find the source code, file issues, and contri
 - [UI automation](ui-automation.md)
 - [NPM programmatic API](npm-usage.md)
 - [Framework guides](guides/dotnet.md)
+- [Get started with Electron](guides/electron/index.md)
 - [Windows App SDK documentation](/windows/apps/windows-app-sdk/)
 - [MSIX packaging documentation](/windows/msix/)

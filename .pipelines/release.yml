@@ -423,6 +423,7 @@ extends:
             displayName: "Create MS Learn Docs PR"
             env:
               GH_TOKEN: $(GITHUB_TOKEN_2)
+              MSLEARN_DOCS_FORK: $(MSLearnDocsFork)
             inputs:
               targetType: 'inline'
               pwsh: true
@@ -430,16 +431,30 @@ extends:
               script: |
                 $version = "$(version)"
                 $docsRepoBase = "hub/apps/dev-tools/winapp-cli"
-                $docsFork = "$(MSLearnDocsFork)"  # e.g., "myaccount/windows-dev-docs-pr"
-                $docsForkOwner = $docsFork.Split('/')[0]
                 $docsUpstream = "MicrosoftDocs/windows-dev-docs-pr"
                 $branch = "winapp-cli/v$version"
 
-                # Install gh
+                # Validate docs fork from env var (not ADO macro expansion)
+                $docsFork = $env:MSLEARN_DOCS_FORK
+                if (-not $docsFork -or $docsFork -notmatch '^[\w-]+/[\w.-]+$') {
+                  Write-Error "Invalid or missing MSLearnDocsFork value: '$docsFork'. Expected format: 'owner/repo'."
+                  exit 1
+                }
+                $docsForkOwner = $docsFork.Split('/')[0]
+
+                # Install gh with integrity verification
                 Write-Host "Installing gh..."
                 $tempDir = "$(Agent.TempDirectory)"
-                Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip" -OutFile "$tempDir\gh.zip"
-                Expand-Archive "$tempDir\gh.zip" -DestinationPath "$tempDir\gh"
+                $ghZipUrl = "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip"
+                $ghZipPath = "$tempDir\gh.zip"
+                $ghExpectedHash = "1324871424CB8CB3793914565026A8DA53B1A633FA05760597ABEF54B57FF12E"
+                Invoke-WebRequest -Uri $ghZipUrl -OutFile $ghZipPath
+                $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
+                if ($actualHash -ne $ghExpectedHash) {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $ghExpectedHash, Got: $actualHash"
+                  exit 1
+                }
+                Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
                 $ghExe = "$tempDir\gh\bin\gh.exe"
 
                 # Sync the fork with upstream
@@ -486,12 +501,7 @@ extends:
                 Push-Location $docsDir
                 git config user.name "winapp-cli-bot"
                 git config user.email "winapp-cli-bot@users.noreply.github.com"
-                git checkout -b $branch
-                if ($LASTEXITCODE -ne 0) {
-                  Pop-Location
-                  Write-Error "Failed to create branch. Exit code: $LASTEXITCODE"
-                  exit $LASTEXITCODE
-                }
+                git checkout -B $branch
                 git add -A
                 git diff --cached --quiet
                 if ($LASTEXITCODE -eq 0) {
@@ -505,7 +515,7 @@ extends:
                   Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
                   exit $LASTEXITCODE
                 }
-                git push origin $branch
+                git push --force-with-lease origin $branch
                 if ($LASTEXITCODE -ne 0) {
                   Pop-Location
                   Write-Error "Failed to push branch. Exit code: $LASTEXITCODE"
@@ -513,7 +523,7 @@ extends:
                 }
                 Pop-Location
 
-                # Create PR
+                # Create PR (or update if one already exists for this branch)
                 Write-Host "Creating PR..."
                 $prTitle = "Update winapp CLI docs to v$version"
                 $prBody = @"
@@ -526,16 +536,26 @@ extends:
                 Please review the changes and merge when ready.
                 "@
 
-                & $ghExe pr create `
-                  --repo $docsUpstream `
-                  --head "${docsForkOwner}:${branch}" `
-                  --base main `
-                  --title $prTitle `
-                  --body $prBody
+                # Check if a PR already exists for this branch
+                $existingPr = & $ghExe pr list --repo $docsUpstream --head "${docsForkOwner}:${branch}" --json number --jq '.[0].number' 2>$null
+                if ($existingPr) {
+                  Write-Host "PR #$existingPr already exists. Updating..."
+                  & $ghExe pr edit $existingPr `
+                    --repo $docsUpstream `
+                    --title $prTitle `
+                    --body $prBody
+                } else {
+                  & $ghExe pr create `
+                    --repo $docsUpstream `
+                    --head "${docsForkOwner}:${branch}" `
+                    --base main `
+                    --title $prTitle `
+                    --body $prBody
+                }
 
                 if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Failed to create PR. Exit code: $LASTEXITCODE"
+                  Write-Error "Failed to create/update PR. Exit code: $LASTEXITCODE"
                   exit $LASTEXITCODE
                 }
 
-                Write-Host "PR created successfully."
+                Write-Host "PR created/updated successfully."
