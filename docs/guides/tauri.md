@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with Tauri
 
 This guide demonstrates how to use `winappcli` with a Tauri application to debug with package identity and package your application as an MSIX.

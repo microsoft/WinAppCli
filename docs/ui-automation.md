@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # UI Automation
 
 Inspect and interact with running Windows applications from the command line.

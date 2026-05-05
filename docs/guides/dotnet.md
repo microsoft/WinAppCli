@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with .NET 
 
 > This guide should work for most .NET projects types. The steps have been tested with both console and UI-based projects like WPF. For working examples, check out the [dotnet-app](../../samples/dotnet-app) (console) and [wpf-app](../../samples/wpf-app) (WPF) samples in the samples folder.

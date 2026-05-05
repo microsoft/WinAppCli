@@ -43,28 +43,16 @@ function Write-Warn  { param([string]$msg) Write-Host "    $msg" -ForegroundColo
 
 $GitHubRepoBase = "https://github.com/microsoft/WinAppCli"
 
-# File mapping: repo source path (relative to repo root, forward slash) → output path (relative to output dir)
-# This is the single source of truth for all link resolution.
-$FileMapping = [ordered]@{
-    "docs/README.md"                                  = "index.md"
-    "docs/usage.md"                                  = "usage.md"
-    "docs/guides/dotnet.md"                          = "guides/dotnet.md"
-    "docs/guides/cpp.md"                             = "guides/cpp.md"
-    "docs/guides/flutter.md"                         = "guides/flutter.md"
-    "docs/guides/rust.md"                            = "guides/rust.md"
-    "docs/guides/tauri.md"                           = "guides/tauri.md"
-    "docs/guides/packaging-cli.md"                   = "guides/packaging-cli.md"
-    "docs/guides/shell-completion.md"                = "guides/shell-completion.md"
-    "docs/ui-automation.md"                          = "ui-automation.md"
-    "docs/guides/electron/setup.md"                  = "guides/electron-setup.md"
-    "docs/guides/electron/packaging.md"              = "guides/electron-packaging.md"
-    "docs/guides/electron/phi-silica-addon.md"       = "guides/electron-phi-silica-addon.md"
-    "docs/guides/electron/winml-addon.md"            = "guides/electron-winml-addon.md"
-    "docs/guides/electron/cpp-notification-addon.md" = "guides/electron-cpp-notification-addon.md"
-}
+# Paths under docs/ to exclude from porting (relative to docs/, forward slash)
+# These are always excluded regardless of mslearn marker (non-doc files, generated content)
+$AlwaysExcludePaths = @(
+    "cli-schema.json"
+    "fragments/"
+)
 
-# Front matter overrides: output path → { title, description, ms.topic }
+# Front matter overrides: output path → { description, topic }
 # Falls back to auto-detection if not specified.
+# Only needed for pages where the first paragraph isn't a good description.
 $FrontMatterOverrides = @{
     "index.md" = @{
         description = "The Windows App Development CLI (winapp CLI) is a command-line interface for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework."
@@ -74,65 +62,26 @@ $FrontMatterOverrides = @{
         description = "Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands."
         topic       = "reference"
     }
-    "guides/dotnet.md" = @{
-        description = "Learn how to use the winapp CLI with a .NET application to debug with package identity and package your application as an MSIX."
-        topic       = "how-to"
-    }
-    "guides/cpp.md" = @{
-        description = "Learn how to use the winapp CLI with a C++ and CMake application to debug with package identity and package your application as an MSIX."
-        topic       = "how-to"
-    }
-    "guides/flutter.md" = @{
-        description = "Learn how to use the winapp CLI with a Flutter application to add package identity and package your app as an MSIX."
-        topic       = "how-to"
-    }
-    "guides/rust.md" = @{
-        description = "Learn how to use the winapp CLI with a Rust application to debug with package identity and package your application as an MSIX."
-        topic       = "how-to"
-    }
-    "guides/tauri.md" = @{
-        description = "Learn how to use the winapp CLI with a Tauri application to debug with package identity and package your application as an MSIX."
-        topic       = "how-to"
-    }
-    "guides/packaging-cli.md" = @{
-        description = "Step-by-step guide to packaging an existing EXE or CLI tool as an MSIX package using the winapp CLI."
-        topic       = "how-to"
-    }
-    "guides/shell-completion.md" = @{
-        description = "Enable tab completion for winapp CLI commands, options, and values in PowerShell, bash, zsh, and fish."
-        topic       = "how-to"
-    }
     "ui-automation.md" = @{
         description = "Inspect and interact with running Windows application UIs from the command line using winapp CLI UI automation commands."
         topic       = "reference"
     }
-    "guides/electron-setup.md" = @{
-        description = "Set up your Electron development environment for Windows API development with the winapp CLI."
-        topic       = "how-to"
-    }
-    "guides/electron-packaging.md" = @{
-        description = "Package your Electron app as an MSIX for distribution using the winapp CLI."
-        topic       = "how-to"
-    }
-    "guides/electron-phi-silica-addon.md" = @{
-        description = "Create an Electron addon that uses the Phi Silica on-device AI model through the Windows App SDK."
-        topic       = "how-to"
-    }
-    "guides/electron-winml-addon.md" = @{
-        description = "Create an Electron addon that uses Windows ML for on-device machine learning inference."
-        topic       = "how-to"
-    }
-    "guides/electron-cpp-notification-addon.md" = @{
-        description = "Create a native C++ Electron addon that sends Windows notifications using the Windows SDK."
-        topic       = "how-to"
-    }
 }
 
-# Image files to copy: repo source path → output path
-$ImageMapping = @{
-    "docs/images/ai-dev-gallery-squeezenet.png"      = "guides/media/ai-dev-gallery-squeezenet.png"
-    "docs/images/ai-dev-gallery-squeezenet-code.png"  = "guides/media/ai-dev-gallery-squeezenet-code.png"
-}
+# Known repo-only link targets (not under docs/, linked to GitHub)
+$RepoOnlyLinkTargets = @(
+    "samples/dotnet-app"
+    "samples/wpf-app"
+    "samples/cpp-app"
+    "samples/electron"
+    "samples/electron-winml"
+    "samples/electron-winml/winMlAddon"
+    "samples/electron-winml/winMlAddon/addon.cs"
+    "samples/electron-winml/src/index.js"
+    "samples/rust-app"
+    "samples/tauri-app"
+    "samples/flutter-app"
+)
 
 # ─── Step 0: Resolve parameters ────────────────────────────────────────────────
 
@@ -150,7 +99,73 @@ $msDate = Get-Date -Format "MM/dd/yyyy"
 Write-Step "Porting docs for v$Version"
 Write-Info "Output: $OutputPath"
 
-# ─── Step 1: Prepare output directory ───────────────────────────────────────────
+# ─── Step 1: Auto-discover files to port ────────────────────────────────────────
+
+Write-Step "Discovering docs to port"
+
+# Find all .md files under docs/
+$allDocFiles = Get-ChildItem (Join-Path $ProjectRoot "docs") -Recurse -File |
+    Where-Object { $_.Extension -eq ".md" -or $_.Extension -eq ".png" -or $_.Extension -eq ".jpg" -or $_.Extension -eq ".gif" }
+
+# Build file mapping by auto-discovery
+$FileMapping = [ordered]@{}
+$ImageMapping = [ordered]@{}
+
+foreach ($file in $allDocFiles) {
+    $repoRelPath = $file.FullName.Substring($ProjectRoot.Length + 1) -replace '\\', '/'
+    $docsRelPath = $repoRelPath.Substring("docs/".Length)  # path relative to docs/
+
+    # Handle images first — they're always included if referenced by ported docs
+    if ($file.Extension -in @(".png", ".jpg", ".gif")) {
+        $parentDir = ($docsRelPath -replace '[^/]+$', '').TrimEnd('/')
+        if ($parentDir -eq "images") {
+            $destRel = "media/$($file.Name)"
+        } elseif ($parentDir -match '^(.*)/images$') {
+            $destRel = "$($Matches[1])/media/$($file.Name)"
+        } else {
+            $destRel = "$parentDir/media/$($file.Name)"
+        }
+        $ImageMapping[$repoRelPath] = $destRel
+        continue
+    }
+
+    # Check always-excluded paths (non-doc content like cli-schema.json, fragments/)
+    $excluded = $false
+    foreach ($excl in $AlwaysExcludePaths) {
+        if ($excl.EndsWith('/')) {
+            if ($docsRelPath.StartsWith($excl)) { $excluded = $true; break }
+        } else {
+            if ($docsRelPath -eq $excl) { $excluded = $true; break }
+        }
+    }
+    if ($excluded) { continue }
+
+    # Check for <!-- mslearn: true --> marker (opt-in model)
+    $fileHead = Get-Content $file.FullName -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
+    if ($fileHead -notmatch '<!--\s*mslearn:\s*true\s*-->') {
+        continue  # not marked for MS Learn
+    }
+
+    # Compute output path
+    # Special case: README.md → index.md
+    if ($docsRelPath -eq "README.md") {
+        $destRel = "index.md"
+    }
+    # Flatten electron subfolder: guides/electron/foo.md → guides/electron-foo.md
+    elseif ($docsRelPath -match '^guides/electron/(.+)$') {
+        $destRel = "guides/electron-$($Matches[1])"
+    }
+    else {
+        $destRel = $docsRelPath
+    }
+
+    $FileMapping[$repoRelPath] = $destRel
+    Write-Info "  $repoRelPath -> $destRel"
+}
+
+Write-Info "Discovered $($FileMapping.Count) doc files + $($ImageMapping.Count) images"
+
+# ─── Step 2: Prepare output directory ───────────────────────────────────────────
 
 if (Test-Path $OutputPath) {
     Remove-Item $OutputPath -Recurse -Force
@@ -159,7 +174,7 @@ New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $OutputPath "guides") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $OutputPath "guides\media") -Force | Out-Null
 
-# ─── Step 2: Build the canonical link resolution map ────────────────────────────
+# ─── Step 3: Build the canonical link resolution map ────────────────────────────
 
 Write-Step "Building link resolution map"
 
@@ -177,34 +192,23 @@ foreach ($entry in $ImageMapping.GetEnumerator()) {
     $LinkMap[$entry.Key] = @{ Type = "ported"; Path = $entry.Value }
 }
 
-# Add known repo-only files (not ported, link to GitHub)
-$repoOnlyFiles = @(
-    "docs/debugging.md"
-    "docs/dotnet-run-support.md"
-    "docs/electron-get-started.md"
-    "docs/npm-usage.md"
-    "docs/telemetry.md"
-    "docs/guides/claude-code-plugin.md"
-    "samples/dotnet-app"
-    "samples/wpf-app"
-    "samples/cpp-app"
-    "samples/electron"
-    "samples/electron-winml"
-    "samples/electron-winml/winMlAddon"
-    "samples/electron-winml/winMlAddon/addon.cs"
-    "samples/electron-winml/src/index.js"
-    "samples/rust-app"
-    "samples/tauri-app"
-    "samples/flutter-app"
-)
-
-foreach ($path in $repoOnlyFiles) {
+# Add known repo-only link targets (not under docs/, linked to GitHub)
+foreach ($path in $RepoOnlyLinkTargets) {
     $isFile = $path -match '\.\w+$'
     $ghPath = if ($isFile) { "$GitHubRepoBase/blob/main/$path" } else { "$GitHubRepoBase/tree/main/$path" }
     $LinkMap[$path] = @{ Type = "github"; Url = $ghPath }
 }
 
-Write-Info "Map has $($LinkMap.Count) entries ($($FileMapping.Count) ported, $($repoOnlyFiles.Count) repo-only)"
+# Add excluded docs as GitHub links (so links to them still work)
+foreach ($excl in $AlwaysExcludePaths) {
+    if ($excl.EndsWith('/')) { continue }  # skip directory exclusions
+    $exclRepoPath = "docs/$excl"
+    if (-not $LinkMap.ContainsKey($exclRepoPath)) {
+        $LinkMap[$exclRepoPath] = @{ Type = "github"; Url = "$GitHubRepoBase/blob/main/$exclRepoPath" }
+    }
+}
+
+Write-Info "Map has $($LinkMap.Count) entries ($($FileMapping.Count) ported + $($ImageMapping.Count) images, $($RepoOnlyLinkTargets.Count) repo-only)"
 
 # ─── Link resolution function ──────────────────────────────────────────────────
 
@@ -315,7 +319,7 @@ function Rewrite-LearnUrls {
 function Get-FrontMatter {
     param(
         [string]$Content,
-        [string]$OutputPath
+        [string]$DestRelPath
     )
 
     # Extract title from first # heading
@@ -325,16 +329,20 @@ function Get-FrontMatter {
     }
 
     # Get overrides
-    $overrides = $FrontMatterOverrides[$OutputPath]
+    $overrides = $FrontMatterOverrides[$DestRelPath]
     $description = if ($overrides -and $overrides.description) { $overrides.description }
                    else { $title }
     $topic = if ($overrides -and $overrides.topic) { $overrides.topic }
              else { "how-to" }
 
+    # Quote values that contain YAML-special characters (colons, brackets, etc.)
+    $safeTitle = if ($title -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($title -replace '"', '\"')`"" } else { $title }
+    $safeDesc  = if ($description -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($description -replace '"', '\"')`"" } else { $description }
+
     $lines = @(
         "---"
-        "title: $title"
-        "description: $description"
+        "title: $safeTitle"
+        "description: $safeDesc"
         "ms.date: $msDate"
         "ms.topic: $topic"
         "---"
@@ -351,7 +359,7 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     $sourcePath = Join-Path $ProjectRoot ($entry.Key -replace '/', '\')
     $destRelPath = $entry.Value
     $destPath = Join-Path $OutputPath ($destRelPath -replace '/', '\')
-
+    $destPath = [System.IO.Path]::GetFullPath($destPath)
     if (-not (Test-Path $sourcePath)) {
         Write-Warn "  MISSING: $($entry.Key) — skipping"
         continue
@@ -359,6 +367,9 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
 
     # Read content
     $content = Get-Content $sourcePath -Raw
+
+    # Strip the mslearn marker comment
+    $content = $content -replace '(?m)^\s*<!--\s*mslearn:\s*true\s*-->\s*\r?\n?', ''
 
     # Rewrite learn.microsoft.com URLs to relative paths
     $content = Rewrite-LearnUrls $content
@@ -371,6 +382,19 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
         $codeBlocks.Add($match.Value)
         return "%%CODEBLOCK_${idx}%%"
     })
+
+    # Protect inline code spans from placeholder escaping
+    $inlineCode = [System.Collections.Generic.List[string]]::new()
+    $content = [regex]::Replace($content, '(`[^`]+`)', {
+        param($match)
+        $idx = $inlineCode.Count
+        $inlineCode.Add($match.Value)
+        return "%%INLINECODE_${idx}%%"
+    })
+
+    # Escape bare <placeholder> patterns that MS Learn treats as HTML tags.
+    # Matches <word>, <word-word>, <word word> not already inside backticks or code blocks.
+    $content = [regex]::Replace($content, '<([\w][\w\s-]*)>', '&lt;$1&gt;')
 
     # Rewrite image links first (before regular links, since ![...]() also matches [...]() regex)
     $content = [regex]::Replace($content, '!\[([^\]]*)\]\(([^)]+)\)', {
@@ -396,13 +420,18 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
         return $match.Groups[1].Value
     })
 
+    # Restore inline code spans
+    for ($i = 0; $i -lt $inlineCode.Count; $i++) {
+        $content = $content.Replace("%%INLINECODE_${i}%%", $inlineCode[$i])
+    }
+
     # Restore code blocks
     for ($i = 0; $i -lt $codeBlocks.Count; $i++) {
         $content = $content.Replace("%%CODEBLOCK_${i}%%", $codeBlocks[$i])
     }
 
     # Add YAML front matter
-    $frontMatter = Get-FrontMatter -Content $content -OutputPath $destRelPath
+    $frontMatter = Get-FrontMatter -Content $content -DestRelPath $destRelPath
     $content = $frontMatter + $content
 
     # Write to output
@@ -410,18 +439,30 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     if (-not (Test-Path $destDir)) {
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($destPath, $content, [System.Text.UTF8Encoding]::new($false))
+    Set-Content -Path $destPath -Value $content -Encoding UTF8 -NoNewline
 
     Write-Info "  $($entry.Key) -> $destRelPath"
 }
 
-# ─── Step 4: Copy images ───────────────────────────────────────────────────────
+# ─── Step 4: Copy images (only those referenced by ported docs) ────────────────
 
-Write-Step "Copying images"
+Write-Step "Copying referenced images"
+
+# Collect all written markdown content to check image references
+$allPortedContent = Get-ChildItem $OutputPath -Recurse -File -Filter "*.md" | ForEach-Object {
+    Get-Content $_.FullName -Raw
+} | Out-String
 
 foreach ($entry in $ImageMapping.GetEnumerator()) {
     $sourcePath = Join-Path $ProjectRoot ($entry.Key -replace '/', '\')
     $destPath = Join-Path $OutputPath ($entry.Value -replace '/', '\')
+    $imageName = Split-Path $entry.Value -Leaf
+
+    # Only copy if the image filename appears in any ported doc
+    if ($allPortedContent -notmatch [regex]::Escape($imageName)) {
+        Write-Info "  SKIPPED (unreferenced): $($entry.Key)"
+        continue
+    }
 
     if (-not (Test-Path $sourcePath)) {
         Write-Warn "  MISSING: $($entry.Key) — skipping"
@@ -457,7 +498,7 @@ These guides walk you through using the winapp CLI with your app framework — f
 |-----------|-------|
 | .NET / WPF / WinForms | [Get started with .NET](dotnet.md) |
 | C++ (CMake) | [Get started with C++](cpp.md) |
-| Electron | [Set up Electron for Windows](electron-setup.md) |
+| Electron | [Get started with Electron](electron-index.md) |
 | Rust | [Get started with Rust](rust.md) |
 | Tauri | [Get started with Tauri](tauri.md) |
 | Flutter | [Get started with Flutter](flutter.md) |

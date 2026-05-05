@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # CLI Documentation and Usage
 
 ## Shell Completion

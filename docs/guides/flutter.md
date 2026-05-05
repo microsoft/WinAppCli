@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with Flutter
 
 For a complete working example, check out the [Flutter sample](../../samples/flutter-app) in this repository.

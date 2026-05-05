@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Packaging a CLI Executable as MSIX
 
 This guide walks you through packaging an existing command-line executable as an MSIX package for distribution via Windows Package Manager (winget), the Microsoft Store, or direct distribution.

@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with C++ and CMake
 
 This guide demonstrates how to use `winappcli` with a C++ application to debug with package identity and package your application as an MSIX.

@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Windows App Development CLI (winapp CLI)
 
 > [!IMPORTANT]
@@ -64,7 +65,7 @@ winapp CLI works with a variety of app frameworks:
 |-----------|-------|
 | .NET / WPF / WinForms | [Get started with .NET](guides/dotnet.md) |
 | C++ (CMake) | [Get started with C++](guides/cpp.md) |
-| Electron | [Get started with Electron](guides/electron/setup.md) |
+| Electron | [Get started with Electron](guides/electron/index.md) |
 | Rust | [Get started with Rust](guides/rust.md) |
 | Tauri | [Get started with Tauri](guides/tauri.md) |
 | Flutter | [Get started with Flutter](guides/flutter.md) |
@@ -95,6 +96,9 @@ winapp CLI is open source. You can find the source code, file issues, and contri
 ## Related topics
 
 - [CLI reference](usage.md)
+- [Debugging with package identity](debugging.md)
+- [UI automation](ui-automation.md)
+- [NPM programmatic API](npm-usage.md)
 - [Framework guides](guides/dotnet.md)
 - [Windows App SDK documentation](/windows/apps/windows-app-sdk/)
 - [MSIX packaging documentation](/windows/msix/)
