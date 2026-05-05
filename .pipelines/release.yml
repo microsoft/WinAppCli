@@ -422,7 +422,7 @@ extends:
           - task: PowerShell@2
             displayName: "Create MS Learn Docs PR"
             env:
-              GH_TOKEN: $(MSLEARN_GH_TOKEN)
+              GH_TOKEN: $(GITHUB_TOKEN_2)
             inputs:
               targetType: 'inline'
               pwsh: true
