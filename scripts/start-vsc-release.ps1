@@ -39,6 +39,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 $VscPackageJsonPath = Join-Path $ProjectRoot "src\winapp-VSC\package.json"
+$VscPackageLockPath = Join-Path $ProjectRoot "src\winapp-VSC\package-lock.json"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +183,6 @@ try {
 
     # 6. Confirm with user
     Write-Host ""
-    $pad = { param($s, $w) (' ' * [Math]::Max(0, $w - $s.Length)) }
     Write-Host "  VSC Extension Release Plan" -ForegroundColor White
     Write-Host "  ─────────────────────────────────────────────" -ForegroundColor White
     Write-Host "  Release version : $releaseVersion" -ForegroundColor White
@@ -217,8 +217,15 @@ try {
             $updatedJson = $vscPackageJson | ConvertTo-Json -Depth 100
             Set-Content -Path $VscPackageJsonPath -Value $updatedJson -NoNewline
             Write-Info "Updated VS Code extension version: $vscCurrentVersion -> $releaseVersion"
+
+            # Update package-lock.json to keep it in sync
+            $vscDir = Split-Path $VscPackageJsonPath -Parent
+            Push-Location $vscDir
+            npm install --package-lock-only --ignore-scripts 2>&1 | Out-Null
+            Pop-Location
+            Write-Info "Updated package-lock.json to match version $releaseVersion"
         }
-        Invoke-GitOrDryRun -Description "Stage version update" -Arguments @("add", $VscPackageJsonPath)
+        Invoke-GitOrDryRun -Description "Stage version update" -Arguments @("add", $VscPackageJsonPath, $VscPackageLockPath)
         Invoke-GitOrDryRun -Description "Commit version update" -Arguments @("commit", "-m", "Set VS Code extension version to $releaseVersion for release")
     }
 
@@ -244,9 +251,16 @@ try {
         $updatedJson = $vscPackageJson | ConvertTo-Json -Depth 100
         Set-Content -Path $VscPackageJsonPath -Value $updatedJson -NoNewline
         Write-Info "Updated package.json: $releaseVersion -> $nextVersion"
+
+        # Update package-lock.json to keep it in sync
+        $vscDir = Split-Path $VscPackageJsonPath -Parent
+        Push-Location $vscDir
+        npm install --package-lock-only --ignore-scripts 2>&1 | Out-Null
+        Pop-Location
+        Write-Info "Updated package-lock.json to match version $nextVersion"
     }
 
-    Invoke-GitOrDryRun -Description "Stage version bump" -Arguments @("add", $VscPackageJsonPath)
+    Invoke-GitOrDryRun -Description "Stage version bump" -Arguments @("add", $VscPackageJsonPath, $VscPackageLockPath)
     Invoke-GitOrDryRun -Description "Commit version bump" -Arguments @("commit", "-m", "Bump VS Code extension version to $nextVersion for development")
 
     Confirm-Step "Push version bump branch '$bumpBranch' to origin and create PR?"
@@ -262,6 +276,7 @@ try {
     $prBody  = "Auto-generated version bump after releasing VS Code extension v$releaseVersion.`n`nThis PR bumps the patch version in ``src/winapp-VSC/package.json`` from ``$releaseVersion`` to ``$nextVersion`` so that prerelease builds pick up the new version number."
 
     $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
+    $prCreated = $false
     if (-not $ghAvailable -and -not $DryRun) {
         $encodedTitle = [System.Uri]::EscapeDataString($prTitle)
         $encodedBody  = [System.Uri]::EscapeDataString($prBody)
@@ -278,6 +293,7 @@ try {
             "--title", $prTitle,
             "--body", $prBody
         )
+        $prCreated = $true
         Write-Ok "Pull request created"
     }
 
@@ -289,11 +305,19 @@ try {
     Write-Host "  VSC Extension release started!" -ForegroundColor Green
     Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Green
     Write-Host "  • Release branch '$releaseBranch' pushed" -ForegroundColor Green
-    Write-Host "  • Version bump PR created for $nextVersion" -ForegroundColor Green
+    if ($prCreated) {
+        Write-Host "  • Version bump PR created for $nextVersion" -ForegroundColor Green
+    } else {
+        Write-Host "  • Version bump branch '$bumpBranch' pushed (create PR manually)" -ForegroundColor Green
+    }
     Write-Host "" -ForegroundColor Green
     Write-Host "  Next steps:" -ForegroundColor Green
     Write-Host "  1. Monitor the VSC release pipeline" -ForegroundColor Green
-    Write-Host "  2. Review & merge the version bump PR" -ForegroundColor Green
+    if ($prCreated) {
+        Write-Host "  2. Review & merge the version bump PR" -ForegroundColor Green
+    } else {
+        Write-Host "  2. Create & merge the version bump PR using the link above" -ForegroundColor Green
+    }
     Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Green
     Write-Host ""
 
