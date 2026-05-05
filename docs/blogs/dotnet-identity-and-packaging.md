@@ -30,10 +30,10 @@ winapp init --use-defaults
 
 The init command takes care of all the prerequisites for enabling identity:
 - Ensures the `TargetFramework` specified in your `.csproj` is supported
-- Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
+- Adds `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
 - Generates both a `Package.appxmanifest` and required asset files, placed in an `Assets` directory
 
-If you want to more control over the init experience, run without the `--use-defaults` flag.
+If you want more control over the init experience, run without the `--use-defaults` flag.
 
 ### 2. Debug with `dotnet run`
 
