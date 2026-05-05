@@ -228,7 +228,7 @@ extends:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-                npm install -g @vscode/vsce
+                npm install -g @vscode/vsce@3
 
                 VSIX=$(find "$(Pipeline.Workspace)/vscode-extension/" -name "*.vsix" | head -1)
                 if [ -z "$VSIX" ]; then
