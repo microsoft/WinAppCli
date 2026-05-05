@@ -97,7 +97,7 @@ And you're ready to test out your package!
 
 <!-- image showing generated msix -->
 
-For a more in-depth breakdown for these scenarios with .NET, checkout the full [.NET guide.](https://github.com/microsoft/winappCli/blob/main/docs/guides/dotnet.md)
+For a more in-depth breakdown for these scenarios with .NET, check out the full [.NET guide.](https://github.com/microsoft/winappCli/blob/main/docs/guides/dotnet.md)
 
 
 ## What else can winapp do?
