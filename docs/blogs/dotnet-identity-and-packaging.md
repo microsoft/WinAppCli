@@ -109,7 +109,7 @@ Though package identity and packaging are the core of winapp CLI right now, it h
 * Access to the Microsoft Store CLI via the `store` command 
 * Support for other Windows-compatible frameworks for developers that work with a variety of stacks.
 
-Check out the [Usage documentaition](https://github.com/microsoft/winappCli/blob/main/docs/usage.md) for a full breakdown of available commands.
+Check out the [Usage documentation](https://github.com/microsoft/winappCli/blob/main/docs/usage.md) for a full breakdown of available commands.
 
 ## Don't like the terminal? Use the winapp VS Code extension instead.
 
