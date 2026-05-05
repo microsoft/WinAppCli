@@ -431,6 +431,7 @@ extends:
                 $version = "$(version)"
                 $docsRepoBase = "hub/apps/dev-tools/winapp-cli"
                 $docsFork = "$(MSLearnDocsFork)"  # e.g., "myaccount/windows-dev-docs-pr"
+                $docsForkOwner = $docsFork.Split('/')[0]
                 $docsUpstream = "MicrosoftDocs/windows-dev-docs-pr"
                 $branch = "winapp-cli/v$version"
 
@@ -470,10 +471,12 @@ extends:
                   exit $LASTEXITCODE
                 }
 
-                # Copy ported docs to the docs repo
+                # Clean target dir to remove stale files, then copy ported docs
                 Write-Host "Copying ported docs to docs repo..."
                 $targetDir = Join-Path $docsDir $docsRepoBase
-                if (-not (Test-Path $targetDir)) {
+                if (Test-Path $targetDir) {
+                  Remove-Item "$targetDir\*" -Recurse -Force
+                } else {
                   New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
                 }
                 Copy-Item "$portOutput\*" $targetDir -Recurse -Force
@@ -484,6 +487,11 @@ extends:
                 git config user.name "winapp-cli-bot"
                 git config user.email "winapp-cli-bot@users.noreply.github.com"
                 git checkout -b $branch
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to create branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
                 git add -A
                 git diff --cached --quiet
                 if ($LASTEXITCODE -eq 0) {
@@ -492,7 +500,17 @@ extends:
                   exit 0
                 }
                 git commit -m "Update winapp CLI docs to v$version"
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
                 git push origin $branch
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to push branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
                 Pop-Location
 
                 # Create PR
@@ -510,7 +528,7 @@ extends:
 
                 & $ghExe pr create `
                   --repo $docsUpstream `
-                  --head "${docsFork}:${branch}" `
+                  --head "${docsForkOwner}:${branch}" `
                   --base main `
                   --title $prTitle `
                   --body $prBody

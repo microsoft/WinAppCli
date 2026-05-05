@@ -304,8 +304,8 @@ function Resolve-DocLink {
 function Rewrite-LearnUrls {
     param([string]$Content)
 
-    # Convert https://learn.microsoft.com[/en-us]/windows/... → /windows/...
-    $Content = [regex]::Replace($Content, 'https://learn\.microsoft\.com(?:/en-us)?(/windows/[^\s\)\]"]+)', '$1')
+    # Convert https://learn.microsoft.com[/en-us]/path/... → /path/...
+    $Content = [regex]::Replace($Content, 'https://learn\.microsoft\.com(?:/en-us)?((?:/[\w-]+)+[^\s\)\]"]*)', '$1')
 
     return $Content
 }

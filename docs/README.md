@@ -80,9 +80,9 @@ Additional guides:
 | **Setup** | [init](usage.md#init), [restore](usage.md#restore), [update](usage.md#update) |
 | **Identity & Debugging** | [run](usage.md#run), [create-debug-identity](usage.md#create-debug-identity), [unregister](usage.md#unregister) |
 | **Packaging** | [pack](usage.md#pack) |
-| **Manifests** | [manifest generate](usage.md#manifest-generate), [manifest update-assets](usage.md#manifest-update-assets), [manifest add-alias](usage.md#manifest-add-alias) |
+| **Manifests** | [manifest generate](usage.md#manifest-generate), [manifest update-assets](usage.md#manifest), [manifest add-alias](usage.md#manifest-add-alias) |
 | **Certificates & Signing** | [cert generate](usage.md#cert-generate), [cert install](usage.md#cert-install), [sign](usage.md#sign), [create-external-catalog](usage.md#create-external-catalog) |
-| **Utilities** | [tool](usage.md#tool), [store](usage.md#store), [get-winapp-path](usage.md#get-winapp-path), [complete](usage.md#complete) |
+| **Utilities** | [tool](usage.md#tool), [store](usage.md#store), [get-winapp-path](usage.md#get-winapp-path), [complete](usage.md#shell-completion) |
 | **UI Automation** | [ui](usage.md#ui) |
 | **Node.js/Electron** | [node create-addon](usage.md#node-create-addon), [node add-electron-debug-identity](usage.md#node-add-electron-debug-identity), [node clear-electron-debug-identity](usage.md#node-clear-electron-debug-identity) |
 
@@ -91,3 +91,10 @@ For the full CLI reference, see [CLI reference](usage.md).
 ## Open source
 
 winapp CLI is open source. You can find the source code, file issues, and contribute on [GitHub](https://github.com/microsoft/WinAppCli).
+
+## Related topics
+
+- [CLI reference](usage.md)
+- [Framework guides](guides/dotnet.md)
+- [Windows App SDK documentation](/windows/apps/windows-app-sdk/)
+- [MSIX packaging documentation](/windows/msix/)

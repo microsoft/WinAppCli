@@ -180,7 +180,7 @@ winapp pack <input-folder> [options]
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
 
-**WinRT component discovery:**
+#### WinRT component discovery
 
 When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
@@ -228,11 +228,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
-<<<<<<< docs/validation-fixes
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
-=======
-- `--manifest <path>` - Path to Package.appxmanifest (default: `./Package.appxmanifest`)
->>>>>>> main
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -289,7 +285,7 @@ winapp manifest generate [directory] [options]
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
 
-**Manifest placeholders:**
+#### Manifest placeholders
 
 Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
 
