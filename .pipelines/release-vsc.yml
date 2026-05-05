@@ -142,7 +142,7 @@ extends:
             - task: EsrpCodeSigning@5
               displayName: Code Sign ESRP - VSIX Package
               inputs:
-                ConnectedServiceName: 'WinSDKCLI - ESRP Code Signing MI'
+                ConnectedServiceName: $(SigningServiceName)
                 AppRegistrationClientId: $(SigningAppId)
                 AppRegistrationTenantId: $(SigningTenantId)
                 AuthAKVName: $(SigningAKVName)
