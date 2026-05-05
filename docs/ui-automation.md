@@ -456,14 +456,24 @@ winapp ui wait-for "Dialog Title" -a $pid --gone -t 5000
 
 ### Assert with JSON output
 Use `--json` with PowerShell or jq for more complex assertions:
+
+> **Exit-code contract for `search` and `wait-for` in `--json` mode:** when no element matches
+> (`search`) or the wait times out (`wait-for`), the command writes a fully parseable result envelope
+> to **stdout** (`{ "matchCount": 0, ... }` or `{ "found": false, "timedOut": true, ... }`) and
+> returns **exit code 1**. Stderr is empty in `--json` mode (logger output is suppressed).
+> Branch on the envelope fields, or on `$LASTEXITCODE`, depending on which is more ergonomic.
+
 ```powershell
 # Assert: search found exactly one match
 $result = winapp ui search "Submit" -a $pid --json | ConvertFrom-Json
 if ($result.matchCount -ne 1) { throw "Expected 1 Submit button, found $($result.matchCount)" }
 
 # Assert: element has expected properties
+# inspect --json returns { windows: [{ hwnd, title, elements: [...] }] };
+# each window's elements[] is the nested tree (children rendered via .children).
 $tree = winapp ui inspect "Counter Display" -a $pid --json | ConvertFrom-Json
-if ($tree.elements[0].name -ne "Count: 3") { throw "Counter value wrong: $($tree.elements[0].name)" }
+$counter = $tree.windows[0].elements[0]
+if ($counter.name -ne "Count: 3") { throw "Counter value wrong: $($counter.name)" }
 ```
 
 ### Full smoke test example

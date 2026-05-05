@@ -2,6 +2,9 @@
   branches:
     include:
       - rel/v*
+  tags:
+    exclude:
+      - '*'
 pr: none
 
 resources:

@@ -33,17 +33,20 @@ internal static class Program
         bool verbose = false;
         bool json = false;
 
-        if (args.Contains(WinAppRootCommand.VerboseOption.Name) || args.Any(WinAppRootCommand.VerboseOption.Aliases.Contains))
+        // Pre-scan argv for the global logging-mode flags. The scan stops at the first
+        // standalone '--' separator so that passthrough payload (e.g. `winapp run . --
+        // --json`) is not misread as a winapp global flag.
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
         {
             minimumLogLevel = LogLevel.Debug;
             verbose = true;
         }
-        if (args.Contains(WinAppRootCommand.QuietOption.Name) || args.Any(WinAppRootCommand.QuietOption.Aliases.Contains))
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
         {
             minimumLogLevel = LogLevel.Warning;
             quiet = true;
         }
-        if (args.Contains(WinAppRootCommand.JsonOption.Name) || args.Any(WinAppRootCommand.JsonOption.Aliases.Contains))
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
         {
             minimumLogLevel = LogLevel.None;
             json = true;
@@ -67,7 +70,8 @@ internal static class Program
 
         // Check if --cli-schema is specified - this outputs machine-readable JSON
         // and should not display any interactive messages like first-run notices
-        bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
+        bool isCliSchemaMode = GlobalOptionPreScan.IsFlagPresent(
+            args, WinAppRootCommand.CliSchemaOption.Name, []);
 
         // Check if this is a completion request - completions must be fast and silent
         bool isCompleteMode = args.Length > 0 && args[0] == "complete";

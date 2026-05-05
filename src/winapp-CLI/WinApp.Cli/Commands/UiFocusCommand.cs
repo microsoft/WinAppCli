@@ -36,20 +36,20 @@ internal class UiFocusCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "focus");
+                UiErrors.MissingSelector(logger, "focus", json);
                 return 1;
             }
 
@@ -61,32 +61,32 @@ internal class UiFocusCommand : Command, IShortDescription
 
                 if (element is null)
                 {
-                    UiErrors.ElementNotFound(logger, selectorStr);
+                    UiErrors.ElementNotFound(logger, selectorStr, json);
                     return 1;
                 }
 
                 await uiAutomation.FocusAsync(session, element, cancellationToken);
                 if (json)
                 {
-                    var result = new UiFocusResult { ElementId = element.Selector ?? element.Id, Hwnd = session.WindowHandle };
+                    var result = new UiFocusResult { ElementId = (element.Selector ?? element.Id ?? ""), Hwnd = session.WindowHandle };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiFocusResult));
                 }
                 else
                 {
-                    logger.LogInformation("Focused {ElementId}", element.Selector ?? element.Id);
+                    logger.LogInformation("Focused {ElementId}", (element.Selector ?? element.Id ?? ""));
                 }
                 return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }
