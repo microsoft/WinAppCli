@@ -17,6 +17,9 @@
   <a href="https://www.npmjs.com/package/@microsoft/winappcli">
     <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM">
   </a>
+  <a href="https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinApp">
+    <img src="https://img.shields.io/nuget/v/Microsoft.Windows.SDK.BuildTools.WinApp?style=for-the-badge&logo=nuget&label=NuGet&color=004880" alt="NuGet">
+  </a>
   <a href="https://github.com/microsoft/WinAppCli/releases/latest">
     <img src="https://img.shields.io/github/v/release/microsoft/WinAppCli?style=for-the-badge&logo=github&label=Latest%20Release&color=8ab4f8" alt="Latest Release">
   </a>
@@ -288,6 +291,16 @@ To build the CLI:
 ```
 
 The binaries and packages will be placed in the `artifacts` folder
+
+### Reviewing your changes before pushing
+
+Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
+Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
+files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
+skill fans out parallel sub-agents covering security, correctness, CLI UX,
+alternative-solution check, test coverage, docs/samples sync, packaging
+impact, and a multi-model cross-check, then prints a consolidated finding
+list to stdout.
 
 ## Trademarks
 
