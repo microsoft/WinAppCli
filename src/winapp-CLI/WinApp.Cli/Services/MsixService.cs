@@ -703,7 +703,16 @@ internal partial class MsixService(
 
         foreach (var relativePath in referencedFiles)
         {
-            var stagingPath = Path.Combine(stagingDir.FullName, relativePath);
+            var stagingPath = Path.GetFullPath(Path.Combine(stagingDir.FullName, relativePath));
+            var stagingRoot = Path.GetFullPath(stagingDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            // Verify the destination stays within the staging directory
+            if (!stagingPath.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file with path escape: {relativePath}");
+                continue;
+            }
+
             if (File.Exists(stagingPath))
             {
                 continue;
@@ -725,6 +734,27 @@ internal partial class MsixService(
 
             if (sourceFile == null)
             {
+                continue;
+            }
+
+            // Security: verify the resolved source path stays within the allowed roots.
+            // This prevents symlinks/junctions from escaping the project directory.
+            var resolvedSourcePath = Path.GetFullPath(sourceFile.FullName);
+            var manifestRoot = Path.GetFullPath(manifestDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var inputRoot = Path.GetFullPath(inputFolder.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (!resolvedSourcePath.StartsWith(manifestRoot, StringComparison.OrdinalIgnoreCase) &&
+                !resolvedSourcePath.StartsWith(inputRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file outside project root: {relativePath}");
+                continue;
+            }
+
+            // Reject reparse points (symlinks/junctions) that could redirect to arbitrary locations
+            var sourceAttributes = File.GetAttributes(sourceFile.FullName);
+            if (sourceAttributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced symlink/junction: {relativePath}");
                 continue;
             }
 
