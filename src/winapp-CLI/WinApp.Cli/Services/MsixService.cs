@@ -469,6 +469,10 @@ internal partial class MsixService(
             var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
                 .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
+            // Pre-extract all file references from the manifest once (used by both
+            // MrtAssetHelper for images and CopyManifestReferencedFiles for non-image files)
+            var allManifestReferences = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
             // If manifest is outside input folder, copy its referenced assets into the staging directory
             if (manifestIsOutsideInputFolder)
             {
@@ -479,7 +483,7 @@ internal partial class MsixService(
             // Copy any non-image files referenced in the manifest that are missing from
             // staging. This handles files like manifest.json or other extension-referenced
             // resources that aren't discovered by the image-asset extractor.
-            CopyManifestReferencedFiles(manifestContent, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext);
+            CopyManifestReferencedFiles(allManifestReferences, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext, cancellationToken);
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
@@ -687,13 +691,13 @@ internal partial class MsixService(
     /// This ensures non-image referenced files (e.g., manifest.json) are included in the package.
     /// </summary>
     private static void CopyManifestReferencedFiles(
-        string manifestContent,
+        HashSet<string> referencedFiles,
         DirectoryInfo manifestDir,
         DirectoryInfo inputFolder,
         DirectoryInfo stagingDir,
-        TaskContext taskContext)
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
     {
-        var referencedFiles = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
         if (referencedFiles.Count == 0)
         {
             return;
@@ -703,6 +707,8 @@ internal partial class MsixService(
 
         foreach (var relativePath in referencedFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var stagingPath = Path.GetFullPath(Path.Combine(stagingDir.FullName, relativePath));
             var stagingRoot = Path.GetFullPath(stagingDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 

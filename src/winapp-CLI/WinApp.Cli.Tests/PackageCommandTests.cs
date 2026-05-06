@@ -2281,5 +2281,21 @@ public class PackageCommandTests : BaseCommandTests
             $"IsLikelyFilePath should accept: \"{value}\"");
     }
 
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_ReturnsEmptyForMalformedXml()
+    {
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest("<not valid xml><><>");
+        Assert.AreEqual(0, references.Count, "Should return empty set for malformed XML");
+    }
+
+    [TestMethod]
+    [DataRow("", DisplayName = "Empty string")]
+    [DataRow("   ", DisplayName = "Whitespace only")]
+    public void ExtractAllFileReferencesFromManifest_ReturnsEmptyForEmptyInput(string input)
+    {
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(input);
+        Assert.AreEqual(0, references.Count, "Should return empty set for empty/whitespace input");
+    }
+
     #endregion
 }
