@@ -2,6 +2,7 @@
   "name": "winapp",
   "displayName": "WinApp",
   "description": "WinApp extension for Visual Studio Code to assist in building, debugging, and packaging Windows applications using the WinAppCLI.",
+  "publisher": "Microsoft-WinAppCLI",
   "icon": "images/icon.png",
   "version": "0.1.0",
   "repository": {

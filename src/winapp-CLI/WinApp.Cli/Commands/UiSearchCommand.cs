@@ -37,21 +37,21 @@ internal class UiSearchCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
             var maxResults = parseResult.GetRequiredValue(SharedUiOptions.MaxResultsOption);
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "search");
+                UiErrors.MissingSelector(logger, "search", json);
                 return 1;
             }
 
@@ -69,6 +69,9 @@ internal class UiSearchCommand : Command, IShortDescription
 
                 if (json)
                 {
+                    // Strip internal/redundant fields — selectors are the stable handle for consumers.
+                    // Also flattens InvokableAncestor to a hint (no cycle, no nested children).
+                    UiElementScrubber.ScrubAll(matches);
                     var result = new UiSearchResult
                     {
                         MatchCount = matches.Length,
@@ -82,7 +85,7 @@ internal class UiSearchCommand : Command, IShortDescription
                 {
                     foreach (var el in matches)
                     {
-                        var elSelector = el.Selector ?? el.Id;
+                        var elSelector = el.Selector ?? el.Id ?? "";
                         var displayName = el.Name ?? el.AutomationId;
                         var name = displayName is not null && displayName != elSelector
                             ? $" [green]\"{EscapeMarkup(Truncate(displayName, 80))}\"[/]" : "";
@@ -96,7 +99,7 @@ internal class UiSearchCommand : Command, IShortDescription
 
                         if (el.InvokableAncestor is { } ancestor)
                         {
-                            var ancestorSel = ancestor.Selector ?? ancestor.Id;
+                            var ancestorSel = ancestor.Selector ?? ancestor.Id ?? "";
                             var aName = ancestor.Name is not null ? $" \"{ancestor.Name}\"" : "";
                             ansiConsole.MarkupLine($"        ^ invoke via: [bold cyan]{EscapeMarkup(ancestorSel)}[/]{aName}");
                         }
@@ -113,12 +116,12 @@ internal class UiSearchCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }
