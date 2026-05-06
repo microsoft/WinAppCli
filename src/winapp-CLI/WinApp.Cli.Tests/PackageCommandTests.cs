@@ -2240,5 +2240,41 @@ public class PackageCommandTests : BaseCommandTests
             "Should still include valid references");
     }
 
+    [TestMethod]
+    [DataRow("https://schemas.microsoft.com/appx/manifest.xml", DisplayName = "https URI")]
+    [DataRow("http://example.com/file.dll", DisplayName = "http URI")]
+    [DataRow("ms-appx:///Assets/logo.png", DisplayName = "ms-appx URI")]
+    [DataRow("ms-resource:Resources/AppName.txt", DisplayName = "ms-resource URI")]
+    [DataRow(@"C:\Windows\foo.txt", DisplayName = "Rooted absolute path")]
+    [DataRow(@"\rooted\path.json", DisplayName = "Rooted relative path")]
+    [DataRow(@"\\server\share\x.txt", DisplayName = "UNC path")]
+    [DataRow("6ba7b810-9dad-11d1-80b4-00c04fd430c8", DisplayName = "GUID-like string")]
+    [DataRow("{6ba7b810-9dad-11d1-80b4-00c04fd430c8}", DisplayName = "Braced GUID")]
+    [DataRow("file\0name.dll", DisplayName = "Invalid path characters")]
+    [DataRow("1.0.0.0", DisplayName = "Version string")]
+    [DataRow("10.0.18362.0", DisplayName = "Windows version string")]
+    [DataRow("MyApp.App", DisplayName = "Dotted class identifier")]
+    [DataRow("Windows.Universal", DisplayName = "Dotted namespace identifier")]
+    [DataRow("", DisplayName = "Empty string")]
+    [DataRow("   ", DisplayName = "Whitespace only")]
+    [DataRow("noextension", DisplayName = "No file extension")]
+    public void IsLikelyFilePath_RejectsNonPathValues(string value)
+    {
+        Assert.IsFalse(ManifestFileReferenceHelper.IsLikelyFilePath(value),
+            $"IsLikelyFilePath should reject: \"{value}\"");
+    }
+
+    [TestMethod]
+    [DataRow("app.exe", DisplayName = "Simple executable")]
+    [DataRow("Assets/logo.png", DisplayName = "Relative path with directory")]
+    [DataRow("config.json", DisplayName = "JSON file")]
+    [DataRow("resources/strings.resw", DisplayName = "Resource file")]
+    [DataRow("lib/native.dll", DisplayName = "DLL in subdirectory")]
+    public void IsLikelyFilePath_AcceptsValidPaths(string value)
+    {
+        Assert.IsTrue(ManifestFileReferenceHelper.IsLikelyFilePath(value),
+            $"IsLikelyFilePath should accept: \"{value}\"");
+    }
+
     #endregion
 }

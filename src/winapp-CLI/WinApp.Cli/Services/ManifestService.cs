@@ -605,9 +605,8 @@ internal partial class ManifestService(
         }
 
         // Build the ExecutionAlias element
-        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias",
-            new XAttribute("Alias", aliasName));
-
+        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias", new XAttribute("Alias", aliasName));
+        
         // Find or create the Extensions > uap5:Extension > uap5:AppExecutionAlias hierarchy
         var extensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
         if (extensions == null)
