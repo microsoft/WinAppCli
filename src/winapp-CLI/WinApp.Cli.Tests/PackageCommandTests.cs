@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -2191,7 +2192,7 @@ public class PackageCommandTests : BaseCommandTests
   </Applications>
 </Package>";
 
-        var references = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
 
         // Should include image assets
         Assert.IsTrue(references.Contains(@"Assets\StoreLogo.png"), "Should find StoreLogo.png");
@@ -2231,7 +2232,7 @@ public class PackageCommandTests : BaseCommandTests
   </Applications>
 </Package>";
 
-        var references = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
 
         Assert.IsFalse(references.Any(r => r.Contains("secret.json")),
             "Should reject path traversal references");

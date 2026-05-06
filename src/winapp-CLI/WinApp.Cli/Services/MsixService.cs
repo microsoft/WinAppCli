@@ -693,7 +693,7 @@ internal partial class MsixService(
         DirectoryInfo stagingDir,
         TaskContext taskContext)
     {
-        var referencedFiles = ManifestService.ExtractAllFileReferencesFromManifest(manifestContent);
+        var referencedFiles = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
         if (referencedFiles.Count == 0)
         {
             return;
