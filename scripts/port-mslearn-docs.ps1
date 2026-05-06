@@ -478,10 +478,24 @@ foreach ($entry in $ImageMapping.GetEnumerator()) {
     Write-Info "  $($entry.Key) -> $($entry.Value)"
 }
 
-# ─── Step 5: Generate guides/index.md ───────────────────────────────────────────
+# ─── Step 5: Generate guides/index.md from ported index.md ─────────────────────
 
 Write-Step "Generating guides/index.md"
 
+# Extract the framework table and additional guides from the ported index.md
+# (docs/README.md → index.md) so there's a single source of truth.
+$portedIndexPath = Join-Path $OutputPath "index.md"
+$portedIndexContent = Get-Content $portedIndexPath -Raw
+
+# Extract the "Supported frameworks" section (table + additional guides)
+$frameworkSection = ""
+if ($portedIndexContent -match '(?ms)(## Supported frameworks\s*\n.+?)(?=\n## )') {
+    $frameworkSection = $Matches[1]
+    # Rewrite links from index.md-relative (guides/foo.md) to guides/-relative (foo.md)
+    $frameworkSection = $frameworkSection -replace '\]\(guides/', ']('
+}
+
+# Build guides/index.md using the extracted content
 $guidesIndex = @"
 ---
 title: winapp CLI framework guides
@@ -494,6 +508,15 @@ ms.topic: overview
 
 These guides walk you through using the winapp CLI with your app framework — from project setup to debugging with package identity to packaging as MSIX.
 
+"@
+
+if ($frameworkSection) {
+    # Strip the "## Supported frameworks" heading and the intro line, keep just the table + additional guides
+    $tableContent = $frameworkSection -replace '(?ms)^## Supported frameworks\s*\n+.*?app frameworks:\s*\n+', ''
+    $guidesIndex += $tableContent
+} else {
+    Write-Warn "  Could not extract framework section from index.md — using fallback"
+    $guidesIndex += @"
 | Framework | Guide |
 |-----------|-------|
 | .NET / WPF / WinForms | [Get started with .NET](dotnet.md) |
@@ -502,11 +525,11 @@ These guides walk you through using the winapp CLI with your app framework — f
 | Rust | [Get started with Rust](rust.md) |
 | Tauri | [Get started with Tauri](tauri.md) |
 | Flutter | [Get started with Flutter](flutter.md) |
+"@
+}
 
-## Additional guides
-
-- [Packaging an EXE/CLI](packaging-cli.md) — Package an existing executable as MSIX
-- [Shell Completion](shell-completion.md) — Enable tab completion for commands, options, and values
+# Add Electron deep-dive section (these only exist as guides, not in README)
+$guidesIndex += @"
 
 ## Electron deep-dive guides
 
