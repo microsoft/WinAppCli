@@ -20,6 +20,34 @@ internal partial class ManifestService(
     IImageAssetService imageAssetService,
     IAnsiConsole ansiConsole) : IManifestService
 {
+    private static readonly HashSet<string> KnownFileExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Executables and libraries
+        ".exe", ".dll", ".winmd", ".sys", ".ocx",
+        // Images
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".tiff", ".webp",
+        // Configuration and data
+        ".xml", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".config",
+        // Web
+        ".html", ".htm", ".css", ".js", ".ts", ".mjs", ".cjs", ".wasm",
+        // Documents
+        ".txt", ".md", ".pdf", ".rtf", ".csv",
+        // Resources and assets
+        ".resw", ".resx", ".pri", ".rc", ".resources", ".xaml", ".xsd", ".xsl", ".xslt",
+        // Source code
+        ".cs", ".cpp", ".c", ".h", ".hpp", ".idl", ".def", ".vcxproj", ".csproj", ".sln",
+        // Fonts
+        ".ttf", ".otf", ".woff", ".woff2",
+        // Audio and video
+        ".mp3", ".wav", ".ogg", ".mp4", ".avi", ".wmv",
+        // Archives and packages
+        ".zip", ".msix", ".appx", ".appxbundle", ".msixbundle", ".cab", ".msi", ".nupkg",
+        // Certificates and signing
+        ".pfx", ".cer", ".p7x", ".cat",
+        // Misc
+        ".man", ".manifest", ".rdp", ".lnk", ".url", ".appxmanifest",
+    };
+
     public async Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
         DirectoryInfo directory,
         string? packageName,
@@ -595,19 +623,17 @@ internal partial class ManifestService(
         }
 
         // Reject dotted identifiers that look like class/namespace names (e.g., "MyApp.App", "Windows.Universal")
-        // File paths typically contain a path separator or have a short well-known extension
+        // Only accept values whose extension is in the known file extensions allow list
         var extension = Path.GetExtension(value);
         if (string.IsNullOrEmpty(extension))
         {
             return false;
         }
 
-        // Must have a reasonable file extension (1-10 chars after the dot)
-        var ext = extension.TrimStart('.');
-        if (ext.Length == 0 || ext.Length > 10 || !ext.All(c => char.IsLetterOrDigit(c)))
+        if (!KnownFileExtensions.Contains(extension))
         {
             return false;
-        }        
+        }
 
         return true;
     }
