@@ -581,8 +581,12 @@ public class EndToEndTests : BaseCommandTests
         // Assert
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail when electron.exe does not exist.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
+        // Either branch of the new error messaging is acceptable: "Electron is not installed"
+        // (no node_modules/electron) or "binary was not found" (node_modules/electron present
+        // but exe missing, e.g. Electron 42+ before `install-electron` runs).
         Assert.IsTrue(
-            combinedOutput.Contains("Electron executable not found at:", StringComparison.OrdinalIgnoreCase),
+            combinedOutput.Contains("Electron is not installed", StringComparison.OrdinalIgnoreCase)
+                || combinedOutput.Contains("binary was not found", StringComparison.OrdinalIgnoreCase),
             $"Expected Node-layer electron missing error to be surfaced. Output: {combinedOutput}");
     }
 
