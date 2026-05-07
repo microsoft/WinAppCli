@@ -43,45 +43,12 @@ function Write-Warn  { param([string]$msg) Write-Host "    $msg" -ForegroundColo
 
 $GitHubRepoBase = "https://github.com/microsoft/WinAppCli"
 
-# Paths under docs/ to exclude from porting (relative to docs/, forward slash)
-# These are always excluded regardless of mslearn marker (non-doc files, generated content)
-$AlwaysExcludePaths = @(
-    "cli-schema.json"
-    "fragments/"
-)
-
-# Front matter overrides: output path → { description, topic }
-# Falls back to auto-detection if not specified.
-# Only needed for pages where the first paragraph isn't a good description.
-$FrontMatterOverrides = @{
-    "index.md" = @{
-        description = "The Windows App Development CLI (winapp CLI) is a command-line interface for managing Windows SDKs, packaging, generating app identity, manifests, certificates, and using build tools with any app framework."
-        topic       = "overview"
-    }
-    "usage.md" = @{
-        description = "Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands."
-        topic       = "reference"
-    }
-    "ui-automation.md" = @{
-        description = "Inspect and interact with running Windows application UIs from the command line using winapp CLI UI automation commands."
-        topic       = "reference"
-    }
-}
-
-# Known repo-only link targets (not under docs/, linked to GitHub)
-$RepoOnlyLinkTargets = @(
-    "samples/dotnet-app"
-    "samples/wpf-app"
-    "samples/cpp-app"
-    "samples/electron"
-    "samples/electron-winml"
-    "samples/electron-winml/winMlAddon"
-    "samples/electron-winml/winMlAddon/addon.cs"
-    "samples/electron-winml/src/index.js"
-    "samples/rust-app"
-    "samples/tauri-app"
-    "samples/flutter-app"
-)
+# Per-file metadata is read from HTML-comment markers in source docs:
+#   <!-- mslearn: true -->         (required opt-in marker)
+#   <!-- ms.topic: overview -->    (optional, defaults to "how-to")
+#   <!-- description: ... -->      (optional, defaults to page title)
+# Repo-only link targets (anything outside docs/ or not opted-in) are
+# auto-rewritten to GitHub URLs by Resolve-DocLink — no list to maintain.
 
 # ─── Step 0: Resolve parameters ────────────────────────────────────────────────
 
@@ -129,19 +96,8 @@ foreach ($file in $allDocFiles) {
         continue
     }
 
-    # Check always-excluded paths (non-doc content like cli-schema.json, fragments/)
-    $excluded = $false
-    foreach ($excl in $AlwaysExcludePaths) {
-        if ($excl.EndsWith('/')) {
-            if ($docsRelPath.StartsWith($excl)) { $excluded = $true; break }
-        } else {
-            if ($docsRelPath -eq $excl) { $excluded = $true; break }
-        }
-    }
-    if ($excluded) { continue }
-
     # Check for <!-- mslearn: true --> marker (opt-in model)
-    $fileHead = Get-Content $file.FullName -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
+    $fileHead = Get-Content $file.FullName -TotalCount 10 -ErrorAction SilentlyContinue | Out-String
     if ($fileHead -notmatch '<!--\s*mslearn:\s*true\s*-->') {
         continue  # not marked for MS Learn
     }
@@ -192,23 +148,7 @@ foreach ($entry in $ImageMapping.GetEnumerator()) {
     $LinkMap[$entry.Key] = @{ Type = "ported"; Path = $entry.Value }
 }
 
-# Add known repo-only link targets (not under docs/, linked to GitHub)
-foreach ($path in $RepoOnlyLinkTargets) {
-    $isFile = $path -match '\.\w+$'
-    $ghPath = if ($isFile) { "$GitHubRepoBase/blob/main/$path" } else { "$GitHubRepoBase/tree/main/$path" }
-    $LinkMap[$path] = @{ Type = "github"; Url = $ghPath }
-}
-
-# Add excluded docs as GitHub links (so links to them still work)
-foreach ($excl in $AlwaysExcludePaths) {
-    if ($excl.EndsWith('/')) { continue }  # skip directory exclusions
-    $exclRepoPath = "docs/$excl"
-    if (-not $LinkMap.ContainsKey($exclRepoPath)) {
-        $LinkMap[$exclRepoPath] = @{ Type = "github"; Url = "$GitHubRepoBase/blob/main/$exclRepoPath" }
-    }
-}
-
-Write-Info "Map has $($LinkMap.Count) entries ($($FileMapping.Count) ported + $($ImageMapping.Count) images, $($RepoOnlyLinkTargets.Count) repo-only)"
+Write-Info "Map has $($LinkMap.Count) entries ($($FileMapping.Count) ported + $($ImageMapping.Count) images)"
 
 # ─── Link resolution function ──────────────────────────────────────────────────
 
@@ -292,10 +232,15 @@ function Resolve-DocLink {
         }
     }
 
-    # Not in map — check if it looks like a repo path and convert to GitHub URL
+    # Not in map — if the path actually exists in the repo, rewrite to GitHub.
+    # Warn only when the target doesn't exist (likely a broken link).
     if ($repoPath -and -not ($repoPath -match '^\w+://')) {
-        Write-Warn "  Unmapped link in $SourceRepoPath : $Href (resolved: $repoPath)"
+        $absPath = Join-Path $ProjectRoot ($repoPath -replace '/', '\')
+        $exists = Test-Path $absPath
         $isFile = $repoPath -match '\.\w+$'
+        if (-not $exists) {
+            Write-Warn "  Unmapped link in $SourceRepoPath : $Href (resolved: $repoPath)"
+        }
         $ghBase = if ($isFile) { "$GitHubRepoBase/blob/main" } else { "$GitHubRepoBase/tree/main" }
         return "$ghBase/$repoPath$anchor"
     }
@@ -328,12 +273,16 @@ function Get-FrontMatter {
         $title = $Matches[1].Trim()
     }
 
-    # Get overrides
-    $overrides = $FrontMatterOverrides[$DestRelPath]
-    $description = if ($overrides -and $overrides.description) { $overrides.description }
-                   else { $title }
-    $topic = if ($overrides -and $overrides.topic) { $overrides.topic }
-             else { "how-to" }
+    # Read per-file overrides from HTML-comment markers anywhere in the source.
+    # Supported: <!-- description: ... --> and <!-- ms.topic: ... -->
+    $description = $title
+    if ($Content -match '<!--\s*description:\s*(.+?)\s*-->') {
+        $description = $Matches[1].Trim()
+    }
+    $topic = "how-to"
+    if ($Content -match '<!--\s*ms\.topic:\s*(.+?)\s*-->') {
+        $topic = $Matches[1].Trim()
+    }
 
     # Quote values that contain YAML-special characters (colons, brackets, etc.)
     $safeTitle = if ($title -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($title -replace '"', '\"')`"" } else { $title }
@@ -367,9 +316,12 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
 
     # Read content
     $content = Get-Content $sourcePath -Raw
+    $rawContent = $content  # preserve metadata markers for front matter extraction
 
-    # Strip the mslearn marker comment
+    # Strip the mslearn marker comments (mslearn: true, description, ms.topic)
     $content = $content -replace '(?m)^\s*<!--\s*mslearn:\s*true\s*-->\s*\r?\n?', ''
+    $content = $content -replace '(?m)^\s*<!--\s*description:\s*.+?\s*-->\s*\r?\n?', ''
+    $content = $content -replace '(?m)^\s*<!--\s*ms\.topic:\s*.+?\s*-->\s*\r?\n?', ''
 
     # Protect code blocks from link rewriting and URL rewriting by temporarily replacing them
     $codeBlocks = [System.Collections.Generic.List[string]]::new()
@@ -431,7 +383,7 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     }
 
     # Add YAML front matter
-    $frontMatter = Get-FrontMatter -Content $content -DestRelPath $destRelPath
+    $frontMatter = Get-FrontMatter -Content $rawContent -DestRelPath $destRelPath
     $content = $frontMatter + $content
 
     # Write to output
