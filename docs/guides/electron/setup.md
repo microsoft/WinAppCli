@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Setting Up the Development Environment
 
 This guide walks you through setting up your Electron development environment for Windows API development. You'll install the necessary tools, initialize your project, and configure Windows SDKs.
@@ -255,4 +256,4 @@ Now that your development environment is set up, you're ready to create native a
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to create a C# addon that uses Windows Machine Learning
 - **[Packaging for Distribution](packaging.md)** - Create an MSIX package for distribution
 
-Or return to the **[Getting Started Overview](../../electron-get-started.md)**.
+Or return to the **[Getting Started Overview](index.md)**.

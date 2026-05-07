@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Packaging Your Electron App for Distribution
 
 This guide shows you how to create an MSIX package for distributing your Electron app with Windows APIs.
@@ -250,7 +251,7 @@ Congratulations! You've successfully packaged your Windows-enabled Electron app 
 
 ### Return to Overview
 
-- **[Getting Started Overview](../../electron-get-started.md)** - Return to the main guide
+- **[Getting Started Overview](index.md)** - Return to the main guide
 - **[Setting Up Development Environment](setup.md)** - Review setup steps
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** - Review addon creation
 - **[Creating a WinML Addon](winml-addon.md)** - Learn about WinML integration

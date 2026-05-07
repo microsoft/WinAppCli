@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with C++ and CMake
 
 This guide demonstrates how to use `winappcli` with a C++ application to debug with package identity and package your application as an MSIX.
@@ -195,7 +196,8 @@ To test features that require identity (like Notifications) without fully packag
 
 The `--with-alias` flag launches the app via its execution alias so console output stays in the current terminal. This requires the `uap5:ExecutionAlias` we added in step 4.
 
-> **Tip**: `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 8. Use `winapp unregister` to clean up development packages when done.
+> [!TIP]
+> `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 8. Use `winapp unregister` to clean up development packages when done.
 
 You should now see output similar to:
 ```
@@ -212,7 +214,8 @@ winapp create-debug-identity .\build\Debug\cpp-app.exe
 .\build\Debug\cpp-app.exe
 ```
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 6. Using Windows App SDK (Optional)
 
@@ -424,7 +427,8 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Tip**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
+> [!TIP]
+> The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Sign and Pack
 
@@ -435,7 +439,8 @@ Now you can package and sign:
 winapp pack .\dist --cert .\devcert.pfx 
 ```
 
-> **Tip**: The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated `.msix` file will be in the current directory.
+> [!TIP]
+> The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated `.msix` file will be in the current directory.
 
 ### Install the Certificate
 
@@ -447,7 +452,8 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-> **Tip**: If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
+> [!TIP]
+> If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
 
 The `winapp pack` command generates the MSIX file in your project root directory. Install the package by double-clicking the generated `.msix` file, or using PowerShell:
 
@@ -455,7 +461,8 @@ The `winapp pack` command generates the MSIX file in your project root directory
 Add-AppxPackage .\cpp-app_1.0.0.0_x64.msix
 ```
 
-> **Tip**: The MSIX filename includes the version and architecture (e.g., `cpp-app_1.0.0.0_arm64.msix`). Check your directory for the exact filename.
+> [!TIP]
+> The MSIX filename includes the version and architecture (e.g., `cpp-app_1.0.0.0_arm64.msix`). Check your directory for the exact filename.
 
 Now you can run your app from anywhere in the terminal by typing:
 
@@ -465,7 +472,8 @@ cpp-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> [!TIP]
+> If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
