@@ -77,18 +77,6 @@ Describe "Electron Sample" {
                 $created | Should -Be $true -Because "Electron app creation should succeed within $maxRetries attempts"
                 $script:appDir = Join-Path $script:tempDir "electron-app"
                 $script:appDir | Should -Exist
-
-                # Electron's postinstall binary download can silently fail on newer Node versions.
-                # Explicitly run the install script if the binary is missing.
-                $electronExe = Join-Path $script:appDir "node_modules\electron\dist\electron.exe"
-                if (-not (Test-Path $electronExe)) {
-                    Write-Host "Electron binary not found after scaffold — running explicit install..."
-                    Push-Location $script:appDir
-                    try {
-                        Invoke-Expression "node node_modules/electron/install.js"
-                        $electronExe | Should -Exist -Because "Electron binary should be downloaded after explicit install"
-                    } finally { Pop-Location }
-                }
             } finally { Pop-Location }
         }
 
