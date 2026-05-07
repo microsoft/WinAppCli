@@ -582,7 +582,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail when electron.exe does not exist.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
         Assert.IsTrue(
-            combinedOutput.Contains("Electron executable not found at:", StringComparison.OrdinalIgnoreCase),
+            combinedOutput.Contains("Electron is not installed", StringComparison.OrdinalIgnoreCase),
             $"Expected Node-layer electron missing error to be surfaced. Output: {combinedOutput}");
     }
 

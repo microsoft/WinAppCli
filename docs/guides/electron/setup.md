@@ -99,15 +99,16 @@ To ensure the Windows SDKs are available when other developers clone your projec
 ```json
 {
   "scripts": {
-    "postinstall": "winapp restore && winapp node add-electron-debug-identity"
+    "postinstall": "npx install-electron && winapp restore && winapp node add-electron-debug-identity"
   }
 }
 ```
 
-This script automatically runs after `npm install` and does two things:
+This script automatically runs after `npm install` and does three things:
 
-1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
-2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
+1. **`npx install-electron`** - Downloads the Electron binary into `node_modules/electron/dist/`. Required for Electron 42+, which no longer downloads its binary during `npm install` ([release notes](https://github.com/electron/electron/releases/tag/v42.0.0)). On Electron < 42 the binary is already present after `npm install`, so this step is a no-op there — you can omit it if you pin to an older version.
+2. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
+3. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
 
 Now run `npm install` to trigger the postinstall script and configure the Windows environment:
 
@@ -128,7 +129,7 @@ Create `scripts/postinstall.js`:
 if (process.platform === 'win32') {
   const { execSync } = require('child_process');
   try {
-    execSync('npx winapp restore && npx winapp cert generate --if-exists skip && npx winapp node add-electron-debug-identity', {
+    execSync('npx install-electron && npx winapp restore && npx winapp cert generate --if-exists skip && npx winapp node add-electron-debug-identity', {
       stdio: 'inherit'
     });
   } catch (error) {
