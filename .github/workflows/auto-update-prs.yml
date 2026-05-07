@@ -34,14 +34,20 @@ jobs:
           set -euo pipefail
 
           # List open PRs targeting main that have auto-merge enabled. Skip
-          # drafts and PRs from forks (update-branch can't push to fork
-          # branches with GITHUB_TOKEN).
+          # drafts and PRs whose head branch lives in a different repository
+          # (forks, sibling repos), since update-branch can't push to those
+          # with GITHUB_TOKEN. Match the full nameWithOwner so a same-org
+          # fork or sibling repo isn't mistaken for the canonical repo.
           prs=$(gh pr list \
             --base main \
             --state open \
-            --limit 200 \
-            --json number,isDraft,headRepositoryOwner,autoMergeRequest \
-            --jq '.[] | select(.isDraft == false) | select(.autoMergeRequest != null) | select(.headRepositoryOwner.login == "${{ github.repository_owner }}") | .number')
+            --limit 500 \
+            --json number,isDraft,headRepository,headRepositoryOwner,autoMergeRequest \
+            --jq ".[]
+                  | select(.isDraft == false)
+                  | select(.autoMergeRequest != null)
+                  | select((.headRepositoryOwner.login + \"/\" + .headRepository.name) == \"${GH_REPO}\")
+                  | .number")
 
           if [ -z "$prs" ]; then
             echo "No auto-merge-enabled PRs to update."
@@ -51,14 +57,26 @@ jobs:
           for pr in $prs; do
             echo "::group::PR #$pr"
             # 202 = update queued, 422 = already up to date or has conflicts.
-            # We tolerate 422 so one stuck PR doesn't fail the whole job.
-            if gh api \
+            # We tolerate 422 so one stuck PR doesn't fail the whole job, but
+            # any other non-success status (auth, rate limit, outage) fails
+            # loudly so regressions don't silently no-op the workflow.
+            set +e
+            output=$(gh api \
                 --method PUT \
                 -H "Accept: application/vnd.github+json" \
-                "/repos/${GH_REPO}/pulls/${pr}/update-branch"; then
+                "/repos/${GH_REPO}/pulls/${pr}/update-branch" 2>&1)
+            exit_code=$?
+            set -e
+
+            if [ $exit_code -eq 0 ]; then
               echo "Update queued for PR #$pr"
+            elif echo "$output" | grep -q "HTTP 422"; then
+              echo "Skipped PR #$pr (HTTP 422: already up to date, has conflicts, or not updatable)"
             else
-              echo "Skipped PR #$pr (already up to date, has conflicts, or not updatable)"
+              echo "::error::Unexpected failure updating PR #$pr"
+              echo "$output"
+              echo "::endgroup::"
+              exit 1
             fi
             echo "::endgroup::"
           done
