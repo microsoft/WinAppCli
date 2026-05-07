@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
