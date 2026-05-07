@@ -35,6 +35,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ```powershell
 # Interactive — prompts for app name, publisher, SDK channel, etc.
+# Automatically searches for compatible projects (Tauri, Electron, .NET, Rust, C++, Flutter)
 winapp init .
 
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
@@ -45,6 +46,12 @@ winapp init --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
 winapp init --use-defaults --setup-sdks preview
+
+# Limit project search to 3 results
+winapp init --max-projects 3
+
+# Include normally-ignored directories in project search
+winapp init --search-all
 ```
 
 After `init`, your project will contain:

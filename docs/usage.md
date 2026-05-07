@@ -32,6 +32,8 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--max-projects <count>` - Maximum number of compatible projects to discover during directory search (default: 5)
+- `--search-all` - Search all directories, including commonly ignored ones like node_modules, bin, obj, etc.
 
 **What it does:**
 
@@ -43,7 +45,25 @@ winapp init [base-directory] [options]
 - Updates .gitignore to exclude generated files
 - Stores sharable files in the global cache directory
 
-**Automatic .NET project detection:**
+**Automatic project detection:**
+
+When `init` is run, it performs a breadth-first search of the target directory tree to find compatible projects. Supported project types:
+
+- **Tauri** — `tauri.conf.json` found one level below the directory
+- **Electron** — `package.json` with `electron` in dependencies or devDependencies
+- **Flutter** — `pubspec.yaml` at project root
+- **.NET** — `.csproj` at project root
+- **Rust** — `Cargo.toml` at project root
+- **C++** — `CMakeLists.txt` at project root
+
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.) unless `--search-all` is specified. When a compatible project is found, subdirectories below it are not searched. Results are displayed as they are discovered with a live progress indicator.
+
+- If the current directory is a compatible project, `init` proceeds immediately without searching
+- If exactly one project is found elsewhere, you're prompted to confirm
+- If multiple projects are found, you can select which one to initialize
+- If no projects are found, you're warned and asked whether to proceed anyway
+
+**Automatic .NET project flow:**
 
 When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
 
