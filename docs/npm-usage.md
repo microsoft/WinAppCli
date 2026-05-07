@@ -799,7 +799,7 @@ function execWithBuildTools(command: string, options?: ExecSyncOptions): string 
 
 ### `addMsixIdentityToExe()`
 
-Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
+Adds package identity information from a Package.appxmanifest or appxmanifest.xml file to an executable's embedded manifest
 
 ```typescript
 function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undefined, options?: MsixIdentityOptions): Promise<MsixIdentityResult>
@@ -810,7 +810,7 @@ function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undef
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `exePath` | `string` | Yes | Path to the executable file |
-| `appxManifestPath` | `string \| undefined` | No | Path to the appxmanifest.xml file containing package identity data |
+| `appxManifestPath` | `string \| undefined` | No | Path to the Package.appxmanifest or appxmanifest.xml file containing package identity data |
 | `options` | `MsixIdentityOptions` | No | Optional configuration |
 
 ---
