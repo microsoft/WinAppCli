@@ -99,16 +99,28 @@ To ensure the Windows SDKs are available when other developers clone your projec
 ```json
 {
   "scripts": {
-    "postinstall": "npx install-electron && winapp restore && winapp node add-electron-debug-identity"
+    "postinstall": "winapp restore && winapp node add-electron-debug-identity"
   }
 }
 ```
 
-This script automatically runs after `npm install` and does three things:
+This script automatically runs after `npm install` and does two things:
 
-1. **`npx install-electron`** - Downloads the Electron binary into `node_modules/electron/dist/`. Required for Electron 42+, which no longer downloads its binary during `npm install` ([release notes](https://github.com/electron/electron/releases/tag/v42.0.0)). On Electron < 42 the binary is already present after `npm install`, so this step is a no-op there — you can omit it if you pin to an older version.
-2. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
-3. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
+1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
+2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
+
+> [!IMPORTANT]
+> **Electron 42 and newer**: As of Electron 42, the binary is no longer downloaded automatically during `npm install` ([release notes](https://github.com/electron/electron/releases/tag/v42.0.0)). You must download it explicitly before `add-electron-debug-identity` runs:
+>
+> ```json
+> {
+>   "scripts": {
+>     "postinstall": "npx --no-install install-electron && winapp restore && winapp node add-electron-debug-identity"
+>   }
+> }
+> ```
+>
+> The `--no-install` flag ensures `npx` only runs the `install-electron` bin shipped by your installed Electron package and never silently downloads anything from the registry. If you pin to Electron < 42, omit this step — the binary is already in place after `npm install`.
 
 Now run `npm install` to trigger the postinstall script and configure the Windows environment:
 
@@ -128,10 +140,28 @@ Create `scripts/postinstall.js`:
 ```javascript
 if (process.platform === 'win32') {
   const { execSync } = require('child_process');
+  const fs = require('fs');
+  const path = require('path');
+
+  // Electron 42+ ships an `install-electron` bin and skips the postinstall download.
+  // Run it only when present, and use `--no-install` so npx never silently fetches
+  // anything from the registry.
+  const installElectronBin = path.join(
+    'node_modules', '.bin',
+    process.platform === 'win32' ? 'install-electron.cmd' : 'install-electron'
+  );
+  const steps = [];
+  if (fs.existsSync(installElectronBin)) {
+    steps.push('npx --no-install install-electron');
+  }
+  steps.push(
+    'npx winapp restore',
+    'npx winapp cert generate --if-exists skip',
+    'npx winapp node add-electron-debug-identity'
+  );
+
   try {
-    execSync('npx install-electron && npx winapp restore && npx winapp cert generate --if-exists skip && npx winapp node add-electron-debug-identity', {
-      stdio: 'inherit'
-    });
+    execSync(steps.join(' && '), { stdio: 'inherit' });
   } catch (error) {
     console.warn('Warning: Windows-specific setup failed. If you are not developing Windows features, you can ignore this.');
   }
