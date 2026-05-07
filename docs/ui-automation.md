@@ -225,12 +225,15 @@ winapp ui screenshot -a notepad --output my.png     # custom filename
 winapp ui screenshot -a notepad --json              # returns file path as JSON
 winapp ui screenshot -w 131906                      # target specific HWND (+ its dialogs)
 winapp ui screenshot txt-searchbox-e5f6 -a myapp          # crop to element bounds
-winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays)
+winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays; foregrounds window)
+winapp ui screenshot -a myapp --focus               # bring window to foreground first, then capture (default WGC path)
 ```
 
 When dialogs or popups are open, all windows are composited into one PNG so you can see the full UI state in a single image.
 
-Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays. In `--capture-screen` mode (and when retrying after a blank-frame is detected) the target window is brought to the foreground first; normal window captures do not move the window.
+The default capture path uses **Windows.Graphics.Capture (WGC)**, reading the actual DWM-composited surface — preserving rounded corners, transparency, and working even while the window is occluded by other windows. If WGC is unavailable (older Windows builds) the CLI falls back to **PrintWindow**.
+
+Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays that aren't owned by the target window. `--capture-screen` reads from the screen DC and brings the window to the foreground first. Use `--focus` if you just want to foreground the window without switching capture modes (e.g., to ensure the screenshot matches what the user is currently looking at).
 
 ### invoke
 Programmatically activate an element (click button, toggle checkbox, expand combo box).
@@ -346,7 +349,7 @@ winapp ui list-windows                                      # all windows (no fi
 | "does not support any invoke pattern" | Element can't be invoked | Use `inspect` on the element to find an invokable child |
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
-| Popup/dropdown not in screenshot | PrintWindow doesn't capture overlays | Use `--capture-screen` flag |
+| Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
 
 ## Common Patterns
 

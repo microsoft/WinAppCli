@@ -355,6 +355,10 @@ Assert-WinappSuccess "wait-for: counter after click" -WinappArgs @("ui", "wait-f
 $ssScreen = Join-Path $ScreenshotDir "05-capture-screen.png"
 Assert-WinappSuccess "screenshot --capture-screen" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssScreen, "--capture-screen")
 
+# --- screenshot --focus (exercises new WGC + foreground path) ---
+$ssFocus = Join-Path $ScreenshotDir "06-focus.png"
+Assert-WinappSuccess "screenshot --focus" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssFocus, "--focus")
+
 # --- wait-for: element exists ---
 Assert-WinappSuccess "wait-for: element exists" -WinappArgs @("ui", "wait-for", "Submit Button", "-a", "$appPid", "-t", "3000")
 
@@ -390,6 +394,7 @@ Assert-ScreenshotValid "screenshot: 02-after-counter.png" $ssCounter
 Assert-ScreenshotValid "screenshot: 03-after-input.png" $ssInput
 Assert-ScreenshotValid "screenshot: 04-after-submit.png" $ssSubmit
 Assert-ScreenshotValid "screenshot: 05-capture-screen.png" $ssScreen
+Assert-ScreenshotValid "screenshot: 06-focus.png" $ssFocus
 
 # ============================================================================
 # Summary

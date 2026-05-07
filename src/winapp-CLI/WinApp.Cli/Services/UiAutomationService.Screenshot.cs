@@ -12,9 +12,9 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal sealed partial class UiAutomationService
 {
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
+    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
-        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen})", session.ProcessId, captureScreen);
+        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
 
         var root = GetRootElement(session);
         if (root is null)
@@ -60,43 +60,88 @@ internal sealed partial class UiAutomationService
         }
 
         byte[] pixelData;
+        var cropOriginLeft = rect.left;
+        var cropOriginTop = rect.top;
+
+        // Bring window to foreground when explicitly requested or implied by --capture-screen.
+        // Done exactly once here, regardless of capture path.
+        if (focus || captureScreen)
+        {
+            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+            Thread.Sleep(focus ? 150 : 100);
+        }
 
         if (captureScreen)
         {
-            // Screen capture mode: BitBlt from screen DC — captures popups and overlays
-            // Bring window to foreground first to avoid capturing other windows
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            Thread.Sleep(100);
-
+            // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
             pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
+        }
+        else if (WgcCapture.IsSupported())
+        {
+            try
+            {
+                var visibleRect = GetVisibleWindowRect(hwnd, rect);
+                var result = await WgcCapture.CaptureAsync(hwnd, _logger, ct).ConfigureAwait(false);
+                pixelData = result.Pixels;
+                width = result.Width;
+                height = result.Height;
+                cropOriginLeft = visibleRect.left;
+                cropOriginTop = visibleRect.top;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "WGC capture failed; falling back to PrintWindow");
+                pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
+            }
         }
         else
         {
-            // Window render mode: PrintWindow — works even when occluded
-            pixelData = CaptureFromWindow(hwnd, width, height);
-
-            // If capture is blank (all zeros), the window may not have rendered yet.
-            // Activate it and retry — common with Electron on first launch.
-            if (IsBlankCapture(pixelData))
-            {
-                _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
-                Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-                Thread.Sleep(200);
-                pixelData = CaptureFromWindow(hwnd, width, height);
-            }
+            pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
         }
 
         // If a selector was provided, crop to the element's bounding rectangle
         if (!string.IsNullOrEmpty(elementId))
         {
-            var cropped = CropToElement(pixelData, width, height, elementId, session, root, rect.left, rect.top);
+            var cropped = CropToElement(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
             if (cropped is not null)
             {
-                return Task.FromResult(cropped.Value);
+                return cropped.Value;
             }
         }
 
-        return Task.FromResult((pixelData, width, height));
+        return (pixelData, width, height);
+    }
+
+
+    private static unsafe Windows.Win32.Foundation.RECT GetVisibleWindowRect(
+        Windows.Win32.Foundation.HWND hwnd,
+        Windows.Win32.Foundation.RECT fallbackRect)
+    {
+        var visibleRect = fallbackRect;
+        var hr = Windows.Win32.PInvoke.DwmGetWindowAttribute(
+            hwnd,
+            Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+            &visibleRect,
+            (uint)sizeof(Windows.Win32.Foundation.RECT));
+
+        return hr.Succeeded ? visibleRect : fallbackRect;
+    }
+
+    private byte[] CaptureFromWindowWithBlankRetry(Windows.Win32.Foundation.HWND hwnd, int width, int height)
+    {
+        var pixels = CaptureFromWindow(hwnd, width, height);
+        if (IsBlankCapture(pixels))
+        {
+            _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+            Thread.Sleep(200);
+            pixels = CaptureFromWindow(hwnd, width, height);
+        }
+        return pixels;
     }
 
     private static unsafe byte[] CaptureFromWindow(Windows.Win32.Foundation.HWND hwnd, int width, int height)
