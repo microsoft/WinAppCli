@@ -90,7 +90,51 @@ export async function addElectronDebugIdentity(
     const electronPackageJsonPath = path.join(process.cwd(), 'node_modules', 'electron', 'package.json');
 
     if (!fsSync.existsSync(electronExePath)) {
-      throw new Error(`Electron executable not found at: ${electronExePath}`);
+      const electronDir = path.join(process.cwd(), 'node_modules', 'electron');
+      if (!fsSync.existsSync(electronDir)) {
+        throw new Error(
+          `Electron is not installed in this project. Expected to find it at:\n` +
+            `  ${electronDir}\n\n` +
+            `Run \`npm install\` from your project root, then re-run this command.`
+        );
+      }
+
+      // node_modules/electron exists but the binary is missing. As of Electron 42
+      // (released 2026-05-06), the postinstall step that downloaded the binary was
+      // removed for supply-chain hardening. The binary is now downloaded lazily on
+      // first launch, or on demand via the new `install-electron` script.
+      let installedVersion: string | undefined;
+      if (fsSync.existsSync(electronPackageJsonPath)) {
+        try {
+          installedVersion = JSON.parse(fsSync.readFileSync(electronPackageJsonPath, 'utf-8')).version as
+            | string
+            | undefined;
+        } catch {
+          // Ignore errors reading package.json
+        }
+      }
+      const major = installedVersion ? parseInt(installedVersion.split('.')[0], 10) : NaN;
+      const versionLabel = installedVersion ? ` (v${installedVersion})` : '';
+
+      if (!Number.isNaN(major) && major >= 42) {
+        throw new Error(
+          `Electron${versionLabel} is installed, but its binary was not found at:\n` +
+            `  ${electronExePath}\n\n` +
+            `Starting with Electron 42, the binary is no longer downloaded automatically ` +
+            `during \`npm install\`. Download it once with:\n\n` +
+            `  npx install-electron\n\n` +
+            `Then re-run \`winapp node add-electron-debug-identity\`. ` +
+            `If you use a postinstall script, add \`npx install-electron\` before this command. ` +
+            `See https://github.com/electron/electron/releases/tag/v42.0.0 for details.`
+        );
+      }
+
+      throw new Error(
+        `Electron${versionLabel} is installed, but its binary was not found at:\n` +
+          `  ${electronExePath}\n\n` +
+          `Try reinstalling Electron with \`npm install electron --force\`, ` +
+          `or run \`npx install-electron\` to download the binary on demand.`
+      );
     }
 
     // Get current Electron version from package.json
