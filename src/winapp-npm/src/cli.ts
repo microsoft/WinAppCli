@@ -440,7 +440,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     console.log('');
     console.log('Options:');
     console.log(
-      '  --manifest <path>     Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory)'
+      '  --manifest <path>     Path to custom Package.appxmanifest or appxmanifest.xml (default: auto-detected in current directory)'
     );
     console.log('  --no-install          Do not install the package after creation (will require manual registration)');
     console.log('  --keep-identity       Keep the manifest identity as-is, without appending .debug suffix');

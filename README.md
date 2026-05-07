@@ -110,7 +110,7 @@ Checkout our getting started guides for step by step instructions of how to setu
     <img src="https://img.shields.io/badge/C++-Get%20Started-00599C?style=for-the-badge&logo=cplusplus&logoColor=white" alt="Get Started with C++">
   </a>
     <br />
-  <a href="/docs/electron-get-started.md">
+  <a href="/docs/guides/electron/index.md">
     <img src="https://img.shields.io/badge/Electron-Get%20Started-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Get Started with Electron">
   </a>
     <br />
