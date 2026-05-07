@@ -24,6 +24,10 @@ internal static partial class WgcCapture
     private static readonly Guid DxgiDeviceGuid = new("54EC77FA-1377-44E6-8C32-88FD5F44C84C");
     private static readonly Guid D3D11Texture2DGuid = new("6F15AAF2-D208-4E89-9AB4-489535D34F9C");
 
+    // D3D11_SDK_VERSION — must be 7 per d3d11.h. CsWin32 doesn't project the
+    // numeric constant for this header, so it's defined here.
+    private const uint D3D11_SDK_VERSION = 7;
+
     public static bool IsSupported()
     {
         try
@@ -49,70 +53,81 @@ internal static partial class WgcCapture
             Software: default,
             D3D.D3D11_CREATE_DEVICE_FLAG.D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             pFeatureLevels: default,
-            SDKVersion: 7,
+            SDKVersion: D3D11_SDK_VERSION,
             out var device,
             out _,
             out var context).ThrowOnFailure();
 
-        var winrtDevice = CreateDirect3DDevice(device);
-        var item = CreateItemForWindow(hwnd);
-        using var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-            winrtDevice,
-            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-            numberOfBuffers: 2,
-            item.Size);
-        using var session = pool.CreateCaptureSession(item);
-        session.IsCursorCaptureEnabled = false;
-
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-
-        var framesSeen = 0;
-        var tcs = new TaskCompletionSource<Direct3D11CaptureFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
-        pool.FrameArrived += (sender, _) =>
+        try
         {
-            Direct3D11CaptureFrame? frame = null;
-            try
+            var winrtDevice = CreateDirect3DDevice(device);
+            var item = CreateItemForWindow(hwnd);
+            using var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                winrtDevice,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                numberOfBuffers: 2,
+                item.Size);
+            using var session = pool.CreateCaptureSession(item);
+            session.IsCursorCaptureEnabled = false;
+
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            var framesSeen = 0;
+            var tcs = new TaskCompletionSource<Direct3D11CaptureFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pool.FrameArrived += (sender, _) =>
             {
-                frame = sender.TryGetNextFrame();
-                if (frame is null)
+                Direct3D11CaptureFrame? frame = null;
+                try
                 {
-                    return;
+                    frame = sender.TryGetNextFrame();
+                    if (frame is null)
+                    {
+                        return;
+                    }
+
+                    if (!tcs.TrySetResult(frame))
+                    {
+                        frame.Dispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    frame?.Dispose();
+                    tcs.TrySetException(ex);
+                }
+            };
+
+            session.StartCapture();
+
+            while (true)
+            {
+                linkedCts.Token.ThrowIfCancellationRequested();
+                using var frame = await tcs.Task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+                var result = CopyFrame(device, context, frame);
+                framesSeen++;
+                if (!IsBlankCapture(result.Pixels) || framesSeen >= 5)
+                {
+                    if (framesSeen > 1)
+                    {
+                        logger.LogDebug("WGC returned non-blank frame after {FrameCount} attempts", framesSeen);
+                    }
+
+                    return result;
                 }
 
-                if (!tcs.TrySetResult(frame))
-                {
-                    frame.Dispose();
-                }
+                logger.LogDebug("WGC returned blank frame; waiting for next frame");
+                await Task.Delay(50, linkedCts.Token).ConfigureAwait(false);
+                tcs = new TaskCompletionSource<Direct3D11CaptureFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
             }
-            catch (Exception ex)
-            {
-                frame?.Dispose();
-                tcs.TrySetException(ex);
-            }
-        };
-
-        session.StartCapture();
-
-        while (true)
+        }
+        finally
         {
-            linkedCts.Token.ThrowIfCancellationRequested();
-            using var frame = await tcs.Task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
-            var result = CopyFrame(device, context, frame);
-            framesSeen++;
-            if (!IsBlankCapture(result.Pixels) || framesSeen >= 5)
-            {
-                if (framesSeen > 1)
-                {
-                    logger.LogDebug("WGC returned non-blank frame after {FrameCount} attempts", framesSeen);
-                }
-
-                return result;
-            }
-
-            logger.LogDebug("WGC returned blank frame; waiting for next frame");
-            await Task.Delay(50, linkedCts.Token).ConfigureAwait(false);
-            tcs = new TaskCompletionSource<Direct3D11CaptureFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // ID3D11Device and ID3D11DeviceContext are COM objects projected by CsWin32
+            // as IDisposable; release the underlying COM refs so repeated captures
+            // don't leak GPU/COM resources.
+            (context as IDisposable)?.Dispose();
+            (device as IDisposable)?.Dispose();
         }
     }
 
@@ -192,52 +207,66 @@ internal static partial class WgcCapture
         Direct3D11CaptureFrame frame)
     {
         var capturedTexture = GetTexture(frame.Surface);
-        var size = frame.ContentSize;
-        var width = size.Width;
-        var height = size.Height;
-        if (width <= 0 || height <= 0)
-        {
-            throw new InvalidOperationException("WGC returned an empty frame.");
-        }
-
-        var desc = new D3D.D3D11_TEXTURE2D_DESC
-        {
-            Width = (uint)width,
-            Height = (uint)height,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = DxgiCommon.DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc = new DxgiCommon.DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
-            Usage = D3D.D3D11_USAGE.D3D11_USAGE_STAGING,
-            BindFlags = 0,
-            CPUAccessFlags = D3D.D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ,
-            MiscFlags = 0,
-        };
-
-        device.CreateTexture2D(in desc, pInitialData: null, out var stagingTexture);
-        context.CopyResource(stagingTexture, capturedTexture);
-        context.Map(stagingTexture, 0, D3D.D3D11_MAP.D3D11_MAP_READ, 0, out var mapped);
         try
         {
-            var pixels = new byte[checked(width * height * 4)];
-            fixed (byte* destination = pixels)
+            var size = frame.ContentSize;
+            var width = size.Width;
+            var height = size.Height;
+            if (width <= 0 || height <= 0)
             {
-                var rowBytes = width * 4;
-                for (var row = 0; row < height; row++)
-                {
-                    Buffer.MemoryCopy(
-                        (byte*)mapped.pData + (row * mapped.RowPitch),
-                        destination + (row * rowBytes),
-                        rowBytes,
-                        rowBytes);
-                }
+                throw new InvalidOperationException("WGC returned an empty frame.");
             }
 
-            return (pixels, width, height);
+            var desc = new D3D.D3D11_TEXTURE2D_DESC
+            {
+                Width = (uint)width,
+                Height = (uint)height,
+                MipLevels = 1,
+                ArraySize = 1,
+                Format = DxgiCommon.DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc = new DxgiCommon.DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
+                Usage = D3D.D3D11_USAGE.D3D11_USAGE_STAGING,
+                BindFlags = 0,
+                CPUAccessFlags = D3D.D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ,
+                MiscFlags = 0,
+            };
+
+            device.CreateTexture2D(in desc, pInitialData: null, out var stagingTexture);
+            try
+            {
+                context.CopyResource(stagingTexture, capturedTexture);
+                context.Map(stagingTexture, 0, D3D.D3D11_MAP.D3D11_MAP_READ, 0, out var mapped);
+                try
+                {
+                    var pixels = new byte[checked(width * height * 4)];
+                    fixed (byte* destination = pixels)
+                    {
+                        var rowBytes = width * 4;
+                        for (var row = 0; row < height; row++)
+                        {
+                            Buffer.MemoryCopy(
+                                (byte*)mapped.pData + (row * mapped.RowPitch),
+                                destination + (row * rowBytes),
+                                rowBytes,
+                                rowBytes);
+                        }
+                    }
+
+                    return (pixels, width, height);
+                }
+                finally
+                {
+                    context.Unmap(stagingTexture, 0);
+                }
+            }
+            finally
+            {
+                (stagingTexture as IDisposable)?.Dispose();
+            }
         }
         finally
         {
-            context.Unmap(stagingTexture, 0);
+            (capturedTexture as IDisposable)?.Dispose();
         }
     }
 

@@ -68,7 +68,7 @@ internal sealed partial class UiAutomationService
         if (focus || captureScreen)
         {
             Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            Thread.Sleep(focus ? 150 : 100);
+            await Task.Delay(focus ? 150 : 100, ct).ConfigureAwait(false);
         }
 
         if (captureScreen)
