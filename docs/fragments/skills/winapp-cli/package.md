@@ -66,9 +66,10 @@ winapp package ./dist --name "MyApp_1.0.0_x64" --cert ./devcert.pfx
 
 1. **Locates `Package.appxmanifest`** — looks in input folder, then current directory (or uses `--manifest`)
 2. **Copies manifest + assets** into a staging layout alongside your app files
-3. **Generates `resources.pri`** — Package Resource Index for UWP-style resource lookup (skip with `--skip-pri`)
-4. **Runs `makeappx pack`** — creates the `.msix` package file
-5. **Signs the package** (if `--cert` provided) — calls `signtool` with your certificate
+3. **Discovers manifest-referenced files** — any non-image file referenced in the manifest (e.g., AppExtension payloads like `manifest.json`, config files) is automatically copied from the manifest directory or input folder if missing from staging
+4. **Generates `resources.pri`** — Package Resource Index for UWP-style resource lookup (skip with `--skip-pri`)
+5. **Runs `makeappx pack`** — creates the `.msix` package file
+6. **Signs the package** (if `--cert` provided) — calls `signtool` with your certificate
 
 Output: a `.msix` file that can be installed on Windows via double-click or `Add-AppxPackage`.
 
