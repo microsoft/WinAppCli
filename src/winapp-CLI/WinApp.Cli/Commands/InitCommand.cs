@@ -100,6 +100,11 @@ internal class InitCommand : Command, IShortDescription
             if (baseDirectoryExplicit || useDefaults)
             {
                 // User specified a directory or --use-defaults: skip search, use the directory directly
+                if (searchAll)
+                {
+                    logger.LogDebug("--search-all has no effect when a directory is specified or --use-defaults is set");
+                }
+
                 selectedDirectory = await InitDirectlyAsync(baseDirectory, useDefaults, cancellationToken);
             }
             else
@@ -112,7 +117,7 @@ internal class InitCommand : Command, IShortDescription
             if (selectedDirectory == null)
             {
                 // User declined to init in a directory with no compatible projects
-                return 0;
+                return 1;
             }
 
             // If a nested project was selected and --config-dir was not explicitly set,

@@ -201,6 +201,7 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
+| `searchAll` | `boolean \| undefined` | No | Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
 
@@ -335,10 +336,12 @@ function run(options: RunOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -1163,6 +1166,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
+| `searchAll` | `boolean \| undefined` | No | Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1243,10 +1247,12 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |

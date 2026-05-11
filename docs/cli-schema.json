@@ -683,20 +683,6 @@
           "required": false,
           "recursive": false
         },
-        "--max-projects": {
-          "description": "Maximum number of compatible projects to discover during directory search (default: 5)",
-          "hidden": false,
-          "helpName": "count",
-          "valueType": "System.Int32",
-          "hasDefaultValue": true,
-          "defaultValue": 5,
-          "arity": {
-            "minimum": 1,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
         "--no-gitignore": {
           "description": "Don't update .gitignore file",
           "hidden": false,

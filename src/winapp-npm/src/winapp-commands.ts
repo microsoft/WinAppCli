@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.1
+ * Source schema version: 0.3.2
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -249,6 +249,8 @@ export interface InitOptions extends CommonOptions {
   ignoreConfig?: boolean;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
+  /** Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. */
+  searchAll?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
   /** Do not prompt, and use default of all prompts */
@@ -265,6 +267,7 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.configOnly) args.push('--config-only');
   if (options.ignoreConfig) args.push('--ignore-config');
   if (options.noGitignore) args.push('--no-gitignore');
+  if (options.searchAll) args.push('--search-all');
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.useDefaults) args.push('--use-defaults');
   return execCommand(args, options);
@@ -439,7 +442,9 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 export interface RunOptions extends CommonOptions {
   /** Input folder containing the app to run */
   inputFolder: string;
-  /** Command-line arguments to pass to the application */
+  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
+  appArgs?: string;
+  /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
@@ -447,6 +452,8 @@ export interface RunOptions extends CommonOptions {
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
+  /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
+  executable?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
@@ -469,10 +476,12 @@ export interface RunOptions extends CommonOptions {
 export async function run(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
+  if (options.appArgs) args.push(options.appArgs);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
+  if (options.executable) args.push('--executable', options.executable);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');

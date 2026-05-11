@@ -46,7 +46,7 @@ winapp init [base-directory] [options]
 
 **Automatic project detection:**
 
-When `init` is run, it performs a breadth-first search of the target directory tree to find compatible projects. Supported project types:
+When `init` is run without a directory argument, it performs a breadth-first search of the current directory tree to find compatible projects (up to 10). Supported project types:
 
 - **Tauri** — `tauri.conf.json` found one level below the directory
 - **Electron** — `package.json` with `electron` in dependencies or devDependencies
@@ -55,12 +55,15 @@ When `init` is run, it performs a breadth-first search of the target directory t
 - **Rust** — `Cargo.toml` at project root
 - **C++** — `CMakeLists.txt` at project root
 
-The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.) unless `--search-all` is specified. When a compatible project is found, subdirectories below it are not searched. Results are displayed as they are discovered with a live progress indicator.
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.) unless `--search-all` is specified. When a compatible project is found, subdirectories below it are not searched.
 
-- If the current directory is a compatible project, `init` proceeds immediately without searching
+- If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
+- If `--use-defaults` is set, the search is skipped and `init` proceeds in the current directory (warning if no project is detected)
+- If the current directory is a compatible project, `init` proceeds immediately
 - If exactly one project is found elsewhere, you're prompted to confirm
-- If multiple projects are found, you can select which one to initialize
+- If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
 - If no projects are found, you're warned and asked whether to proceed anyway
+- If the search reaches the 10-project limit, a warning suggests providing a directory argument
 
 **Automatic .NET project flow:**
 

@@ -174,6 +174,26 @@ public class ProjectDetectionServiceTests
         Assert.AreEqual(DetectedProjectType.Electron, result.Type);
     }
 
+    [TestMethod]
+    public void DetectProject_DotnetOverCpp_WhenBothPresent()
+    {
+        CreateFile("MyApp.csproj", "<Project />");
+        CreateFile("CMakeLists.txt", "cmake_minimum_required(VERSION 3.0)");
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_FlutterOverRust_WhenBothPresent()
+    {
+        CreateFile("pubspec.yaml", "name: my_app");
+        CreateFile("Cargo.toml", "[package]");
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Flutter, result.Type);
+    }
+
     // --- BFS tests ---
 
     [TestMethod]

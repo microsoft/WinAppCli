@@ -214,9 +214,25 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
 
     private void EnqueueSubdirectories(Queue<DirectoryInfo> queue, DirectoryInfo parent, HashSet<string> ignoredNames)
     {
+        IEnumerable<DirectoryInfo> subdirs;
         try
         {
-            foreach (var subDir in parent.EnumerateDirectories())
+            subdirs = parent.EnumerateDirectories();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            logger.LogDebug("Cannot access directory: {Path}", parent.FullName);
+            return;
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug("I/O error enumerating {Path}: {Message}", parent.FullName, ex.Message);
+            return;
+        }
+
+        foreach (var subDir in subdirs)
+        {
+            try
             {
                 // Skip hidden directories (starting with .) that aren't in the explicit ignore list
                 if (subDir.Name.StartsWith('.') && !ignoredNames.Contains(subDir.Name))
@@ -240,14 +256,14 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
 
                 queue.Enqueue(subDir);
             }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            logger.LogDebug("Cannot access directory: {Path}", parent.FullName);
-        }
-        catch (IOException ex)
-        {
-            logger.LogDebug("I/O error enumerating {Path}: {Message}", parent.FullName, ex.Message);
+            catch (UnauthorizedAccessException)
+            {
+                logger.LogDebug("Cannot access directory: {Path}", subDir.FullName);
+            }
+            catch (IOException ex)
+            {
+                logger.LogDebug("I/O error accessing {Path}: {Message}", subDir.FullName, ex.Message);
+            }
         }
     }
 
