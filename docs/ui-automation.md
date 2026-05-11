@@ -1,3 +1,6 @@
+<!-- mslearn: true -->
+<!-- ms.topic: reference -->
+<!-- description: Inspect and interact with running Windows application UIs from the command line using winapp CLI UI automation commands. -->
 # UI Automation
 
 Inspect and interact with running Windows applications from the command line.

@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Using winapp CLI with Flutter
 
 For a complete working example, check out the [Flutter sample](../../samples/flutter-app) in this repository.
@@ -228,7 +229,8 @@ To test features that require identity (like Notifications) without fully packag
     winapp run .\build\windows\x64\runner\Release
     ```
 
-> **Tip**: `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 7. Use `winapp unregister` to clean up development packages when done.
+> [!TIP]
+> `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 7. Use `winapp unregister` to clean up development packages when done.
 
 You should now see the app with a green indicator showing:
 ```
@@ -236,7 +238,8 @@ Package Family Name: flutterapp.debug_xxxxxxxx
 ```
 This confirms your app is running with a valid package identity!
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 6. Using Windows App SDK (Optional)
 
@@ -479,7 +482,8 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-> **Tip**: If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
+> [!TIP]
+> If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
 
 Install the package by double-clicking the generated `.msix` file, or using PowerShell:
 
@@ -487,7 +491,8 @@ Install the package by double-clicking the generated `.msix` file, or using Powe
 Add-AppxPackage .\flutterapp.msix
 ```
 
-> **Tip**: The MSIX filename includes the version and architecture (e.g., `flutterapplication1_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
+> [!TIP]
+> The MSIX filename includes the version and architecture (e.g., `flutterapplication1_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
 
 ## Tips
 

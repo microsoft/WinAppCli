@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Getting Started: Adding Windows APIs to Your Electron App
 
 This guide walks you through adding Windows-native capabilities to an Electron application using the Windows App Development CLI. You'll learn how to call modern Windows APIs from your Electron app, test with app identity, and package for distribution.
@@ -23,7 +24,7 @@ Before starting, ensure you have:
 
 Building a Windows-enabled Electron app involves three main phases:
 
-### 1. [Setting Up the Development Environment](guides/electron/setup.md)
+### 1. [Setting Up the Development Environment](setup.md)
 
 First, you'll set up your development environment with the necessary tools and SDKs. This includes:
 - Creating or configuring an Electron app
@@ -31,36 +32,28 @@ First, you'll set up your development environment with the necessary tools and S
 - Initializing Windows SDKs and required assets
 - Setting up your build pipeline
 
-**Time:** ~10 minutes | **Difficulty:** Easy
-
-[Get Started with Setup →](guides/electron/setup.md)
+[Get Started with Setup →](setup.md)
 
 ### 2. Creating a Native Addon
 
 Next, you'll create a native addon that calls Windows APIs. Choose one of the following guides:
 
-#### Option A: [Creating a C++ Notification Addon](guides/electron/cpp-notification-addon.md)
+#### Option A: [Creating a C++ Notification Addon](cpp-notification-addon.md)
 Learn how to create a C++ addon that calls the Windows App SDK notification APIs. This is a great starting point for understanding native addons before diving into more complex scenarios.
 
-**Time:** ~15 minutes | **Difficulty:** Easy | **Requirements:** Windows 11
+[Create a C++ Notification Addon →](cpp-notification-addon.md)
 
-[Create a C++ Notification Addon →](guides/electron/cpp-notification-addon.md)
-
-#### Option B: [Creating a Phi Silica Addon](guides/electron/phi-silica-addon.md)
+#### Option B: [Creating a Phi Silica Addon](phi-silica-addon.md)
 Learn how to create a C# addon that uses the Phi Silica AI model to summarize text on-device. Phi Silica is a small language model that runs locally on Windows 11 devices with NPUs.
 
-**Time:** ~20 minutes | **Difficulty:** Moderate | **Requirements:** Copilot+ PC
+[Create a Phi Silica Addon →](phi-silica-addon.md)
 
-[Create a Phi Silica Addon →](guides/electron/phi-silica-addon.md)
-
-#### Option C: [Creating a WinML Addon](guides/electron/winml-addon.md)
+#### Option C: [Creating a WinML Addon](winml-addon.md)
 Learn how to create a C# addon that uses Windows Machine Learning (WinML) to run custom ONNX models for image classification, object detection, and more.
 
-**Time:** ~20 minutes | **Difficulty:** Moderate | **Requirements:** Windows 11
+[Create a WinML Addon →](winml-addon.md)
 
-[Create a WinML Addon →](guides/electron/winml-addon.md)
-
-### 3. [Packaging for Distribution](guides/electron/packaging.md)
+### 3. [Packaging for Distribution](packaging.md)
 
 Finally, you'll package your app as an MSIX for distribution. This includes:
 - Building your app for production
@@ -68,24 +61,22 @@ Finally, you'll package your app as an MSIX for distribution. This includes:
 - Testing the installed package
 - Understanding distribution options
 
-**Time:** ~10 minutes | **Difficulty:** Easy
-
-[Package Your App →](guides/electron/packaging.md)
+[Package Your App →](packaging.md)
 
 ## Quick Navigation
 
 | Phase | Guide | What You'll Learn |
 |-------|-------|-------------------|
-| 1️⃣ | [Setup](guides/electron/setup.md) | Install tools, initialize SDKs, configure build pipeline |
-| 2️⃣ | [C++ Notification Addon](guides/electron/cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
-| 2️⃣ | [Phi Silica Addon](guides/electron/phi-silica-addon.md) | Create C# addon, call AI APIs, test with debug identity |
-| 2️⃣ | [WinML Addon](guides/electron/winml-addon.md) | Create C# addon, call WinML APIs, run ONNX models, integrate ML |
-| 3️⃣ | [Packaging](guides/electron/packaging.md) | Build production app, create MSIX, distribute |
+| 1️⃣ | [Setup](setup.md) | Install tools, initialize SDKs, configure build pipeline |
+| 2️⃣ | [C++ Notification Addon](cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
+| 2️⃣ | [Phi Silica Addon](phi-silica-addon.md) | Create C# addon, call AI APIs, test with debug identity |
+| 2️⃣ | [WinML Addon](winml-addon.md) | Create C# addon, call WinML APIs, run ONNX models, integrate ML |
+| 3️⃣ | [Packaging](packaging.md) | Build production app, create MSIX, distribute |
 
 ## Additional Resources
 
-- **[winapp CLI Documentation](usage.md)** - Full CLI reference
-- **[Sample Electron App](../samples/electron/)** - Complete working example
+- **[winapp CLI Documentation](../../usage.md)** - Full CLI reference
+- **[Sample Electron App](../../../samples/electron/)** - Complete working example
 - **[AI Dev Gallery](https://aka.ms/aidevgallery)** - Sample gallery of all AI APIs 
 - **[Windows App SDK Samples](https://github.com/microsoft/WindowsAppSDK-Samples)** - Collection of Windows App SDK samples
 - **[node-api-dotnet](https://github.com/microsoft/node-api-dotnet)** - C# ↔ JavaScript interop library
@@ -93,5 +84,3 @@ Finally, you'll package your app as an MSIX for distribution. This includes:
 ## Get Help
 
 - **Found a bug?** [File an issue](https://github.com/microsoft/WinAppCli/issues)
-
-Happy coding! 🚀
