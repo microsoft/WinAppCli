@@ -938,7 +938,28 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
 
----
+### Update Checks
+
+The winapp CLI periodically checks for new versions and displays a one-line notice when an update is available. This check runs in the background and adds no latency to commands.
+
+Update checks are automatically disabled in CI environments (GitHub Actions, Azure Pipelines, etc.).
+
+To manually disable update checks, set the `WINAPP_CLI_UPDATE_CHECK` environment variable to `0`.
+
+In **cmd**:
+```cmd
+set WINAPP_CLI_UPDATE_CHECK=0
+```
+
+In **PowerShell** and **pwsh**:
+```pwsh
+$env:WINAPP_CLI_UPDATE_CHECK = "0"
+```
+
+To make this permanent:
+```powershell
+[System.Environment]::SetEnvironmentVariable('WINAPP_CLI_UPDATE_CHECK', '0', 'User')
+```
 
 ### ui
 

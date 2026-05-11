@@ -15,7 +15,7 @@ namespace WinApp.Cli;
 
 internal static class Program
 {
-    static async Task<int> Main(string[] args)
+    internal static async Task<int> Main(string[] args)
     {
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
         try
@@ -89,6 +89,19 @@ internal static class Program
         using var serviceProvider = services.BuildServiceProvider();
 
         var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+        System.CommandLine.ParseResult? parseResult = null;
+
+        if (args.Length > 0)
+        {
+            parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+            // Set WINAPP_CLI_CALLER env var from --caller option so telemetry and update checks can use it
+            var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+            if (!string.IsNullOrWhiteSpace(caller))
+            {
+                Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+            }
+        }
 
         // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
@@ -96,6 +109,14 @@ internal static class Program
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
+
+            // Check for CLI updates — shows cached notice instantly (no network),
+            // and starts a background refresh if the cache is stale (fire-and-forget).
+            if (!quiet)
+            {
+                var updateNotificationService = serviceProvider.GetRequiredService<IUpdateNotificationService>();
+                updateNotificationService.CheckAndNotify();
+            }
         }
 
         // If no arguments provided, display banner and show help
@@ -111,16 +132,16 @@ internal static class Program
             return 0;
         }
 
-        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+        var parsedArgs = parseResult!;
 
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
         // "Unrecognized command or argument" pointing at the wrong token (issue #467).
         // Only run when parsing already failed — otherwise a command that legitimately
         // accepts a "-foo"-shaped positional value would get a false-positive typo error.
-        if (parseResult.Errors.Count > 0)
+        if (parsedArgs.Errors.Count > 0)
         {
-            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parsedArgs);
             if (typo is not null)
             {
                 var suggested = "-" + typo;
@@ -131,32 +152,25 @@ internal static class Program
             }
         }
 
-        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
-        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
-        if (!string.IsNullOrWhiteSpace(caller))
-        {
-            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
-        }
-
         try
         {
             if (!isCompleteMode)
             {
-                CommandInvokedEvent.Log(parseResult.CommandResult);
+                CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
-            var returnCode = await parseResult.InvokeAsync();
+            var returnCode = await parsedArgs.InvokeAsync();
 
             if (!isCompleteMode)
             {
-                CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+                CommandCompletedEvent.Log(parsedArgs.CommandResult, returnCode);
             }
 
             return returnCode;
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(parseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parsedArgs.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
