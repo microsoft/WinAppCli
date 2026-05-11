@@ -44,7 +44,7 @@ winapp init [base-directory] [options]
 - Creates Package.appxmanifest
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
-- Stores sharable files in the global cache directory
+- Stores shareable files in the global cache directory
 
 **Automatic .NET project detection:**
 
@@ -102,7 +102,7 @@ winapp restore [options]
 - Reads existing `winapp.yaml` configuration
 - Downloads/updates SDK packages to specified versions
 - Regenerates C++/WinRT headers and binaries
-- Stores sharable files in the global cache directory
+- Stores shareable files in the global cache directory
 
 > [!NOTE]
 > For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
@@ -232,7 +232,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
+- `--manifest <path>` - Path to the app manifest file, either `Package.appxmanifest` or `appxmanifest.xml` (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -318,6 +318,100 @@ winapp manifest generate
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite
 ```
 
+#### manifest add-alias
+
+Add an execution alias (`uap5:AppExecutionAlias`) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name.
+
+```bash
+winapp manifest add-alias [options]
+```
+
+**Options:**
+
+- `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
+- `--manifest <path>` - Path to Package.appxmanifest (default: search current directory)
+- `--app-id <id>` - Application Id to add the alias to (default: first Application element)
+
+**What it does:**
+
+- Reads the manifest and infers the alias from the `Executable` attribute (preserving placeholders like `$targetnametoken$.exe`)
+- Adds the `uap5` namespace declaration if not already present
+- Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
+- If the alias already exists, reports it and exits successfully
+
+**Examples:**
+
+```bash
+# Add alias inferred from Executable attribute (e.g. $targetnametoken$.exe)
+winapp manifest add-alias
+
+# Add alias with explicit name
+winapp manifest add-alias --name myapp.exe
+
+# Add alias to specific manifest
+winapp manifest add-alias --manifest ./dist/Package.appxmanifest
+```
+
+#### manifest update-assets
+
+Generate all required MSIX image assets from a single source image.
+
+```bash
+winapp manifest update-assets <image-path> [options]
+```
+
+**Arguments:**
+
+- `image-path` - Path to source image file (PNG, JPG, SVG, ICO, GIF, BMP, etc.)
+
+**Options:**
+
+- `--manifest <path>` - Path to Package.appxmanifest file (default: search current directory)
+- `--light-image <path>` - Path to a separate source image for light theme variants
+
+**Description:**
+
+Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
+
+For each asset referenced in the manifest:
+- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
+
+For the app icon (Square44x44Logo / AppList, 44×44 base):
+- **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
+- **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
+
+Additionally:
+- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration. If an existing `.ico` file is found in the assets directory (e.g. `AppIcon.ico` from a project template), it is replaced in-place rather than creating a duplicate
+
+With `--light-image`:
+- **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)
+- **Light theme scale variants** — `.scale-{factor}_altform-colorful_theme-light` (tiles, store logo)
+
+**SVG support:** SVG files are fully supported as source images. They are rendered as vectors directly at each target size, producing pixel-perfect results at all resolutions.
+
+The command scales images proportionally while maintaining aspect ratio, centering them with transparent backgrounds when needed. Assets are saved to the `Assets` directory relative to the manifest location.
+
+**Examples:**
+
+```bash
+# Generate assets with auto-detected manifest
+winapp manifest update-assets mylogo.png
+
+# Use an SVG source for best quality at all sizes
+winapp manifest update-assets mylogo.svg
+
+# Specify manifest location explicitly
+winapp manifest update-assets mylogo.png --manifest ./dist/Package.appxmanifest
+
+# Generate light theme variants from a separate image
+winapp manifest update-assets mylogo.png --light-image mylogo-light.png
+
+# Use the same image for both (generates all MRT light theme qualifiers)
+winapp manifest update-assets mylogo.png --light-image mylogo.png
+
+# With verbose output
+winapp manifest update-assets mylogo.png --verbose
+```
 
 ---
 
@@ -347,6 +441,7 @@ winapp run <input-folder> [options]
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
+- `--json` - Format output as JSON for programmatic consumption (e.g. CI/automation). Useful with `--detach` to capture the PID. Cannot be combined with `--with-alias` or `--debug-output`.
 
 **Application data persistence:**
 
@@ -462,101 +557,6 @@ winapp unregister --force
 
 # JSON output for scripting
 winapp unregister --json
-```
-
----
-
-#### manifest add-alias
-
-Add an execution alias (`uap5:AppExecutionAlias`) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name.
-
-```bash
-winapp manifest add-alias [options]
-```
-
-**Options:**
-
-- `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
-- `--manifest <path>` - Path to Package.appxmanifest (default: search current directory)
-- `--app-id <id>` - Application Id to add the alias to (default: first Application element)
-
-**What it does:**
-
-- Reads the manifest and infers the alias from the `Executable` attribute (preserving placeholders like `$targetnametoken$.exe`)
-- Adds the `uap5` namespace declaration if not already present
-- Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
-- If the alias already exists, reports it and exits successfully
-
-**Examples:**
-
-```bash
-# Add alias inferred from Executable attribute (e.g. $targetnametoken$.exe)
-winapp manifest add-alias
-
-# Add alias with explicit name
-winapp manifest add-alias --name myapp.exe
-
-# Add alias to specific manifest
-winapp manifest add-alias --manifest ./dist/Package.appxmanifest
-```
-
-Generate all required MSIX image assets from a single source image.
-
-```bash
-winapp manifest update-assets <image-path> [options]
-```
-
-**Arguments:**
-
-- `image-path` - Path to source image file (PNG, JPG, SVG, ICO, GIF, BMP, etc.)
-
-**Options:**
-
-- `--manifest <path>` - Path to Package.appxmanifest file (default: search current directory)
-- `--light-image <path>` - Path to a separate source image for light theme variants
-
-**Description:**
-
-Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
-
-For each asset referenced in the manifest:
-- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
-
-For the app icon (Square44x44Logo / AppList, 44×44 base):
-- **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
-- **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
-
-Additionally:
-- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration. If an existing `.ico` file is found in the assets directory (e.g. `AppIcon.ico` from a project template), it is replaced in-place rather than creating a duplicate
-
-With `--light-image`:
-- **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)
-- **Light theme scale variants** — `.scale-{factor}_altform-colorful_theme-light` (tiles, store logo)
-
-**SVG support:** SVG files are fully supported as source images. They are rendered as vectors directly at each target size, producing pixel-perfect results at all resolutions.
-
-The command scales images proportionally while maintaining aspect ratio, centering them with transparent backgrounds when needed. Assets are saved to the `Assets` directory relative to the manifest location.
-
-**Examples:**
-
-```bash
-# Generate assets with auto-detected manifest
-winapp manifest update-assets mylogo.png
-
-# Use an SVG source for best quality at all sizes
-winapp manifest update-assets mylogo.svg
-
-# Specify manifest location explicitly
-winapp manifest update-assets mylogo.png --manifest ./dist/Package.appxmanifest
-
-# Generate light theme variants from a separate image
-winapp manifest update-assets mylogo.png --light-image mylogo-light.png
-
-# Use the same image for both (generates all MRT light theme qualifiers)
-winapp manifest update-assets mylogo.png --light-image mylogo.png
-
-# With verbose output
-winapp manifest update-assets mylogo.png --verbose
 ```
 
 ---
@@ -760,7 +760,7 @@ winapp tool signtool verify /pa MyApp.msix
 
 ### store
 
-Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the [Microsoft Store Developer CLI](https://aka.ms/msstoredevcli).
 
 ```bash
 winapp store [args...]
@@ -930,7 +930,7 @@ REM Set a custom location for winapp's global cache
 set WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
-In **Powershell** and **pwsh**:
+In **PowerShell** and **pwsh**:
 ```pwsh
 # Set a custom location for winapp's global cache
 $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
