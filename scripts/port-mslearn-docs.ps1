@@ -346,7 +346,17 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
 
     # Escape bare <placeholder> patterns that MS Learn treats as HTML tags.
     # Matches <word>, <word-word>, <word word> not already inside backticks or code blocks.
-    $content = [regex]::Replace($content, '<([\w][\w\s-]*)>', '&lt;$1&gt;')
+    # Skip legitimate HTML tags whose closing form (</tag>) wouldn't be escaped by this rule,
+    # which would otherwise produce mismatched &lt;tag&gt; ... </tag> pairs in the output.
+    $htmlPassthroughTags = @('details', 'summary', 'br', 'hr', 'sub', 'sup', 'kbd')
+    $content = [regex]::Replace($content, '<([\w][\w\s-]*)>', {
+        param($match)
+        $tag = $match.Groups[1].Value
+        if ($htmlPassthroughTags -contains $tag.ToLowerInvariant()) {
+            return $match.Value
+        }
+        return "&lt;$tag&gt;"
+    })
 
     # Rewrite image links first (before regular links, since ![...]() also matches [...]() regex)
     $content = [regex]::Replace($content, '!\[([^\]]*)\]\(([^)]+)\)', {

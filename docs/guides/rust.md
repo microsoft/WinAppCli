@@ -1,7 +1,7 @@
 <!-- mslearn: true -->
 # Using winapp CLI with Rust
 
-This guide demonstrates how to use `winappcli` with a Rust application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a Rust application to debug with package identity and package your application as an MSIX.
 
 For a complete working example, check out the [Rust sample](../../samples/rust-app) in this repository.
 

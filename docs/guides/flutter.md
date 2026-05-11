@@ -3,7 +3,7 @@
 
 For a complete working example, check out the [Flutter sample](../../samples/flutter-app) in this repository.
 
-This guide demonstrates how to use `winappcli` with a Flutter application to add package identity and package your app as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a Flutter application to add package identity and package your app as an MSIX.
 
 Package identity is a core concept in the Windows app model. It allows your application to access specific Windows APIs (like Notifications, Security, AI APIs, etc), have a clean install/uninstall experience, and more.
 
