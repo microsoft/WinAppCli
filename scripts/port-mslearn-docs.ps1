@@ -348,11 +348,14 @@ foreach ($entry in $FileMapping.GetEnumerator()) {
     # Matches <word>, <word-word>, <word word> not already inside backticks or code blocks.
     # Skip legitimate HTML tags whose closing form (</tag>) wouldn't be escaped by this rule,
     # which would otherwise produce mismatched &lt;tag&gt; ... </tag> pairs in the output.
-    $htmlPassthroughTags = @('details', 'summary', 'br', 'hr', 'sub', 'sup', 'kbd')
+    # Compare only the tag name (first token), so allowed tags with attributes like
+    # <details open> are preserved as HTML instead of being partially escaped.
+    $htmlPassthroughTags = @('details', 'summary', 'br', 'hr', 'sub', 'sup', 'kbd', 'b')
     $content = [regex]::Replace($content, '<([\w][\w\s-]*)>', {
         param($match)
         $tag = $match.Groups[1].Value
-        if ($htmlPassthroughTags -contains $tag.ToLowerInvariant()) {
+        $tagName = ($tag -split '\s+', 2)[0]
+        if ($htmlPassthroughTags -contains $tagName.ToLowerInvariant()) {
             return $match.Value
         }
         return "&lt;$tag&gt;"
