@@ -1,7 +1,7 @@
 <!-- mslearn: true -->
 # Using winapp CLI with Tauri
 
-This guide demonstrates how to use `winappcli` with a Tauri application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a Tauri application to debug with package identity and package your application as an MSIX.
 
 Package identity is a core concept in the Windows app model. It allows your application to access specific Windows APIs (like Notifications, Security, AI APIs, etc), have a clean install/uninstall experience, and more.
 

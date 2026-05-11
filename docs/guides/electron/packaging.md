@@ -86,7 +86,7 @@ The `--manifest` option is optional. If not provided, it will look for a Package
 
 The `--cert` option is also optional. If not provided, the msix will not be signed.
 
-The `--out` option is also optional. If not provided, the current directory will be used.
+The `--output` option is also optional. If not provided, the current directory will be used.
 
 The MSIX package will be created as `./out/<your-app-name>.msix`.
 
