@@ -21,7 +21,6 @@ internal class InitCommand : Command, IShortDescription
     public static Option<bool> NoGitignoreOption { get; }
     public static Option<bool> UseDefaults { get; }
     public static Option<bool> ConfigOnlyOption { get; }
-    public static Option<int> MaxProjectsOption { get; }
     public static Option<bool> SearchAllOption { get; }
 
     static InitCommand()
@@ -58,12 +57,6 @@ internal class InitCommand : Command, IShortDescription
         {
             Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
         };
-        MaxProjectsOption = new Option<int>("--max-projects")
-        {
-            Description = "Maximum number of compatible projects to discover during directory search (default: 5)",
-            HelpName = "count",
-            DefaultValueFactory = _ => 5
-        };
         SearchAllOption = new Option<bool>("--search-all")
         {
             Description = "Search all directories, including commonly ignored ones like node_modules, bin, obj, etc."
@@ -79,7 +72,6 @@ internal class InitCommand : Command, IShortDescription
         Options.Add(NoGitignoreOption);
         Options.Add(UseDefaults);
         Options.Add(ConfigOnlyOption);
-        Options.Add(MaxProjectsOption);
         Options.Add(SearchAllOption);
     }
 
@@ -92,6 +84,7 @@ internal class InitCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var baseDirectoryExplicit = parseResult.GetResult(BaseDirectoryArgument)?.Implicit == false;
             var baseDirectory = parseResult.GetValue(BaseDirectoryArgument) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
             var configDirExplicit = parseResult.GetResult(ConfigDirOption)?.Implicit == false;
             var configDir = parseResult.GetValue(ConfigDirOption) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
@@ -100,12 +93,21 @@ internal class InitCommand : Command, IShortDescription
             var noGitignore = parseResult.GetValue(NoGitignoreOption);
             var useDefaults = parseResult.GetValue(UseDefaults);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
-            var maxProjects = parseResult.GetValue(MaxProjectsOption);
             var searchAll = parseResult.GetValue(SearchAllOption);
 
-            // Run project detection to find compatible projects
-            var selectedDirectory = await DetectAndSelectProjectAsync(
-                baseDirectory, maxProjects, searchAll, useDefaults, cancellationToken);
+            DirectoryInfo? selectedDirectory;
+
+            if (baseDirectoryExplicit || useDefaults)
+            {
+                // User specified a directory or --use-defaults: skip search, use the directory directly
+                selectedDirectory = await InitDirectlyAsync(baseDirectory, useDefaults, cancellationToken);
+            }
+            else
+            {
+                // No directory specified: search for compatible projects
+                selectedDirectory = await DetectAndSelectProjectAsync(
+                    baseDirectory, searchAll, cancellationToken);
+            }
 
             if (selectedDirectory == null)
             {
@@ -138,28 +140,16 @@ internal class InitCommand : Command, IShortDescription
 
         /// <summary>
         /// Detects compatible projects in the directory tree and prompts the user to select one.
+        /// Only called when no directory argument was provided and --use-defaults is not set.
         /// Returns the selected directory, or null if the user declines.
         /// </summary>
         private async Task<DirectoryInfo?> DetectAndSelectProjectAsync(
             DirectoryInfo searchRoot,
-            int maxProjects,
             bool searchAll,
-            bool useDefaults,
             CancellationToken cancellationToken)
         {
+            const int maxProjects = 10;
             var useLiveSpinner = ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-            var foundProjects = new List<DetectedProject>();
-
-            IProgress<DetectedProject>? progress = null;
-            if (!useLiveSpinner && logger.IsEnabled(LogLevel.Information))
-            {
-                // Plain mode: log each discovery as it happens
-                progress = new Progress<DetectedProject>(project =>
-                {
-                    logger.LogInformation("{Search} {TypeLabel} project found at {Path}",
-                        UiSymbols.Search, project.TypeLabel, project.DisplayPath);
-                });
-            }
 
             IReadOnlyList<DetectedProject> results;
 
@@ -170,29 +160,28 @@ internal class InitCommand : Command, IShortDescription
                     .AutoRefresh(true)
                     .Spinner(Spinner.Known.Dots)
                     .SpinnerStyle(Style.Parse("blue"))
-                    .StartAsync($"Searching for compatible projects (0 of max {maxProjects} found)...", async ctx =>
+                    .StartAsync("Searching for compatible projects...", async ctx =>
                     {
-                        var liveProgress = new Progress<DetectedProject>(project =>
-                        {
-                            foundProjects.Add(project);
-                            ctx.Status($"Searching for compatible projects ({foundProjects.Count} of max {maxProjects} found)...");
-                            ansiConsole.MarkupLine($"  {UiSymbols.Search} [green]{Markup.Escape(project.TypeLabel)}[/] project found at [blue]{Markup.Escape(project.DisplayPath)}[/]");
-                        });
-
                         return await projectDetectionService.DetectProjectsAsync(
-                            searchRoot, maxProjects, searchAll, liveProgress, cancellationToken);
+                            searchRoot, maxProjects, searchAll, progress: null, cancellationToken);
                     });
             }
             else
             {
                 results = await projectDetectionService.DetectProjectsAsync(
-                    searchRoot, maxProjects, searchAll, progress, cancellationToken);
+                    searchRoot, maxProjects, searchAll, progress: null, cancellationToken);
             }
 
             // Handle results based on count
+            if (results.Count >= maxProjects)
+            {
+                logger.LogWarning("{Warning} Search stopped at {Max} projects. If your project wasn't found, provide a directory argument: winapp init <path-to-project>",
+                    UiSymbols.Warning, maxProjects);
+            }
+
             if (results.Count == 0)
             {
-                return await HandleNoProjectsFoundAsync(searchRoot, useDefaults, cancellationToken);
+                return await HandleNoProjectsFoundAsync(searchRoot, cancellationToken);
             }
 
             // If the only result is at the search root, use it directly
@@ -205,25 +194,65 @@ internal class InitCommand : Command, IShortDescription
 
             if (results.Count == 1)
             {
-                return await HandleSingleProjectAsync(results[0], useDefaults, cancellationToken);
+                return await HandleSingleProjectAsync(results[0], cancellationToken);
             }
 
-            return await HandleMultipleProjectsAsync(results, useDefaults, cancellationToken);
+            return await HandleMultipleProjectsAsync(results, searchRoot, cancellationToken);
+        }
+
+        /// <summary>
+        /// Handles direct initialization when a directory was explicitly specified or --use-defaults is set.
+        /// Checks for a project at the target path; warns if none found.
+        /// </summary>
+        private async Task<DirectoryInfo?> InitDirectlyAsync(
+            DirectoryInfo targetDirectory,
+            bool useDefaults,
+            CancellationToken cancellationToken)
+        {
+            var detected = ProjectDetectionService.DetectProject(targetDirectory, targetDirectory);
+
+            if (detected != null)
+            {
+                logger.LogInformation("{Check} {TypeLabel} project detected at {Path}",
+                    UiSymbols.Check, detected.TypeLabel, targetDirectory.FullName);
+                return targetDirectory;
+            }
+
+            // No project detected at the specified path
+            logger.LogWarning("{Warning} No compatible project detected at {Path}",
+                UiSymbols.Warning, targetDirectory.FullName);
+
+            if (useDefaults)
+            {
+                logger.LogWarning("{Warning} Proceeding anyway (--use-defaults). The CLI might not function as expected.",
+                    UiSymbols.Warning);
+                return targetDirectory;
+            }
+
+            var proceed = await ansiConsole.PromptAsync(
+                new ConfirmationPrompt(
+                    $"[yellow]No compatible project was detected at this path.[/] Initialize winapp here anyway? " +
+                    $"([dim]The CLI might not function as expected[/])")
+                {
+                    DefaultValue = false
+                },
+                cancellationToken);
+
+            if (!proceed)
+            {
+                logger.LogInformation("Init cancelled by user.");
+                return null;
+            }
+
+            return targetDirectory;
         }
 
         private async Task<DirectoryInfo?> HandleNoProjectsFoundAsync(
             DirectoryInfo searchRoot,
-            bool useDefaults,
             CancellationToken cancellationToken)
         {
             logger.LogWarning("{Warning} No compatible projects found in {Path}",
                 UiSymbols.Warning, searchRoot.FullName);
-
-            if (useDefaults)
-            {
-                logger.LogInformation("Proceeding with init in current directory (--use-defaults)");
-                return searchRoot;
-            }
 
             var proceed = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
@@ -245,16 +274,8 @@ internal class InitCommand : Command, IShortDescription
 
         private async Task<DirectoryInfo?> HandleSingleProjectAsync(
             DetectedProject project,
-            bool useDefaults,
             CancellationToken cancellationToken)
         {
-            if (useDefaults)
-            {
-                logger.LogInformation("{Check} Auto-selecting {TypeLabel} project at {Path} (--use-defaults)",
-                    UiSymbols.Check, project.TypeLabel, project.DisplayPath);
-                return project.Directory;
-            }
-
             var confirm = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
                     $"Found [green]{Markup.Escape(project.TypeLabel)}[/] project at [blue]{Markup.Escape(project.DisplayPath)}[/]. Initialize with winapp?"),
@@ -266,28 +287,25 @@ internal class InitCommand : Command, IShortDescription
                 return null;
             }
 
+            logger.LogInformation("{Check} Selected {TypeLabel} project at {Path}",
+                UiSymbols.Check, project.TypeLabel, project.DisplayPath);
             return project.Directory;
         }
 
         private async Task<DirectoryInfo?> HandleMultipleProjectsAsync(
             IReadOnlyList<DetectedProject> projects,
-            bool useDefaults,
+            DirectoryInfo searchRoot,
             CancellationToken cancellationToken)
         {
-            if (useDefaults)
-            {
-                var first = projects[0];
-                logger.LogInformation("{Check} Auto-selecting first result: {TypeLabel} project at {Path} (--use-defaults)",
-                    UiSymbols.Check, first.TypeLabel, first.DisplayPath);
-                return first.Directory;
-            }
-
-            logger.LogInformation("");
-            logger.LogInformation("{Search} Found {Count} compatible project(s):",
-                UiSymbols.Search, projects.Count);
-
             var choices = projects.Select(p =>
-                $"{p.TypeLabel} project at {p.DisplayPath}").ToArray();
+                $"{p.TypeLabel} project at {p.DisplayPath}").ToList();
+
+            // Always offer the current directory as a fallback option
+            var currentDirIsListed = projects.Any(p => p.DisplayPath == ".");
+            if (!currentDirIsListed)
+            {
+                choices.Add(". (current directory — no project detected)");
+            }
 
             var selected = await ansiConsole.PromptAsync(
                 new SelectionPrompt<string>()
@@ -295,8 +313,20 @@ internal class InitCommand : Command, IShortDescription
                     .AddChoices(choices),
                 cancellationToken);
 
-            var selectedIndex = Array.IndexOf(choices, selected);
-            return projects[selectedIndex].Directory;
+            var selectedIndex = choices.IndexOf(selected);
+
+            // If the user picked the appended current-directory fallback
+            if (!currentDirIsListed && selectedIndex == projects.Count)
+            {
+                logger.LogWarning("{Warning} No compatible project was detected in the current directory. The CLI might not function as expected.",
+                    UiSymbols.Warning);
+                return searchRoot;
+            }
+
+            var selectedProject = projects[selectedIndex];
+            logger.LogInformation("{Check} Selected {TypeLabel} project at {Path}",
+                UiSymbols.Check, selectedProject.TypeLabel, selectedProject.DisplayPath);
+            return selectedProject.Directory;
         }
     }
 }

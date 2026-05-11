@@ -32,7 +32,6 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
-- `--max-projects <count>` - Maximum number of compatible projects to discover during directory search (default: 5)
 - `--search-all` - Search all directories, including commonly ignored ones like node_modules, bin, obj, etc.
 
 **What it does:**

@@ -47,9 +47,6 @@ winapp init --use-defaults --setup-sdks none
 # Install preview SDKs instead of stable
 winapp init --use-defaults --setup-sdks preview
 
-# Limit project search to 3 results
-winapp init --max-projects 3
-
 # Include normally-ignored directories in project search
 winapp init --search-all
 ```
