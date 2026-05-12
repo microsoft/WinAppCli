@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -88,8 +89,8 @@ internal partial class MsixService
             var entryPointDir = Path.GetDirectoryName(entryPointPath);
             var externalLocation = new DirectoryInfo(string.IsNullOrEmpty(entryPointDir) ? currentDirectoryProvider.GetCurrentDirectory() : entryPointDir);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken: cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterSparsePackageAsync(debugManifestPath, externalLocation, taskContext, cancellationToken);
@@ -98,7 +99,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -146,11 +147,19 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Install the Windows App Runtime framework packages if not already present
+            var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
+
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register from the AppX layout directory
             var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
+            if (!registrationManifest.Exists)
+            {
+                registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "Package.appxmanifest"));
+            }
             if (!registrationManifest.Exists)
             {
                 registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
@@ -169,14 +178,31 @@ internal partial class MsixService
 
         SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
 
-        var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name));
+        // SyncFilesToOutputDirectory renames Package.appxmanifest → appxmanifest.xml
+        var copiedManifestName = string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase)
+            ? "appxmanifest.xml"
+            : appxManifestPath.Name;
+        var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
         manifestContent = await File.ReadAllTextAsync(copiedAppxManifestPath.FullName, Encoding.UTF8, cancellationToken);
-        var executableMatch = outputAppXDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
-            .FirstOrDefault(f => string.Equals(f.Extension, ".exe", StringComparison.OrdinalIgnoreCase));
 
-        if (executableMatch == null)
+        // Resolve $targetnametoken$ and other placeholders using the same logic as
+        // winapp package — uses --executable if provided, otherwise searches the AppX
+        // root for a single non-runtime exe.
+        manifestContent = ResolveManifestPlaceholders(manifestContent, executable, outputAppXDirectory, taskContext);
+
+        // Determine the resolved executable for downstream operations (PRI rename, arch detection).
+        // ResolveManifestPlaceholders guarantees the Executable attribute is non-placeholder
+        // on success, so we expect a concrete file name here.
+        var resolvedDoc = AppxManifestDocument.Parse(manifestContent);
+        var resolvedExeName = resolvedDoc.ApplicationExecutable
+            ?? throw new InvalidOperationException(
+                "Manifest has no Application/Executable attribute. Cannot determine the application executable.");
+        var executableMatch = new FileInfo(Path.Combine(outputAppXDirectory.FullName, resolvedExeName));
+        if (!executableMatch.Exists)
         {
-            throw new FileNotFoundException("No executable (.exe) file found in the output directory for token replacement.");
+            throw new FileNotFoundException(
+                $"Executable '{resolvedExeName}' (from manifest) was not found in the output directory '{outputAppXDirectory.FullName}'. " +
+                "Ensure the build output contains the exe, or pass --executable with the correct relative path.");
         }
 
         // Fetch dotnet package list once for all downstream operations
@@ -208,18 +234,16 @@ internal partial class MsixService
                 await priService.GeneratePriFileAsync(outputAppXDirectory, taskContext, cancellationToken: cancellationToken);
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Generated resources.pri");
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                logger.LogWarning(ex, "{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
             }
         }
-
-        // Resolve $targetnametoken$ and $targetentrypoint$ placeholders
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [PlaceholderHelper.TargetNameToken] = Path.GetFileNameWithoutExtension(executableMatch.Name)
-        };
-        manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
 
         // Resolve <Resource Language="x-generate"/> — falls back to "en-US" if no PRI found
         manifestContent = manifestContent.Replace("x-generate", "EN-US");
@@ -252,8 +276,8 @@ internal partial class MsixService
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
 
-            // Unregister any existing package first
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, cancellationToken);
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -687,7 +711,8 @@ internal partial class MsixService
                 }
                 catch (Exception ex)
                 {
-                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Failed to generate PRI: {ex.Message}");
+                    logger.LogWarning(ex, "{UISymbol} Failed to generate resources.pri: {Message}. The app may not launch correctly. Re-run with --verbose for details.", UiSymbols.Warning, ex.Message);
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} PRI generation error details: {ex}");
                 }
                 finally
                 {
@@ -767,33 +792,146 @@ internal partial class MsixService
     /// Checks if a package with the given name exists and unregisters it if found
     /// </summary>
     /// <param name="packageName">The name of the package to check and unregister</param>
+    /// <param name="taskContext">Task context for debug output</param>
+    /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
         try
         {
-            var removed = await packageRegistrationService.UnregisterAsync(packageName, cancellationToken);
+            // Inspect installed packages first so we can make a safe, per-package decision
+            // about non-dev-mode installations (where PreserveApplicationData is rejected
+            // and a blind removal would wipe user data).
+            // NOTE: despite its name, IPackageRegistrationService.FindDevPackages returns
+            // *all* same-name packages (dev-mode AND non-dev-mode); the IsDevelopmentMode
+            // flag on each entry is what we classify on below.
+            var installed = packageRegistrationService.FindDevPackages(packageName);
 
-            if (removed)
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully");
-            }
-            else
+            if (installed.Count == 0)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Note} No existing package found");
+                return false;
             }
 
-            return removed;
+            var cwd = Path.GetFullPath(currentDirectoryProvider.GetCurrentDirectory());
+
+            // First pass: classify packages and refuse the whole operation if any
+            // out-of-tree non-dev install is present. Doing this up front (instead of
+            // mid-loop) prevents the first removal from racing ahead and wiping data
+            // that the safety check on a *later* package was meant to protect.
+            foreach (var pkg in installed)
+            {
+                if (pkg.IsDevelopmentMode)
+                {
+                    continue;
+                }
+
+                if (!IsPathInsideDirectory(pkg.InstallLocation, cwd))
+                {
+                    var locationDescription = string.IsNullOrEmpty(pkg.InstallLocation)
+                        ? "."
+                        : $" at '{Path.GetFullPath(pkg.InstallLocation)}'.";
+                    throw new InvalidOperationException(
+                        $"A package with the same identity ('{pkg.FullName}') is already installed " +
+                        $"as a non-development-mode package" + locationDescription + Environment.NewLine +
+                        "Remove it manually if you intended to replace it:" + Environment.NewLine +
+                        $"  Get-AppxPackage {packageName} | Remove-AppxPackage");
+                }
+            }
+
+            // Second pass: safe to remove each package individually using its full name.
+            // Using the per-FullName API ensures one iteration cannot wipe packages the
+            // first pass approved or rejected separately.
+            var anyRemoved = false;
+            foreach (var pkg in installed)
+            {
+                if (pkg.IsDevelopmentMode)
+                {
+                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData, cancellationToken);
+                }
+                else
+                {
+                    // Verified in-tree above: safe to remove (app data deleted, since
+                    // PreserveApplicationData isn't valid for non-dev-mode packages).
+                    taskContext.AddDebugMessage(
+                        $"{UiSymbols.Warning} Existing non-dev-mode package {pkg.FullName} is rooted in the current " +
+                        $"project tree ({pkg.InstallLocation}); removing it (application data will be deleted).");
+                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData: false, cancellationToken);
+                }
+                anyRemoved = true;
+            }
+
+            if (anyRemoved)
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Existing package unregistered successfully{(preserveAppData ? " (app data preserved where possible)" : "")}");
+            }
+
+            return anyRemoved;
+        }
+        catch (InvalidOperationException)
+        {
+            // Surface actionable conflicts (non-dev-mode package outside project tree) to the caller.
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation must propagate so callers (StatusService etc.) can treat it
+            // distinctly from a normal "no package removed" outcome.
+            throw;
         }
         catch (Exception ex)
         {
-            // If check fails, package likely doesn't exist or we don't have permission
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not check for existing package: {ex.Message}");
+            // Other failures (e.g., transient deployment errors during inspection or
+            // removal) shouldn't block the caller's overall flow — log and continue,
+            // matching prior behavior.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not unregister existing package: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Segment-aware containment check: returns true iff <paramref name="candidatePath"/>
+    /// lives inside <paramref name="containerPath"/>. Uses <see cref="Path.GetRelativePath"/>
+    /// so that sibling directories sharing a string prefix (e.g. <c>C:\proj</c> vs
+    /// <c>C:\project2</c>) are correctly treated as outside.
+    /// </summary>
+    internal static bool IsPathInsideDirectory(string? candidatePath, string containerPath)
+    {
+        if (string.IsNullOrEmpty(candidatePath))
+        {
+            return false;
+        }
+
+        string fullCandidate;
+        string fullContainer;
+        try
+        {
+            fullCandidate = Path.GetFullPath(candidatePath);
+            fullContainer = Path.GetFullPath(containerPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var relative = Path.GetRelativePath(fullContainer, fullCandidate);
+        if (Path.IsPathRooted(relative))
+        {
+            // Different volume / UNC root — definitely not contained.
+            return false;
+        }
+
+        // Reject any traversal out of the container ("..", "..\foo", etc.).
+        if (relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                             || relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>

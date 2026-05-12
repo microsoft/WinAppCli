@@ -26,6 +26,17 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> WithAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
+    public static Option<bool> DetachOption { get; }
+    public static Option<bool> CleanOption { get; }
+    public static Option<bool> SymbolsOption { get; }
+    public static Option<string?> ExecutableOption { get; }
+
+    /// <summary>
+    /// Captures zero or more arguments after the <c>--</c> separator and forwards them to the
+    /// launched application. System.CommandLine routes all post-<c>--</c> tokens here as
+    /// positional arguments; anything typed before <c>--</c> is validated normally.
+    /// </summary>
+    public static Argument<string[]> PassthroughArgument { get; }
 
     static RunCommand()
     {
@@ -36,9 +47,20 @@ internal partial class RunCommand : Command, IShortDescription
         };
         InputFolderArgument.AcceptExistingOnly();
 
+        PassthroughArgument = new Argument<string[]>("app-args")
+        {
+            Description = "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
+            Arity = ArgumentArity.ZeroOrMore,
+            // Hidden from help/schema: this argument exists only to absorb tokens after '--'
+            // so System.CommandLine doesn't reject them. Exposing it would mislead users and
+            // schema consumers into thinking `winapp run <input-folder> [<app-args>...]` is
+            // a valid direct invocation; in reality, app args MUST be preceded by '--'.
+            Hidden = true,
+        };
+
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the appxmanifest.xml (default: auto-detect from input folder or current directory)"
+            Description = "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)"
         };
         ManifestOption.AcceptExistingOnly();
 
@@ -49,7 +71,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ArgsOption = new Option<string>("--args")
         {
-            Description = "Command-line arguments to pass to the application"
+            Description = "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value)."
         };
 
         NoLaunchOption = new Option<bool>("--no-launch")
@@ -71,11 +93,33 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Unregister the development package after the application exits. Only removes packages registered in development mode."
         };
+
+        DetachOption = new Option<bool>("--detach")
+        {
+            Description = "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json)."
+        };
+        
+        CleanOption = new Option<bool>("--clean")
+        {
+            Description = "Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments."
+        };
+
+        SymbolsOption = new Option<bool>("--symbols")
+        {
+            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
+        };
+
+        ExecutableOption = new Option<string?>("--executable")
+        {
+            Description = "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder."
+        };
+        ExecutableOption.Aliases.Add("--exe");
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
     {
         Arguments.Add(InputFolderArgument);
+        Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
@@ -83,6 +127,10 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
+        Options.Add(DetachOption);
+        Options.Add(CleanOption);
+        Options.Add(SymbolsOption);
+        Options.Add(ExecutableOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -106,7 +154,48 @@ internal partial class RunCommand : Command, IShortDescription
             var withAlias = parseResult.GetValue(WithAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
+            var detach = parseResult.GetValue(DetachOption);
+            var clean = parseResult.GetValue(CleanOption);
+            var useSymbols = parseResult.GetValue(SymbolsOption);
+            var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Collect passthrough args from the token stream.
+            // With a ZeroOrMore positional argument, System.CommandLine absorbs ALL extra
+            // Argument-typed tokens — including unrecognised option-like tokens before '--'.
+            // SplitPassthroughTokens uses a count-based diff between the post-'--' token walk
+            // and what ZeroOrMore actually absorbed to detect pre-dash invalids without needing
+            // to categorise each token by type (which would confuse option values with positionals).
+            var allAbsorbed = parseResult.GetValue(PassthroughArgument) ?? [];
+            var (passthroughArgs, invalidPreDashTokens) = WindowsCommandLine.SplitPassthroughTokens(
+                parseResult.Tokens, allAbsorbed);
+            if (invalidPreDashTokens.Count > 0)
+            {
+                foreach (var bad in invalidPreDashTokens)
+                {
+                    logger.LogError("{UISymbol} Unrecognized argument: '{Arg}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).", UiSymbols.Error, bad);
+                }
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                if (isJson)
+                {
+                    var firstBad = invalidPreDashTokens[0];
+                    var jsonError = invalidPreDashTokens.Count == 1
+                        ? $"Unrecognized argument: '{firstBad}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value)."
+                        : $"Unrecognized arguments: {string.Join(", ", invalidPreDashTokens.Select(t => $"'{t}'"))}. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).";
+                    PrintJson(aumid: null, processId: null, errorMessage: jsonError);
+                }
+                return 1;
+            }
+
+            // Merge '--args' value with any tokens collected after '--'.
+            var passthroughStr = WindowsCommandLine.JoinArguments(passthroughArgs);
+            if (passthroughStr != null)
+            {
+                appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
+            }
 
             // Validate mutually exclusive options
             if (withAlias && noLaunch)
@@ -136,6 +225,42 @@ internal partial class RunCommand : Command, IShortDescription
             if (unregisterOnExit && noLaunch)
             {
                 logger.LogError("{UISymbol} --unregister-on-exit and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && noLaunch)
+            {
+                logger.LogError("{UISymbol} --detach and --no-launch cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && debugOutput)
+            {
+                logger.LogError("{UISymbol} --detach and --debug-output cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && withAlias)
+            {
+                logger.LogError("{UISymbol} --detach and --with-alias cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            if (detach && unregisterOnExit)
+            {
+                logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
+                return 1;
+            }
+
+            // Validate the input folder path early so the command fails fast with a clear
+            // long-path message before any file system operations are attempted.
+            try
+            {
+                LongPathHelper.ValidatePathLength(inputFolder.FullName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, ex.Message);
                 return 1;
             }
 
@@ -187,6 +312,10 @@ internal partial class RunCommand : Command, IShortDescription
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
                     resolvedOutputDir = outputAppXDirectory;
 
+                    // Validate that the manifest and output paths are usable (check long path support if needed)
+                    LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
+                    LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
+
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
@@ -194,6 +323,8 @@ internal partial class RunCommand : Command, IShortDescription
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        clean,
+                        executable,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -253,10 +384,20 @@ internal partial class RunCommand : Command, IShortDescription
                 return success;
             }
 
+            // --detach: return immediately after launch without waiting for exit
+            if (detach)
+            {
+                if (isJson)
+                {
+                    PrintJson(aumid, processId, errorMessage: null);
+                }
+                return 0;
+            }
+
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, appArgs, debugOutput, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -273,7 +414,8 @@ internal partial class RunCommand : Command, IShortDescription
             // DebugSetProcessKillOnExit(true) in the debug service handles crash cleanup.
             if (debugOutput)
             {
-                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken);
+                var exitCode = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken, useSymbols,
+                    symbolSearchPaths: [inputFolder.FullName]);
                 if (cancellationToken.IsCancellationRequested)
                 {
                     appLauncherService.TerminatePackageProcesses(packageFullName, processId);
@@ -355,7 +497,7 @@ internal partial class RunCommand : Command, IShortDescription
                         continue;
                     }
 
-                    await packageRegistrationService.UnregisterAsync(pkg.Name, cancellationToken);
+                    await packageRegistrationService.UnregisterAsync(pkg.Name, preserveAppData: false, cancellationToken);
                     logger.LogDebug("Unregistered package {FullName} on exit.", pkg.FullName);
                 }
             }
@@ -366,18 +508,45 @@ internal partial class RunCommand : Command, IShortDescription
         }
 
         /// <summary>
+        /// Builds the <see cref="ProcessStartInfo"/> used to launch an app via its execution
+        /// alias. Extracted so tests can verify that passthrough args (from <c>--args</c> /
+        /// <c>--</c>) are forwarded into <see cref="ProcessStartInfo.Arguments"/> without
+        /// having to spawn a real process.
+        /// </summary>
+        internal static ProcessStartInfo BuildAliasProcessStartInfo(string alias, string? appArgs)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = alias,
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+            };
+
+            if (!string.IsNullOrEmpty(appArgs))
+            {
+                psi.Arguments = appArgs;
+            }
+
+            return psi;
+        }
+
+        /// <summary>
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
         private async Task<int> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
+            DirectoryInfo inputFolder,
             string? appArgs,
             bool debugOutput,
+            bool useSymbols,
             string? packageFullName,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
-            var processedManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
+            var processedManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
             if (!processedManifest.Exists)
             {
                 logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName);
@@ -395,21 +564,9 @@ internal partial class RunCommand : Command, IShortDescription
 
             var alias = aliases[0]; // Use the first alias
 
-
-            // Launch the execution alias process with inherited stdio
-            var psi = new ProcessStartInfo
-            {
-                FileName = alias,
-                UseShellExecute = false,
-                RedirectStandardInput = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-            };
-
-            if (!string.IsNullOrEmpty(appArgs))
-            {
-                psi.Arguments = appArgs;
-            }
+            // Build the ProcessStartInfo via a static helper so the argument-forwarding
+            // contract is unit-testable without spawning a real process.
+            var psi = BuildAliasProcessStartInfo(alias, appArgs);
 
             try
             {
@@ -422,7 +579,8 @@ internal partial class RunCommand : Command, IShortDescription
 
                 if (debugOutput)
                 {
-                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken);
+                    var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken,
+                        useSymbols, symbolSearchPaths: [inputFolder.FullName]);
                     if (cancellationToken.IsCancellationRequested)
                     {
                         appLauncherService.TerminatePackageProcesses(packageFullName, unchecked((uint)process.Id));

@@ -3,9 +3,12 @@
 
 // The CLI requires Windows 10+; suppress platform compat warnings for Debug APIs.
 #pragma warning disable CA1416
+// _logWriter lifetime is managed in RunDebugLoopAsync try/finally, not via IDisposable.
+#pragma warning disable CA1001
 
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using System.Runtime.InteropServices;
 using System.Text;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -22,7 +25,7 @@ namespace WinApp.Cli.Services;
 /// The debugged process is terminated when the debug session ends (e.g., Ctrl+C)
 /// or if the winapp process exits unexpectedly.
 /// </summary>
-internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutputService> logger) : IDebugOutputService
+internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService crashDumpService, ILogger<DebugOutputService> logger) : IDebugOutputService
 {
     // Well-known NTSTATUS / exception codes
     private const uint STATUS_BREAKPOINT = 0x80000003;
@@ -30,12 +33,57 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
     private const uint STATUS_WX86_BREAKPOINT = 0x4000001F;
     private const uint THREAD_NAME_EXCEPTION = 0x406D1388;
 
+    // Set by the debug loop when a crash dump is captured.
+    private string? _crashDumpPath;
+
+    // Log writer for verbose debug output (OutputDebugString, first-chance exceptions).
+    private StreamWriter? _logWriter;
+    private string? _logPath;
+
+    // Saved first-chance exception context — at first-chance time the thread context
+    // still points to user code. By second-chance, XAML's FailFast has replaced the stack.
+    private byte[]? _savedFirstChanceContext;
+    private uint _savedFirstChanceThreadId;
+    private int _savedFirstChanceExceptionCode;
+    private nuint _savedFirstChanceExceptionAddress;
+
     /// <inheritdoc/>
-    public Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken)
+    public async Task<int> RunDebugLoopAsync(uint processId, CancellationToken cancellationToken, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
-        // DebugActiveProcess + WaitForDebugEventEx must be called from the same thread,
-        // so spin up a dedicated thread via Task.Run.
-        return Task.Run(() => RunDebugLoop(processId, cancellationToken), cancellationToken);
+        // Create a log file alongside the dump directory for verbose debug output.
+        var logDir = Path.Combine(Path.GetTempPath(), "winapp-dumps");
+        Directory.CreateDirectory(logDir);
+        _logPath = Path.Combine(logDir, $"debug-{processId}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        _logWriter = new StreamWriter(_logPath, append: false, Encoding.UTF8) { AutoFlush = true };
+
+        try
+        {
+            // DebugActiveProcess + WaitForDebugEventEx must be called from the same thread,
+            // so spin up a dedicated thread via Task.Run.
+            var exitCode = await Task.Run(() => RunDebugLoop(processId, cancellationToken), cancellationToken);
+
+            // Close the log writer before analysis appends to the same file.
+            _logWriter.Dispose();
+            _logWriter = null;
+
+            // After the debug loop ends, analyze the crash dump if one was captured.
+            if (_crashDumpPath != null)
+            {
+                await crashDumpService.AnalyzeDumpAsync(_crashDumpPath, _logPath!, useSymbols, symbolSearchPaths);
+            }
+            else
+            {
+                // No crash — show log path so users can find captured debug output.
+                console.MarkupLine($"[dim]Full debug log:[/] {_logPath!.EscapeMarkup()}");
+            }
+
+            return exitCode;
+        }
+        finally
+        {
+            _logWriter?.Dispose();
+            _logWriter = null;
+        }
     }
 
     private int RunDebugLoop(uint processId, CancellationToken cancellationToken)
@@ -143,9 +191,18 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
 
         if (!string.IsNullOrWhiteSpace(message))
         {
-            // Trim trailing newline so Spectre doesn't double-space the output.
+            // Trim trailing newline so log doesn't double-space the output.
             message = message.TrimEnd('\r', '\n');
-            console.MarkupLine($"[dim][[Debug]][/] {message.EscapeMarkup()}");
+
+            // Log file gets everything for detailed investigation.
+            _logWriter?.WriteLine($"[Debug] {message}");
+
+            // Console only shows app-specific messages — filter out OS/framework
+            // noise from WinUI, COM, DirectX, and other system DLLs.
+            if (!IsFrameworkNoise(message))
+            {
+                console.MarkupLine($"[dim][[Debug]][/] {message.EscapeMarkup()}");
+            }
         }
     }
 
@@ -177,7 +234,55 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         {
             var name = GetExceptionName(code);
             var address = (nuint)exInfo.ExceptionRecord.ExceptionAddress;
-            console.MarkupLine($"[yellow]First-chance exception:[/] {name} (0x{code:X8}) at 0x{address:X}");
+
+            // Log file gets all first-chance exceptions.
+            _logWriter?.WriteLine($"First-chance exception: {name} (0x{code:X8}) at 0x{address:X}");
+
+            // Console only shows exceptions meaningful for crash diagnosis.
+            // Skip WinUI/COM internal exceptions (0x40080201, 0x04242420, etc.)
+            // that are caught and handled during normal framework operation.
+            if (code is 0xE0434352 or 0xC0000005 or 0xC00000FD)
+            {
+                console.MarkupLine($"[yellow]First-chance exception:[/] {name} (0x{code:X8}) at 0x{address:X}");
+            }
+
+            // Save thread context for the FIRST critical exception — at first-chance
+            // time, the context still points to user code. Later exceptions (CLR wrapping
+            // the AV) have already unwound the stack. Only save once per crash sequence.
+            if (_savedFirstChanceContext == null &&
+                code is 0xC0000005 or 0xC00000FD or 0xE0434352 or 0xE06D7363)
+            {
+                SaveFirstChanceContext(debugEvent.dwThreadId, code, address);
+            }
+
+            // Stack Overflow is always fatal in .NET — no second-chance will follow.
+            // Capture the dump immediately on first-chance.
+            if (code is 0xC00000FD && _crashDumpPath == null)
+            {
+                console.MarkupLine($"[red]Crash:[/] {name} (0x{code:X8}) at 0x{address:X}");
+                _crashDumpPath = crashDumpService.WriteMiniDump(
+                    debugEvent.dwProcessId,
+                    _savedFirstChanceContext, _savedFirstChanceThreadId,
+                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
+            }
+        }
+        else
+        {
+            // Second-chance exception — the process is about to crash.
+            // Only capture if we don't already have a dump (e.g., Stack Overflow
+            // already captured at first-chance time).
+            var name = GetExceptionName(code);
+            var address = (nuint)exInfo.ExceptionRecord.ExceptionAddress;
+            _logWriter?.WriteLine($"Second-chance exception (crash): {name} (0x{code:X8}) at 0x{address:X}");
+            console.MarkupLine($"[red]Crash:[/] {name} (0x{code:X8}) at 0x{address:X}");
+
+            if (_crashDumpPath == null)
+            {
+                _crashDumpPath = crashDumpService.WriteMiniDump(
+                    debugEvent.dwProcessId,
+                    _savedFirstChanceContext, _savedFirstChanceThreadId,
+                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
+            }
         }
 
         // Let the target's own exception handling run. For second-chance exceptions
@@ -191,6 +296,60 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         if (!handle.IsNull && handle.Value != (void*)-1)
         {
             PInvoke.CloseHandle(handle);
+        }
+    }
+
+    /// <summary>
+    /// Captures the faulting thread's context at first-chance time, when it still
+    /// points to the user code that caused the exception.
+    /// </summary>
+    private unsafe void SaveFirstChanceContext(uint threadId, uint code, nuint address)
+    {
+        using var threadHandle = PInvoke.OpenThread_SafeHandle(
+            THREAD_ACCESS_RIGHTS.THREAD_GET_CONTEXT | THREAD_ACCESS_RIGHTS.THREAD_QUERY_INFORMATION,
+            false, threadId);
+
+        if (threadHandle.IsInvalid)
+        {
+            var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            _logWriter?.WriteLine($"[CrashDump] OpenThread failed for thread {threadId}: error {err}");
+            return;
+        }
+
+        // CONTEXT must be 16-byte aligned on x64. Allocate on native heap to guarantee alignment.
+        var contextSize = sizeof(CONTEXT);
+        var pContext = (CONTEXT*)NativeMemory.AlignedAlloc((nuint)contextSize, 16);
+        try
+        {
+            NativeMemory.Clear(pContext, (nuint)contextSize);
+            pContext->ContextFlags = RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.Arm64 => CONTEXT_FLAGS.CONTEXT_FULL_ARM64,
+                _ => CONTEXT_FLAGS.CONTEXT_FULL_AMD64,
+            };
+
+            if (PInvoke.GetThreadContext(new HANDLE(threadHandle.DangerousGetHandle()), pContext))
+            {
+                _savedFirstChanceContext = new byte[contextSize];
+                fixed (byte* p = _savedFirstChanceContext)
+                {
+                    Buffer.MemoryCopy(pContext, p, contextSize, contextSize);
+                }
+                _savedFirstChanceThreadId = threadId;
+                _savedFirstChanceExceptionCode = unchecked((int)code);
+                _savedFirstChanceExceptionAddress = address;
+
+                _logWriter?.WriteLine($"[CrashDump] Saved first-chance context for thread {threadId} (0x{code:X8}) at 0x{address:X}");
+            }
+            else
+            {
+                var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                _logWriter?.WriteLine($"[CrashDump] GetThreadContext failed for thread {threadId}: error {err}");
+            }
+        }
+        finally
+        {
+            NativeMemory.AlignedFree(pContext);
         }
     }
 
@@ -211,4 +370,91 @@ internal sealed class DebugOutputService(IAnsiConsole console, ILogger<DebugOutp
         0xE0434352 => "CLR Exception",
         _ => "Exception",
     };
+
+    /// <summary>
+    /// Returns true if the debug message is internal OS/framework noise
+    /// rather than an app-specific debug message worth showing on the console.
+    /// </summary>
+    private static bool IsFrameworkNoise(string message)
+    {
+        // Windows OS source paths (onecore, onecoreuap, minkernel, etc.)
+        if (message.StartsWith("onecore\\", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("onecoreuap\\", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("minkernel\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // WinRT/COM internal trace markers
+        if (message.Contains("ReturnHr(", StringComparison.Ordinal) ||
+            message.Contains("LogHr(", StringComparison.Ordinal) ||
+            message.Contains("ReturnNt(", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Windows SDK build paths (Azure DevOps build agent)
+        if (message.StartsWith("C:\\__w\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Framework DLL WIL/HRESULT trace format: "DllName.dll!0x..." or "DllName.dll!FuncName"
+        if (IsFrameworkDllTrace(message))
+        {
+            return true;
+        }
+
+        // Common framework HRESULT noise
+        if (message.StartsWith("E_INVALIDARG", StringComparison.Ordinal) ||
+            message.StartsWith("E_FAIL", StringComparison.Ordinal) ||
+            message.StartsWith("HRESULT:", StringComparison.Ordinal) ||
+            message.StartsWith("hr = ", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if the message looks like a framework DLL debug trace
+    /// (e.g., "Microsoft.UI.Xaml.dll!0x..." or "twinapi.appcore.dll!SomeFunc").
+    /// </summary>
+    private static bool IsFrameworkDllTrace(string message)
+    {
+        var bangIndex = message.IndexOf('!');
+        if (bangIndex < 5)
+        {
+            return false;
+        }
+
+        var beforeBang = message.AsSpan(0, bangIndex);
+        if (!beforeBang.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (beforeBang.StartsWith("Microsoft.UI.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.Windows.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.Web.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Microsoft.WinUI.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("twinapi", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("dxgi", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("d3d", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("d2d", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("combase", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("oleaut32", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("ntdll", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("kernelbase", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("kernel32", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("WinAppRuntime", StringComparison.OrdinalIgnoreCase) ||
+            beforeBang.StartsWith("MRM", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
 }

@@ -71,8 +71,8 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify manifest generated the necessary files
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "Manifest generate should create Package.appxmanifest");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");
         Assert.IsTrue(Directory.Exists(assetsDir), "Manifest generate should create Assets directory");
@@ -151,7 +151,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreEqual(0, manifestExitCode, "Manifest generate command should complete successfully");
 
         // Verify custom options were applied
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
@@ -211,8 +211,8 @@ public class EndToEndTests : BaseCommandTests
         var winAppSdkVersion = ExtractPackageVersion(csprojContent, "Microsoft.WindowsAppSDK");
         Assert.IsNotNull(winAppSdkVersion, "csproj should contain WindowsAppSDK version after init");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         // Step 3: Build
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
@@ -249,12 +249,26 @@ public class EndToEndTests : BaseCommandTests
             Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
 
         var versionParts = winAppSdkVersion.Split('.');
-        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+
+        // Assert only on what's invariant across SDK naming-convention churn:
+        //   * The PackageDependency name MUST start with "Microsoft.WindowsAppRuntime.{major}".
+        //     Whether the framework is "Microsoft.WindowsAppRuntime.2" (2.0.1+ stable, major-only),
+        //     "Microsoft.WindowsAppRuntime.1.8" (per-minor SxS in 1.x), or
+        //     "Microsoft.WindowsAppRuntime.2-experimentalN" (2.x experimental) is the SDK's call,
+        //     not ours — the CLI faithfully propagates whatever name appears in MSIX.inventory.
+        //   * MinVersion's first three components must match the SDK version
+        //     (the inventory ships a Major.Minor.Patch.Revision quad; the leading triple is the SDK version).
+        var expectedNamePrefix = $"Name=\"Microsoft.WindowsAppRuntime.{versionParts[0]}";
+        var expectedMinVersionPrefix = versionParts.Length >= 3
+            ? $"MinVersion=\"{versionParts[0]}.{versionParts[1]}.{versionParts[2].Split('-')[0]}."
+            : $"MinVersion=\"{versionParts[0]}.";
 
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
-        Assert.Contains(expectedRuntimeName, finalManifest,
-            $"PackageDependency should reference {expectedRuntimeName}");
+        Assert.Contains(expectedNamePrefix, finalManifest,
+            $"PackageDependency Name should start with Microsoft.WindowsAppRuntime.{versionParts[0]}");
+        Assert.Contains(expectedMinVersionPrefix, finalManifest,
+            $"PackageDependency MinVersion should be derived from SDK version {winAppSdkVersion}");
     }
 
     [TestMethod]
@@ -285,8 +299,8 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
@@ -358,8 +372,8 @@ public class EndToEndTests : BaseCommandTests
         var addWin2dResult = await RunDotnetCommandAsync(_tempDirectory, "add package Microsoft.Graphics.Win2D --version 1.3.0");
         Assert.AreEqual(0, addWin2dResult.ExitCode, $"Failed to add Win2D: {addWin2dResult.Output}");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create appxmanifest.xml");
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "Package.appxmanifest");
+        Assert.IsTrue(File.Exists(manifestPath), "winapp init should create Package.appxmanifest");
 
         var buildResult = await RunDotnetCommandAsync(_tempDirectory, "build -c Release");
         Assert.AreEqual(0, buildResult.ExitCode, $"Failed to build: {buildResult.Output}");
@@ -455,7 +469,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj should NOT contain Microsoft.WindowsAppSDK when --setup-sdks none is used");
 
         // Step 4: Manifest should still be created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created even with --setup-sdks none");
 
         Console.WriteLine("Successfully initialized .NET project with --setup-sdks none");
@@ -501,11 +515,6 @@ public class EndToEndTests : BaseCommandTests
             updatedCsprojContent.Contains("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase),
             "csproj should contain Microsoft.WindowsAppSDK package reference");
 
-        // The init command should add BuildTools package reference
-        Assert.IsTrue(
-            updatedCsprojContent.Contains("Microsoft.Windows.SDK.BuildTools", StringComparison.OrdinalIgnoreCase),
-            "csproj should contain Microsoft.Windows.SDK.BuildTools package reference");
-
         // Step 4: Verify the TargetFramework was updated to a Windows TFM while preserving the .NET version
         Assert.IsTrue(
             updatedCsprojContent.Contains("-windows", StringComparison.OrdinalIgnoreCase),
@@ -520,7 +529,7 @@ public class EndToEndTests : BaseCommandTests
             "csproj TargetFramework should preserve the .NET version with Windows SDK version added");
 
         // Step 5: Verify manifest and assets were created
-        var manifestPath = Path.Combine(projectDir.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Combine(projectDir.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(manifestPath), "Manifest should be created");
 
         var assetsDir = Path.Combine(projectDir.FullName, "Assets");
@@ -572,8 +581,12 @@ public class EndToEndTests : BaseCommandTests
         // Assert
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail when electron.exe does not exist.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
+        // Either branch of the new error messaging is acceptable: "Electron is not installed"
+        // (no node_modules/electron) or "binary was not found" (node_modules/electron present
+        // but exe missing, e.g. Electron 42+ before `install-electron` runs).
         Assert.IsTrue(
-            combinedOutput.Contains("Electron executable not found at:", StringComparison.OrdinalIgnoreCase),
+            combinedOutput.Contains("Electron is not installed", StringComparison.OrdinalIgnoreCase)
+                || combinedOutput.Contains("binary was not found", StringComparison.OrdinalIgnoreCase),
             $"Expected Node-layer electron missing error to be surfaced. Output: {combinedOutput}");
     }
 

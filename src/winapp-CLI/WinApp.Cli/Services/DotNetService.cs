@@ -25,6 +25,8 @@ internal partial class DotNetService : IDotNetService
     /// </summary>
     private const string RecommendedTfm = "net10.0-windows10.0.26100.0";
 
+    private const string MSIXInfoComment = "<!-- Enables targets that generate package layout, required for running with winapp run or msix packaging -->";
+
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
@@ -45,11 +47,17 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<TargetFrameworks>(.*?)</TargetFrameworks>", RegexOptions.Singleline)]
     private static partial Regex TargetFrameworksElementRegex();
 
-    [GeneratedRegex(@"<RuntimeIdentifier[\s>]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"<RuntimeIdentifier\b[^>]*>(.*?)</RuntimeIdentifier>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifierElementRegex();
 
     [GeneratedRegex(@"<RuntimeIdentifiers[\s>].*?</RuntimeIdentifiers>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RuntimeIdentifiersElementRegex();
+
+    [GeneratedRegex(@"<EnableMsixTooling>(.*?)</EnableMsixTooling>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex EnableMsixToolingElementRegex();
+
+    [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
+    private static partial Regex WindowsPackageTypeNoneElementRegex();
 
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory)
     {
@@ -250,8 +258,11 @@ internal partial class DotNetService : IDotNetService
 
         // Insert a RuntimeIdentifier with a Condition so it only applies when not already set
         // (e.g. via command-line -r or Directory.Build.props)
-        const string runtimeIdentifierElement =
+        const string runtimeIdentifierComment =
+            "<!-- Added by winapp: default RuntimeIdentifier to current architecture when not specified. Only applies when not set via -r or Directory.Build.props. -->";
+        const string runtimeIdentifierProperty =
             "<RuntimeIdentifier Condition=\"'$(RuntimeIdentifier)' == ''\">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>";
+        var runtimeIdentifierElement = runtimeIdentifierComment + Environment.NewLine + "    " + runtimeIdentifierProperty;
 
         // Insert into the first PropertyGroup:
         // 1. After <RuntimeIdentifiers> if present (keep RID properties together)
@@ -407,6 +418,16 @@ internal partial class DotNetService : IDotNetService
 
     public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
     {
+        // Fast path: many .csproj files declare PackageReference inline. A direct XML scan avoids
+        // an implicit `dotnet restore` (which can take 30s+ on a fresh machine — see #463).
+        // We only short-circuit on a positive match; absence still requires the slow path because
+        // the package may come from Directory.Packages.props (CPM), Directory.Build.props, an SDK,
+        // or another import that only MSBuild evaluation can resolve.
+        if (TryFindPackageReferenceInCsproj(csprojPath, packageName))
+        {
+            return true;
+        }
+
         var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
         if (packageList?.Projects is null)
         {
@@ -417,6 +438,40 @@ internal partial class DotNetService : IDotNetService
             .SelectMany(p => p.Frameworks ?? [])
             .SelectMany(f => f.TopLevelPackages ?? [])
             .Any(pkg => string.Equals(pkg.Id, packageName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryFindPackageReferenceInCsproj(FileInfo csprojPath, string packageName)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Load(csprojPath.FullName);
+            // PackageReference items live in the default (no-prefix) MSBuild namespace; new-style
+            // SDK csproj files have no xmlns, so XName.LocalName is what we want either way.
+            return doc.Descendants()
+                .Where(e => string.Equals(e.Name.LocalName, "PackageReference", StringComparison.Ordinal))
+                .Any(e => string.Equals((string?)e.Attribute("Include"), packageName, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -444,6 +499,217 @@ internal partial class DotNetService : IDotNetService
             return null;
         }
     }
+
+    public async Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = EnableMsixToolingElementRegex().Match(content);
+
+        if (match.Success)
+        {
+            var existingValue = match.Groups[1].Value.Trim();
+
+            if (string.Equals(existingValue, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(existingValue, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                // Update existing element from false to true, adding a comment if one doesn't already exist
+                var replacement = "<EnableMsixTooling>true</EnableMsixTooling>";
+
+                // Check if there's already a comment above the element
+                var beforeMatch = content[..match.Index];
+                if (!beforeMatch.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
+                {
+                    // Detect indentation from the EnableMsixTooling line
+                    var lastNewline = beforeMatch.LastIndexOf('\n');
+                    var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
+                    replacement = $"{indent}{MSIXInfoComment}"
+                        + Environment.NewLine + replacement;
+                    // Replace including the leading whitespace on this line
+                    content = content[..(lastNewline + 1)]
+                        + replacement
+                        + content[(match.Index + match.Length)..];
+                }
+                else
+                {
+                    content = content[..match.Index]
+                        + replacement
+                        + content[(match.Index + match.Length)..];
+                }
+
+                await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+                return true;
+            }
+
+            return false;
+        }
+
+        // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
+        var element =
+            MSIXInfoComment
+            + Environment.NewLine + "    <EnableMsixTooling>true</EnableMsixTooling>";
+
+        var modified = false;
+        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
+        if (ridMatch.Success)
+        {
+            // Insert after the full closing </RuntimeIdentifier> tag
+            var insertPos = ridMatch.Index + ridMatch.Length;
+            content = content[..insertPos]
+                + Environment.NewLine + "    " + element
+                + content[insertPos..];
+            modified = true;
+        }
+        else
+        {
+            var tfmMatch = TargetFrameworkElementRegex().Match(content);
+            if (tfmMatch.Success)
+            {
+                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                content = content[..insertPos]
+                    + Environment.NewLine + "    " + element
+                    + content[insertPos..];
+                modified = true;
+            }
+            else
+            {
+                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+                if (propGroupIdx >= 0)
+                {
+                    var closeTag = content.IndexOf('>', propGroupIdx);
+                    if (closeTag >= 0)
+                    {
+                        var insertPos = closeTag + 1;
+                        content = content[..insertPos]
+                            + Environment.NewLine + "    " + element
+                            + content[insertPos..];
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        }
+
+        return modified;
+    }
+
+    public async Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = WindowsPackageTypeNoneElementRegex().Match(content);
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        content = content[..match.Index] + content[(match.Index + match.Length)..];
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists || packageComments.Count == 0)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var modified = false;
+
+        foreach (var (packageName, comment) in packageComments)
+        {
+            // Find <PackageReference Include="packageName" and check if there's already a comment above it
+            var pattern = $@"<PackageReference\s+Include=""{Regex.Escape(packageName)}""";
+            var pkgMatch = Regex.Match(content, pattern, RegexOptions.IgnoreCase);
+            if (!pkgMatch.Success)
+            {
+                continue;
+            }
+
+            // Check if there's already an XML comment on the line(s) immediately before
+            var beforePkg = content[..pkgMatch.Index];
+            var lastNewline = beforePkg.LastIndexOf('\n');
+            var linePrefix = lastNewline >= 0 ? beforePkg[(lastNewline + 1)..] : beforePkg;
+
+            // If the content before on this line is just whitespace, check the previous line for a comment
+            if (string.IsNullOrWhiteSpace(linePrefix))
+            {
+                var prevContent = lastNewline >= 0 ? beforePkg[..lastNewline].TrimEnd('\r') : "";
+                if (prevContent.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
+                {
+                    continue; // Already has a comment
+                }
+            }
+
+            // Detect indentation from the PackageReference line
+            var indent = linePrefix;
+            var commentLine = $"{indent}<!-- {comment} -->" + Environment.NewLine;
+            var insertPos = lastNewline >= 0 ? lastNewline + 1 : pkgMatch.Index;
+            content = content[..insertPos] + commentLine + content[insertPos..];
+            modified = true;
+        }
+
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        }
+
+        return modified;
+    }
+
+    public async Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+
+        // Skip if the csproj already includes Assets content (glob or individual entries)
+        if (AssetsContentItemRegex().IsMatch(content))
+        {
+            return false;
+        }
+
+        // Insert a new ItemGroup with the Assets glob before </Project>
+        var closeProjectIdx = content.LastIndexOf("</Project>", StringComparison.OrdinalIgnoreCase);
+        if (closeProjectIdx < 0)
+        {
+            return false;
+        }
+
+        var itemGroup =
+            "  <ItemGroup>" + Environment.NewLine
+            + "    <Content Include=\"Assets\\**\\*\" />" + Environment.NewLine
+            + "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
+
+        content = content[..closeProjectIdx] + itemGroup + content[closeProjectIdx..];
+        await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        return true;
+    }
+
+    [GeneratedRegex(@"<Content\s[^>]*Include\s*=\s*""Assets\\", RegexOptions.IgnoreCase)]
+    private static partial Regex AssetsContentItemRegex();
 }
 
 [JsonSerializable(typeof(DotNetPackageListJson))]

@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
+bin/**
 !bin/**/*.exe
 out/**
 node_modules/**
@@ -8,6 +9,7 @@ node_modules/**
 eslint.config.mjs
 esbuild.mjs
 tsconfig.json
+package-lock.json
 **/*.ts
 **/*.map
 **/*.backup

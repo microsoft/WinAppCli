@@ -783,7 +783,8 @@ public class DotNetServiceTests : BaseCommandTests
         Assert.IsTrue(ridStart > ridsEnd, "RuntimeIdentifier should be placed after RuntimeIdentifiers");
         // Nothing but whitespace between them
         var between = content[(ridsEnd + "</RuntimeIdentifiers>".Length)..ridStart];
-        Assert.IsTrue(string.IsNullOrWhiteSpace(between), $"Only whitespace expected between elements, got: '{between}'");
+        // The comment is expected between the elements
+        Assert.IsTrue(between.Contains("<!-- Added by winapp"), $"Expected comment between elements, got: '{between}'");
     }
 
     [TestMethod]
@@ -1011,7 +1012,137 @@ public class DotNetServiceTests : BaseCommandTests
             new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
 
         // Assert
-        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");
+        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_DetectsInlinePackageReference_WithoutDotnetRestore()
+    {
+        // Arrange — write an SDK-style csproj with an inline PackageReference. Use a non-existent
+        // SDK so a `dotnet list package` fallback would fail; success here proves the XML fast path
+        // returned true without invoking dotnet (#463).
+        var csprojPath = Path.Combine(_testTempDirectory, "Inline.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should detect inline <PackageReference Include=\"Microsoft.WindowsAppSDK\"/>.");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_CaseInsensitiveOnIncludeAttribute()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Cased.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <ItemGroup>
+    <PackageReference Include="microsoft.windowsappsdk" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should be case-insensitive on the Include attribute.");
+    }
+
+    #endregion
+
+    #region EnsureAssetContentItemsAsync
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_AddsMissingAssetsGlob()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should modify csproj when no asset Content items exist");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**\*"" />"),
+            "Should add Assets glob Content item");
+        Assert.IsTrue(content.Contains("</Project>"),
+            "Should preserve </Project> closing tag");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenAlreadyPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include=""Assets\**\*"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when asset Content items already exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenIndividualAssetPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <Content Include=""Assets\StoreLogo.png"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when individual asset Content items exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_ReturnsFalseForMissingFile()
+    {
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "NonExistent.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
     }
 
     #endregion

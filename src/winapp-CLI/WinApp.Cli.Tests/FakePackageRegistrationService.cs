@@ -13,7 +13,8 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
 {
     public List<string> RegisterLooseLayoutCalls { get; } = [];
     public List<(string ManifestPath, string ExternalLocation)> RegisterSparseCalls { get; } = [];
-    public List<string> UnregisterCalls { get; } = [];
+    public List<(string PackageName, bool PreserveAppData)> UnregisterCalls { get; } = [];
+    public List<(string PackageFullName, bool PreserveAppData)> UnregisterByFullNameCalls { get; } = [];
     public List<string> InstallPackageCalls { get; } = [];
     public List<string> GetInstalledVersionCalls { get; } = [];
     public List<string> FindDevPackagesCalls { get; } = [];
@@ -48,10 +49,27 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
-    public Task<bool> UnregisterAsync(string packageName, CancellationToken cancellationToken = default)
+    public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
-        UnregisterCalls.Add(packageName);
+        UnregisterCalls.Add((packageName, preserveAppData));
         return Task.FromResult(FakeUnregisterResult);
+    }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="UnregisterByFullNameAsync"/> throws it
+    /// instead of recording the call. Useful for testing exception-propagation paths
+    /// (e.g. cancellation surfacing from MsixService.UnregisterExistingPackageAsync).
+    /// </summary>
+    public Exception? UnregisterByFullNameThrows { get; set; }
+
+    public Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    {
+        if (UnregisterByFullNameThrows is not null)
+        {
+            throw UnregisterByFullNameThrows;
+        }
+        UnregisterByFullNameCalls.Add((packageFullName, preserveAppData));
+        return Task.CompletedTask;
     }
 
     public Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)

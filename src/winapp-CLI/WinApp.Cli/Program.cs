@@ -15,7 +15,7 @@ namespace WinApp.Cli;
 
 internal static class Program
 {
-    static async Task<int> Main(string[] args)
+    internal static async Task<int> Main(string[] args)
     {
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
         try
@@ -33,17 +33,20 @@ internal static class Program
         bool verbose = false;
         bool json = false;
 
-        if (args.Contains(WinAppRootCommand.VerboseOption.Name) || args.Any(WinAppRootCommand.VerboseOption.Aliases.Contains))
+        // Pre-scan argv for the global logging-mode flags. The scan stops at the first
+        // standalone '--' separator so that passthrough payload (e.g. `winapp run . --
+        // --json`) is not misread as a winapp global flag.
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
         {
             minimumLogLevel = LogLevel.Debug;
             verbose = true;
         }
-        if (args.Contains(WinAppRootCommand.QuietOption.Name) || args.Any(WinAppRootCommand.QuietOption.Aliases.Contains))
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
         {
             minimumLogLevel = LogLevel.Warning;
             quiet = true;
         }
-        if (args.Contains(WinAppRootCommand.JsonOption.Name) || args.Any(WinAppRootCommand.JsonOption.Aliases.Contains))
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
         {
             minimumLogLevel = LogLevel.None;
             json = true;
@@ -67,7 +70,11 @@ internal static class Program
 
         // Check if --cli-schema is specified - this outputs machine-readable JSON
         // and should not display any interactive messages like first-run notices
-        bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
+        bool isCliSchemaMode = GlobalOptionPreScan.IsFlagPresent(
+            args, WinAppRootCommand.CliSchemaOption.Name, []);
+
+        // Check if this is a completion request - completions must be fast and silent
+        bool isCompleteMode = args.Length > 0 && args[0] == "complete";
 
         var services = new ServiceCollection()
             .ConfigureServices()
@@ -81,15 +88,36 @@ internal static class Program
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        // Skip first-run notice for machine-readable output modes
+        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+        System.CommandLine.ParseResult? parseResult = null;
+
+        if (args.Length > 0)
+        {
+            parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+            // Set WINAPP_CLI_CALLER env var from --caller option so telemetry and update checks can use it
+            var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+            if (!string.IsNullOrWhiteSpace(caller))
+            {
+                Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+            }
+        }
+
+        // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json)
+        if (!isCliSchemaMode && !isCompleteMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
-        }
 
-        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+            // Check for CLI updates — shows cached notice instantly (no network),
+            // and starts a background refresh if the cache is stale (fire-and-forget).
+            if (!quiet)
+            {
+                var updateNotificationService = serviceProvider.GetRequiredService<IUpdateNotificationService>();
+                updateNotificationService.CheckAndNotify();
+            }
+        }
 
         // If no arguments provided, display banner and show help
         if (args.Length == 0)
@@ -100,32 +128,49 @@ internal static class Program
             }
 
             // Show help by invoking with --help
-            await rootCommand.Parse(["--help"]).InvokeAsync();
+            await rootCommand.Parse(["--help"], WinAppParserConfiguration.Default).InvokeAsync();
             return 0;
         }
 
-        var parseResult = rootCommand.Parse(args);
+        var parsedArgs = parseResult!;
 
-        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
-        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
-        if (!string.IsNullOrWhiteSpace(caller))
+        // Catch single-dash typos like "-app" before invocation so the user gets a clear
+        // "Did you mean --app?" message instead of System.CommandLine's confusing
+        // "Unrecognized command or argument" pointing at the wrong token (issue #467).
+        // Only run when parsing already failed — otherwise a command that legitimately
+        // accepts a "-foo"-shaped positional value would get a false-positive typo error.
+        if (parsedArgs.Errors.Count > 0)
         {
-            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parsedArgs);
+            if (typo is not null)
+            {
+                var suggested = "-" + typo;
+                Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                Console.Error.WriteLine(
+                    "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                return 1;
+            }
         }
 
         try
         {
-            CommandInvokedEvent.Log(parseResult.CommandResult);
+            if (!isCompleteMode)
+            {
+                CommandInvokedEvent.Log(parsedArgs.CommandResult);
+            }
 
-            var returnCode = await parseResult.InvokeAsync();
+            var returnCode = await parsedArgs.InvokeAsync();
 
-            CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+            if (!isCompleteMode)
+            {
+                CommandCompletedEvent.Log(parsedArgs.CommandResult, returnCode);
+            }
 
             return returnCode;
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(parseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parsedArgs.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }

@@ -2,8 +2,9 @@
   "name": "winapp",
   "displayName": "WinApp",
   "description": "WinApp extension for Visual Studio Code to assist in building, debugging, and packaging Windows applications using the WinAppCLI.",
+  "publisher": "Microsoft-WinAppCLI",
   "icon": "images/icon.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/microsoft/WinAppCli.git"
@@ -15,7 +16,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onDebug",
+    "onDebugResolve:winapp",
     "onCommand:winapp.init",
     "onCommand:winapp.restore",
     "onCommand:winapp.update",
@@ -28,74 +29,92 @@
     "onCommand:winapp.certInstall",
     "onCommand:winapp.sign",
     "onCommand:winapp.tool",
-    "onCommand:winapp.getWinappPath"
+    "onCommand:winapp.getWinappPath",
+    "onCommand:winapp.manifestAddAlias",
+    "onCommand:winapp.unregister",
+    "onCommand:winapp.certInfo"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "winapp.init",
-        "title": "WinApp: Initialize Project",
+        "title": "Initialize Project",
         "category": "WinApp"
       },
       {
         "command": "winapp.restore",
-        "title": "WinApp: Restore Packages",
+        "title": "Restore Packages",
         "category": "WinApp"
       },
       {
         "command": "winapp.update",
-        "title": "WinApp: Update Packages",
+        "title": "Update Packages",
         "category": "WinApp"
       },
       {
         "command": "winapp.pack",
-        "title": "WinApp: Create MSIX Package",
+        "title": "Create MSIX Package",
         "category": "WinApp"
       },
       {
         "command": "winapp.run",
-        "title": "WinApp: Run Application",
+        "title": "Run Application",
         "category": "WinApp"
       },
       {
         "command": "winapp.createDebugIdentity",
-        "title": "WinApp: Create Debug Identity",
+        "title": "Create Debug Identity",
         "category": "WinApp"
       },
       {
         "command": "winapp.manifestGenerate",
-        "title": "WinApp: Generate Manifest",
+        "title": "Generate Manifest",
         "category": "WinApp"
       },
       {
         "command": "winapp.manifestUpdateAssets",
-        "title": "WinApp: Update Manifest Assets",
+        "title": "Update Manifest Assets",
         "category": "WinApp"
       },
       {
         "command": "winapp.certGenerate",
-        "title": "WinApp: Generate Certificate",
+        "title": "Generate Certificate",
         "category": "WinApp"
       },
       {
         "command": "winapp.certInstall",
-        "title": "WinApp: Install Certificate",
+        "title": "Install Certificate",
         "category": "WinApp"
       },
       {
         "command": "winapp.sign",
-        "title": "WinApp: Sign Package",
+        "title": "Sign Package",
         "category": "WinApp"
       },
       {
         "command": "winapp.tool",
-        "title": "WinApp: Run SDK Tool",
+        "title": "Run SDK Tool",
         "category": "WinApp"
       },
       {
         "command": "winapp.getWinappPath",
-        "title": "WinApp: Get WinApp Path",
+        "title": "Get WinApp Path",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.manifestAddAlias",
+        "title": "Add Manifest Execution Alias",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.unregister",
+        "title": "Unregister Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.certInfo",
+        "title": "Certificate Info",
         "category": "WinApp"
       }
     ],
@@ -198,6 +217,7 @@
     "@types/vscode": "^1.109.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.3.2",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.2",
     "tsx": "^4.21.0",
@@ -206,6 +226,7 @@
   },
   "overrides": {
     "minimatch": "^10.2.1",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "fast-uri": "3.1.0"
   }
 }

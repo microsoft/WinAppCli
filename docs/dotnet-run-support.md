@@ -168,7 +168,7 @@ Disable run support for a project:
 Specify manifest path:
 ```xml
 <PropertyGroup>
-  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\appxmanifest.xml</WinAppManifestPath>
+  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\Package.appxmanifest</WinAppManifestPath>
 </PropertyGroup>
 ```
 
@@ -201,7 +201,7 @@ Capture OutputDebugString messages and first-chance exceptions:
 </PropertyGroup>
 ```
 
-Production Blockers
+## Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
 

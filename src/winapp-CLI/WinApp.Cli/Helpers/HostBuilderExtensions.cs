@@ -41,9 +41,15 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAppLauncherService, AppLauncherService>()
             .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
             .AddSingleton<IDebugOutputService, DebugOutputService>()
+            .AddSingleton<ICrashDumpService, CrashDumpService>()
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
-            .AddSingleton<IMSStoreCLIService, MSStoreCLIService>();
+            .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
+            .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
+            // UI Automation services
+            .AddSingleton<ISelectorService, SelectorService>()
+            .AddSingleton<IUiSessionService, UiSessionService>()
+            .AddSingleton<IUiAutomationService, UiAutomationService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -69,7 +75,25 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
-                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>();
+                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>()
+                // UI Automation commands
+                .ConfigureCommand<UiCommand>()
+                .UseCommandHandler<UiStatusCommand, UiStatusCommand.Handler>()
+                .UseCommandHandler<UiInspectCommand, UiInspectCommand.Handler>()
+                .UseCommandHandler<UiSearchCommand, UiSearchCommand.Handler>()
+                .UseCommandHandler<UiGetPropertyCommand, UiGetPropertyCommand.Handler>()
+                .UseCommandHandler<UiGetValueCommand, UiGetValueCommand.Handler>()
+                .UseCommandHandler<UiScreenshotCommand, UiScreenshotCommand.Handler>()
+                .UseCommandHandler<UiInvokeCommand, UiInvokeCommand.Handler>()
+                .UseCommandHandler<UiClickCommand, UiClickCommand.Handler>()
+                .UseCommandHandler<UiSetValueCommand, UiSetValueCommand.Handler>()
+                .UseCommandHandler<UiFocusCommand, UiFocusCommand.Handler>()
+                .UseCommandHandler<UiScrollIntoViewCommand, UiScrollIntoViewCommand.Handler>()
+                .UseCommandHandler<UiScrollCommand, UiScrollCommand.Handler>()
+                .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
+                .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
+                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                .ConfigureCommand<CompleteCommand>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)

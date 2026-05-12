@@ -472,7 +472,7 @@ internal partial class CertificateService(
     /// Infers the publisher name using the specified hierarchy:
     /// 1. If explicit publisher is provided, use that
     /// 2. If manifest path is provided, extract publisher from that manifest
-    /// 3. If appxmanifest.xml is found in project (.winapp directory), use that
+    /// 3. If a project manifest is found by searching the current directory and parent directories (preferring Package.appxmanifest, then appxmanifest.xml), use that
     /// 4. Use the system default publisher (from SystemDefaultsService.GetDefaultPublisherCN())
     /// </summary>
     private async Task<string> InferPublisherAsync(
@@ -504,7 +504,7 @@ internal partial class CertificateService(
             }
         }
 
-        // 3. If appxmanifest.xml is found in the current project, use that
+        // 3. If Package.appxmanifest is found in the current project, use that
         var projectManifestPath = MsixService.FindProjectManifest(currentDirectoryProvider);
         if (projectManifestPath != null)
         {

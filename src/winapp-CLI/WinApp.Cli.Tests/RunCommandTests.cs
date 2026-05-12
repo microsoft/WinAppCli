@@ -152,6 +152,34 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
 
+    [TestMethod]
+    public void ParseOptions_Clean_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--clean"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.CleanOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_CleanNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.CleanOption));
+    }
+
     #endregion
 
     #region Handler tests
@@ -169,7 +197,40 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsFalse(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "Default run should preserve app data (clean=false)");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "Application should NOT be launched with --no-launch");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithClean_PassesCleanThroughToMsixService()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch", "--clean"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsTrue(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "--clean should be passed through to MSIX service");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithoutClean_DefaultsToPreservingAppData()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.IsFalse(_fakeMsixService.AddLooseLayoutCalls[0].Clean, "Without --clean, app data should be preserved");
     }
 
     [TestMethod]
@@ -202,7 +263,7 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
-        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0], subFolder.FullName,
+        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0].ManifestPath, subFolder.FullName,
             "Manifest should be resolved from the input folder");
     }
 
@@ -220,7 +281,7 @@ public class RunCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Command should succeed");
         Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
-        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0], manifest.FullName,
+        StringAssert.Contains(_fakeMsixService.AddLooseLayoutCalls[0].ManifestPath, manifest.FullName,
             "Explicit --manifest should take priority");
     }
 
@@ -594,6 +655,479 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual("--my-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
             "Arguments should be forwarded to the launcher");
         Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should be called");
+    }
+
+    #endregion
+
+    #region --detach option tests
+
+    [TestMethod]
+    public void ParseOptions_Detach_IsParsedCorrectly()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsTrue(parseResult.GetValue(RunCommand.DetachOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_DetachNotSpecified_DefaultsToFalse()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
+        Assert.IsFalse(parseResult.GetValue(RunCommand.DetachOption));
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndNoLaunch_ReturnsError()
+    {
+        // Arrange - --detach and --no-launch are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--no-launch"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --no-launch are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndDebugOutput_ReturnsError()
+    {
+        // Arrange - --detach and --debug-output are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--debug-output"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --debug-output are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndWithAlias_ReturnsError()
+    {
+        // Arrange - --detach and --with-alias are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--with-alias"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --with-alias are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachAndUnregisterOnExit_ReturnsError()
+    {
+        // Arrange - --detach and --unregister-on-exit are mutually exclusive
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--unregister-on-exit"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Command should fail when both --detach and --unregister-on-exit are specified");
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_Detach_LaunchesByAumidAndReturnsImmediately()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Debug identity should be created");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched via AUMID");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachWithJson_OutputsJsonWithProcessId()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach", "--json"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+
+        var json = ParseJsonOutput();
+        Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, json.GetProperty("ProcessId").GetUInt32(),
+            "ProcessId should be present in detach mode");
+        Assert.IsFalse(json.TryGetProperty("Error", out _), "Error should not be present on success");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DetachWithoutJson_DoesNotOutputJson()
+    {
+        // Arrange
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--detach"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("\"AUMID\""), "JSON fields should not appear without --json flag");
+        Assert.IsFalse(output.Contains("\"ProcessId\""), "JSON fields should not appear without --json flag");
+    }
+
+    #endregion
+
+    #region -- passthrough argument tests
+
+    // --- Parse-level behaviour ---
+
+    [TestMethod]
+    public void ParseOptions_DoubleDashPassthrough_ProducesNoParseErrors()
+    {
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--", "--flag", "value"]);
+        Assert.IsEmpty(parseResult.Errors, "Tokens after -- should not cause parse errors");
+    }
+
+    [TestMethod]
+    public void ParseOptions_BareDoubleDash_ProducesNoParseErrors()
+    {
+        // A bare '--' with nothing after it is valid; the app simply receives no passthrough args.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--"]);
+        Assert.IsEmpty(parseResult.Errors, "A bare -- with nothing following should not cause parse errors");
+    }
+
+    [TestMethod]
+    public void ParseOptions_UnknownOptionBeforeDoubleDash_AbsorbedIntoZeroOrMore_NoParseError()
+    {
+        // With a ZeroOrMore positional argument, System.CommandLine absorbs unrecognised
+        // option-like tokens (e.g. '--unknown-opt') into the argument rather than reporting
+        // them as parse errors. The handler uses SplitPassthroughTokens to detect and reject
+        // these tokens at invocation time.
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--unknown-opt", "--", "--app-flag"]);
+        Assert.IsEmpty(parseResult.Errors,
+            "ZeroOrMore absorbs pre-'--' unknown tokens silently; the handler validates them");
+    }
+
+    // --- Handler: basic passthrough scenarios ---
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ForwardsArgsToLauncher()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--my-flag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--my-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args after -- should be forwarded to the launcher");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_BareDoubleDash_LaunchesWithNoArgs()
+    {
+        // A bare '--' separator with nothing after it should launch successfully with no app args.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed with a bare --");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.IsNull(_fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "No app args should be passed when nothing follows --");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_MultipleArgs_AllForwarded()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--flag1", "v1", "--flag2", "v2", "--flag3"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual("--flag1 v1 --flag2 v2 --flag3",
+            _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "All passthrough tokens should be forwarded in order");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_MergesWithArgsOption()
+    {
+        // --args value and tokens after -- are both forwarded, --args first.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--args", "--existing", "--", "--flag"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual("--existing --flag", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "--args value and -- passthrough args should both be forwarded");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ValueWithSpace_QuotedInLaunchArgs()
+    {
+        // This test verifies the full pipeline: token → JoinArguments → launcher.
+        // A value that contains a space must be quoted so the launched app's CommandLineToArgvW
+        // recovers the original token correctly.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--title", "hello world"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Values containing spaces must be quoted in the final command-line string");
+    }
+
+    // --- Handler: unknown-token rejection ---
+
+    [TestMethod]
+    public async Task RunCommand_UnknownOptionBeforeDoubleDash_ReturnsError()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--unknown-winapp-option", "--", "--app-flag"]);
+
+        Assert.AreEqual(1, exitCode, "Unknown winapp options before -- should still fail");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_BadTokenBeforeDoubleDash_RejectsWithError_DoesNotForwardGoodToken()
+    {
+        // Explicit test for: winapp run . --badtoken -- --cooltoken
+        // --badtoken is an unrecognised winapp option BEFORE '--' → error, exit 1
+        // --cooltoken is a legitimate passthrough AFTER '--' → NOT forwarded (command aborts)
+        // This ensures the bad pre-dash token is caught and no launch occurs.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--badtoken", "--", "--cooltoken"]);
+
+        Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
+            "App must NOT be launched when a bad pre-dash token is present");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_UnknownOptionWithNoDoubleDash_ReturnsError()
+    {
+        // Ensures the guard fires even when the user never typed '--'.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--unknown-winapp-option"]);
+
+        Assert.AreEqual(1, exitCode, "Unknown options without -- should fail");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_SameTokenBeforeAndAfterDoubleDash_ReturnsError()
+    {
+        // The duplicate-value edge case: the same string appears before '--' (bad) and after '--'
+        // (legitimate passthrough).  A naïve set-based check would cancel them out and let the bad
+        // token through.  The count-based implementation must catch it.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--flag", "--", "--flag"]);
+
+        Assert.AreEqual(1, exitCode,
+            "The pre-dash unknown token must be rejected even when the same value appears as passthrough");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    // --- Handler: passthrough interacts correctly with other mode flags ---
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithNoLaunch_Succeeds()
+    {
+        // --no-launch registers the package without launching; passthrough args are collected but
+        // irrelevant — the important thing is the command does NOT error just because -- was used.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--no-launch", "--", "--app-flag"]);
+
+        Assert.AreEqual(0, exitCode, "-- passthrough should not cause an error when combined with --no-launch");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Package should still be registered");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched with --no-launch");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithDetach_ForwardsArgs()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--detach", "--", "--app-flag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--app-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args should be forwarded to the launcher in --detach mode");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_WithDebugOutput_ForwardsArgs()
+    {
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--debug-output", "--", "--app-flag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--app-flag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "Passthrough args should be forwarded to the launcher in --debug-output mode");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "Debug service should still be called");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DoubleDashPassthrough_ForwardsLiteralDoubleDash()
+    {
+        // A '--' that appears AFTER the separator is an app argument, not another separator.
+        // It must be forwarded as the literal string "--".
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--"]);
+
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
+        Assert.AreEqual("--", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "A literal -- after the passthrough separator should be forwarded to the app");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_BadTokenBeforeDoubleDash_WithJson_EmitsJsonErrorBody()
+    {
+        // Regression for: in --json mode the logger is suppressed, so a bad pre-dash token
+        // would otherwise produce only exit code 1 with empty stdout. The handler must emit
+        // a structured JSON error body so machine-readable callers can surface a useful message.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--json", "--badtoken", "--", "--cooltoken"]);
+
+        Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1 even in --json mode");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched");
+
+        // The handler must have written a JSON document (with an Error field that names the
+        // offending token) to stdout. We avoid full JsonDocument.Parse here because the test
+        // console wraps long string values at width boundaries; substring assertions are
+        // sufficient to demonstrate the error body was produced and references the bad token.
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, "\"Error\":",
+            "JSON output must contain an Error field in --json mode (got: " + output + ")");
+        StringAssert.Contains(output, "--badtoken",
+            "Error message should name the offending token");
+        StringAssert.Contains(output, "{",
+            "Output should contain a JSON object opening brace");
+        StringAssert.Contains(output, "}",
+            "Output should contain a JSON object closing brace");
+    }
+
+    // --- BuildAliasProcessStartInfo: passthrough forwarded into execution-alias ProcessStartInfo ---
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithAppArgs_SetsArgumentsOnProcessStartInfo()
+    {
+        // The execution-alias launch path uses a separate Process.Start, so this test
+        // verifies that passthrough args (after merge with --args) are forwarded into
+        // ProcessStartInfo.Arguments verbatim.
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", "--flag value");
+
+        Assert.AreEqual("myalias.exe", psi.FileName);
+        Assert.AreEqual("--flag value", psi.Arguments);
+        Assert.IsFalse(psi.UseShellExecute, "UseShellExecute must be false so stdio inherits");
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithQuotedAppArgs_PreservesQuoting()
+    {
+        // The merged appArgs string for the alias path has already been escaped via
+        // WindowsCommandLine.JoinArguments. BuildAliasProcessStartInfo must pass the
+        // escaped string through unchanged so CommandLineToArgvW recovers original tokens.
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", "--title \"hello world\"");
+
+        Assert.AreEqual("--title \"hello world\"", psi.Arguments);
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithNullAppArgs_LeavesArgumentsEmpty()
+    {
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", null);
+
+        Assert.AreEqual("myalias.exe", psi.FileName);
+        Assert.AreEqual(string.Empty, psi.Arguments,
+            "Null appArgs must NOT set Arguments (default ProcessStartInfo.Arguments is empty string)");
+    }
+
+    [TestMethod]
+    public void BuildAliasProcessStartInfo_WithEmptyAppArgs_LeavesArgumentsEmpty()
+    {
+        var psi = RunCommand.Handler.BuildAliasProcessStartInfo("myalias.exe", string.Empty);
+
+        Assert.AreEqual(string.Empty, psi.Arguments,
+            "Empty appArgs must NOT set Arguments");
     }
 
     #endregion

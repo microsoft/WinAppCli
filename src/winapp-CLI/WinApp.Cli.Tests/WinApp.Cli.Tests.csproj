@@ -10,11 +10,17 @@
     <AnalysisMode>Recommended</AnalysisMode>
     
     <!-- Suppress specific warnings -->
-    <NoWarn>CA1852;CA1707;IDE1006</NoWarn>
+    <!-- SYSLIB1045: inline Regex constructions in test assertions are throwaway literals
+         (used by StringAssert.DoesNotMatch); compile-time GeneratedRegex source-gen would
+         add zero value here and only bloat the test file. -->
+    <NoWarn>CA1852;CA1707;IDE1006;SYSLIB1045</NoWarn>
     
     <!-- Test discovery and execution -->
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- Exclude test app source files from compilation -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);TestApps\**\*</DefaultItemExcludes>
 
     <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
     <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>

@@ -153,10 +153,10 @@ internal partial class ManifestService(
         // If logo path is provided, update manifest assets
         if (logoPath?.Exists == true)
         {
-            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
+            var manifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
             if (!manifestPath.Exists)
             {
-                manifestPath = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
+                manifestPath = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
             }
             if (manifestPath.Exists)
             {
@@ -605,9 +605,8 @@ internal partial class ManifestService(
         }
 
         // Build the ExecutionAlias element
-        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias",
-            new XAttribute("Alias", aliasName));
-
+        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias", new XAttribute("Alias", aliasName));
+        
         // Find or create the Extensions > uap5:Extension > uap5:AppExecutionAlias hierarchy
         var extensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
         if (extensions == null)
