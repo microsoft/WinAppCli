@@ -45,6 +45,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
+            .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()

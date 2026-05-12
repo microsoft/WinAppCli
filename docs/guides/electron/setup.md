@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Setting Up the Development Environment
 
 This guide walks you through setting up your Electron development environment for Windows API development. You'll install the necessary tools, initialize your project, and configure Windows SDKs.
@@ -109,6 +110,19 @@ This script automatically runs after `npm install` and does two things:
 1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
 2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
 
+> [!IMPORTANT]
+> **Electron 42 and newer**: As of Electron 42, the binary is no longer downloaded automatically during `npm install` ([release notes](https://github.com/electron/electron/releases/tag/v42.0.0)). You must download it explicitly before `add-electron-debug-identity` runs:
+>
+> ```json
+> {
+>   "scripts": {
+>     "postinstall": "npx --no-install install-electron && winapp restore && winapp node add-electron-debug-identity"
+>   }
+> }
+> ```
+>
+> The `--no-install` flag ensures `npx` only runs the `install-electron` bin shipped by your installed Electron package and never silently downloads anything from the registry. If you pin to Electron < 42, omit this step — the binary is already in place after `npm install`.
+
 Now run `npm install` to trigger the postinstall script and configure the Windows environment:
 
 ```bash
@@ -127,10 +141,28 @@ Create `scripts/postinstall.js`:
 ```javascript
 if (process.platform === 'win32') {
   const { execSync } = require('child_process');
+  const fs = require('fs');
+  const path = require('path');
+
+  // Electron 42+ ships an `install-electron` bin and skips the postinstall download.
+  // Run it only when present, and use `--no-install` so npx never silently fetches
+  // anything from the registry.
+  const installElectronBin = path.join(
+    'node_modules', '.bin',
+    process.platform === 'win32' ? 'install-electron.cmd' : 'install-electron'
+  );
+  const steps = [];
+  if (fs.existsSync(installElectronBin)) {
+    steps.push('npx --no-install install-electron');
+  }
+  steps.push(
+    'npx winapp restore',
+    'npx winapp cert generate --if-exists skip',
+    'npx winapp node add-electron-debug-identity'
+  );
+
   try {
-    execSync('npx winapp restore && npx winapp cert generate --if-exists skip && npx winapp node add-electron-debug-identity', {
-      stdio: 'inherit'
-    });
+    execSync(steps.join(' && '), { stdio: 'inherit' });
   } catch (error) {
     console.warn('Warning: Windows-specific setup failed. If you are not developing Windows features, you can ignore this.');
   }
@@ -224,4 +256,4 @@ Now that your development environment is set up, you're ready to create native a
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to create a C# addon that uses Windows Machine Learning
 - **[Packaging for Distribution](packaging.md)** - Create an MSIX package for distribution
 
-Or return to the **[Getting Started Overview](../../electron-get-started.md)**.
+Or return to the **[Getting Started Overview](index.md)**.

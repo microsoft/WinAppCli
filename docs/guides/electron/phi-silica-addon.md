@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Creating a Phi Silica Addon
 
 This guide shows you how to create a C# native addon that calls the Phi Silica AI API in your Electron app. Phi Silica is a small language model that runs locally on Windows 11 devices with NPUs (Neural Processing Units).
@@ -212,7 +213,7 @@ Now you're ready to:
 
 Or explore other guides:
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to use Windows Machine Learning
-- **[Getting Started Overview](../../electron-get-started.md)** - Return to the main guide
+- **[Getting Started Overview](index.md)** - Return to the main guide
 
 ### Additional Resources
 
