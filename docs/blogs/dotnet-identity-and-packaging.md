@@ -69,7 +69,7 @@ Now what about packaging?
 
 ## Creating MSIX packages with `winapp pack`
 
-The winapp CLI provides `pack` and `cert generate` commands to streamline the MSIX creation process. Assuming you've initialized your project with `winapp init`, this is all it takes to create an installable MSIX:
+The WinApp CLI provides `pack` and `cert generate` commands to streamline the MSIX creation process. Assuming you've initialized your project with `winapp init`, this is all it takes to create an installable MSIX:
 
 1. Build your application in `Release` configuration:
 ```
