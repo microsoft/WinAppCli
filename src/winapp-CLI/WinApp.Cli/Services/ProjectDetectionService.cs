@@ -184,6 +184,10 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         {
             return false;
         }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool HasElectronDependency(JsonElement root, string propertyName)
