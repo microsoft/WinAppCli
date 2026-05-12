@@ -51,7 +51,7 @@ For more details on how exactly the winapp CLI works with dotnet under the hood,
 
 If you are building a console application, and want output to remain in the current terminal window, you will need to add an execution alias:
 
-1. Add the required alias to your `Package.appxmanifest` with winapp CLI:
+1. Add the required alias to your `Package.appxmanifest` with WinApp CLI:
 ```
 winapp manifest add-alias
 ```
