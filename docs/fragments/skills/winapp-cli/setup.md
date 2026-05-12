@@ -46,9 +46,6 @@ winapp init --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
 winapp init --use-defaults --setup-sdks preview
-
-# Include normally-ignored directories in project search
-winapp init --search-all
 ```
 
 After `init`, your project will contain:

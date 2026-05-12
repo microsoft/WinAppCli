@@ -45,7 +45,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
     };
 
     /// <summary>
-    /// Directory names that are always skipped, even with --search-all.
+    /// Directory names that are always skipped during project search.
     /// These are either not real project directories or can cause infinite loops.
     /// </summary>
     private static readonly HashSet<string> HardIgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
@@ -57,15 +57,12 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
     public Task<IReadOnlyList<DetectedProject>> DetectProjectsAsync(
         DirectoryInfo root,
         int maxProjects,
-        bool searchAll,
         IProgress<DetectedProject>? progress,
         CancellationToken cancellationToken)
     {
         var results = new List<DetectedProject>();
         var queue = new Queue<DirectoryInfo>();
         queue.Enqueue(root);
-
-        var ignoredNames = searchAll ? HardIgnoredDirectories : DefaultIgnoredDirectories;
 
         while (queue.Count > 0 && results.Count < maxProjects)
         {
@@ -84,7 +81,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
             }
 
             // Enqueue subdirectories for further searching
-            EnqueueSubdirectories(queue, current, ignoredNames);
+            EnqueueSubdirectories(queue, current, DefaultIgnoredDirectories);
         }
 
         return Task.FromResult<IReadOnlyList<DetectedProject>>(results);

@@ -35,7 +35,6 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
-- `--search-all` - Search all directories, including commonly ignored ones like node_modules, bin, obj, etc.
 
 **What it does:**
 
@@ -58,7 +57,7 @@ When `init` is run without a directory argument, it performs a breadth-first sea
 - **Rust** — `Cargo.toml` at project root
 - **C++** — `CMakeLists.txt` at project root
 
-The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.) unless `--search-all` is specified. When a compatible project is found, subdirectories below it are not searched.
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
 
 - If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
 - If `--use-defaults` is set, the search is skipped and `init` proceeds in the current directory (warning if no project is detected)

@@ -21,7 +21,6 @@ internal class InitCommand : Command, IShortDescription
     public static Option<bool> NoGitignoreOption { get; }
     public static Option<bool> UseDefaults { get; }
     public static Option<bool> ConfigOnlyOption { get; }
-    public static Option<bool> SearchAllOption { get; }
 
     static InitCommand()
     {
@@ -57,10 +56,6 @@ internal class InitCommand : Command, IShortDescription
         {
             Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
         };
-        SearchAllOption = new Option<bool>("--search-all")
-        {
-            Description = "Search all directories, including commonly ignored ones like node_modules, bin, obj, etc."
-        };
     }
 
     public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.")
@@ -72,7 +67,6 @@ internal class InitCommand : Command, IShortDescription
         Options.Add(NoGitignoreOption);
         Options.Add(UseDefaults);
         Options.Add(ConfigOnlyOption);
-        Options.Add(SearchAllOption);
     }
 
     public class Handler(
@@ -93,25 +87,19 @@ internal class InitCommand : Command, IShortDescription
             var noGitignore = parseResult.GetValue(NoGitignoreOption);
             var useDefaults = parseResult.GetValue(UseDefaults);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
-            var searchAll = parseResult.GetValue(SearchAllOption);
 
             DirectoryInfo? selectedDirectory;
 
             if (baseDirectoryExplicit || useDefaults)
             {
                 // User specified a directory or --use-defaults: skip search, use the directory directly
-                if (searchAll)
-                {
-                    logger.LogDebug("--search-all has no effect when a directory is specified or --use-defaults is set");
-                }
-
                 selectedDirectory = await InitDirectlyAsync(baseDirectory, useDefaults, cancellationToken);
             }
             else
             {
                 // No directory specified: search for compatible projects
                 selectedDirectory = await DetectAndSelectProjectAsync(
-                    baseDirectory, searchAll, cancellationToken);
+                    baseDirectory, cancellationToken);
             }
 
             if (selectedDirectory == null)
@@ -150,7 +138,6 @@ internal class InitCommand : Command, IShortDescription
         /// </summary>
         private async Task<DirectoryInfo?> DetectAndSelectProjectAsync(
             DirectoryInfo searchRoot,
-            bool searchAll,
             CancellationToken cancellationToken)
         {
             const int maxProjects = 10;
@@ -168,13 +155,13 @@ internal class InitCommand : Command, IShortDescription
                     .StartAsync("Searching for compatible projects...", async ctx =>
                     {
                         return await projectDetectionService.DetectProjectsAsync(
-                            searchRoot, maxProjects, searchAll, progress: null, cancellationToken);
+                            searchRoot, maxProjects, progress: null, cancellationToken);
                     });
             }
             else
             {
                 results = await projectDetectionService.DetectProjectsAsync(
-                    searchRoot, maxProjects, searchAll, progress: null, cancellationToken);
+                    searchRoot, maxProjects, progress: null, cancellationToken);
             }
 
             // Handle results based on count

@@ -51,9 +51,6 @@ winapp init --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
 winapp init --use-defaults --setup-sdks preview
-
-# Include normally-ignored directories in project search
-winapp init --search-all
 ```
 
 After `init`, your project will contain:
@@ -178,7 +175,6 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
-| `--search-all` | Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
 | `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
 

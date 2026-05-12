@@ -203,7 +203,7 @@ public class ProjectDetectionServiceTests
         CreateDir("sub");
         CreateFile(Path.Combine("sub", "Cargo.toml"), "[package]");
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
 
         // Root project should be found; sub should be pruned
         Assert.AreEqual(1, results.Count);
@@ -219,7 +219,7 @@ public class ProjectDetectionServiceTests
         CreateDir("app2");
         CreateFile(Path.Combine("app2", "CMakeLists.txt"), "cmake_minimum_required(VERSION 3.0)");
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
 
         Assert.AreEqual(2, results.Count);
         var types = results.Select(r => r.Type).ToHashSet();
@@ -236,7 +236,7 @@ public class ProjectDetectionServiceTests
         CreateDir("sub", "app", "nested");
         CreateFile(Path.Combine("sub", "app", "nested", "CMakeLists.txt"), "cmake");
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
 
         // Only the parent project should be found, nested should be pruned
         Assert.AreEqual(1, results.Count);
@@ -252,7 +252,7 @@ public class ProjectDetectionServiceTests
             CreateFile(Path.Combine($"app{i}", "Cargo.toml"), "[package]");
         }
 
-        var results = await _sut.DetectProjectsAsync(Root, 3, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 3, null, CancellationToken.None);
 
         Assert.AreEqual(3, results.Count);
     }
@@ -265,40 +265,10 @@ public class ProjectDetectionServiceTests
         CreateDir("src");
         CreateFile(Path.Combine("src", "CMakeLists.txt"), "cmake");
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
 
         Assert.AreEqual(1, results.Count);
         Assert.AreEqual(DetectedProjectType.CPP, results[0].Type);
-    }
-
-    [TestMethod]
-    public async Task DetectProjects_BFS_SearchAllStillSkipsHardIgnored()
-    {
-        // .git should be skipped even with searchAll=true
-        CreateDir(".git", "objects");
-        CreateFile(Path.Combine(".git", "objects", "Cargo.toml"), "[package]");
-        CreateDir("src");
-        CreateFile(Path.Combine("src", "CMakeLists.txt"), "cmake");
-
-        var results = await _sut.DetectProjectsAsync(Root, 5, true, null, CancellationToken.None);
-
-        Assert.AreEqual(1, results.Count);
-        Assert.AreEqual(DetectedProjectType.CPP, results[0].Type);
-    }
-
-    [TestMethod]
-    public async Task DetectProjects_BFS_SearchAllFindsInSoftIgnoredDirs()
-    {
-        CreateDir("build");
-        CreateFile(Path.Combine("build", "CMakeLists.txt"), "cmake");
-
-        // Default: should skip "build"
-        var resultsDefault = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
-        Assert.AreEqual(0, resultsDefault.Count);
-
-        // search-all: should find it
-        var resultsAll = await _sut.DetectProjectsAsync(Root, 5, true, null, CancellationToken.None);
-        Assert.AreEqual(1, resultsAll.Count);
     }
 
     [TestMethod]
@@ -312,7 +282,7 @@ public class ProjectDetectionServiceTests
         var reported = new List<DetectedProject>();
         var progress = new SynchronousProgress<DetectedProject>(p => reported.Add(p));
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, progress, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, progress, CancellationToken.None);
 
         Assert.AreEqual(results.Count, reported.Count);
     }
@@ -320,7 +290,7 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public async Task DetectProjects_BFS_EmptyDir_ReturnsEmpty()
     {
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
         Assert.AreEqual(0, results.Count);
     }
 
@@ -341,7 +311,7 @@ public class ProjectDetectionServiceTests
         CreateDir("src", "my-app");
         CreateFile(Path.Combine("src", "my-app", "Cargo.toml"), "[package]");
 
-        var results = await _sut.DetectProjectsAsync(Root, 5, false, null, CancellationToken.None);
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
 
         Assert.AreEqual(1, results.Count);
         Assert.AreEqual("src/my-app", results[0].DisplayPath);
@@ -395,7 +365,7 @@ public class ProjectDetectionServiceTests
         cts.Cancel();
 
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
-            await _sut.DetectProjectsAsync(Root, 5, false, null, cts.Token));
+            await _sut.DetectProjectsAsync(Root, 5, null, cts.Token));
     }
 }
 

@@ -249,8 +249,6 @@ export interface InitOptions extends CommonOptions {
   ignoreConfig?: boolean;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
-  /** Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. */
-  searchAll?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
   /** Do not prompt, and use default of all prompts */
@@ -267,7 +265,6 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.configOnly) args.push('--config-only');
   if (options.ignoreConfig) args.push('--ignore-config');
   if (options.noGitignore) args.push('--no-gitignore');
-  if (options.searchAll) args.push('--search-all');
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.useDefaults) args.push('--use-defaults');
   return execCommand(args, options);

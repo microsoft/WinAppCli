@@ -712,19 +712,6 @@
           "required": false,
           "recursive": false
         },
-        "--search-all": {
-          "description": "Search all directories, including commonly ignored ones like node_modules, bin, obj, etc.",
-          "hidden": false,
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
         "--setup-sdks": {
           "description": "SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)",
           "hidden": false,
