@@ -1,13 +1,15 @@
-# Packaging and Package Identity for .NET apps with winapp CLI on Windows
+# Packaging and Package Identity for .NET apps with WinApp CLI on Windows
 
-Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed.
+Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed. 
 
-Now, with the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
+With the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
 
 The WinApp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
 1. The WinApp CLI integrates with existing dotnet tooling to enable you to test your application with package identity via `dotnet run`
 2. The WinApp CLI makes packaging applications as MSIX easy via `winapp pack`
+
+The WinApp CLI works for .NET console, WPF, WinForms, and WinUI3 applications.
 
 <!-- image with cli first run visual -->
 
@@ -22,18 +24,21 @@ winget install Microsoft.winappcli --source winget
 
 Once you have the winapp CLI installed, running your .NET app with identity is easy:
 
-### 1. Initialize your project with winapp.
+### 1. Initialize your project with winapp
 
 ```
 winapp init --use-defaults
 ```
 
 The init command takes care of all the prerequisites for enabling identity:
-- Ensures the `TargetFramework` specified in your `.csproj` is supported
-- Adds `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
-- Generates both a `Package.appxmanifest` and required asset files, placed in an `Assets` directory
+- Ensures the `TargetFramework` specified in your `.csproj` is targeting a compatible version of the Windows platform. This is required to properly enable access to Windows APIs.
+- Adds three package references to your `.csproj`:
+    - `Microsoft.WindowsAppSDK` This dependency is the Windows SDK itself, and grants access to Windows APIs.
+    - `Microsoft.Windows.SDK.BuildTools` Windows Build Tools are required for packaging and signing your application.
+    - `Microsoft.Windows.SDK.BuildTools.WinApp` This is the NuGet package for WinApp itself. This dependency enables seamless `dotnet run` usage via WinApp.
+- Generates both a `Package.appxmanifest` and required asset files, placed in an `Assets` directory. These files are required to grant package identity.
 
-If you want more control over the init experience, run without the `--use-defaults` flag.
+If you want more control over the init experience, run without the `--use-defaults` flag. This will give you control over versioning, package and publisher name, and allow you to manage which dependencies are added to your project.
 
 ### 2. Debug with `dotnet run`
 
@@ -44,6 +49,12 @@ dotnet run
 ```
 
 This will launch your app with package identity, allowing you to easily add and test Windows features within your app.
+
+If you want to unregister your application and clean up any app data after launching with identity, run this command from the project root:
+
+```
+winapp unregister
+```
 
 For more details on how exactly the winapp CLI works with dotnet under the hood, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
 
@@ -63,7 +74,7 @@ winapp manifest add-alias
 
 ### That's it.
 
-Those two steps (or three for console applications) are all that's required to run your application with identity locally.
+Those two steps (or three for console applications) are all that's required to run your application with identity locally. Your app will now be able to access Windows features and APIs (like notifications, file handlers, and background tasks) that were gated behind identity.
 
 Now what about packaging?
 
@@ -75,24 +86,18 @@ The WinApp CLI provides `pack` and `cert generate` commands to streamline the MS
 ```
 dotnet build -c Release
 ```
-2. Generate a certificate with `winapp cert generate`, which will be named `devcert.pfx` by default:
-```
-winapp cert generate
-```
 
-3. Package your application with the `pack` command, specifying your output directory and the cert you just generated. Run this command from your project root:
+2. Package your application with the `pack` command, specifying your output directory. Run this command from your project root:
 
-The `pack` command will output a signed MSIX, ready to install.
-
-Before installing the MSIX, make sure to install the certificate:
-
-```
-winapp cert install .\devcert.pfx
-```
-
-And you're ready to test out your package!
+The `pack` command will output a signed MSIX.
 
 <!-- image showing generated msix -->
+
+### Testing locally
+If you need to test locally, you will need to sign your package with a self-signed certificate.
+
+WinApp can generate certificates via the `winapp cert generate` command and install them via `winapp cert install`.
+
 
 For a more in-depth breakdown for these scenarios with .NET, check out the full [.NET guide.](https://github.com/microsoft/winappCli/blob/main/docs/guides/dotnet.md)
 
@@ -112,13 +117,59 @@ Check out the [Usage documentation](https://github.com/microsoft/winappCli/blob/
 
 If you prefer to stay inside Visual Studio Code, and want an integrated debugging experience, we recently launched a [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp) to expose winapp CLI functionality through VS Code commands.
 
-With some brief configuration, you can enable a "F5" debug experience, allowing you to launch and test your app from within VS Code with a button press. The extension also exposes commands for packaging and cert generation via the command palette.
+With some brief configuration, you can enable a "F5" debug experience, allowing you to launch and test your app from within VS Code with a button press. To enable F5 debugging via the WinApp extension:
 
-Once the extension is installed, hit `Ctrl+Shift+P` to open the command palette and type `winapp` to see available commands.
+1. Update your `launch.json` to include a `winapp` configuration:
+
+```json
+{
+  "version": "0.3.0",
+  "configurations": [
+    {
+      "type": "winapp",
+      "request": "launch",
+      "name": "WinApp: Launch and Attach"
+    }
+  ]
+}
+```
+
+2. Automate the build process by defining a build task in `.vscode/tasks.json`:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "command": "dotnet",
+      "type": "process",
+      "args": ["build", "${workspaceFolder}"],
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}
+```
+
+3. Update the `winapp` configuration in your `launch.json` to reference your build task:
+
+```json
+{
+  "type": "winapp",
+  "request": "launch",
+  "name": "WinApp: Launch and Attach",
+  "preLaunchTask": "build"
+}
+```
+
+Now, hitting F5 will automatically build and launch your application.
+
+### Access WinApp commands via the command palette
+In addition to integrated launching, the extension also exposes much of the CLI's functionality via the VS Code command palette. Hit `Ctrl+Shift+P` to open the command palette and type `winapp` to see available commands, including packaging and signing commands.
 
 <!-- Image here of command palette open -->
  
- For more info on the winapp extension, check out the [release blog post.](https://devblogs.microsoft.com/ifdef-windows/announcing-the-winapp-vs-code-extension-run-debug-and-package-windows-apps-in-vs-code/)
+For more info on the winapp extension, check out the [release blog post.](https://devblogs.microsoft.com/ifdef-windows/announcing-the-winapp-vs-code-extension-run-debug-and-package-windows-apps-in-vs-code/)
 
 ## Get Started
 
