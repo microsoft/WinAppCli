@@ -36,7 +36,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 ```powershell
 # Interactive — prompts for app name, publisher, SDK channel, etc.
 # Automatically searches for compatible projects (Tauri, Electron, .NET, Rust, C++, Flutter)
-winapp init .
+winapp init
 
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
 winapp init --use-defaults
