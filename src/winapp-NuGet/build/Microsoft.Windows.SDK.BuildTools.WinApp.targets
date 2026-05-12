@@ -7,6 +7,7 @@
   
   Key targets:
   - _WinAppValidateRunSupport: Validates prerequisites for running packaged apps
+  - _WinAppInstallFrameworkDependencies: Installs missing framework MSIXes contributed by NuGets (via @(AppxPackageRegistration))
   - _WinAppBuildRunArgs: Builds the CLI command arguments (shared)
   - RunPackagedApp: Runs the packaged application via the WinAppCLI
   
@@ -135,6 +136,52 @@
 
   <!--
     ============================================================================
+    _WinAppInstallFrameworkDependencies Target
+
+    Installs any framework MSIXes contributed by NuGets via the standard
+    @(AppxPackageRegistration) item group (the same item group VS Deploy
+    consumes from Microsoft.WindowsAppSDK.Runtime, etc.) so that
+    Add-AppxPackage -Register doesn't fail with 0x80073CF3
+    ("package depends on a framework that could not be found") when the
+    WinAppSDK framework package isn't already installed on the machine.
+
+    Filters by Architecture metadata to match the current build platform.
+    Installs are idempotent — Add-AppxPackage no-ops when the same version
+    is already registered. Running powershell via Exec avoids requiring a
+    new winapp CLI command (PackageRegistrationService.InstallPackageAsync
+    in the CLI could be surfaced as `winapp install-package` in a follow-up).
+    ============================================================================
+  -->
+  <Target Name="_WinAppInstallFrameworkDependencies"
+          DependsOnTargets="_WinAppValidateRunSupport"
+          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None' And '@(AppxPackageRegistration)' != ''">
+
+    <!-- Normalize MSBuild $(Platform) into the AppxPackageRegistration Architecture token (x64/x86/arm64). -->
+    <PropertyGroup>
+      <_WinAppArch>$(Platform.ToLowerInvariant())</_WinAppArch>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_WinAppFwMsix Include="@(AppxPackageRegistration)"
+                     Condition="'%(AppxPackageRegistration.Architecture)' == '$(_WinAppArch)'" />
+    </ItemGroup>
+
+    <Message Importance="high"
+             Condition="'@(_WinAppFwMsix)' != ''"
+             Text="[WinAppRunSupport] Ensuring framework MSIX is installed: %(_WinAppFwMsix.Identity)" />
+
+    <!--
+      Idempotent install: Get-AppxPackage probe first so already-installed frameworks are skipped silently.
+      Identity is the full MSIX file path; we extract the family name from the file stem to match against
+      Get-AppxPackage -Name (which accepts wildcards on the Name portion of the package identity).
+    -->
+    <Exec Condition="'@(_WinAppFwMsix)' != ''"
+          Command='powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference=&apos;Stop&apos;; $msix=&apos;%(_WinAppFwMsix.FullPath)&apos;; $name=[IO.Path]::GetFileNameWithoutExtension($msix); if (-not (Get-AppxPackage -Name $name -ErrorAction SilentlyContinue)) { Write-Host (&apos;[WinAppRunSupport] Installing &apos;+$name+&apos;...&apos;); Add-AppxPackage -Path $msix -ForceApplicationShutdown } else { Write-Host (&apos;[WinAppRunSupport] &apos;+$name+&apos; already installed.&apos;) }"'
+          IgnoreExitCode="false" />
+  </Target>
+
+  <!--
+    ============================================================================
     _WinAppBuildRunArgs Target
     
     Builds the CLI command arguments used by both RunPackagedApp and
@@ -142,7 +189,7 @@
     ============================================================================
   -->
   <Target Name="_WinAppBuildRunArgs"
-          DependsOnTargets="_WinAppValidateRunSupport"
+          DependsOnTargets="_WinAppValidateRunSupport;_WinAppInstallFrameworkDependencies"
           Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
     <PropertyGroup>
       <!-- Remove trailing backslash from paths to avoid escaping the closing quote -->
