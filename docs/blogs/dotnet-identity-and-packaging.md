@@ -7,7 +7,7 @@ Now, with the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can 
 The winapp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
 1. The winapp CLI integrates with existing dotnet tooling to enable you to test your application with package identity via `dotnet run`
-2. The winapp CLI makes packaging applications as MSIX easy via `winapp pack`
+2. The WinApp CLI makes packaging applications as MSIX easy via `winapp pack`
 
 <!-- image with cli first run visual -->
 
