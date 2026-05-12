@@ -1,9 +1,9 @@
 <!-- mslearn: true -->
 # Using winapp CLI with .NET 
 
-> This guide should work for most .NET projects types. The steps have been tested with both console and UI-based projects like WPF. For working examples, check out the [dotnet-app](../../samples/dotnet-app) (console) and [wpf-app](../../samples/wpf-app) (WPF) samples in the samples folder.
+> This guide should work for most .NET project types. The steps have been tested with both console and UI-based projects like WPF. For working examples, check out the [dotnet-app](../../samples/dotnet-app) (console) and [wpf-app](../../samples/wpf-app) (WPF) samples in the samples folder.
 
-This guide demonstrates how to use `winappcli` with a .NET application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a .NET application to debug with package identity and package your application as an MSIX.
 
 Package identity is a core concept in the Windows app model. It allows your application to access specific Windows APIs (like Notifications, Security, AI APIs, etc), have a clean install/uninstall experience, and more.
 
