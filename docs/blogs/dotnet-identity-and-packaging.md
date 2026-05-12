@@ -80,10 +80,7 @@ dotnet build -c Release
 winapp cert generate
 ```
 
-3. Package your application with the `pack` command, specifying your output directory and the cert you just generated:
-```
-winapp pack .\bin\Release\net10.0-windows10.0.26100.0 --cert .\devcert.pfx
-```
+3. Package your application with the `pack` command, specifying your output directory and the cert you just generated. Run this command from your project root:
 
 The `pack` command will output a signed MSIX, ready to install.
 
