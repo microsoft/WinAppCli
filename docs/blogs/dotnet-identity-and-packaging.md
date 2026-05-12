@@ -2,7 +2,7 @@
 
 Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed.
 
-Now, with the [**winapp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
+Now, with the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
 
 The winapp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
