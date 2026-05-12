@@ -4,7 +4,7 @@ Package identity has often been a pain point for developers looking to build app
 
 Now, with the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
 
-The winapp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
+The WinApp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
 1. The winapp CLI integrates with existing dotnet tooling to enable you to test your application with package identity via `dotnet run`
 2. The WinApp CLI makes packaging applications as MSIX easy via `winapp pack`
