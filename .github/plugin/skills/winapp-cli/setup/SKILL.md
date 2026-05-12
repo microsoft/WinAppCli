@@ -22,6 +22,10 @@ winget install Microsoft.WinAppCli --source winget
 npm install --save-dev @microsoft/winappcli
 ```
 
+For CI, use the [`setup-WinAppCli`](https://github.com/microsoft/setup-WinAppCli)
+GitHub Action, or download a release directly from
+[GitHub Releases](https://github.com/microsoft/WinAppCli/releases/latest).
+
 You need an **existing app project** — `winapp init` does **not** create new projects, it adds Windows platform files to your existing codebase.
 
 > **Already have a `Package.appxmanifest`?** .NET projects that already have a packaging manifest (e.g., WinUI 3 apps or projects with an existing MSIX packaging setup) likely **don't need `winapp init`**. Ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds (e.g., `<WindowsPackageType>MSIX</WindowsPackageType>`). WinUI 3 apps created from Visual Studio templates are typically already fully configured — you can go straight to building and using `winapp run` or `winapp package`.
@@ -138,6 +142,14 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 - If you only need `Package.appxmanifest` without SDK setup, use `winapp manifest generate` instead of `init`
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
+
+## Version notes
+
+- **v0.2.0+:** `winapp init` no longer auto-generates a development certificate — run `winapp cert generate` explicitly. The old `--no-cert` flag has been removed.
+- **v0.2.0+:** SDK packages are stored in the NuGet global cache, not `%userprofile%/.winapp/packages`. Scripts that depended on the old folder will break.
+- **v0.2.1+:** `winapp manifest update-assets` accepts SVG sources; `winapp pack` auto-discovers third-party WinRT components from `.winmd`; `winapp cert info`, `--export-cer`, and `--json` on `cert generate`/`cert info` are available.
+- **v0.3.0+:** `winapp run` and the `winapp ui` command group (`list-windows`, `inspect`, `click`, `search`, `wait-for`, `get-focused`) were introduced.
+- **v0.3.1+:** `winapp run` supports `-- <app args>` passthrough. The `--json` envelope for `ui inspect`, `ui get-focused`, `ui search`, and `ui wait-for` was reshaped — see the `winapp-ui-automation` skill.
 
 ## Related skills
 - After setup, see `winapp-manifest` to customize your `Package.appxmanifest`

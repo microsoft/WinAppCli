@@ -262,9 +262,19 @@ For setup, configuration, and troubleshooting details, see the [VS Code Extensio
 AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
 
 **GitHub Copilot CLI Plugin** (global — works across all projects)
+
+Install from the default Awesome Copilot marketplace:
+```bash
+copilot plugin install winappcli@awesome-copilot
+```
+
+Or install directly from this repo (tracks `main`, may include unreleased changes):
 ```bash
 copilot plugin install microsoft/WinAppCli
 ```
+
+> [!NOTE]
+> Awesome Copilot installs pin to the latest release branch (`rel/v*`). After a new release, run `copilot plugin upgrade winappcli@awesome-copilot` to pick it up — installed plugins are cached locally.
 
 This gives agents full understanding of winapp commands, workflows, and troubleshooting.
 

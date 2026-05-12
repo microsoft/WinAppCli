@@ -559,3 +559,237 @@ extends:
                 }
 
                 Write-Host "PR created/updated successfully."
+
+    - stage: Release_AwesomeCopilot
+      displayName: Update Awesome Copilot Marketplace
+      dependsOn: [Build, Release_GitHub]
+      variables:
+        version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+      jobs:
+      - job: update_awesome_copilot
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: Awesome Copilot Marketplace PR
+        templateContext:
+          type: releaseJob
+          isProduction: true
+        steps:
+          - task: PowerShell@2
+            displayName: "Create Awesome Copilot PR"
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              AWESOME_COPILOT_FORK: $(AwesomeCopilotFork)
+            inputs:
+              targetType: 'inline'
+              pwsh: true
+              errorActionPreference: 'stop'
+              script: |
+                $version = "$(version)"
+                $pluginName = "winappcli"
+                $upstream = "github/awesome-copilot"
+                $branch = "winapp-cli/v$version"
+
+                if (-not $version) {
+                  Write-Error "Version is empty. Aborting."
+                  exit 1
+                }
+
+                # Validate fork from env var (not ADO macro expansion)
+                $fork = $env:AWESOME_COPILOT_FORK
+                if (-not $fork -or $fork -notmatch '^[\w-]+/[\w.-]+$') {
+                  Write-Error "Invalid or missing AwesomeCopilotFork value: '$fork'. Expected format: 'owner/repo'."
+                  exit 1
+                }
+                $forkOwner = $fork.Split('/')[0]
+
+                # Install gh with integrity verification
+                Write-Host "Installing gh..."
+                $tempDir = "$(Agent.TempDirectory)"
+                $ghZipUrl = "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip"
+                $ghZipPath = "$tempDir\gh.zip"
+                $ghExpectedHash = "1324871424CB8CB3793914565026A8DA53B1A633FA05760597ABEF54B57FF12E"
+                Invoke-WebRequest -Uri $ghZipUrl -OutFile $ghZipPath
+                $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
+                if ($actualHash -ne $ghExpectedHash) {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $ghExpectedHash, Got: $actualHash"
+                  exit 1
+                }
+                Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh-ac"
+                $ghExe = "$tempDir\gh-ac\bin\gh.exe"
+
+                # Sync the fork's staged branch with upstream. Awesome Copilot's
+                # CONTRIBUTING.md mandates branching from `staged`, not `main`.
+                Write-Host "Syncing awesome-copilot fork (staged branch)..."
+                & $ghExe repo sync $fork -b staged
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to sync awesome-copilot fork's staged branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Write-Host "Fork synced successfully."
+
+                # Clone the fork (staged branch only — that's what we branch from)
+                Write-Host "Cloning awesome-copilot fork..."
+                $repoDir = "$tempDir\awesome-copilot"
+                & $ghExe repo clone $fork $repoDir -- --depth 1 --branch staged --single-branch
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to clone awesome-copilot. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Files we need to patch — external.json is the source of truth,
+                # marketplace.json is the generated index that mirrors it. We patch
+                # both to avoid needing to run `npm run build` in this pipeline.
+                $filesToPatch = @(
+                  (Join-Path $repoDir "plugins\external.json"),
+                  (Join-Path $repoDir ".github\plugin\marketplace.json")
+                )
+                foreach ($f in $filesToPatch) {
+                  if (-not (Test-Path $f)) {
+                    Write-Error "Expected file not found: $f"
+                    exit 1
+                  }
+                }
+
+                # Local function: patch a single JSON file's winappcli entry.
+                function Update-PluginEntry {
+                  param([string]$path, [string]$pluginName, [string]$version)
+
+                  $raw = Get-Content $path -Raw
+
+                  # Sanity-parse and confirm the entry exists.
+                  $parsed = $raw | ConvertFrom-Json
+                  # marketplace.json wraps the array under a 'plugins' property;
+                  # external.json is a bare array. Handle both.
+                  $arr = if ($parsed -is [System.Array]) { $parsed } else { $parsed.plugins }
+                  $entry = $arr | Where-Object { $_.name -eq $pluginName }
+                  if (-not $entry) {
+                    Write-Error "No '$pluginName' entry found in $path. The one-time manual submission must land before this automation can run. See issue #394."
+                    exit 1
+                  }
+                  if (-not $entry.source) {
+                    Write-Error "'$pluginName' entry in $path is missing a 'source' block."
+                    exit 1
+                  }
+
+                  # Locate the entry block by anchoring on "name": "winappcli", then walk
+                  # back to its opening brace and forward to the matching close.
+                  $nameAnchor = [regex]::Escape("`"name`": `"$pluginName`"")
+                  $entryStart = [regex]::Match($raw, $nameAnchor)
+                  if (-not $entryStart.Success) {
+                    Write-Error "Failed to locate '$pluginName' name anchor in raw JSON of $path."
+                    exit 1
+                  }
+                  $openBrace = -1
+                  for ($i = $entryStart.Index - 1; $i -ge 0; $i--) {
+                    if ($raw[$i] -eq '{') { $openBrace = $i; break }
+                    if ($raw[$i] -eq '}') {
+                      Write-Error "Unexpected '}' before opening brace while locating '$pluginName' entry in $path."
+                      exit 1
+                    }
+                  }
+                  if ($openBrace -lt 0) {
+                    Write-Error "Failed to locate opening brace for '$pluginName' entry in $path."
+                    exit 1
+                  }
+                  $depth = 0; $end = -1
+                  for ($i = $openBrace; $i -lt $raw.Length; $i++) {
+                    $c = $raw[$i]
+                    if ($c -eq '{') { $depth++ }
+                    elseif ($c -eq '}') { $depth--; if ($depth -eq 0) { $end = $i; break } }
+                  }
+                  if ($end -lt 0) {
+                    Write-Error "Failed to find end of '$pluginName' entry object in $path."
+                    exit 1
+                  }
+                  $head = $raw.Substring(0, $openBrace)
+                  $body = $raw.Substring($openBrace, $end - $openBrace + 1)
+                  $tail = $raw.Substring($end + 1)
+
+                  # Patch the version.
+                  $body = [regex]::Replace($body, '"version"\s*:\s*"[^"]*"', "`"version`": `"$version`"", 1)
+
+                  # Patch whichever git ref field the entry uses (branch or ref).
+                  $newRef = "rel/v$version"
+                  if ($body -match '"branch"\s*:\s*"[^"]*"') {
+                    $body = [regex]::Replace($body, '"branch"\s*:\s*"[^"]*"', "`"branch`": `"$newRef`"", 1)
+                  } elseif ($body -match '"ref"\s*:\s*"[^"]*"') {
+                    $body = [regex]::Replace($body, '"ref"\s*:\s*"[^"]*"', "`"ref`": `"$newRef`"", 1)
+                  } else {
+                    Write-Error "'$pluginName' entry in $path has neither a 'branch' nor a 'ref' field in source. Aborting."
+                    exit 1
+                  }
+
+                  Set-Content -Path $path -Value ($head + $body + $tail) -NoNewline -Encoding utf8
+                  Write-Host "Patched $path"
+                }
+
+                Write-Host "Patching $pluginName entries..."
+                foreach ($f in $filesToPatch) {
+                  Update-PluginEntry -path $f -pluginName $pluginName -version $version
+                }
+
+                # Create branch and commit
+                Write-Host "Creating branch and committing..."
+                Push-Location $repoDir
+                git config user.name "winapp-cli-bot"
+                git config user.email "winapp-cli-bot@users.noreply.github.com"
+                git checkout -B $branch
+                git add -A
+                git diff --cached --quiet
+                if ($LASTEXITCODE -eq 0) {
+                  Write-Host "No changes detected. Awesome Copilot entry is already up to date."
+                  Pop-Location
+                  exit 0
+                }
+                git commit -m "Update $pluginName plugin to v$version"
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                git push --force-with-lease origin $branch
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to push branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Pop-Location
+
+                # Create PR (or update if one already exists for this branch).
+                # Awesome Copilot requires PRs to target `staged`, not `main`.
+                Write-Host "Creating PR..."
+                $prTitle = "Update $pluginName plugin to v$version"
+                $prBody = @"
+                Automated update of the ``$pluginName`` plugin entry for v$version.
+
+                Bumps ``version`` and ``source.branch`` in ``plugins/external.json`` (and the mirrored entry in ``.github/plugin/marketplace.json``) to point at the new release branch.
+
+                Source: [microsoft/winappCli v$version](https://github.com/microsoft/WinAppCli/releases/tag/v$version)
+                "@
+
+                # Check if a PR already exists for this branch (base = staged)
+                $existingPr = & $ghExe pr list --repo $upstream --head "${forkOwner}:${branch}" --base staged --json number --jq '.[0].number' 2>$null
+                if ($existingPr) {
+                  Write-Host "PR #$existingPr already exists. Updating..."
+                  & $ghExe pr edit $existingPr `
+                    --repo $upstream `
+                    --title $prTitle `
+                    --body $prBody
+                } else {
+                  & $ghExe pr create `
+                    --repo $upstream `
+                    --head "${forkOwner}:${branch}" `
+                    --base staged `
+                    --title $prTitle `
+                    --body $prBody
+                }
+
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to create/update PR. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                Write-Host "PR created/updated successfully."
