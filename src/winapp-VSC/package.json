@@ -199,6 +199,7 @@
     "pretest": "npm run compile-tsc && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
+    "test:e2e": "npx playwright test --config=playwright.config.ts",
     "clean": "node -e \"require('fs').rmSync('bin', {recursive: true, force: true}); require('fs').rmSync('out', {recursive: true, force: true}); require('fs').rmSync('dist', {recursive: true, force: true});\"",
     "build-cli": "npm run build-cli-x64 && npm run build-cli-arm64",
     "build-cli-x64": "dotnet publish ../winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-x64 --self-contained -o bin/win-x64",
@@ -212,6 +213,7 @@
     "glob": "^13.0.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.109.0",

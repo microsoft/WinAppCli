@@ -193,6 +193,9 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             margin-bottom: 16px;
             padding-bottom: 6px;
             border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
         .section-header-spaced {
             margin-top: 64px;

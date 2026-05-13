@@ -727,7 +727,6 @@ export function activate(context: vscode.ExtensionContext) {
 			await runWinappCommand(extensionPath, command, workspacePath);
 		})
 	);
-	);
 
 	// Register winapp.manifestAddAlias command
 	context.subscriptions.push(
