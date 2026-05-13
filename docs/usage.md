@@ -1,6 +1,3 @@
-<!-- mslearn: true -->
-<!-- ms.topic: reference -->
-<!-- description: Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands. -->
 # CLI Documentation and Usage
 
 ## Shell Completion
@@ -104,8 +101,7 @@ winapp restore [options]
 - Regenerates C++/WinRT headers and binaries
 - Stores sharable files in the global cache directory
 
-> [!NOTE]
-> For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
+> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
@@ -179,12 +175,11 @@ winapp pack <input-folder> [options]
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
-- Automatically discovers and bundles any non-image files referenced in the manifest (e.g., AppExtension `manifest.json`, config files) from the manifest directory or input folder if they are missing from staging
 - Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
 
-#### WinRT component discovery
+**WinRT component discovery:**
 
 When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
@@ -232,7 +227,11 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
+<<<<<<< docs/validation-fixes
 - `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
+=======
+- `--manifest <path>` - Path to Package.appxmanifest (default: `./Package.appxmanifest`)
+>>>>>>> main
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -289,7 +288,7 @@ winapp manifest generate [directory] [options]
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
 
-#### Manifest placeholders
+**Manifest placeholders:**
 
 Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
 
@@ -937,6 +936,41 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+### gallery
+
+Search the **WinUI 3 Gallery**, **Windows Community Toolkit**, and a curated
+catalog of core platform patterns for grounded XAML and C# samples. Designed for
+agents and developers who need the canonical sample for a control or pattern
+without leaving the terminal.
+
+```bash
+winapp gallery [command] [options]
+```
+
+**Commands:**
+
+- `search <query> [--max N]` — Free-text search across all three sources, BM25-ranked with synonym expansion. Default 5 results.
+- `get <id>` — Print the full markdown card (title, XAML, C#, pitfall notes) for a single pattern. Exits 1 if the id is unknown.
+- `list` — List every available pattern, grouped by source. Useful for discovery.
+- `refresh` — Delete the cached snapshots so the next call re-fetches from GitHub.
+
+**Cache:** snapshots live at `%USERPROFILE%\.winapp\cache\gallery\{gallery,toolkit}\`
+(override with `WINAPP_CLI_CACHE_DIRECTORY`) and are valid for 7 days. An
+embedded snapshot ships with the exe as an offline fallback. The first-run
+notice is suppressed for `gallery` commands so the markdown output pipes
+cleanly.
+
+**Examples:**
+
+```powershell
+winapp gallery search "tabbed document interface"
+winapp gallery get gallery-tabview
+winapp gallery list
+winapp gallery refresh
+```
+
+For full documentation, see [docs/gallery.md](gallery.md).
+
 ### ui
 
 Inspect and interact with running Windows app UIs using UI Automation (UIA).

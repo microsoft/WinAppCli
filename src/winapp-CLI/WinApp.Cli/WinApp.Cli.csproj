@@ -47,6 +47,12 @@
     <!-- Embed templates and default MSIX assets -->
     <EmbeddedResource Include="Templates\**\*.*" />
     <EmbeddedResource Include="Assets\msix_default_assets\**\*.*" />
+    <!-- Gallery search dataset (offline fallback for `winapp gallery`) -->
+    <EmbeddedResource Include="Services\Gallery\Data\gallery-scenarios.json" LogicalName="gallery-scenarios.json" />
+    <EmbeddedResource Include="Services\Gallery\Data\toolkit-scenarios.json" LogicalName="toolkit-scenarios.json" />
+    <EmbeddedResource Include="Services\Gallery\Data\core-patterns.json" LogicalName="core-patterns.json" />
+    <EmbeddedResource Include="Services\Gallery\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
+    <EmbeddedResource Include="Services\Gallery\Data\toolkit-tags.json" LogicalName="toolkit-tags.json" />
   </ItemGroup>
 
   <ItemGroup>

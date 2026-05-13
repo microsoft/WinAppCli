@@ -71,7 +71,8 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         IAnsiConsole ansiConsole,
         CreateExternalCatalogCommand createExternalCatalogCommand,
         CompleteCommand completeCommand,
-        UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        UiCommand uiCommand,
+        GalleryCommand galleryCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -88,6 +89,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
         Subcommands.Add(uiCommand);
+        Subcommands.Add(galleryCommand);
         Subcommands.Add(completeCommand);
 
         Options.Add(CliSchemaOption);
@@ -102,7 +104,8 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
-            ("UI Automation", [typeof(UiCommand)])
+            ("UI Automation", [typeof(UiCommand)]),
+            ("Gallery", [typeof(GalleryCommand)])
         );
     }
 }

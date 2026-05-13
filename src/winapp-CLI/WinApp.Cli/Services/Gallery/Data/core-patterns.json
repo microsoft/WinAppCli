@@ -1,0 +1,167 @@
+[
+  {
+    "id": "jumplist-recent-files",
+    "scenario": "Show recently opened files/folders in the taskbar right-click menu",
+    "tags": [
+      "jumplist",
+      "taskbar",
+      "recent",
+      "files",
+      "folders",
+      "pin",
+      "start menu"
+    ],
+    "description": "Add recently opened files or folders to the Windows taskbar JumpList so users can quickly reopen them by right-clicking the app icon.",
+    "prerequisites": [
+      "App must be packaged (have Package.appxmanifest)"
+    ],
+    "xaml": null,
+    "csharp": "using Windows.UI.StartScreen;\n\npublic static class JumpListService\n{\n    public static async Task AddRecentFileAsync(string filePath, string displayName)\n    {\n        if (!JumpList.IsSupported()) return;\n\n        var jumpList = await JumpList.LoadCurrentAsync();\n        jumpList.SystemGroupKind = JumpListSystemGroupKind.Recent;\n\n        // Remove existing item with same path to avoid duplicates\n        var existing = jumpList.Items.FirstOrDefault(i => i.Arguments == filePath);\n        if (existing != null) jumpList.Items.Remove(existing);\n\n        var item = JumpListItem.CreateWithArguments(filePath, displayName);\n        item.GroupName = \"Recent\";\n        item.Logo = new Uri(\"ms-appx:///Assets/document.png\"); // optional\n        jumpList.Items.Add(item);\n\n        await jumpList.SaveAsync();\n    }\n\n    public static async Task ClearJumpListAsync()\n    {\n        if (!JumpList.IsSupported()) return;\n        var jumpList = await JumpList.LoadCurrentAsync();\n        jumpList.Items.Clear();\n        jumpList.SystemGroupKind = JumpListSystemGroupKind.None;\n        await jumpList.SaveAsync();\n    }\n}\n\n// Handle JumpList activation in App.xaml.cs:\nprotected override void OnLaunched(LaunchActivatedEventArgs args)\n{\n    _window = new MainWindow();\n    _window.Activate();\n\n    // Check if launched from JumpList\n    string arguments = args.Arguments;\n    if (!string.IsNullOrEmpty(arguments))\n    {\n        // Open the file specified in the JumpList item\n        _window.OpenFile(arguments);\n    }\n}",
+    "notes": [
+      "JumpList.IsSupported() returns false on non-desktop devices",
+      "Call AddRecentFileAsync() after opening or saving a file",
+      "Handle args.Arguments in OnLaunched to open files clicked in JumpList",
+      "JumpListItem.CreateWithArguments(args, displayName) — args is what you receive in OnLaunched"
+    ]
+  },
+  {
+    "id": "share-contract-desktop",
+    "scenario": "Share files or data with other apps using the Windows Share dialog",
+    "tags": [
+      "share",
+      "contract",
+      "datatransfer",
+      "files",
+      "send",
+      "share dialog"
+    ],
+    "description": "Invoke the Windows Share UI from a WinUI 3 desktop app. Desktop apps cannot use DataTransferManager.GetForCurrentView() — they must use COM interop with IDataTransferManagerInterop.",
+    "prerequisites": [
+      "using WinRT.Interop for WindowNative.GetWindowHandle"
+    ],
+    "xaml": "<Button AutomationProperties.AutomationId=\"ShareButton\"\n        Click=\"ShareButton_Click\" Content=\"Share\">\n    <Button.KeyboardAccelerators>\n        <KeyboardAccelerator Key=\"H\" Modifiers=\"Control,Shift\" />\n    </Button.KeyboardAccelerators>\n</Button>",
+    "csharp": "using System.Runtime.InteropServices;\nusing Windows.ApplicationModel.DataTransfer;\nusing Windows.Storage;\n\npublic sealed class ShareService\n{\n    // COM interface required for desktop WinUI 3 apps\n    [ComImport, Guid(\"3A3DCD6C-3EAB-43DC-BCDE-45671CE800C8\")]\n    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n    interface IDataTransferManagerInterop\n    {\n        IntPtr GetForWindow(IntPtr appWindow, ref Guid riid);\n        void ShowShareUIForWindow(IntPtr appWindow);\n    }\n\n    private static readonly Guid _dtmIid =\n        new(\"a5caee9b-8708-49d1-8d36-67d25a8da00c\");\n\n    public static void ShowShareUI(IntPtr hwnd, IReadOnlyList<string> filePaths)\n    {\n        var interop = DataTransferManager.As<IDataTransferManagerInterop>();\n        var riid = _dtmIid;\n        var dtmPtr = interop.GetForWindow(hwnd, ref riid);\n        var dtm = DataTransferManager.FromAbi(dtmPtr);\n\n        dtm.DataRequested += (sender, args) =>\n        {\n            var request = args.Request;\n            request.Data.Properties.Title = \"Share Files\";\n            var files = filePaths\n                .Select(p => StorageFile.GetFileFromPathAsync(p).GetAwaiter().GetResult())\n                .ToList();\n            request.Data.SetStorageItems(files);\n        };\n\n        interop.ShowShareUIForWindow(hwnd);\n    }\n}\n\n// Usage from code-behind:\nprivate void ShareButton_Click(object sender, RoutedEventArgs e)\n{\n    var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.Window);\n    ShareService.ShowShareUI(hwnd, selectedFilePaths);\n}",
+    "notes": [
+      "NEVER use DataTransferManager.GetForCurrentView() — it throws in desktop apps",
+      "NEVER use DataTransferManager.ShowShareUI() — use ShowShareUIForWindow(hwnd)",
+      "Get HWND via WinRT.Interop.WindowNative.GetWindowHandle(window)",
+      "The COM GUIDs are fixed — do not change them"
+    ]
+  },
+  {
+    "id": "system-tray-minimize",
+    "scenario": "Minimize app to system tray with a tray icon and restore on click",
+    "tags": [
+      "tray",
+      "system tray",
+      "notification area",
+      "minimize",
+      "background",
+      "icon",
+      "taskbar icon"
+    ],
+    "description": "Hide the window to the system tray (notification area) instead of closing it. Uses H.NotifyIcon.WinUI — the recommended tray icon library for WinUI 3.",
+    "prerequisites": [
+      "dotnet add package H.NotifyIcon.WinUI"
+    ],
+    "xaml": "<!-- In App.xaml Resources -->\n<ResourceDictionary>\n    <tb:TaskbarIcon x:Key=\"TrayIcon\"\n                    xmlns:tb=\"using:H.NotifyIcon\"\n                    ToolTipText=\"My App\"\n                    IconSource=\"ms-appx:///Assets/AppIcon.ico\"\n                    LeftClickCommand=\"{x:Bind ShowWindowCommand}\"\n                    ContextFlyout=\"{StaticResource TrayContextMenu}\" />\n</ResourceDictionary>\n\n<!-- Tray context menu -->\n<MenuFlyout x:Key=\"TrayContextMenu\">\n    <MenuFlyoutItem Text=\"Show\" Command=\"{x:Bind ShowWindowCommand}\" />\n    <MenuFlyoutItem Text=\"Exit\" Command=\"{x:Bind ExitCommand}\" />\n</MenuFlyout>",
+    "csharp": "// MainWindow.xaml.cs — intercept window close to hide instead of exit\nprivate void Window_Closed(object sender, WindowEventArgs args)\n{\n    // Prevent actual close — hide to tray instead\n    args.Handled = true;\n    this.AppWindow.Hide();\n}\n\n// Restore from tray\npublic void ShowWindow()\n{\n    this.AppWindow.Show();\n    this.Activate();\n}\n\n// Exit for real (from tray menu)\npublic void ExitApp()\n{\n    // Dispose tray icon\n    if (Application.Current.Resources.TryGetValue(\"TrayIcon\", out var icon))\n    {\n        (icon as IDisposable)?.Dispose();\n    }\n    Application.Current.Exit();\n}",
+    "notes": [
+      "Do NOT use WinUIEx.TrayIcon — its API surface is unreliable and poorly documented",
+      "H.NotifyIcon.WinUI is the recommended library (dotnet add package H.NotifyIcon.WinUI)",
+      "Use args.Handled = true in Window_Closed to prevent the window from actually closing",
+      "Use AppWindow.Hide() / AppWindow.Show() for visibility control",
+      "The icon must be a .ico file in Assets, not a .png",
+      "LeftClickCommand fires when user clicks the tray icon (use to restore window)"
+    ]
+  },
+  {
+    "id": "file-picker-desktop",
+    "scenario": "Open a file picker dialog to let the user select files",
+    "tags": [
+      "file",
+      "picker",
+      "open",
+      "save",
+      "dialog",
+      "browse",
+      "select file",
+      "folder picker",
+      "storage picker",
+      "packaged",
+      "msix",
+      "store"
+    ],
+    "description": "Use the Windows App SDK storage pickers (Microsoft.Windows.Storage.Pickers, shipped in WinAppSDK 1.8+) in a WinUI 3 desktop app. These pickers are designed to work identically in unpackaged and packaged (MSIX/Store) apps. The legacy WinRT Windows.Storage.Pickers.* types require WinRT.Interop.InitializeWithWindow and are known to fail silently in packaged builds — do NOT use them on WinAppSDK 1.8+.",
+    "prerequisites": [
+      "Windows App SDK 1.8 or later (PackageReference Microsoft.WindowsAppSDK 1.8.*)"
+    ],
+    "xaml": null,
+    "csharp": "using Microsoft.Windows.Storage.Pickers;\nusing System.IO;\n\npublic static class FilePickerHelper\n{\n    // Prefer this overload from a Click handler — pulls the WindowId straight off the XAML element.\n    public static Task<PickFileResult?> PickOpenFileAsync(FrameworkElement element, params string[] extensions)\n        => PickOpenFileAsync(element.XamlRoot.ContentIslandEnvironment.AppWindowId, extensions);\n\n    // Use this overload from a view-model / command where you only have the HWND.\n    public static async Task<PickFileResult?> PickOpenFileAsync(Microsoft.UI.WindowId windowId, params string[] extensions)\n    {\n        var picker = new FileOpenPicker(windowId)\n        {\n            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,\n        };\n\n        foreach (var ext in extensions)\n            picker.FileTypeFilter.Add(ext);\n\n        if (picker.FileTypeFilter.Count == 0)\n            picker.FileTypeFilter.Add(\"*\");\n\n        return await picker.PickSingleFileAsync();\n    }\n\n    public static async Task<PickFileResult?> PickSaveFileAsync(\n        Microsoft.UI.WindowId windowId, string suggestedName, string extension, string filterName)\n    {\n        var picker = new FileSavePicker(windowId)\n        {\n            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,\n            SuggestedFileName = suggestedName,\n        };\n        picker.FileTypeChoices.Add(filterName, new List<string> { extension });\n\n        return await picker.PickSaveFileAsync();\n    }\n}\n\n// Usage from a Click handler (cleanest):\nprivate async void OpenFile_Click(object sender, RoutedEventArgs e)\n{\n    var element = (FrameworkElement)sender;\n    var result = await FilePickerHelper.PickOpenFileAsync(element, \".txt\", \".md\", \".cs\");\n    if (result is not null)\n    {\n        string content = await File.ReadAllTextAsync(result.Path);\n        // Use the content...\n    }\n}\n\n// Usage from an MVVM RelayCommand (no XAML sender):\n//   1) Cache the WindowId once in App.xaml.cs:\n//        public static Microsoft.UI.WindowId WindowId =>\n//            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(\n//                WinRT.Interop.WindowNative.GetWindowHandle(Window));\n//   2) Then call:\nprivate async Task SaveAsync()\n{\n    var result = await FilePickerHelper.PickSaveFileAsync(\n        App.WindowId, \"document\", \".txt\", \"Text Files\");\n    if (result is not null)\n        await File.WriteAllTextAsync(result.Path, _editorContent);\n}\n\n// If a downstream API still requires a Windows.Storage.StorageFile\n// (e.g. RichEditBox.Document.LoadFromStream / SaveToStream, CachedFileManager.DeferUpdates):\n//     var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(result.Path);\n// Re-hydrate from the path — do NOT switch back to the legacy picker.",
+    "notes": [
+      "USE Microsoft.Windows.Storage.Pickers on WinAppSDK 1.8+. It works in packaged AND unpackaged apps.",
+      "DO NOT use Windows.Storage.Pickers.FileSavePicker / FileOpenPicker / FolderPicker + WinRT.Interop.InitializeWithWindow — these silently fail to display a dialog in packaged (MSIX/Store) apps even when InitializeWithWindow succeeds. This is the root cause of 'save button does nothing once installed from the Store'.",
+      "Constructor takes a Microsoft.UI.WindowId. From a XAML element, use element.XamlRoot.ContentIslandEnvironment.AppWindowId. From an HWND, use Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd).",
+      "PickSingleFileAsync / PickSaveFileAsync return a PickFileResult (or null on cancel). Use result.Path — it's a plain filesystem path. Write with System.IO (File.WriteAllBytesAsync, File.ReadAllTextAsync, etc.).",
+      "FolderPicker is in the same namespace: new FolderPicker(windowId).PickSingleFolderAsync() returns a PickFolderResult.",
+      "FileOpenPicker.FileTypeFilter must have at least one entry — Add(\"*\") to allow all files.",
+      "FileSavePicker.FileTypeChoices.Add(displayName, IList<string> extensions). Each extension must start with '.' (e.g. \".png\").",
+      "Canonical sample: WinUI-Gallery → WinUIGallery/Samples/ControlPages/StoragePickersPage.xaml.cs."
+    ]
+  },
+  {
+    "id": "livecharts-realtime",
+    "scenario": "Display real-time scrolling line charts for monitoring data",
+    "tags": [
+      "chart",
+      "graph",
+      "line chart",
+      "real-time",
+      "monitoring",
+      "performance",
+      "live",
+      "scrolling"
+    ],
+    "description": "Use LiveCharts2 to render real-time scrolling line charts in WinUI 3. The key pitfall is the Axis binding type — it must be IEnumerable<ICartesianAxis>, not Axis[].",
+    "prerequisites": [
+      "dotnet add package LiveChartsCore.SkiaSharpView.WinUI"
+    ],
+    "xaml": "<lvc:CartesianChart\n    xmlns:lvc=\"using:LiveChartsCore.SkiaSharpView.WinUI\"\n    Series=\"{x:Bind ViewModel.CpuSeries, Mode=OneWay}\"\n    XAxes=\"{x:Bind ViewModel.XAxes, Mode=OneWay}\"\n    YAxes=\"{x:Bind ViewModel.YAxes, Mode=OneWay}\"\n    TooltipPosition=\"Hidden\"\n    AnimationsSpeed=\"00:00:00.100\" />",
+    "csharp": "using LiveChartsCore;\nusing LiveChartsCore.Defaults;\nusing LiveChartsCore.Kernel.Sketches;\nusing LiveChartsCore.SkiaSharpView;\nusing LiveChartsCore.SkiaSharpView.Painting;\nusing SkiaSharp;\nusing System.Collections.ObjectModel;\n\npublic partial class MonitorViewModel : ObservableObject\n{\n    private readonly ObservableCollection<ObservableValue> _cpuValues = new();\n    private int _dataPointCount;\n\n    // IMPORTANT: Use IEnumerable<ICartesianAxis>, NOT Axis[]\n    public IEnumerable<ICartesianAxis> XAxes { get; } = new List<Axis>\n    {\n        new Axis\n        {\n            Labeler = value => string.Empty, // hide X labels\n            MinStep = 1,\n        }\n    };\n\n    public IEnumerable<ICartesianAxis> YAxes { get; } = new List<Axis>\n    {\n        new Axis\n        {\n            MinLimit = 0,\n            MaxLimit = 100,\n            Labeler = value => $\"{value:0}%\",\n        }\n    };\n\n    public ISeries[] CpuSeries { get; }\n\n    public MonitorViewModel()\n    {\n        CpuSeries = new ISeries[]\n        {\n            new LineSeries<ObservableValue>\n            {\n                Values = _cpuValues,\n                Stroke = new SolidColorPaint(SKColors.DodgerBlue, 2),\n                Fill = null,\n                GeometrySize = 0,\n                LineSmoothness = 0.5,\n            }\n        };\n    }\n\n    // Call this from a DispatcherQueueTimer (1-second interval)\n    public void AddDataPoint(double cpuPercent)\n    {\n        _cpuValues.Add(new ObservableValue(cpuPercent));\n        _dataPointCount++;\n\n        // Keep 60 seconds of history\n        if (_cpuValues.Count > 60)\n            _cpuValues.RemoveAt(0);\n\n        // Scroll X axis\n        var xAxis = (Axis)((List<Axis>)(IEnumerable<ICartesianAxis>)XAxes)[0];\n        xAxis.MinLimit = _dataPointCount > 60 ? _dataPointCount - 60 : 0;\n        xAxis.MaxLimit = _dataPointCount;\n    }\n}",
+    "notes": [
+      "CRITICAL: XAxes/YAxes must be IEnumerable<ICartesianAxis>, NOT Axis[] — Axis[] causes WMC1121 binding error",
+      "Use ObservableCollection<ObservableValue> for auto-updating charts",
+      "Set AnimationsSpeed to a short duration (100ms) for smooth real-time updates",
+      "Remove data points older than 60 entries to keep the chart scrolling",
+      "Use DispatcherQueueTimer for 1-second update intervals, NOT System.Timers.Timer"
+    ]
+  },
+  {
+    "id": "drag-drop-files",
+    "scenario": "Accept files dropped from File Explorer onto the app",
+    "tags": [
+      "drag",
+      "drop",
+      "dragover",
+      "allowdrop",
+      "files",
+      "import",
+      "datapackage",
+      "storageitems"
+    ],
+    "description": "Handle file drag-and-drop from Windows Explorer into a WinUI 3 app. Set AllowDrop on the target element and handle DragOver + Drop events.",
+    "prerequisites": [
+      "using Windows.ApplicationModel.DataTransfer",
+      "using Windows.Storage"
+    ],
+    "xaml": "<Grid AllowDrop=\"True\"\n      DragOver=\"Grid_DragOver\"\n      Drop=\"Grid_Drop\"\n      AutomationProperties.AutomationId=\"DropTarget\"\n      Background=\"Transparent\">\n    <!-- Background must be set (even Transparent) for hit testing -->\n    <TextBlock Text=\"Drop files here\"\n               HorizontalAlignment=\"Center\"\n               VerticalAlignment=\"Center\"\n               Style=\"{StaticResource SubtitleTextBlockStyle}\" />\n</Grid>",
+    "csharp": "private void Grid_DragOver(object sender, DragEventArgs e)\n{\n    e.AcceptedOperation = DataPackageOperation.Copy;\n    e.DragUIOverride.Caption = \"Drop to import\";\n    e.DragUIOverride.IsCaptionVisible = true;\n    e.DragUIOverride.IsGlyphVisible = true;\n}\n\nprivate async void Grid_Drop(object sender, DragEventArgs e)\n{\n    if (e.DataView.Contains(StandardDataFormats.StorageItems))\n    {\n        var items = await e.DataView.GetStorageItemsAsync();\n        foreach (var item in items)\n        {\n            if (item is StorageFile file)\n            {\n                // Process each dropped file\n                await ImportFileAsync(file);\n            }\n            else if (item is StorageFolder folder)\n            {\n                // Process dropped folder\n            }\n        }\n    }\n}",
+    "notes": [
+      "The drop target element MUST have a Background set (even Transparent) — without it, hit testing fails and drop events won't fire.",
+      "AllowDrop must be set to True on the target element in XAML.",
+      "Use e.AcceptedOperation to control the drag cursor icon (Copy, Move, Link).",
+      "Use e.DragUIOverride to customize the drag visual and caption.",
+      "StorageItems contains both StorageFile and StorageFolder — check the type."
+    ]
+  }
+]

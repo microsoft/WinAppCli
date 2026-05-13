@@ -90,9 +90,11 @@ internal static class Program
 
         var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
 
-        // Skip first-run notice for machine-readable output modes and completions
+        // Skip first-run notice for machine-readable output modes, completions, and the
+        // gallery commands (which emit pure markdown to stdout — see ADR-001 F10).
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !isCompleteMode && !json)
+        var isGalleryMode = args.Length > 0 && string.Equals(args[0], "gallery", StringComparison.Ordinal);
+        if (!isCliSchemaMode && !isCompleteMode && !json && !isGalleryMode)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
