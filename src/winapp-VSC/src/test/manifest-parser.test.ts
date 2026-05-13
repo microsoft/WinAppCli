@@ -55,7 +55,7 @@ function loadFixture(name: string): string {
 }
 
 function allFixtureFiles(): string[] {
-    return readdirSync(FIXTURES_DIR).filter(f => f.endsWith('.appxmanifest'));
+    return readdirSync(FIXTURES_DIR).filter(f => f.endsWith('.appxmanifest') && !f.startsWith('edge-'));
 }
 
 /** Minimal valid AppxManifest.xml with one Application and no Extensions. */

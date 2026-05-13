@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Top-level comment before Package -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <!-- Comment before Identity -->
+  <Identity
+    Name="CommentedApp"
+    Publisher="CN=Commented"
+    Version="1.0.0.0" />
+
+  <!-- This comment mentions <Dependencies> to try to confuse findParentBounds -->
+  <!-- Also mentions <Capabilities> and <Applications> -->
+
+  <Properties>
+    <!-- Comment inside Properties -->
+    <DisplayName>CommentedApp</DisplayName>
+    <!-- Another comment -->
+    <PublisherDisplayName>Commented Publisher</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- Trailing comment in Properties -->
+  </Properties>
+
+  <!-- Comment between sections, mentioning <Resources> -->
+  <Dependencies>
+    <!-- Comment inside Dependencies -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+    <!-- After device family -->
+  </Dependencies>
+
+  <!-- Comment mentions <Applications> again here -->
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <!-- Comment before first application -->
+    <Application Id="App" Executable="CommentedApp.exe" EntryPoint="Windows.FullTrustApplication">
+      <!-- Inside application element -->
+      <uap:VisualElements
+        DisplayName="CommentedApp"
+        Description="App with lots of XML comments"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+    <!-- Comment after application -->
+  </Applications>
+
+  <Capabilities>
+    <!-- Comment inside Capabilities -->
+    <rescap:Capability Name="runFullTrust" />
+    <!-- After capability -->
+  </Capabilities>
+  <!-- Final comment before close -->
+</Package>

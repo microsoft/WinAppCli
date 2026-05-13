@@ -119,7 +119,7 @@ For console apps, add `--with-alias` to preserve stdin/stdout in the current ter
 
 For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
-## Recommendedworkflow
+## Recommended workflow
 
 1. **Initialize** — `winapp init --use-defaults` in your existing project
 2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)

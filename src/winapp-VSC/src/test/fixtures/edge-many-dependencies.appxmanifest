@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6"
+  xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 uap5 uap6 uap7 uap10 win32dependencies rescap">
+
+  <Identity
+    Name="ManyDeps.App"
+    Publisher="CN=Test, O=TestOrg, C=US"
+    Version="3.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ManyDeps</DisplayName>
+    <PublisherDisplayName>TestOrg</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+    <TargetDeviceFamily Name="Windows.IoT" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <PackageDependency Name="Microsoft.VCLibs.140.00" MinVersion="14.0.30704.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+    <PackageDependency Name="Microsoft.VCLibs.140.00.UWPDesktop" MinVersion="14.0.30704.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" uap6:Optional="true" />
+    <uap3:MainPackageDependency Name="MyMainPackage" />
+    <uap5:DriverDependency>
+      <uap5:DriverConstraint Name="CustomDriver.inf" MinVersion="1.0.0.0" MinDate="2023-01-15" />
+      <uap5:DriverConstraint Name="AnotherDriver.sys" MinVersion="2.0.0.0" />
+    </uap5:DriverDependency>
+    <uap7:OSPackageDependency Name="Microsoft.Windows.PrimaryOS" Version="10.0.19041.0" />
+    <uap10:HostRuntimeDependency Name="HostApp" Publisher="CN=HostPub" MinVersion="1.0.0.0" />
+    <win32dependencies:ExternalDependency Name="SomeLegacyLib" Publisher="CN=LegacyPub" MinVersion="5.0.0.0" Optional="true" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="ManyDeps.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ManyDeps"
+        Description="App with all dependency types"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

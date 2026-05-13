@@ -119,7 +119,6 @@ winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
 
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
 
-
 ## Manifest structure overview
 
 A typical `Package.appxmanifest` looks like:

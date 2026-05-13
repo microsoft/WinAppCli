@@ -62,23 +62,6 @@ src/
 │       ├── win-x64/
 │       └── win-arm64/
 │
-├── winapp-Templates/                       # Templates NuGet package
-│   ├── Microsoft.WindowsAppSDK.Templates.csproj
-│   ├── README.md
-│   └── templates/
-│       └── winui/                          # WinUI app template
-│           ├── .template.config/
-│           │   └── template.json
-│           ├── WinUIApp1.csproj
-│           ├── App.xaml
-│           ├── App.xaml.cs
-│           ├── MainWindow.xaml
-│           ├── MainWindow.xaml.cs
-│           ├── app.manifest
-│           ├── Package.appxmanifest
-│           ├── Properties/
-│           └── Assets/
-│
 samples/
 └── winui-app/                              # Sample WinUI app for testing
 ```
@@ -135,26 +118,6 @@ The main build script now includes NuGet packaging:
 ```
 
 ## Usage
-
-### Installing the Template
-
-```bash
-# From local build
-dotnet nuget add source "path/to/artifacts/nuget" --name WinAppLocal
-dotnet new install Microsoft.WindowsAppSDK.Templates::1.0.0-test --nuget-source WinAppLocal
-
-# From NuGet.org (when published)
-dotnet new install Microsoft.WindowsAppSDK.Templates
-```
-
-### Creating and Running a WinUI App
-
-```bash
-dotnet new winui -n MyApp
-cd MyApp
-dotnet run
-```
-
 
 ### Customization
 

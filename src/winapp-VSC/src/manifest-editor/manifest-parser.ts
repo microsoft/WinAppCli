@@ -129,6 +129,9 @@ export function addCapability(xmlText: string, capability: string): string {
         result = ensureNamespace(result, 'uap4', CAPABILITY_NS_URIS['uap4']);
     }
 
+    // Expand self-closing <Capabilities /> to open/close pair
+    result = expandSelfClosingElement(result, 'Capabilities');
+
     const bounds = findParentBounds(result, 'Capabilities');
     if (bounds) {
         const parentIndent = detectIndent(result, bounds.openStart);
@@ -200,6 +203,9 @@ export function addPackageDependency(xmlText: string, dep: PackageDependencyData
         result = ensureUap6Namespace(result);
     }
     const childXml = `<PackageDependency ${attrs} />`;
+
+    // Expand self-closing <Dependencies /> to open/close pair
+    result = expandSelfClosingElement(result, 'Dependencies');
 
     const bounds = findParentBounds(result, 'Dependencies');
     if (bounds) {
@@ -565,23 +571,26 @@ export function addResource(xmlText: string, resource: ResourceData): string {
     if (resource.dxFeatureLevel) { attrs += ` uap:DXFeatureLevel="${resource.dxFeatureLevel}"`; }
     const childXml = `<Resource${attrs} />`;
 
-    const bounds = findParentBounds(xmlText, 'Resources');
+    // Expand self-closing <Resources /> to open/close pair
+    let result = expandSelfClosingElement(xmlText, 'Resources');
+
+    const bounds = findParentBounds(result, 'Resources');
     if (bounds) {
-        const parentIndent = detectIndent(xmlText, bounds.openStart);
-        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
     }
 
     // No Resources element — create one before </Package>
-    const pkgClose = xmlText.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return xmlText; }
-    const pkgIndent = detectIndent(xmlText, pkgClose);
+    const pkgClose = result.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return result; }
+    const pkgIndent = detectIndent(result, pkgClose);
     const parentIndent = pkgIndent + '  ';
     const block = parentIndent + '<Resources>\n' +
         parentIndent + '  ' + childXml + '\n' +
         parentIndent + '</Resources>\n';
     let lineStart = pkgClose;
-    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
-    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
+    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
+    return result.substring(0, lineStart) + block + result.substring(lineStart);
 }
 
 /** Remove a Resource element by index. */
@@ -1148,6 +1157,22 @@ function findParentBounds(xml: string, localName: string): { openStart: number; 
     const contentEnd = contentStart + closeMatch.index;
     const closeEnd = contentEnd + closeMatch[0].length;
     return { openStart, contentStart, contentEnd, closeEnd };
+}
+
+/**
+ * Expand a self-closing element like `<Capabilities />` into `<Capabilities>\n</Capabilities>`.
+ * Returns the original XML unchanged if the element is not self-closing or not found.
+ */
+function expandSelfClosingElement(xml: string, localName: string): string {
+    const pattern = new RegExp(`(<(?:[a-zA-Z0-9]+:)?${escapeRegex(localName)}\\b[^>]*)\\s*/>`);
+    const match = pattern.exec(xml);
+    if (!match) { return xml; }
+    const tagName = match[0].match(/<([a-zA-Z0-9:]+)/)?.[1] ?? localName;
+    const indent = detectIndent(xml, match.index);
+    return xml.substring(0, match.index)
+        + match[1] + '>\n'
+        + indent + `</${tagName}>`
+        + xml.substring(match.index + match[0].length);
 }
 
 /** Remove an element and its leading whitespace/newline from the XML string. */
@@ -2024,9 +2049,58 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         return xml;
     }
 
-    // VisualElements attributes
+    // VisualElements attributes — scope searches to the nth Application's region
     if (field.startsWith('visualElements.')) {
         const veField = field.replace('visualElements.', '');
+
+        // Find the bounds of the nth Application element to scope all searches
+        const appRegion = findNthApplicationRegion(xml, index);
+        if (!appRegion) { return xml; }
+        const { start: appStart, end: appEnd } = appRegion;
+        const appXml = xml.substring(appStart, appEnd);
+
+        // Helper: apply a scoped replaceAttribute within the app region
+        function scopedReplaceAttribute(fullXml: string, pattern: RegExp, attrName: string, newValue: string): string {
+            const region = fullXml.substring(appStart, appEnd);
+            const match = pattern.exec(region);
+            if (!match) { return fullXml; }
+            const absIdx = appStart + match.index;
+            const elemRegex = new RegExp(escapeRegex(match[0]));
+            // Create a pattern that matches at the absolute position
+            const before = fullXml.substring(0, absIdx);
+            const after = fullXml.substring(absIdx);
+            const result = replaceAttribute(after, elemRegex, attrName, newValue);
+            if (result === after) { return fullXml; }
+            return before + result;
+        }
+
+        // Helper: apply a scoped addAttributeToElement within the app region
+        function scopedAddAttribute(fullXml: string, pattern: RegExp, attrName: string, newValue: string): string {
+            const region = fullXml.substring(appStart, appEnd);
+            const match = pattern.exec(region);
+            if (!match) { return fullXml; }
+            const absIdx = appStart + match.index;
+            const elemRegex = new RegExp(escapeRegex(match[0]));
+            const before = fullXml.substring(0, absIdx);
+            const after = fullXml.substring(absIdx);
+            const result = addAttributeToElement(after, elemRegex, attrName, newValue);
+            if (result === after) { return fullXml; }
+            return before + result;
+        }
+
+        // Helper: apply a scoped removeAttribute within the app region
+        function scopedRemoveAttribute(fullXml: string, pattern: RegExp, attrName: string): string {
+            const region = fullXml.substring(appStart, appEnd);
+            const match = pattern.exec(region);
+            if (!match) { return fullXml; }
+            const absIdx = appStart + match.index;
+            const elemRegex = new RegExp(escapeRegex(match[0]));
+            const before = fullXml.substring(0, absIdx);
+            const after = fullXml.substring(absIdx);
+            const result = removeAttribute(after, elemRegex, attrName);
+            if (result === after) { return fullXml; }
+            return before + result;
+        }
 
         // Attributes on DefaultTile
         const defaultTileAttrs: Record<string, string> = {
@@ -2037,11 +2111,11 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         };
         if (defaultTileAttrs[veField]) {
             if (!value && veField === 'shortName') {
-                return removeAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField]);
+                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField]);
             }
-            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], value);
+            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], value);
             if (result !== xml) { return result; }
-            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField], value);
+            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField], value);
             if (addResult !== xml) { return addResult; }
         }
 
@@ -2049,11 +2123,11 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         if (veField === 'badgeLogo' || veField === 'lockScreenNotification') {
             const lockAttr = veField === 'badgeLogo' ? 'BadgeLogo' : 'Notification';
             if (!value && veField === 'lockScreenNotification') {
-                return removeAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr);
+                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr);
             }
-            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, value);
+            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, value);
             if (result !== xml) { return result; }
-            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr, value);
+            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr, value);
             if (addResult !== xml) { return addResult; }
         }
 
@@ -2061,11 +2135,11 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         if (veField === 'splashScreenImage' || veField === 'splashScreenBackgroundColor') {
             const splashAttr = veField === 'splashScreenImage' ? 'Image' : 'BackgroundColor';
             if (!value && veField === 'splashScreenBackgroundColor') {
-                return removeAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr);
+                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr);
             }
-            const result = replaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, value);
+            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, value);
             if (result !== xml) { return result; }
-            const addResult = addAttributeToElement(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr, value);
+            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr, value);
             if (addResult !== xml) { return addResult; }
         }
 
@@ -2079,49 +2153,50 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             appListEntry: 'AppListEntry',
         };
         if (attrMap[veField]) {
-            const vePattern = /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s;
             if (!value && veField === 'appListEntry') {
-                return removeAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField]);
+                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField]);
             }
-            return replaceAttribute(xml, vePattern, attrMap[veField], value);
+            return scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], value);
         }
 
         // Fallback: surgically insert new child element inside VisualElements
         // This avoids DOM serialization which destroys whitespace formatting
         const veClosePattern = /(<[a-zA-Z0-9]*:?VisualElements\b[^>]*?)\s*\/>/s;
-        const veCloseMatch = veClosePattern.exec(xml);
+        const veCloseMatch = veClosePattern.exec(appXml);
         if (veCloseMatch) {
             // Self-closing VisualElements — convert to open/close and insert child
-            const indent = detectIndent(xml, veCloseMatch.index);
+            const absPos = appStart + veCloseMatch.index;
+            const indent = detectIndent(xml, absPos);
             const childIndent = indent + '  ';
             const childXml = buildVisualChildElement(veField, value);
             if (childXml) {
-                return xml.substring(0, veCloseMatch.index)
+                return xml.substring(0, absPos)
                     + veCloseMatch[1] + '>\n'
                     + childIndent + childXml + '\n'
                     + indent + '</uap:VisualElements>'
-                    + xml.substring(veCloseMatch.index + veCloseMatch[0].length);
+                    + xml.substring(absPos + veCloseMatch[0].length);
             }
         } else {
             // Non-self-closing VisualElements — insert before closing tag
             const veEndPattern = /<\/[a-zA-Z0-9]*:?VisualElements\s*>/s;
-            const veEndMatch = veEndPattern.exec(xml);
+            const veEndMatch = veEndPattern.exec(appXml);
             if (veEndMatch) {
+                const absEndPos = appStart + veEndMatch.index;
                 // Try to detect child indent from an existing child element (e.g., DefaultTile)
                 const existingChildPattern = /\n([ \t]+)<[a-zA-Z0-9]*:?(?:DefaultTile|LockScreen|SplashScreen)\b/;
-                const existingChildMatch = existingChildPattern.exec(xml);
-                const veEndIndent = detectIndent(xml, veEndMatch.index);
+                const existingChildMatch = existingChildPattern.exec(appXml);
+                const veEndIndent = detectIndent(xml, absEndPos);
                 const childIndent = existingChildMatch ? existingChildMatch[1] : (veEndIndent + '  ');
                 const childXml = buildVisualChildElement(veField, value);
                 if (childXml) {
                     // Find the start of the whitespace preceding the closing tag
-                    const beforeClose = xml.substring(0, veEndMatch.index);
+                    const beforeClose = xml.substring(0, absEndPos);
                     const trailingWsMatch = /\n[ \t]*$/.exec(beforeClose);
-                    const insertPos = trailingWsMatch ? veEndMatch.index - trailingWsMatch[0].length : veEndMatch.index;
+                    const insertPos = trailingWsMatch ? absEndPos - trailingWsMatch[0].length : absEndPos;
                     return xml.substring(0, insertPos)
                         + '\n' + childIndent + childXml
                         + '\n' + veEndIndent + veEndMatch[0]
-                        + xml.substring(veEndMatch.index + veEndMatch[0].length);
+                        + xml.substring(absEndPos + veEndMatch[0].length);
                 }
             }
         }
@@ -2141,6 +2216,16 @@ function detectIndent(xml: string, pos: number): string {
     const lineContent = xml.substring(lineStart + 1, pos);
     const match = /^(\s*)/.exec(lineContent);
     return match ? match[1] : '';
+}
+
+/** Find the start/end positions of the nth Application element. */
+function findNthApplicationRegion(xml: string, index: number): { start: number; end: number } | null {
+    const bounds = findParentBounds(xml, 'Applications');
+    if (!bounds) { return null; }
+    const children = findDirectChildElementBounds(xml, bounds.contentStart, bounds.contentEnd);
+    const apps = children.filter(c => /^<Application\b/.test(xml.substring(c.start, c.end)));
+    if (index < 0 || index >= apps.length) { return null; }
+    return apps[index];
 }
 
 /** Build the XML string for a new child element inside VisualElements. */

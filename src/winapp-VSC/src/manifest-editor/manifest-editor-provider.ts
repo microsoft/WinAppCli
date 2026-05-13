@@ -120,8 +120,28 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             }
         });
 
+        // Flush pending webview input changes before save so Ctrl+S captures edits
+        // that are still in the 300ms debounce window.
+        let pendingSaveResolve: ((edits: vscode.TextEdit[]) => void) | null = null;
+        const willSaveSub = vscode.workspace.onWillSaveTextDocument(e => {
+            if (e.document.uri.toString() === document.uri.toString()) {
+                e.waitUntil(new Promise<vscode.TextEdit[]>((resolve) => {
+                    pendingSaveResolve = resolve;
+                    webviewPanel.webview.postMessage({ type: 'flushChanges' });
+                    // Timeout fallback — don't block save forever
+                    setTimeout(() => {
+                        if (pendingSaveResolve === resolve) {
+                            pendingSaveResolve = null;
+                            resolve([]);
+                        }
+                    }, 500);
+                }));
+            }
+        });
+
         webviewPanel.onDidDispose(() => {
             changeDocSub.dispose();
+            willSaveSub.dispose();
         });
 
         // Handle messages from the webview
@@ -134,6 +154,23 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     case 'ready':
                         updateWebview();
                         return;
+
+                    case 'changesFlushed': {
+                        // Apply all pending field changes and resolve the save promise
+                        if (pendingSaveResolve) {
+                            let result = text;
+                            for (const change of message.changes) {
+                                result = applyFieldChange(result, change.section, change.field, change.value, change.index);
+                            }
+                            const edits = result !== text
+                                ? [vscode.TextEdit.replace(new vscode.Range(0, 0, document.lineCount, 0), result)]
+                                : [];
+                            const resolve = pendingSaveResolve;
+                            pendingSaveResolve = null;
+                            resolve(edits);
+                        }
+                        return;
+                    }
 
                     case 'openAsText':
                         await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');

@@ -10,8 +10,6 @@
     If not specified, reads from version.json and calculates based on Stable flag.
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
-.PARAMETER SkipTemplates
-    Skip building the templates package
 .EXAMPLE
     .\scripts\package-nuget.ps1
     .\scripts\package-nuget.ps1 -Version "1.0.0" -Stable
@@ -35,7 +33,6 @@ try
     $CliBinariesPath = Join-Path $ProjectRoot "artifacts\cli"
     $OutputPath = Join-Path $ProjectRoot "artifacts\nuget"
     $ExtrasProjectPath = Join-Path $ProjectRoot "src\winapp-NuGet"
-    $TemplatesProjectPath = Join-Path $ProjectRoot "src\winapp-Templates"
     
     Write-Host "[NUGET] Starting NuGet package creation..." -ForegroundColor Green
     Write-Host "[INFO] Project root: $ProjectRoot" -ForegroundColor Gray
@@ -171,46 +168,6 @@ try
     
     Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinApp package created successfully!" -ForegroundColor Green
     # ============================================================================
-    # Step 2: Build Microsoft.WindowsAppSDK.Templates package
-    # ============================================================================
-    if (-not $SkipTemplates) {
-        Write-Host ""
-        Write-Host "[NUGET] Building Microsoft.WindowsAppSDK.Templates package..." -ForegroundColor Blue
-        
-        $TemplatesCsproj = Join-Path $TemplatesProjectPath "Microsoft.WindowsAppSDK.Templates.csproj"
-        
-        # Update the template.json to reference the correct Extras version
-        $TemplateJsonPath = Join-Path $TemplatesProjectPath "templates\winui\.template.config\template.json"
-        Write-Host "[TEMPLATE] Updating ExtrasVersion in template.json to $Version..." -ForegroundColor Blue
-        
-        # Backup original template.json before modifying
-        Copy-Item $TemplateJsonPath "$TemplateJsonPath.backup" -Force
-        
-        $TemplateJson = Get-Content $TemplateJsonPath -Raw | ConvertFrom-Json
-        $TemplateJson.symbols.ExtrasVersion.defaultValue = $Version
-        $TemplateJson | ConvertTo-Json -Depth 10 | Set-Content $TemplateJsonPath -Encoding UTF8
-        
-        dotnet pack $TemplatesCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
-        $PackResult = $LASTEXITCODE
-        
-        # Restore original template.json
-        Write-Host "[TEMPLATE] Restoring original template.json..." -ForegroundColor Blue
-        if (Test-Path "$TemplateJsonPath.backup") {
-            Move-Item "$TemplateJsonPath.backup" $TemplateJsonPath -Force
-        }
-        
-        if ($PackResult -ne 0) {
-            Write-Error "Failed to create Microsoft.WindowsAppSDK.Templates NuGet package"
-            exit 1
-        }
-        
-        Write-Host "[NUGET] Microsoft.WindowsAppSDK.Templates package created successfully!" -ForegroundColor Green
-    } else {
-        Write-Host ""
-        Write-Host "[NUGET] Skipping templates package (SkipTemplates flag set)" -ForegroundColor Yellow
-    }
-
-    # ============================================================================
     # Summary
     # ============================================================================
     Write-Host ""
@@ -225,9 +182,6 @@ try
     Write-Host ""
     Write-Host "[INFO] To test locally, add the output path as a NuGet source:" -ForegroundColor Cyan
     Write-Host "  dotnet nuget add source `"$OutputPath`" --name WinAppLocal" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "[INFO] Then install the template:" -ForegroundColor Cyan
-    Write-Host "  dotnet new install Microsoft.WindowsAppSDK.Templates::$Version --nuget-source WinAppLocal" -ForegroundColor Gray
     Write-Host ""
     Write-Host "[INFO] And create a new project:" -ForegroundColor Cyan
     Write-Host "  dotnet new winui -n MyApp" -ForegroundColor Gray

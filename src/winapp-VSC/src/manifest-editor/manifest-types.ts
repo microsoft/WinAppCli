@@ -145,7 +145,8 @@ export interface ValidationError {
 export type ExtensionToWebviewMessage =
     | { type: 'update'; data: ManifestData; errors: ValidationError[] }
     | { type: 'validationErrors'; errors: ValidationError[] }
-    | { type: 'refreshImages' };
+    | { type: 'refreshImages' }
+    | { type: 'flushChanges' };
 
 /** Message types sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
@@ -190,7 +191,8 @@ export type WebviewToExtensionMessage =
     | { type: 'addPhoneIdentity' }
     | { type: 'removePhoneIdentity' }
     | { type: 'packageTypeChanged'; value: string }
-    | { type: 'ready' };
+    | { type: 'ready' }
+    | { type: 'changesFlushed'; changes: Array<{ section: string; field: string; value: string; index: number }> };
 
 /** Known capabilities organized by category for the checklist UI. */
 export const KNOWN_CAPABILITIES = {

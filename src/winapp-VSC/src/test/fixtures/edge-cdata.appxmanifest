@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  IgnorableNamespaces="uap">
+
+  <Identity
+    Name="CdataApp"
+    Publisher="CN=Cdata"
+    Version="1.0.0.0" />
+
+  <Properties>
+    <DisplayName>CdataApp</DisplayName>
+    <PublisherDisplayName>Cdata Publisher</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description><![CDATA[This is a description with <special> chars & "quotes" that use CDATA]]></Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="CdataApp.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="CdataApp"
+        Description="App with CDATA sections"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+  </Capabilities>
+</Package>

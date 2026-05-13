@@ -1074,12 +1074,35 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
         // Debounce helper for text inputs
         let debounceTimers = {};
+        let pendingElements = {};
         function debouncedFieldChange(el) {
             const field = el.getAttribute('data-field-name') || '';
             const idx = el.getAttribute('data-index') || '';
             const key = el.id || (field + ':' + idx);
             clearTimeout(debounceTimers[key]);
-            debounceTimers[key] = setTimeout(() => onFieldChange(el), 300);
+            pendingElements[key] = el;
+            debounceTimers[key] = setTimeout(() => {
+                onFieldChange(el);
+                delete pendingElements[key];
+                delete debounceTimers[key];
+            }, 300);
+        }
+
+        function flushPendingChanges() {
+            const changes = [];
+            for (const key in pendingElements) {
+                const el = pendingElements[key];
+                clearTimeout(debounceTimers[key]);
+                changes.push({
+                    section: el.getAttribute('data-section'),
+                    field: el.getAttribute('data-field-name'),
+                    value: el.value,
+                    index: parseInt(el.getAttribute('data-index') || '0', 10),
+                });
+            }
+            debounceTimers = {};
+            pendingElements = {};
+            return changes;
         }
 
         // ─── Generic custom-select initialization ─────────────
@@ -2674,6 +2697,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                         if (img.src) img.src = img.src.split('?')[0] + '?t=' + Date.now();
                     });
                     break;
+                case 'flushChanges': {
+                    const changes = flushPendingChanges();
+                    vscode.postMessage({ type: 'changesFlushed', changes });
+                    break;
+                }
             }
         });
 

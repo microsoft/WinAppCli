@@ -318,7 +318,6 @@ winapp manifest generate
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite
 ```
 
-
 #### manifest add-alias
 
 Add an execution alias (`uap5:AppExecutionAlias`) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name.
