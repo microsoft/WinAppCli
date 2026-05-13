@@ -42,19 +42,17 @@
     <_WinAppPromoteManifest Condition="'$(EnableMsixTooling)' == 'true' And !Exists('$(MSBuildProjectDirectory)\Package.appxmanifest') And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">true</_WinAppPromoteManifest>
     
     <!--
-      Capture whether the user explicitly set WinAppManifestPath BEFORE auto-detection runs.
-      Only an explicit user-set value (or a project-dir manifest detected directly by the gate)
-      can satisfy the gate. Auto-detected output-dir paths must NOT count, otherwise a stale
-      bin/AppxManifest.xml from a previous build could activate the gate on rebuild.
-    -->
-    <_WinAppManifestPathUserSet Condition="'$(WinAppManifestPath)' != ''">true</_WinAppManifestPathUserSet>
-
-    <!--
       Path to the AppxManifest.xml file.
       Auto-detected from output directory first, then project directory.
       Checks all supported manifest filenames: Package.appxmanifest (VS convention), AppxManifest.xml (MSBuild output),
       and appxmanifest.xml (winapp convention).
       This is set here (in targets) because $(OutputPath) is not available in props.
+
+      Output-directory locations are checked first because frameworks like MAUI
+      generate the manifest at build time based on platform / msbuild props, so
+      the only manifest that exists is in $(OutputPath). Project-directory
+      locations cover the standard winapp / VS conventions where the manifest
+      is authored in source.
     -->
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
@@ -87,13 +85,19 @@
         Windows TFMs must build cleanly with no winapp activity. We prefer
         the explicitly-set $(TargetPlatformIdentifier) when present and
         fall back to deriving it from $(TargetFramework).
-      - A manifest exists in the project directory OR a custom $(WinAppManifestPath)
-        was set EXPLICITLY by the user (captured in $(_WinAppManifestPathUserSet)
-        before auto-detection runs) and points to an existing file. We deliberately
-        do NOT count auto-detected output-directory manifest paths because a stale
-        AppxManifest.xml from a prior build could otherwise activate the gate on
-        a subsequent rebuild. The standalone WindowsPackageType=='MSIX' opt-in is
-        also not enough on its own; downstream targets need an actual manifest file.
+      - A manifest exists at $(WinAppManifestPath). After the auto-detection
+        block above runs, this property points at the first existing manifest
+        across all supported output- and project-directory locations, OR at
+        whatever path the consumer set explicitly. Frameworks like MAUI
+        generate the manifest into $(OutputPath) based on platform / msbuild
+        props, so we deliberately accept output-dir paths here — without that,
+        MAUI head apps consuming this package transitively would never have
+        the gate activate. The other discriminators above (WindowsPackageType,
+        OutputType, TPI) already prevent activation in projects that aren't
+        intended to be packaged Windows apps, so a stale output-dir manifest
+        from a prior build only matters in a project that is otherwise still
+        a packaged Windows app — in which case re-activating the gate is the
+        correct behavior.
     ============================================================================
   -->
   <PropertyGroup>
@@ -113,12 +117,8 @@
         And '$(WindowsPackageType)' != 'None'
         And '$(OutputType)' != 'Library'
         And '$(_WinAppEffectiveTargetPlatformIdentifier)' == 'windows'
-        And (
-          Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')
-          Or Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')
-          Or Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')
-          Or ('$(_WinAppManifestPathUserSet)' == 'true' And Exists('$(WinAppManifestPath)'))
-        )">true</_WinAppRunSupportActive>
+        And '$(WinAppManifestPath)' != ''
+        And Exists('$(WinAppManifestPath)')">true</_WinAppRunSupportActive>
     <_WinAppRunSupportActive Condition="'$(_WinAppRunSupportActive)' == ''">false</_WinAppRunSupportActive>
   </PropertyGroup>
 

@@ -48,6 +48,7 @@ Describe "Microsoft.Windows.SDK.BuildTools.WinApp gating" -Skip:$script:skip {
                 [string]$OutputType,
                 [string]$ProjectDirManifestName = "",  # 'appxmanifest.xml' | 'Package.appxmanifest' | 'AppxManifest.xml'
                 [bool]$ProjectDirManifest = $false,    # convenience: same as -ProjectDirManifestName 'appxmanifest.xml'
+                [string]$OutputDirManifestName = "",   # places file at <OutputPath><name>; OutputPath forced to bin\
                 [string]$WindowsPackageType = "",
                 [string]$CustomManifestPath = "",
                 [string]$EnableWinAppRunSupport = "",
@@ -67,11 +68,17 @@ Describe "Microsoft.Windows.SDK.BuildTools.WinApp gating" -Skip:$script:skip {
                 }
                 Set-Content -Path (Join-Path $dir $CustomManifestPath) -Value '<x/>'
             }
+            if ($OutputDirManifestName) {
+                $outDir = Join-Path $dir 'bin'
+                New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+                Set-Content -Path (Join-Path $outDir $OutputDirManifestName) -Value '<x/>'
+            }
             $extraProps = ""
             if ($WindowsPackageType) { $extraProps += "    <WindowsPackageType>$WindowsPackageType</WindowsPackageType>`n" }
             if ($CustomManifestPath) { $extraProps += "    <WinAppManifestPath>`$(MSBuildProjectDirectory)\$CustomManifestPath</WinAppManifestPath>`n" }
             if ($EnableWinAppRunSupport) { $extraProps += "    <EnableWinAppRunSupport>$EnableWinAppRunSupport</EnableWinAppRunSupport>`n" }
             if ($TargetPlatformIdentifier) { $extraProps += "    <TargetPlatformIdentifier>$TargetPlatformIdentifier</TargetPlatformIdentifier>`n" }
+            if ($OutputDirManifestName) { $extraProps += "    <OutputPath>bin\</OutputPath>`n" }
             $csproj = @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -121,6 +128,23 @@ $extraProps  </PropertyGroup>
 
         It "Activates for the Windows TFM of a multi-targeted MAUI-style project" {
             Get-GateValue -CaseName 'maui-windows' -TargetFramework 'net8.0-windows10.0.19041.0' -OutputType 'Exe' -ProjectDirManifest $true | Should -Be 'true'
+        }
+
+        It "Activates for MAUI-style head app whose manifest is generated into `$(OutputPath) (Package.appxmanifest)" {
+            # MAUI generates the AppxManifest at build time based on platform / msbuild props,
+            # so the only manifest that exists lives under bin\ — not in the project directory.
+            # The auto-detection in WinAppManifestPath checks $(OutputPath) first; the gate must
+            # accept that resolved path, otherwise transitive consumption from MAUI Windows libs
+            # never activates and `dotnet run` falls back to the SDK default.
+            Get-GateValue -CaseName 'maui-genmfst-pkg' -TargetFramework 'net8.0-windows10.0.19041.0' -OutputType 'WinExe' -OutputDirManifestName 'Package.appxmanifest' | Should -Be 'true'
+        }
+
+        It "Activates when the manifest is generated into `$(OutputPath) as AppxManifest.xml" {
+            Get-GateValue -CaseName 'output-appxmanifest-xml' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'Exe' -OutputDirManifestName 'AppxManifest.xml' | Should -Be 'true'
+        }
+
+        It "Activates when the manifest is generated into `$(OutputPath) as appxmanifest.xml" {
+            Get-GateValue -CaseName 'output-appxmanifest-lower' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -OutputDirManifestName 'appxmanifest.xml' | Should -Be 'true'
         }
     }
 
