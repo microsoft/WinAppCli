@@ -30,6 +30,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(SharedUiOptions.OutputOption);
         Options.Add(SharedUiOptions.CaptureScreenOption);
+        Options.Add(SharedUiOptions.FocusOption);
     }
 
     public class Handler(
@@ -52,6 +53,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             }
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+            var focus = parseResult.GetValue(SharedUiOptions.FocusOption);
 
             try
             {
@@ -68,7 +70,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                             return (long)info.Width * info.Height;
                         }).First();
                         var session = await sessionService.ResolveSessionAsync(null, main.Hwnd, cancellationToken);
-                        return await CaptureMultipleWindows(allWindows, session, output, json, captureScreen, cancellationToken);
+                        return await CaptureMultipleWindows(allWindows, session, output, json, captureScreen, focus, cancellationToken);
                     }
                 }
 
@@ -87,11 +89,11 @@ internal class UiScreenshotCommand : Command, IShortDescription
                             (sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")
                         };
                         allWindows.AddRange(ownedWindows);
-                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, cancellationToken);
+                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, focus, cancellationToken);
                     }
                 }
 
-                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, cancellationToken);
+                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, focus, cancellationToken);
                 var pngBytes = EncodePng(pixels, w, h);
 
                 var filePath = output ?? "screenshot.png";
@@ -137,6 +139,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             string? output,
             bool json,
             bool captureScreen,
+            bool focus,
             CancellationToken ct)
         {
             var filePath = output ?? "screenshot.png";
@@ -169,7 +172,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         WindowTitle = title,
                         WindowHandle = w.Hwnd
                     };
-                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, ct);
+                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, focus, ct);
                     captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
                     windowDetails.Add(new UiScreenshotWindowInfo
                     {

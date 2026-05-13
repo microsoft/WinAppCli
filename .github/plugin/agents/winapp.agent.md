@@ -204,7 +204,7 @@ Want to inspect or interact with a running app's UI?
 - `ui inspect -a <app> [--depth N] [--interactive] [--hide-disabled] [--hide-offscreen]` — view element tree with semantic slugs and 2-space indentation. `--interactive` filters to invokable elements only (auto-depth 8) — ideal for discovering clickable elements
 - `ui search <selector> -a <app> [--max N]` — find elements; output shows semantic slugs. Surfaces invokable ancestor for all non-invokable results
 - `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
-- `ui screenshot -a <app> [--output file.png] [--json] [--capture-screen]` — capture window as PNG. Use `--capture-screen` for popup overlays.
+- `ui screenshot -a <app> [--output file.png] [--json] [--focus] [--capture-screen]` — capture window as PNG. Default uses Windows.Graphics.Capture (composited surface — preserves rounded corners and works while occluded), with PrintWindow as fallback. Use `--focus` to bring the window to the foreground first; use `--capture-screen` for popup overlays not owned by the target window.
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
 - `ui set-value <selector> "value" -a <app>` — set text or slider value
 - `ui focus <selector> -a <app>` — move keyboard focus
