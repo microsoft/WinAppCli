@@ -379,11 +379,11 @@ export const DEVICE_FAMILY_OPTIONS = [
 
 /** Optional visual asset types that can be added to an application. */
 export const OPTIONAL_VISUAL_ASSETS = [
-    { field: 'wide310x150Logo', label: 'Wide 310x150 Logo', placeholder: 'Assets\\Wide310x150Logo.png', description: 'Wide tile image for the Start menu, relative path to a 310×150 pixel PNG' },
-    { field: 'square71x71Logo', label: 'Square 71x71 Logo', placeholder: 'Assets\\Square71x71Logo.png', description: 'Small tile image, relative path to a 71×71 pixel PNG' },
-    { field: 'square310x310Logo', label: 'Square 310x310 Logo', placeholder: 'Assets\\Square310x310Logo.png', description: 'Large tile image for the Start menu, relative path to a 310×310 pixel PNG' },
-    { field: 'badgeLogo', label: 'Badge Logo', placeholder: 'Assets\\BadgeLogo.png', description: 'Badge notification image shown on the lock screen, relative path to a 24×24 pixel PNG' },
-    { field: 'splashScreenImage', label: 'Splash Screen', placeholder: 'Assets\\SplashScreen.png', description: 'Image displayed while the app is launching, relative path to a 620×300 pixel PNG' },
+    { field: 'wide310x150Logo', label: 'Wide 310x150 Logo', placeholder: 'Assets\\Wide310x150Logo.png', description: 'Wide tile image for the Start menu — package-relative path or key in resources.pri' },
+    { field: 'square71x71Logo', label: 'Square 71x71 Logo', placeholder: 'Assets\\Square71x71Logo.png', description: 'Small tile image — package-relative path or key in resources.pri' },
+    { field: 'square310x310Logo', label: 'Square 310x310 Logo', placeholder: 'Assets\\Square310x310Logo.png', description: 'Large tile image for the Start menu — package-relative path or key in resources.pri' },
+    { field: 'badgeLogo', label: 'Badge Logo', placeholder: 'Assets\\BadgeLogo.png', description: 'Badge notification image shown on the lock screen — package-relative path or key in resources.pri' },
+    { field: 'splashScreenImage', label: 'Splash Screen', placeholder: 'Assets\\SplashScreen.png', description: 'Image displayed while the app is launching — package-relative path or key in resources.pri' },
 ] as const;
 
 /** Tile sizes that support showing the app name overlay. */

@@ -179,6 +179,13 @@ export async function hasErrorClass(frame: FrameLocator, fieldDataAttr: string):
     return cls.includes('has-error');
 }
 
+/** Check whether a form group has the warning styling class. */
+export async function hasWarningClass(frame: FrameLocator, fieldDataAttr: string): Promise<boolean> {
+    const group = frame.locator(`.form-group[data-field="${fieldDataAttr}"]`);
+    const cls = await group.getAttribute('class') ?? '';
+    return cls.includes('has-warning');
+}
+
 /** Select a value from a custom-select dropdown. */
 export async function selectCustomValue(frame: FrameLocator, selectId: string, value: string): Promise<void> {
     // Open the dropdown

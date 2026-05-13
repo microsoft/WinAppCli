@@ -131,23 +131,41 @@ export function isValidCustomCapability(name: string): boolean {
     return CUSTOM_CAPABILITY_REGEX.test(name);
 }
 
-/** Returns true if a path has an unsupported image file extension. Schema allows .png, .jpg, .jpeg. */
-function hasUnsupportedImageExtension(path: string): boolean {
-    const filename = path.split(/[\\/]/).pop() || '';
-    const dotIdx = filename.lastIndexOf('.');
-    if (dotIdx < 0) { return false; } // no extension — valid (could be scale-qualified)
-    const ext = filename.substring(dotIdx).toLowerCase();
-    return ext !== '.png' && ext !== '.jpg' && ext !== '.jpeg';
+/**
+ * Returns true if a value is an MRT resource reference.
+ * MRT prefixed strings (ms-resource:) are explicit resource lookups.
+ * All path values are also run through MRT before falling back to the literal path,
+ * so even "foo.png" could be a key in resources.pri that resolves to a different file.
+ */
+function isMrtReference(value: string): boolean {
+    return value.startsWith('ms-resource:');
 }
 
-const IMAGE_FORMAT_ERROR = 'Visual assets must be .png, .jpg, or .jpeg files.';
+/**
+ * Returns true if a path has an unsupported image file extension.
+ * Only checks literal file paths — MRT resource keys are always valid.
+ * Extensionless values are valid (could be scale/contrast-qualified or MRT keys).
+ */
+function hasUnsupportedImageExtension(path: string): boolean {
+    if (isMrtReference(path)) { return false; }
+    const filename = path.split(/[\\/]/).pop() || '';
+    const dotIdx = filename.lastIndexOf('.');
+    if (dotIdx < 0) { return false; } // no extension — valid (MRT key or scale-qualified)
+    const ext = filename.substring(dotIdx).toLowerCase();
+    // Allow known image extensions and MRT qualifier patterns (e.g. .scale-200, .contrast-high)
+    if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') { return false; }
+    if (/^\.(scale|contrast|targetsize|theme|layoutdirection|language|dxfeaturelevel)-/i.test(ext)) { return false; }
+    return true;
+}
 
-/** Validate an image field: error if blank (but present in manifest) or unsupported extension. */
+const IMAGE_FORMAT_ERROR = 'Visual assets should be .png, .jpg, or .jpeg files, or an MRT resource key (ms-resource:).';
+
+/** Validate an image field: error if blank (but present in manifest), warn if unsupported extension. */
 function validateImageField(errors: ValidationError[], field: string, value: string | null | undefined): void {
     if (value === '') {
         errors.push({ field, message: 'Image path cannot be empty.', severity: 'error' });
     } else if (value && hasUnsupportedImageExtension(value)) {
-        errors.push({ field, message: IMAGE_FORMAT_ERROR, severity: 'error' });
+        errors.push({ field, message: IMAGE_FORMAT_ERROR, severity: 'warning' });
     }
 }
 

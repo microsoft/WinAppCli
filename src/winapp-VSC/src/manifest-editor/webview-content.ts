@@ -2256,7 +2256,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                         <input type="text" data-section="applications" data-field-name="visualElements.square150x150Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.square150x150Logo)}" placeholder="Assets\\\\Square150x150Logo.png" />
                                         <button class="btn btn-sm browse-image-btn" data-section="applications" data-field-name="visualElements.square150x150Logo" data-index="\${idx}">Choose file</button>
                                     </div>
-                                    <div class="description">Medium tile image shown in the Start menu, relative path to a 150×150 pixel PNG</div>
+                                    <div class="description">Medium tile image shown in the Start menu — package-relative path or key in resources.pri</div>
                                     <div class="validation-msg"></div>
                                 </div>
                                 <div class="form-group" data-field="applications.\${idx}.visualElements.square44x44Logo">
@@ -2265,7 +2265,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                                         <input type="text" data-section="applications" data-field-name="visualElements.square44x44Logo" data-index="\${idx}" value="\${escapeHtml(app.visualElements.square44x44Logo)}" placeholder="Assets\\\\Square44x44Logo.png" />
                                         <button class="btn btn-sm browse-image-btn" data-section="applications" data-field-name="visualElements.square44x44Logo" data-index="\${idx}">Choose file</button>
                                     </div>
-                                    <div class="description">Small app icon shown in the taskbar, task switcher, and notification area, relative path to a 44×44 pixel PNG</div>
+                                    <div class="description">Small app icon shown in the taskbar, task switcher, and notification area — package-relative path or key in resources.pri</div>
                                     <div class="validation-msg"></div>
                                 </div>
                             </div>
