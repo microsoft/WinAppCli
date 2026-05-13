@@ -2,23 +2,34 @@
 
 Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed. 
 
-With the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution.
+With the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution. Inside the .NET ecosystem, WinApp supports .NET console, WPF, WinForms, and WinUI3 applications.
 
 The WinApp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
 1. The WinApp CLI integrates with existing dotnet tooling to enable you to test your application with package identity via `dotnet run`
 2. The WinApp CLI makes packaging applications as MSIX easy via `winapp pack`
 
-The WinApp CLI works for .NET console, WPF, WinForms, and WinUI3 applications.
-
-<!-- image with cli first run visual -->
-
-
 If you want to follow along with the examples in this post, install the CLI with winget:
+<!-- image with cli first run visual -->
 
 ```
 winget install Microsoft.winappcli --source winget
 ```
+
+### What is package identity and why would I want it?
+Package identity is a unique identifier for your application within Windows. You can think of granting package identity as "registering" your application within the operating system. 
+
+An app that has been granted identity can more effectively integrate with the Windows platform, enabling access to Windows APIs and features that would otherwise be blocked without it. Some of the capabilities that become available with package identity include:
+* Background tasks
+* Push and toast notifications
+* Share target
+* File handlers
+* Windows AI APIs
+* and many others!
+
+Long story short, package identity enables a richer experience for your application on Windows.
+
+Let's take a look at how WinApp can make the process of granting package identity straightforward.
 
 ## `dotnet run` with Package Identity
 
