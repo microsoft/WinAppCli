@@ -1,3 +1,4 @@
+<!-- mslearn: true -->
 # Creating a WinML Addon
 
 This guide shows you how to create a C# native addon that uses Windows Machine Learning (WinML) in your Electron app. WinML allows you to run machine learning models (ONNX format) locally on Windows devices for tasks like image classification, object detection, and more.
@@ -385,7 +386,7 @@ Now you're ready to:
 
 Or explore other guides:
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** - Learn how to use the Phi Silica AI API
-- **[Getting Started Overview](../../electron-get-started.md)** - Return to the main guide
+- **[Getting Started Overview](index.md)** - Return to the main guide
 
 ### Customizing for Your Model
 

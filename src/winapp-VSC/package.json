@@ -4,7 +4,7 @@
   "description": "WinApp extension for Visual Studio Code to assist in building, debugging, and packaging Windows applications using the WinAppCLI.",
   "publisher": "Microsoft-WinAppCLI",
   "icon": "images/icon.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/microsoft/WinAppCli.git"
@@ -201,13 +201,14 @@
     "@types/vscode": "^1.109.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.3.2",
     "esbuild": "^0.27.3",
     "eslint": "^10.0.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
   },
   "overrides": {
-    "minimatch": "^10.2.1",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "fast-uri": "3.1.0"
   }
 }

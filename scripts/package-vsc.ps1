@@ -185,10 +185,12 @@ try
     $CliVersion = "unknown"
     if (Test-Path $CliExe) {
         try {
-            $RawCliVersion = & $CliExe --version 2>$null
-            if (-not [string]::IsNullOrWhiteSpace($RawCliVersion)) {
+            $RawOutput = & $CliExe --version 2>$null
+            # Output may contain ASCII banner art; find the line matching semver pattern
+            $VersionLine = $RawOutput | Where-Object { $_ -match '^\d+\.\d+\.\d+' } | Select-Object -First 1
+            if (-not [string]::IsNullOrWhiteSpace($VersionLine)) {
                 # Strip git hash suffix (e.g., "1.0.0+abc123" -> "1.0.0")
-                $CliVersion = ($RawCliVersion.Trim() -split '\+')[0]
+                $CliVersion = ($VersionLine.Trim() -split '\+')[0]
             }
         } catch {
             Write-Warning "Could not determine CLI version from binary"
@@ -212,29 +214,12 @@ try
     $PackageJson.version = $Version
     $PackageJson | ConvertTo-Json -Depth 100 | Set-Content $PackageJsonPath
 
-    # Check if vsce is available, install if needed
-    $VsceCmd = Get-Command vsce -ErrorAction SilentlyContinue
-    if (-not $VsceCmd) {
-        Write-Host "[VSC] Installing @vscode/vsce..." -ForegroundColor Blue
-        npm install -g @vscode/vsce
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to install @vscode/vsce"
-            # Restore package.json and README.md before exiting
-            Move-Item "$PackageJsonPath.backup" $PackageJsonPath -Force
-            if (Test-Path "$ReadmePath.backup") {
-                Move-Item "$ReadmePath.backup" $ReadmePath -Force
-            }
-            Pop-Location
-            exit 1
-        }
-    }
-
-    # Package the VSIX
+    # Package the VSIX (vsce installed via npm ci from devDependencies)
     Write-Host "[PACK] Creating VSIX package..." -ForegroundColor Blue
 
     $RelativeOutputPath = [System.IO.Path]::GetRelativePath($VscProjectPath, $OutputPath)
 
-    vsce package --no-dependencies -o "$RelativeOutputPath\winapp-$Version.vsix"
+    npx vsce package --no-dependencies -o "$RelativeOutputPath\winapp-$Version.vsix"
     $PackResult = $LASTEXITCODE
 
     # Restore original package.json

@@ -1,6 +1,7 @@
+<!-- mslearn: true -->
 # Using winapp CLI with Rust
 
-This guide demonstrates how to use `winappcli` with a Rust application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a Rust application to debug with package identity and package your application as an MSIX.
 
 For a complete working example, check out the [Rust sample](../../samples/rust-app) in this repository.
 
@@ -50,7 +51,8 @@ This adds the Windows API bindings with the `ApplicationModel` feature, which gi
 
 Next, replace the entire contents of `src/main.rs` with the following code. This code attempts to retrieve the current package identity. If it succeeds, it prints the Package Family Name; otherwise, it prints "Not packaged".
 
-> **Note**: The [full sample](../../samples/rust-app) also includes code to show a Windows Notification if identity is present, but for this guide, we'll focus on the identity check.
+> [!NOTE]
+> The [full sample](../../samples/rust-app) also includes code to show a Windows Notification if identity is present, but for this guide, we'll focus on the identity check.
 
 ```rust
 use windows::ApplicationModel::Package;
@@ -102,7 +104,8 @@ This command will:
 - Create `Package.appxmanifest` — the manifest that defines your app's identity
 - Create `Assets` folder — icons required for MSIX packaging and Store submission
 
-> **Note:** Because no SDK packages are being managed, no `winapp.yaml` is created — Rust uses the `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
+> [!NOTE]
+> Because no SDK packages are being managed, no `winapp.yaml` is created — Rust uses the `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
 
 You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
@@ -138,7 +141,8 @@ To test features that require identity (like Notifications) without fully packag
 
 The `--with-alias` flag launches the app via its execution alias so console output stays in the current terminal. This requires the `uap5:ExecutionAlias` we added in step 4.
 
-> **Note**: `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 6. Use `winapp unregister` to clean up development packages when done.
+> [!NOTE]
+> `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 6. Use `winapp unregister` to clean up development packages when done.
 
 You should now see output similar to:
 ```
@@ -146,7 +150,8 @@ Package Family Name: rust-app_12345abcde
 ```
 This confirms your app is running with a valid package identity!
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 6. Package with MSIX
 
@@ -174,7 +179,8 @@ MSIX packages must be signed. For local testing, generate a self-signed developm
 winapp cert generate --if-exists skip
 ```
 
-> **Important**: The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
+> [!IMPORTANT]
+> The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Sign and Pack
 
@@ -196,7 +202,8 @@ winapp cert install .\devcert.pfx
 
 ### Install and Run
 
-> **Note**: If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
+> [!NOTE]
+> If you used `winapp run` in step 5, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
 
 Install the package by double-clicking the generated `.msix` file, or via PowerShell:
 
@@ -212,7 +219,8 @@ rust-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> [!TIP]
+> If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate

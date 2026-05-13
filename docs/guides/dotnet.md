@@ -1,8 +1,9 @@
+<!-- mslearn: true -->
 # Using winapp CLI with .NET 
 
-> This guide should work for most .NET projects types. The steps have been tested with both console and UI-based projects like WPF. For working examples, check out the [dotnet-app](../../samples/dotnet-app) (console) and [wpf-app](../../samples/wpf-app) (WPF) samples in the samples folder.
+> This guide should work for most .NET project types. The steps have been tested with both console and UI-based projects like WPF. For working examples, check out the [dotnet-app](../../samples/dotnet-app) (console) and [wpf-app](../../samples/wpf-app) (WPF) samples in the samples folder.
 
-This guide demonstrates how to use `winappcli` with a .NET application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a .NET application to debug with package identity and package your application as an MSIX.
 
 Package identity is a core concept in the Windows app model. It allows your application to access specific Windows APIs (like Notifications, Security, AI APIs, etc), have a clean install/uninstall experience, and more.
 
@@ -100,7 +101,8 @@ This command will:
 - Add `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.BuildTools`, and `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package references to your `.csproj`
 - Create `Package.appxmanifest` and `Assets` folder for your app identity
 
-> **Note:** Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
+> [!NOTE]
+> Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
 
 You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
@@ -146,7 +148,8 @@ dotnet run
 
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
-> **Note**: You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
+> [!NOTE]
+> You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
 
 You should see output similar to:
 ```
@@ -165,7 +168,8 @@ winapp run .\bin\Debug\net10.0-windows10.0.26100.0
 
 To add the NuGet package back: `dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease`
 
-> **Tip:** To disable the automatic `dotnet run` integration, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
+> [!TIP]
+> To disable the automatic `dotnet run` integration, add `<EnableWinAppRunSupport>false</EnableWinAppRunSupport>` to your `.csproj`. See [dotnet run support docs](../dotnet-run-support.md) for customization options.
 
 ### Alternative: Sparse package identity
 
@@ -195,7 +199,8 @@ If you prefer not to use the NuGet package, you can add a custom MSBuild target 
 
 With this configuration, `dotnet build` applies the debug identity and you can run the executable directly. Note that `dotnet run` may rebuild and overwrite the identity, so run the exe manually after building.
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 > **When to skip this**: If you prefer explicit control over when identity is applied, or if you're working on code that doesn't need identity for most of your development cycle, the manual approach above may be simpler.
 
@@ -273,7 +278,8 @@ First, build your application in release mode for optimal performance:
 dotnet build -c Release
 ```
 
-> **Note**: You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
+> [!NOTE]
+> You may see NuGet vulnerability warnings (NU1900). These are safe to ignore and don't affect your build output.
 
 ### Generate a Development Certificate
 
@@ -313,7 +319,8 @@ dotnet-app
 
 You should see the "Package Family Name" output, confirming it's installed and running with identity.
 
-> **Tip**: If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
+> [!TIP]
+> If you need to repackage your app (e.g., after code changes), increment the `Version` in your `Package.appxmanifest` before running `winapp pack` again. Windows requires a higher version number to update an installed package.
 
 ## Tips
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.

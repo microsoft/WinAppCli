@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.1
+ * Source schema version: 0.3.2
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -439,7 +439,9 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 export interface RunOptions extends CommonOptions {
   /** Input folder containing the app to run */
   inputFolder: string;
-  /** Command-line arguments to pass to the application */
+  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
+  appArgs?: string;
+  /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
@@ -447,6 +449,8 @@ export interface RunOptions extends CommonOptions {
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
+  /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
+  executable?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
@@ -469,10 +473,12 @@ export interface RunOptions extends CommonOptions {
 export async function run(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
+  if (options.appArgs) args.push(options.appArgs);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
+  if (options.executable) args.push('--executable', options.executable);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
@@ -788,8 +794,10 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
   captureScreen?: boolean;
+  /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
+  focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Save output to file path (e.g., screenshot) */
@@ -806,6 +814,7 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
+  if (options.focus) args.push('--focus');
   if (options.json) args.push('--json');
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());

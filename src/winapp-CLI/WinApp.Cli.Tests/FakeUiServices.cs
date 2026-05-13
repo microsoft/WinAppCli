@@ -38,7 +38,7 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
         => Task.FromResult(ScreenshotResult);
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)

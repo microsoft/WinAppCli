@@ -19,7 +19,7 @@ Perfect for:
 
 ## Get started
 
-Checkout our getting started guide for step by step instructions: [Electron guide](https://github.com/microsoft/WinAppCli/blob/main/docs/electron-get-started.md).
+Checkout our getting started guide for step by step instructions: [Electron guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/index.md).
 
 ## 📋 Usage
 
