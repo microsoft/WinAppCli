@@ -936,6 +936,41 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+### gallery
+
+Search the **WinUI 3 Gallery**, **Windows Community Toolkit**, and a curated
+catalog of core platform patterns for grounded XAML and C# samples. Designed for
+agents and developers who need the canonical sample for a control or pattern
+without leaving the terminal.
+
+```bash
+winapp gallery [command] [options]
+```
+
+**Commands:**
+
+- `search <query> [--max N]` — Free-text search across all three sources, BM25-ranked with synonym expansion. Default 5 results.
+- `get <id>` — Print the full markdown card (title, XAML, C#, pitfall notes) for a single pattern. Exits 1 if the id is unknown.
+- `list` — List every available pattern, grouped by source. Useful for discovery.
+- `refresh` — Delete the cached snapshots so the next call re-fetches from GitHub.
+
+**Cache:** snapshots live at `%USERPROFILE%\.winapp\cache\gallery\{gallery,toolkit}\`
+(override with `WINAPP_CLI_CACHE_DIRECTORY`) and are valid for 7 days. An
+embedded snapshot ships with the exe as an offline fallback. The first-run
+notice is suppressed for `gallery` commands so the markdown output pipes
+cleanly.
+
+**Examples:**
+
+```powershell
+winapp gallery search "tabbed document interface"
+winapp gallery get gallery-tabview
+winapp gallery list
+winapp gallery refresh
+```
+
+For full documentation, see [docs/gallery.md](gallery.md).
+
 ### ui
 
 Inspect and interact with running Windows app UIs using UI Automation (UIA).

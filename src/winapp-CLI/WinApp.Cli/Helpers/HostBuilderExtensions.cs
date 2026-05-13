@@ -8,6 +8,7 @@ using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.Gallery;
 
 namespace WinApp.Cli.Helpers;
 
@@ -48,7 +49,9 @@ internal static class StoreHostBuilderExtensions
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            // Gallery search services
+            .AddSingleton<IGalleryDataService, GalleryDataService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -92,6 +95,12 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                // Gallery commands
+                .ConfigureCommand<GalleryCommand>()
+                .UseCommandHandler<GallerySearchCommand, GallerySearchCommand.Handler>()
+                .UseCommandHandler<GalleryGetCommand, GalleryGetCommand.Handler>()
+                .UseCommandHandler<GalleryListCommand, GalleryListCommand.Handler>()
+                .UseCommandHandler<GalleryRefreshCommand, GalleryRefreshCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 
