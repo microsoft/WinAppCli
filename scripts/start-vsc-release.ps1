@@ -183,6 +183,7 @@ try {
 
     # 6. Confirm with user
     Write-Host ""
+
     Write-Host "  VSC Extension Release Plan" -ForegroundColor White
     Write-Host "  ─────────────────────────────────────────────" -ForegroundColor White
     Write-Host "  Release version : $releaseVersion" -ForegroundColor White

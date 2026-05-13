@@ -794,8 +794,10 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
   captureScreen?: boolean;
+  /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
+  focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Save output to file path (e.g., screenshot) */
@@ -812,6 +814,7 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
+  if (options.focus) args.push('--focus');
   if (options.json) args.push('--json');
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());
