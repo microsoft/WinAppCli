@@ -309,7 +309,8 @@ Capture the target window or element as a PNG image. When multiple windows exist
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--capture-screen` | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
+| `--focus` | Bring the target window to the foreground before capture. Already implied by --capture-screen. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--output` | Save output to file path (e.g., screenshot) | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
