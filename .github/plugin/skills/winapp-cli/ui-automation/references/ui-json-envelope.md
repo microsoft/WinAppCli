@@ -69,13 +69,13 @@ like a label inside a button).
 ```json
 [
   {
-    "selector": "btn-save-c3d4",
+    "selector": "txt-save-label-a1b2",
     "name": "Save",
-    "controlType": "Button",
+    "controlType": "Text",
     "children": [ ... ],
     "invokableAncestor": {
       "selector": "btn-save-c3d4",
-      "name": "Save",
+      "name": "Save button",
       "controlType": "Button"
     }
   }
