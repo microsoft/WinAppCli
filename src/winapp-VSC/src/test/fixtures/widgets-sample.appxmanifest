@@ -1,45 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<Package
+<Package xmlns:uap17="http://schemas.microsoft.com/appx/manifest/uap/windows10/17" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:uap13="http://schemas.microsoft.com/appx/manifest/uap/windows/10/13" xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6" xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
 	xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 	xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
 	xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
 	xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
 	xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-	IgnorableNamespaces="uap uap3 rescap">
+	IgnorableNamespaces="uap uap3 rescap mp">
 
 	<Identity
-		Name="SampleWidgetProviderAppPackage"
-		Publisher="CN=Microsoft Corporation"
-		Version="1.0.0.0" />
+		Name="testtest"
+		Publisher="CN=Microsoft Corporation, O=t"
+		Version="1.0.0.0"
+		ProcessorArchitecture="arm64" />
 
 	<Properties>
-		<DisplayName>SampleWidgetProviderAppPackage</DisplayName>
+		<DisplayName>SampleWidgetProviderApp</DisplayName>
 		<PublisherDisplayName>Microsoft Corporation</PublisherDisplayName>
 		<Logo>Images\StoreLogo.png</Logo>
+	  <Description>ddd</Description>
 	</Properties>
 
 	<Dependencies>
-		<TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
 		<TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+		<TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+	  <PackageDependency Name="dddd" MinVersion="1.0.0.0" Publisher="CN=t" />
 	</Dependencies>
 
 	<Resources>
-		<Resource Language="x-generate" />
+		<Resource Language="x-generate" uap:Scale="100" />
 	</Resources>
 
 	<Applications>
 		<Application Id="App"
 			Executable="$targetnametoken$.exe"
-			EntryPoint="$targetentrypoint$">
+			EntryPoint="$targetentrypoint$"
+			uap10:TrustLevel="appContainer"
+			uap10:RuntimeBehavior="windowsApp">
 			<uap:VisualElements
 				DisplayName="SampleWidgetProviderAppPackage"
 				Description="SampleWidgetProviderAppPackage"
 				BackgroundColor="transparent"
 				Square150x150Logo="Images\Square150x150Logo.png"
-				Square44x44Logo="Images\Square44x44Logo.png"
-				AppListEntry="none">
-				<uap:DefaultTile Wide310x150Logo="Images\Wide310x150Logo.png" />
+				Square44x44Logo="Images\Square44x44Logo.png">
+				<uap:DefaultTile Wide310x150Logo="Images\Wide310x150Logo.png" Square310x310Logo="" />
 				<uap:SplashScreen Image="Images\SplashScreen.png" />
 			</uap:VisualElements>
 			<Extensions>
@@ -74,6 +78,15 @@
 											<Capability>
 												<Size Name="large" />
 											</Capability>
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="contacts" />
+										  <uap:Capability Name="contacts" />
+										  <uap:Capability Name="contacts" />
+										  <Capability Name="internetClientServer" />
+										  <Capability Name="codeGeneration" />
+										  <uap:Capability Name="appointments" />
 										</Capabilities>
 										<ThemeResources>
 											<Icons>
@@ -115,7 +128,12 @@
 						</uap3:Properties>
 					</uap3:AppExtension>
 				</uap3:Extension>
-			</Extensions>
+        <Extension Category="windows.backgroundTasks" EntryPoint="---">
+          <BackgroundTasks>
+            <Task Type="timer" />
+          </BackgroundTasks>
+        </Extension>
+      </Extensions>
 		</Application>
 	</Applications>
 	<Capabilities>

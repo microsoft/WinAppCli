@@ -246,6 +246,23 @@ describe('applyFieldChange — Identity', () => {
         const parsed = parseManifest(result);
         assert.equal(parsed.identity.version, '2.5.0.0');
     });
+
+    it('should add ResourceId when set to non-empty', () => {
+        const result = applyFieldChange(BASE_MANIFEST, 'identity', 'resourceId', 'MyResource');
+        const parsed = parseManifest(result);
+        assert.equal(parsed.identity.resourceId, 'MyResource');
+        assert.ok(result.includes('ResourceId="MyResource"'), 'Should contain ResourceId attribute');
+    });
+
+    it('should remove ResourceId when set to empty string', () => {
+        // First add it, then remove it
+        let xml = applyFieldChange(BASE_MANIFEST, 'identity', 'resourceId', 'MyResource');
+        assert.ok(parseManifest(xml).identity.resourceId === 'MyResource', 'Precondition: ResourceId should be set');
+        xml = applyFieldChange(xml, 'identity', 'resourceId', '');
+        const parsed = parseManifest(xml);
+        assert.equal(parsed.identity.resourceId, '', 'ResourceId should be empty after removal');
+        assert.ok(!xml.includes('ResourceId='), 'ResourceId attribute should be removed from XML');
+    });
 });
 
 // ─── 4. applyFieldChange — Properties Section ──────────────────────────────
@@ -448,6 +465,36 @@ describe('Add/Remove Capabilities', () => {
         const removed = removeCapability(xml, 'ttt');
         const parsedAfter = parseManifest(removed);
         assert.ok(!parsedAfter.capabilities.includes('ttt'), '"ttt" should be removed');
+    });
+
+    it('should add capability to package-level Capabilities when app-level Capabilities exist', () => {
+        // widgets-sample has <Capabilities> inside <Application> extensions AND at package level
+        const xml = loadFixture('widgets-sample.appxmanifest');
+        const before = parseManifest(xml);
+        const result = addCapability(xml, 'webcam');
+        const after = parseManifest(result);
+        assert.ok(after.capabilities.includes('webcam'), 'Should include added webcam');
+        // All original caps should still be present
+        for (const cap of before.capabilities) {
+            assert.ok(after.capabilities.includes(cap), `Original capability ${cap} should still be present`);
+        }
+    });
+
+    it('should remove capability from package-level Capabilities when app-level Capabilities exist', () => {
+        const xml = loadFixture('widgets-sample.appxmanifest');
+        const result = removeCapability(xml, 'internetClient');
+        const after = parseManifest(result);
+        assert.ok(!after.capabilities.includes('internetClient'), 'internetClient should be removed');
+        assert.ok(after.capabilities.includes('rescap:runFullTrust'), 'Other caps should remain');
+    });
+
+    it('should round-trip add/remove on manifest with nested Capabilities', () => {
+        const xml = loadFixture('widgets-sample.appxmanifest');
+        let result = addCapability(xml, 'webcam');
+        result = removeCapability(result, 'webcam');
+        const after = parseManifest(result);
+        const before = parseManifest(xml);
+        assert.deepEqual(after.capabilities, before.capabilities, 'Capabilities should be unchanged after add+remove');
     });
 });
 

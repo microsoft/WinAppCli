@@ -132,7 +132,7 @@ export function addCapability(xmlText: string, capability: string): string {
     // Expand self-closing <Capabilities /> to open/close pair
     result = expandSelfClosingElement(result, 'Capabilities');
 
-    const bounds = findParentBounds(result, 'Capabilities');
+    const bounds = findPackageLevelParentBounds(result, 'Capabilities');
     if (bounds) {
         const parentIndent = detectIndent(result, bounds.openStart);
         return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
@@ -153,7 +153,7 @@ export function addCapability(xmlText: string, capability: string): string {
 
 /** Remove a capability element from the XML. */
 export function removeCapability(xmlText: string, capability: string): string {
-    const bounds = findParentBounds(xmlText, 'Capabilities');
+    const bounds = findPackageLevelParentBounds(xmlText, 'Capabilities');
     if (!bounds) { return xmlText; }
 
     const { attrName, namespace: capNs } = parseCapabilityString(capability);
@@ -1157,6 +1157,39 @@ function findParentBounds(xml: string, localName: string): { openStart: number; 
     const contentEnd = contentStart + closeMatch.index;
     const closeEnd = contentEnd + closeMatch[0].length;
     return { openStart, contentStart, contentEnd, closeEnd };
+}
+
+/**
+ * Find the bounds of a package-level element (direct child of <Package>), skipping
+ * any matches that are nested inside <Applications>…</Applications>.
+ * Falls back to findParentBounds if no <Applications> section exists.
+ */
+function findPackageLevelParentBounds(xml: string, localName: string): { openStart: number; contentStart: number; contentEnd: number; closeEnd: number } | null {
+    // Find the <Applications> region to exclude
+    const appsBounds = findParentBounds(xml, 'Applications');
+
+    const openPattern = new RegExp(`<(?:[a-zA-Z0-9]+:)?${escapeRegex(localName)}\\b`, 'g');
+    let match: RegExpExecArray | null;
+    while ((match = openPattern.exec(xml)) !== null) {
+        const openStart = match.index;
+
+        // Skip matches inside the <Applications> region
+        if (appsBounds && openStart > appsBounds.openStart && openStart < appsBounds.closeEnd) {
+            continue;
+        }
+
+        const gt = xml.indexOf('>', openStart);
+        if (gt === -1) { continue; }
+        if (xml[gt - 1] === '/') { continue; } // self-closing
+        const contentStart = gt + 1;
+        const closePattern = new RegExp(`</(?:[a-zA-Z0-9]+:)?${escapeRegex(localName)}\\s*>`);
+        const closeMatch = closePattern.exec(xml.substring(contentStart));
+        if (!closeMatch) { continue; }
+        const contentEnd = contentStart + closeMatch.index;
+        const closeEnd = contentEnd + closeMatch[0].length;
+        return { openStart, contentStart, contentEnd, closeEnd };
+    }
+    return null;
 }
 
 /**

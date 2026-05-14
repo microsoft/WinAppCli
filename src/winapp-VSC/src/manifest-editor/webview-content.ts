@@ -731,7 +731,7 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             <label for="identity-resourceid">Resource ID:</label>
             <div class="optional-field-content">
                 <input type="text" id="identity-resourceid" data-section="identity" data-field-name="resourceId" placeholder="e.g. SplitConfig" />
-                <button class="btn-remove-field" type="button" data-target="identity-resourceid-group" title="Remove Resource ID">✕</button>
+                <button class="btn-remove-field" type="button" data-target="identity-resourceid-group" data-section="identity" data-field-name="resourceId" title="Remove Resource ID">✕</button>
             </div>
             <div class="description">Optional string used to differentiate packages that are part of a resource bundle or bundle optional packages (max 30 chars, alphanumeric/period/dash only)</div>
             <div class="validation-msg"></div>
@@ -2102,7 +2102,14 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 const requiredExtFields = new Set([
                     'ExeServer.Executable', 'ExeServer.DisplayName', 'Class.Id',
                     'AppExtension.Name', 'AppExtension.Id', 'AppExtension.DisplayName', 'AppExtension.PublicFolder',
-                    'Registration', 'ExecutionAlias.Alias'
+                    'Registration', 'ExecutionAlias.Alias',
+                    'Extension.EntryPoint', 'Task.Type',
+                    'Protocol.Name',
+                    'FileTypeAssociation.Name', 'FileType',
+                    'StartupTask.TaskId', 'StartupTask.DisplayName',
+                    'DataFormat',
+                    'AppService.Name',
+                    'ToastNotificationActivation.ToastActivatorCLSID'
                 ]);
                 if (app.extensions && app.extensions.length > 0) {
                     app.extensions.forEach((extXml, eidx) => {
@@ -2111,9 +2118,11 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                             let descHtml = f.description ? '<div class="description">' + escapeHtml(f.description) + '</div>' : '';
                             const textContentAttr = f.isTextContent ? ' data-ext-text-content="true"' : '';
                             const isRequired = f.editable && requiredExtFields.has(f.label);
-                            const isEmpty = f.editable && !f.value;
-                            const errorClass = isRequired && isEmpty ? ' has-error' : '';
-                            const errorMsg = isRequired && isEmpty ? '<div class="validation-msg error">This field is required.</div>' : '<div class="validation-msg"></div>';
+                            const validation = f.editable ? validateExtField(f.label, f.value, isRequired) : null;
+                            const errorClass = validation && validation.level ? ' has-' + validation.level : '';
+                            const errorMsg = validation && validation.message
+                                ? '<div class="validation-msg ' + validation.level + '">' + escapeHtml(validation.message) + '</div>'
+                                : '<div class="validation-msg"></div>';
                             if (!f.editable) {
                                 return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
                                     '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />' +
@@ -2431,18 +2440,18 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
                 card.querySelectorAll('input[data-ext-field]').forEach(inp => {
                     let extDebounce = null;
                     inp.addEventListener('input', () => {
-                        // Live validation for required extension fields
+                        // Live validation for extension fields
                         const fg = inp.closest('.form-group');
                         const fieldLabel = inp.getAttribute('data-ext-field');
                         const isReq = requiredExtFields.has(fieldLabel);
-                        if (fg && isReq) {
-                            if (!inp.value) {
-                                fg.classList.add('has-error');
-                                const vm = fg.querySelector('.validation-msg');
-                                if (vm) { vm.className = 'validation-msg error'; vm.textContent = 'This field is required.'; }
+                        if (fg) {
+                            const validation = validateExtField(fieldLabel, inp.value, isReq);
+                            fg.classList.remove('has-error', 'has-warning');
+                            const vm = fg.querySelector('.validation-msg');
+                            if (validation && validation.level) {
+                                fg.classList.add('has-' + validation.level);
+                                if (vm) { vm.className = 'validation-msg ' + validation.level; vm.textContent = validation.message; }
                             } else {
-                                fg.classList.remove('has-error');
-                                const vm = fg.querySelector('.validation-msg');
                                 if (vm) { vm.className = 'validation-msg'; vm.textContent = ''; }
                             }
                         }
@@ -2741,17 +2750,37 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
 
             // Descriptions for known extension fields
             const fieldDescriptions = {
+                // MCP Server / App Extension (windows.appExtension)
                 'AppExtension.Name': 'Extension contract name, use "com.microsoft.windows.ai.mcpServer" to register as an MCP server',
-                'AppExtension.Id': 'Unique identifier for this app extension',
+                'AppExtension.Id': 'Unique identifier for this app extension instance',
                 'AppExtension.DisplayName': 'Display name shown when discovering this extension',
                 'AppExtension.PublicFolder': 'Folder in the package accessible to the host app, typically "Assets" or "Public"',
                 'Registration': 'Path to the MCP server configuration JSON file, relative to the PublicFolder',
-                'ExeServer.Executable': 'Relative path to the COM server executable',
-                'ExeServer.DisplayName': 'Name for this COM server, shown in system tools',
+                // COM Server (windows.comServer)
+                'ExeServer.Executable': 'Relative path to the COM server executable inside the package',
+                'ExeServer.DisplayName': 'Name for this COM server, shown in system tools and diagnostics',
                 'Class.Id': 'CLSID (GUID) that uniquely identifies this COM class, format: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}',
-                'Protocol.Name': 'URI scheme this app handles (e.g., "myapp"), users can launch your app with myapp://',
-                'DisplayName': 'User-friendly display name for this extension',
-                'ExecutionAlias.Alias': 'Command-line alias users type to launch your app from a terminal or Run dialog (e.g., "myapp.exe")',
+                // App Execution Alias (windows.appExecutionAlias)
+                'ExecutionAlias.Alias': 'Command-line alias users type to launch your app (e.g., "myapp.exe"). Must end in .exe',
+                // Background Tasks (windows.backgroundTasks)
+                'Extension.EntryPoint': 'Activatable class ID for the background task (e.g., "MyApp.BackgroundTask"), or "Windows.FullTrustApplication" for Win32 apps',
+                'Task.Type': 'Background task trigger type (e.g., "timer", "pushNotification", "systemEvent", "general")',
+                // Protocol Activation (windows.protocol)
+                'Protocol.Name': 'URI scheme this app handles (e.g., "myapp"). Users launch your app with myapp://. Lowercase letters, digits, and ".", "+", "-" only',
+                // File Type Association (windows.fileTypeAssociation)
+                'FileTypeAssociation.Name': 'Internal name for this file type association (letters, digits, periods only)',
+                'DisplayName': 'User-friendly display name shown in the Open With dialog',
+                'FileType': 'File extension to associate (must start with ".", e.g., ".txt", ".myext")',
+                // Startup Task (windows.startupTask)
+                'StartupTask.TaskId': 'Unique identifier for this startup task, used to enable/disable it programmatically',
+                'StartupTask.Enabled': 'Whether the task runs automatically at user logon ("true" or "false")',
+                'StartupTask.DisplayName': 'Name shown to the user in Task Manager Startup tab',
+                // Share Target (windows.shareTarget)
+                'DataFormat': 'Data format this share target accepts (e.g., "Text", "URI", "Bitmap", "Html", "StorageItems")',
+                // App Service (windows.appService)
+                'AppService.Name': 'Unique name for this app service that other apps use to connect (e.g., "com.contoso.myservice")',
+                // Toast Notification Activation (windows.toastNotificationActivation)
+                'ToastNotificationActivation.ToastActivatorCLSID': 'COM CLSID for toast activation, format: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}',
             };
 
             const fields = [];
@@ -2795,6 +2824,71 @@ export function getWebviewContent(webview: vscode.Webview, nonce: string, manife
             }
             walk(root, 0);
             return fields;
+        }
+
+        /** Validate an extension field value and return { level, message } or null if valid. */
+        function validateExtField(fieldLabel, value, isRequired) {
+            const guidRegex = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
+
+            // Required check first
+            if (isRequired && !value) {
+                return { level: 'error', message: 'This field is required.' };
+            }
+            if (!value) return null;
+
+            switch (fieldLabel) {
+                case 'Class.Id':
+                case 'ToastNotificationActivation.ToastActivatorCLSID':
+                    if (!guidRegex.test(value)) {
+                        return { level: 'error', message: 'Must be a valid GUID, e.g., {12345678-1234-1234-1234-123456789012}' };
+                    }
+                    break;
+                case 'ExecutionAlias.Alias':
+                    if (!/\.exe$/i.test(value)) {
+                        return { level: 'error', message: 'Alias must end with .exe (e.g., "myapp.exe").' };
+                    }
+                    if (/[\\/:*?"<>|]/.test(value)) {
+                        return { level: 'error', message: 'Alias must not contain path separators or special characters.' };
+                    }
+                    break;
+                case 'Protocol.Name':
+                    if (!/^[a-z][a-z0-9.+\-]*$/.test(value)) {
+                        return { level: 'error', message: 'Protocol must start with a lowercase letter and contain only lowercase letters, digits, ".", "+", or "-".' };
+                    }
+                    break;
+                case 'FileType':
+                    if (!/^\.[a-zA-Z0-9]+$/.test(value)) {
+                        return { level: 'error', message: 'File extension must start with "." followed by alphanumeric characters (e.g., ".txt").' };
+                    }
+                    break;
+                case 'FileTypeAssociation.Name':
+                    if (!/^[a-zA-Z0-9.]+$/.test(value)) {
+                        return { level: 'error', message: 'Name must contain only letters, digits, and periods.' };
+                    }
+                    break;
+                case 'StartupTask.Enabled':
+                    if (value !== 'true' && value !== 'false') {
+                        return { level: 'error', message: 'Value must be "true" or "false".' };
+                    }
+                    break;
+                case 'ExeServer.Executable':
+                    if (!/\.(exe|dll)$/i.test(value)) {
+                        return { level: 'warning', message: 'Expected a .exe or .dll path.' };
+                    }
+                    break;
+                case 'Task.Type':
+                    var validTypes = ['timer', 'pushNotification', 'systemEvent', 'general', 'audio', 'controlChannel', 'bluetooth', 'location', 'deviceUse', 'deviceServicing', 'deviceConnectionChange'];
+                    if (!validTypes.includes(value)) {
+                        return { level: 'warning', message: 'Common values: ' + validTypes.slice(0, 5).join(', ') + ', ...' };
+                    }
+                    break;
+                case 'AppService.Name':
+                    if (!/^[a-zA-Z][a-zA-Z0-9._]*$/.test(value)) {
+                        return { level: 'warning', message: 'Recommended format: reverse-domain style (e.g., "com.contoso.myservice").' };
+                    }
+                    break;
+            }
+            return null;
         }
 
         function toColorValue(str) {
