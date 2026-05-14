@@ -220,7 +220,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 **Development Tools:**
 
-- [`gallery`](./docs/usage.md#gallery) - Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for grounded XAML/C# samples ([full docs](./docs/gallery.md))
+- [`controls`](./docs/usage.md#controls) - Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for grounded XAML/C# samples ([full docs](./docs/controls.md))
 - [`ui`](./docs/usage.md#ui) - Inspect and interact with running Windows app UIs via UI Automation ([full docs](./docs/ui-automation.md))
 - [`tool`](./docs/usage.md#tool) - Access Windows SDK tools
 - [`store`](./docs/usage.md#store) - Run Microsoft Store Developer CLI commands

@@ -363,6 +363,203 @@
         }
       }
     },
+    "controls": {
+      "description": "Search the WinUI 3 Gallery, Windows Community Toolkit, and curated platform patterns for grounded XAML and C# code samples. Designed for agent and developer lookup while authoring WinUI 3 apps. Data is fetched from GitHub on first use and cached for 7 days.",
+      "hidden": false,
+      "subcommands": {
+        "get": {
+          "description": "Print the full XAML, C#, and pitfall notes for a single control pattern, identified by the id returned from `winapp controls search`.",
+          "hidden": false,
+          "arguments": {
+            "id": {
+              "description": "Pattern id from `winapp controls search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files).",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "list": {
+          "description": "List every available control pattern grouped by source (core platform patterns, WinUI Gallery, Community Toolkit). Useful for discovery and to see exact ids accepted by `winapp controls get`.",
+          "hidden": false,
+          "options": {
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "refresh": {
+          "description": "Delete the cached WinUI Gallery and Community Toolkit dataset so the next `winapp controls search/get/list` re-fetches the latest snapshot from GitHub.",
+          "hidden": false,
+          "options": {
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "search": {
+          "description": "Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for controls that match a free-text query.",
+          "hidden": false,
+          "arguments": {
+            "query": {
+              "description": "Free-text query (e.g. \"tabbed document interface\", \"share contract\", \"settings card\").",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--max": {
+              "description": "Maximum number of matches to return.",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 5,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        }
+      }
+    },
     "create-debug-identity": {
       "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.",
       "hidden": false,
@@ -571,203 +768,6 @@
           },
           "required": false,
           "recursive": false
-        }
-      }
-    },
-    "gallery": {
-      "description": "Search the WinUI 3 Gallery, Windows Community Toolkit, and curated platform patterns for grounded XAML and C# code samples. Designed for agent and developer lookup while authoring WinUI 3 apps. Data is fetched from GitHub on first use and cached for 7 days.",
-      "hidden": false,
-      "subcommands": {
-        "get": {
-          "description": "Print the full XAML, C#, and pitfall notes for a single gallery pattern, identified by the id returned from `winapp gallery search`.",
-          "hidden": false,
-          "arguments": {
-            "id": {
-              "description": "Pattern id from `winapp gallery search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files).",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              }
-            }
-          },
-          "options": {
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "list": {
-          "description": "List every available gallery pattern grouped by source (core platform patterns, WinUI Gallery, Community Toolkit). Useful for discovery and to see exact ids accepted by `winapp gallery get`.",
-          "hidden": false,
-          "options": {
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "refresh": {
-          "description": "Delete the cached Gallery and Community Toolkit dataset so the next `winapp gallery search/get/list` re-fetches the latest snapshot from GitHub.",
-          "hidden": false,
-          "options": {
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "search": {
-          "description": "Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for samples that match a free-text query.",
-          "hidden": false,
-          "arguments": {
-            "query": {
-              "description": "Free-text query (e.g. \"tabbed document interface\", \"share contract\", \"settings card\").",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              }
-            }
-          },
-          "options": {
-            "--max": {
-              "description": "Maximum number of matches to return.",
-              "hidden": false,
-              "valueType": "System.Int32",
-              "hasDefaultValue": true,
-              "defaultValue": 5,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
         }
       }
     },

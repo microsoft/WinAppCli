@@ -5,7 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 
 internal static partial class ToolkitFetcher
@@ -171,8 +171,8 @@ internal static partial class ToolkitFetcher
             {
                 try
                 {
-                    var s = JsonSerializer.Deserialize(File.ReadAllText(cacheScenarios), GalleryJsonContext.Default.ScenarioArray);
-                    var t = JsonSerializer.Deserialize(File.ReadAllText(cacheTags), GalleryJsonContext.Default.DictionaryStringStringArray);
+                    var s = JsonSerializer.Deserialize(File.ReadAllText(cacheScenarios), ControlsJsonContext.Default.ScenarioArray);
+                    var t = JsonSerializer.Deserialize(File.ReadAllText(cacheTags), ControlsJsonContext.Default.DictionaryStringStringArray);
                     if (s != null && s.Length > 0 && t != null) return (s, t);
                 }
                 catch { /* fall through */ }
@@ -186,8 +186,8 @@ internal static partial class ToolkitFetcher
             if (scenarios.Length > 0)
             {
                 Directory.CreateDirectory(cacheDir);
-                File.WriteAllText(cacheScenarios, JsonSerializer.Serialize(scenarios, GalleryJsonContext.Default.ScenarioArray));
-                File.WriteAllText(cacheTags, JsonSerializer.Serialize(tags, GalleryJsonContext.Default.DictionaryStringStringArray));
+                File.WriteAllText(cacheScenarios, JsonSerializer.Serialize(scenarios, ControlsJsonContext.Default.ScenarioArray));
+                File.WriteAllText(cacheTags, JsonSerializer.Serialize(tags, ControlsJsonContext.Default.DictionaryStringStringArray));
                 File.WriteAllText(timestamp, DateTime.UtcNow.ToString("o"));
                 File.WriteAllText(versionFile, CacheSchemaVersion);
                 return (scenarios, tags);

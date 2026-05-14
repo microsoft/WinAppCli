@@ -183,7 +183,7 @@ try {
         }
     }
     
-    $SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "ui-automation", "gallery")
+    $SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "ui-automation", "controls")
     $SkillsDrift = $false
     
     foreach ($skillName in $SkillNames) {

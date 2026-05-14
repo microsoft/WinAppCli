@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
-internal class GalleryDataService(IWinappDirectoryService directoryService) : IGalleryDataService
+internal class ControlsDataService(IWinappDirectoryService directoryService) : IControlsDataService
 {
     private SearchEngine? _engine;
 
@@ -14,15 +14,15 @@ internal class GalleryDataService(IWinappDirectoryService directoryService) : IG
             return _engine;
         }
 
-        var galleryCacheDir = GetGalleryCacheDir();
+        var winuiGalleryCacheDir = GetWinUIGalleryCacheDir();
         var toolkitCacheDir = GetToolkitCacheDir();
 
-        var (galleryScenarios, galleryTags) = GalleryFetcher.Load(galleryCacheDir);
+        var (galleryScenarios, galleryTags) = WinUIGalleryFetcher.Load(winuiGalleryCacheDir);
         var (toolkitScenarios, toolkitTags) = ToolkitFetcher.Load(toolkitCacheDir);
 
         var allScenarios = galleryScenarios.Concat(toolkitScenarios).ToArray();
 
-        // Merge gallery + toolkit tags. Toolkit wins on duplicate keys (matches winui-search behavior).
+        // Merge WinUI Gallery + Toolkit tags. Toolkit wins on duplicate keys.
         var allTags = new Dictionary<string, string[]>(galleryTags);
         foreach (var kv in toolkitTags)
         {
@@ -35,16 +35,16 @@ internal class GalleryDataService(IWinappDirectoryService directoryService) : IG
 
     public void ClearCache()
     {
-        var galleryCacheDir = GetGalleryCacheDir();
+        var winuiGalleryCacheDir = GetWinUIGalleryCacheDir();
         var toolkitCacheDir = GetToolkitCacheDir();
-        try { if (Directory.Exists(galleryCacheDir)) { Directory.Delete(galleryCacheDir, recursive: true); } } catch { /* best-effort */ }
+        try { if (Directory.Exists(winuiGalleryCacheDir)) { Directory.Delete(winuiGalleryCacheDir, recursive: true); } } catch { /* best-effort */ }
         try { if (Directory.Exists(toolkitCacheDir)) { Directory.Delete(toolkitCacheDir, recursive: true); } } catch { /* best-effort */ }
         _engine = null;
     }
 
-    private string GetGalleryCacheDir() =>
-        Path.Combine(directoryService.GetGlobalWinappDirectory().FullName, "cache", "gallery", "gallery");
+    private string GetWinUIGalleryCacheDir() =>
+        Path.Combine(directoryService.GetGlobalWinappDirectory().FullName, "cache", "controls", "winui-gallery");
 
     private string GetToolkitCacheDir() =>
-        Path.Combine(directoryService.GetGlobalWinappDirectory().FullName, "cache", "gallery", "toolkit");
+        Path.Combine(directoryService.GetGlobalWinappDirectory().FullName, "cache", "controls", "toolkit");
 }

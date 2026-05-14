@@ -4,36 +4,36 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using Microsoft.Extensions.Logging;
-using WinApp.Cli.Services.Gallery;
+using WinApp.Cli.Services.Controls;
 
 namespace WinApp.Cli.Commands;
 
-internal class GalleryGetCommand : Command, IShortDescription
+internal class ControlsGetCommand : Command, IShortDescription
 {
     public string ShortDescription => "Print the full XAML + C# for a pattern";
 
     public static Argument<string> IdArgument { get; } = new Argument<string>("id")
     {
-        Description = "Pattern id from `winapp gallery search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files)."
+        Description = "Pattern id from `winapp controls search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files)."
     };
 
-    public GalleryGetCommand()
+    public ControlsGetCommand()
         : base("get",
-            "Print the full XAML, C#, and pitfall notes for a single gallery pattern, identified by the id returned from `winapp gallery search`.")
+            "Print the full XAML, C#, and pitfall notes for a single control pattern, identified by the id returned from `winapp controls search`.")
     {
         Arguments.Add(IdArgument);
     }
 
     public class Handler(
-        IGalleryDataService dataService,
-        ILogger<GalleryGetCommand> logger) : AsynchronousCommandLineAction
+        IControlsDataService dataService,
+        ILogger<ControlsGetCommand> logger) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var id = parseResult.GetValue(IdArgument);
             if (string.IsNullOrWhiteSpace(id))
             {
-                logger.LogError("A pattern id is required. Use `winapp gallery search <query>` to find one.");
+                logger.LogError("A pattern id is required. Use `winapp controls search <query>` to find one.");
                 return Task.FromResult(1);
             }
 
@@ -48,7 +48,7 @@ internal class GalleryGetCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                logger.LogError("Gallery get failed: {Message}", ex.Message);
+                logger.LogError("Controls get failed: {Message}", ex.Message);
                 logger.LogDebug("{StackTrace}", ex.StackTrace);
                 return Task.FromResult(1);
             }

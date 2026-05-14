@@ -6,10 +6,10 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 
-internal static partial class GalleryFetcher
+internal static partial class WinUIGalleryFetcher
 {
     private const string ControlInfoUrl =
         "https://raw.githubusercontent.com/microsoft/WinUI-Gallery/main/WinUIGallery/Samples/Data/ControlInfoData.json";
@@ -25,7 +25,7 @@ internal static partial class GalleryFetcher
 
     private static readonly HttpClient Http = new()
     {
-        DefaultRequestHeaders = { { "User-Agent", "winui-gallery-cli/1.0" } }
+        DefaultRequestHeaders = { { "User-Agent", "winapp-controls-cli/1.0" } }
     };
 
     [GeneratedRegex(@"<controls:ControlExample\b[^>]*?HeaderText=""([^""]+)""", RegexOptions.IgnoreCase)]
@@ -73,8 +73,8 @@ internal static partial class GalleryFetcher
             {
                 try
                 {
-                    var s = JsonSerializer.Deserialize(File.ReadAllText(scenarioCache), GalleryJsonContext.Default.ScenarioArray);
-                    var t = JsonSerializer.Deserialize(File.ReadAllText(tagCache), GalleryJsonContext.Default.DictionaryStringStringArray);
+                    var s = JsonSerializer.Deserialize(File.ReadAllText(scenarioCache), ControlsJsonContext.Default.ScenarioArray);
+                    var t = JsonSerializer.Deserialize(File.ReadAllText(tagCache), ControlsJsonContext.Default.DictionaryStringStringArray);
                     if (s != null && s.Length > 0 && t != null) return (s, t);
                 }
                 catch { /* fall through to fetch */ }
@@ -90,8 +90,8 @@ internal static partial class GalleryFetcher
                 ApplyOverrides(scenarios);
                 scenarios = InjectMissing(scenarios);
                 Directory.CreateDirectory(cacheDir);
-                File.WriteAllText(scenarioCache, JsonSerializer.Serialize(scenarios, GalleryJsonContext.Default.ScenarioArray));
-                File.WriteAllText(tagCache, JsonSerializer.Serialize(tags, GalleryJsonContext.Default.DictionaryStringStringArray));
+                File.WriteAllText(scenarioCache, JsonSerializer.Serialize(scenarios, ControlsJsonContext.Default.ScenarioArray));
+                File.WriteAllText(tagCache, JsonSerializer.Serialize(tags, ControlsJsonContext.Default.DictionaryStringStringArray));
                 File.WriteAllText(timestampFile, DateTime.UtcNow.ToString("o"));
                 File.WriteAllText(versionFile, CacheSchemaVersion);
                 return (scenarios, tags);
