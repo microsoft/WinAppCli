@@ -438,6 +438,19 @@
               "required": false,
               "recursive": false
             },
+            "--source": {
+              "description": "Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources.",
+              "hidden": false,
+              "helpName": "gallery|toolkit|core",
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--verbose": {
               "description": "Enable verbose output",
               "hidden": false,
@@ -535,6 +548,19 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--source": {
+              "description": "Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources.",
+              "hidden": false,
+              "helpName": "gallery|toolkit|core",
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

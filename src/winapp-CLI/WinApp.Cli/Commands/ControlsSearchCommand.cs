@@ -25,7 +25,8 @@ internal class ControlsSearchCommand : Command, IShortDescription
 
     public static Option<string?> SourceOption { get; } = new Option<string?>("--source")
     {
-        Description = "Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources."
+        Description = "Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources.",
+        HelpName = "gallery|toolkit|core"
     };
 
     private static readonly string[] ValidSources = ["gallery", "toolkit", "core"];
