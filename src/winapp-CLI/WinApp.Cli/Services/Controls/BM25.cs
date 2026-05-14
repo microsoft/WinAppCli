@@ -3,7 +3,7 @@
 
 using System.Text.RegularExpressions;
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 
 internal static partial class BM25

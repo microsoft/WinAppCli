@@ -4,11 +4,11 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using Microsoft.Extensions.Logging;
-using WinApp.Cli.Services.Gallery;
+using WinApp.Cli.Services.Controls;
 
 namespace WinApp.Cli.Commands;
 
-internal class GallerySearchCommand : Command, IShortDescription
+internal class ControlsSearchCommand : Command, IShortDescription
 {
     public string ShortDescription => "Search controls and patterns by description";
 
@@ -23,22 +23,31 @@ internal class GallerySearchCommand : Command, IShortDescription
         DefaultValueFactory = _ => 5
     };
 
-    public GallerySearchCommand()
+    public static Option<string?> SourceOption { get; } = new Option<string?>("--source")
+    {
+        Description = "Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources."
+    };
+
+    private static readonly string[] ValidSources = ["gallery", "toolkit", "core"];
+
+    public ControlsSearchCommand()
         : base("search",
-            "Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for samples that match a free-text query.")
+            "Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for controls that match a free-text query.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(MaxOption);
+        Options.Add(SourceOption);
     }
 
     public class Handler(
-        IGalleryDataService dataService,
-        ILogger<GallerySearchCommand> logger) : AsynchronousCommandLineAction
+        IControlsDataService dataService,
+        ILogger<ControlsSearchCommand> logger) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var query = parseResult.GetValue(QueryArgument);
             var max = parseResult.GetValue(MaxOption);
+            var source = parseResult.GetValue(SourceOption);
             if (max <= 0)
             {
                 max = 5;
@@ -46,14 +55,20 @@ internal class GallerySearchCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(query))
             {
-                logger.LogError("A non-empty query is required. Example: winapp gallery search \"tabbed document interface\"");
+                logger.LogError("A non-empty query is required. Example: winapp controls search \"tabbed document interface\"");
+                return Task.FromResult(1);
+            }
+
+            if (!string.IsNullOrWhiteSpace(source) && !ValidSources.Contains(source))
+            {
+                logger.LogError("Invalid --source value '{Source}'. Allowed values: gallery, toolkit, core.", source);
                 return Task.FromResult(1);
             }
 
             try
             {
                 var engine = dataService.GetEngine();
-                var results = engine.Search(query, max);
+                var results = engine.Search(query, max, string.IsNullOrWhiteSpace(source) ? null : source);
 
                 var writer = parseResult.InvocationConfiguration.Output;
                 if (results.Count == 0)
@@ -70,12 +85,12 @@ internal class GallerySearchCommand : Command, IShortDescription
                     writer.WriteLine($"    {r.Scenario}");
                     writer.WriteLine();
                 }
-                writer.WriteLine("To get full code: winapp gallery get <id>");
+                writer.WriteLine("To get full code: winapp controls get <id>");
                 return Task.FromResult(0);
             }
             catch (Exception ex)
             {
-                logger.LogError("Gallery search failed: {Message}", ex.Message);
+                logger.LogError("Controls search failed: {Message}", ex.Message);
                 logger.LogDebug("{StackTrace}", ex.StackTrace);
                 return Task.FromResult(1);
             }

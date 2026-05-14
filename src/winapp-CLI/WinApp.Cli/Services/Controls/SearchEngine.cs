@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 internal sealed class SearchEngine
 {
@@ -36,7 +36,7 @@ internal sealed class SearchEngine
     public record SearchResult(string Id, string Scenario, string Type, double Score);
 
     /// <summary>Two-layer search: find controls first, then pick best scenario.</summary>
-    public List<SearchResult> Search(string query, int maxResults = 5)
+    public List<SearchResult> Search(string query, int maxResults = 5, string? sourceFilter = null)
     {
         // Phrase preprocessing: merge known multi-word phrases (e.g. "data grid" → "datagrid")
         var preprocessed = Synonyms.Preprocess(query);
@@ -70,6 +70,7 @@ internal sealed class SearchEngine
             );
         }).ToArray();
 
+        // Always score against the full corpus so IDF stays stable regardless of filter.
         var allDocs = coreDocs.Concat(controlDocs).ToArray();
         var corpus = BM25.BuildCorpus(allDocs);
 
@@ -97,6 +98,11 @@ internal sealed class SearchEngine
             var bestScenario = PickBestScenario(scenarios, expandedWords);
             var prefix = bestScenario.Source == "toolkit" ? "toolkit-" : "gallery-";
             results.Add(new($"{prefix}{bestScenario.Id}", $"{bestScenario.ControlName}: {bestScenario.HeaderText}", bestScenario.Source, s));
+        }
+
+        if (sourceFilter != null)
+        {
+            results = results.Where(r => r.Type == sourceFilter).ToList();
         }
 
         results.Sort((a, b) => b.Score.CompareTo(a.Score));
@@ -155,14 +161,20 @@ internal sealed class SearchEngine
         return ($"Pattern '{id}' not found.", false);
     }
 
-    public IEnumerable<(string id, string scenario)> ListAll()
+    public IEnumerable<(string id, string scenario)> ListAll(string? sourceFilter = null)
     {
-        foreach (var p in _corePatterns)
-            yield return (p.Id, p.Scenario);
+        if (sourceFilter == null || sourceFilter == "core")
+        {
+            foreach (var p in _corePatterns)
+                yield return (p.Id, p.Scenario);
+        }
+
+        if (sourceFilter == "core") yield break;
 
         // Show ALL scenarios grouped by (source, control) so multi-scenario controls are
         // discoverable AND collisions like ColorPicker (Gallery vs Toolkit) stay separate.
         var byControl = _scenarios
+            .Where(s => sourceFilter == null || s.Source == sourceFilter)
             .GroupBy(s => $"{s.Source}:{s.ControlId}")
             .OrderBy(g => g.First().Source)         // gallery first, toolkit after
             .ThenBy(g => g.First().ControlName);

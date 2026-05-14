@@ -5,16 +5,16 @@ using System.CommandLine;
 
 namespace WinApp.Cli.Commands;
 
-internal class GalleryCommand : Command, IShortDescription
+internal class ControlsCommand : Command, IShortDescription
 {
     public string ShortDescription => "Search WinUI 3 controls and Community Toolkit samples";
 
-    public GalleryCommand(
-        GallerySearchCommand searchCommand,
-        GalleryGetCommand getCommand,
-        GalleryListCommand listCommand,
-        GalleryRefreshCommand refreshCommand)
-        : base("gallery",
+    public ControlsCommand(
+        ControlsSearchCommand searchCommand,
+        ControlsGetCommand getCommand,
+        ControlsListCommand listCommand,
+        ControlsRefreshCommand refreshCommand)
+        : base("controls",
             "Search the WinUI 3 Gallery, Windows Community Toolkit, and curated platform patterns " +
             "for grounded XAML and C# code samples. Designed for agent and developer lookup while " +
             "authoring WinUI 3 apps. Data is fetched from GitHub on first use and cached for 7 days.")

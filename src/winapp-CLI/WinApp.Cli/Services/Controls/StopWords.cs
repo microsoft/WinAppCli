@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 internal static class StopWords
 {

@@ -72,7 +72,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         CreateExternalCatalogCommand createExternalCatalogCommand,
         CompleteCommand completeCommand,
         UiCommand uiCommand,
-        GalleryCommand galleryCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        ControlsCommand controlsCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(restoreCommand);
@@ -89,7 +89,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
         Subcommands.Add(uiCommand);
-        Subcommands.Add(galleryCommand);
+        Subcommands.Add(controlsCommand);
         Subcommands.Add(completeCommand);
 
         Options.Add(CliSchemaOption);
@@ -103,7 +103,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup",          [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand), typeof(ToolCommand), typeof(GetWinappPathCommand)]),
-            ("Build & Test",   [typeof(RunCommand), typeof(UnregisterCommand), typeof(CreateDebugIdentityCommand), typeof(GalleryCommand), typeof(UiCommand)]),
+            ("Build & Test",   [typeof(RunCommand), typeof(UnregisterCommand), typeof(CreateDebugIdentityCommand), typeof(ControlsCommand), typeof(UiCommand)]),
             ("Package & Ship", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand), typeof(MSStoreCommand)])
         );
     }

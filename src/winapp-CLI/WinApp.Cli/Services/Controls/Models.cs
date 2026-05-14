@@ -3,13 +3,13 @@
 
 using System.Text.Json.Serialization;
 
-namespace WinApp.Cli.Services.Gallery;
+namespace WinApp.Cli.Services.Controls;
 
 
 [JsonSerializable(typeof(Scenario[]))]
 [JsonSerializable(typeof(CorePattern[]))]
 [JsonSerializable(typeof(Dictionary<string, string[]>))]
-internal partial class GalleryJsonContext : JsonSerializerContext { }
+internal partial class ControlsJsonContext : JsonSerializerContext { }
 
 internal sealed class Scenario
 {
