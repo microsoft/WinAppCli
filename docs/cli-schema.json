@@ -2535,20 +2535,7 @@
               "recursive": false
             },
             "--capture-screen": {
-              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus.",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--focus": {
-              "description": "Bring the target window to the foreground before capture. Already implied by --capture-screen.",
+              "description": "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first.",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
