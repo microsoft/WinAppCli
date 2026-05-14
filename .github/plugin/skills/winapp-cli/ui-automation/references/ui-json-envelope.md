@@ -33,9 +33,9 @@ Top-level shape (elements are now nested under `windows[]`, not flat):
 }
 ```
 
-Pre-0.3.1 the shape was `{ "elements": [...] }`. Per-element `id`, `depth`,
-`parentSelector`, and `windowHandle` fields have been **removed** — `selector`
-is the public handle.
+Pre-0.3.1 the shape was `{ "elements": [...] }`. Per-element `id`,
+`parentSelector`, and `windowHandle` fields have been **removed** —
+`selector` is the public handle.
 
 ## `ui inspect --ancestors --json`
 
