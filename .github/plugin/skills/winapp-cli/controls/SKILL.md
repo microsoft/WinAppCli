@@ -70,6 +70,11 @@ winapp controls search "settings card"
 # Wider net
 winapp controls search "tabbed document interface" --max 10
 
+# Constrain to one source
+winapp controls search "color picker" --source toolkit
+winapp controls search "navigation" --source gallery
+winapp controls search "share" --source core
+
 # Natural-language descriptions work
 winapp controls search "i need a stack box like flexbox on the web"
 winapp controls search "show recently opened files in the taskbar right-click menu"
@@ -90,6 +95,9 @@ winapp controls get gallery-navigationview > navview.md
 ```powershell
 # All patterns, grouped by source — useful for discovery
 winapp controls list
+
+# Filter to one source
+winapp controls list --source toolkit
 ```
 
 ### Refresh
@@ -113,7 +121,6 @@ winapp controls refresh
 ## Roadmap
 - `--json` opt-in output for scripts and agents that want structured results
 - `--refresh` flag on `search`/`get`/`list` so the cache can be invalidated inline without a separate `refresh` call
-- Optional `--source <gallery|toolkit|core>` filter to constrain results to one source
 
 ## Troubleshooting
 | Error | Cause | Solution |
@@ -141,6 +148,7 @@ Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for contro
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--max` | Maximum number of matches to return. | `5` |
+| `--source` | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. | (none) |
 
 ### `winapp controls get`
 
@@ -155,6 +163,12 @@ Print the full XAML, C#, and pitfall notes for a single control pattern, identif
 ### `winapp controls list`
 
 List every available control pattern grouped by source (core platform patterns, WinUI Gallery, Community Toolkit). Useful for discovery and to see exact ids accepted by `winapp controls get`.
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--source` | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. | (none) |
 
 ### `winapp controls refresh`
 
