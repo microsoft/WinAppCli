@@ -464,10 +464,10 @@ describe('PhoneIdentity Validation', () => {
         assert.equal(errors.filter(e => e.field.startsWith('phoneIdentity')).length, 0);
     });
 
-    it('should not error when phoneProductId is empty string (optional within phoneIdentity)', () => {
+    it('should error when phoneProductId is empty string (required within phoneIdentity)', () => {
         const m = makeValidManifest();
         m.phoneIdentity = { phoneProductId: '', phonePublisherId: '00000000-0000-0000-0000-000000000000' };
-        expectNoError(validateManifest(m), 'phoneIdentity.phoneProductId');
+        expectError(validateManifest(m), 'phoneIdentity.phoneProductId');
     });
 });
 

@@ -31,6 +31,8 @@ import {
     addPhoneIdentity,
     removePhoneIdentity,
     setShowNameOnTiles,
+    ensureNamespace,
+    findDirectChildElementBounds,
 } from '../manifest-editor/manifest-parser';
 
 const FIXTURES_DIR = join(__dirname, 'fixtures');
@@ -812,4 +814,53 @@ describe('Edge: Edit Isolation', () => {
             assert.equal(after.resources.length, before.resources.length);
         });
     }
+});
+
+// ─── CDATA handling in findDirectChildElementBounds (M5) ─────────
+
+describe('findDirectChildElementBounds — CDATA handling', () => {
+    it('should skip CDATA sections containing < characters', () => {
+        const xml = '<Root><Child1><![CDATA[<fake>not a tag</fake>]]></Child1><Child2 /></Root>';
+        const start = xml.indexOf('>') + 1; // after <Root>
+        const end = xml.lastIndexOf('</Root>');
+        const bounds = findDirectChildElementBounds(xml, start, end);
+        assert.equal(bounds.length, 2, 'Should find 2 children despite CDATA containing < characters');
+    });
+
+    it('should handle CDATA inside nested elements', () => {
+        const xml = '<Root><Outer><Inner><![CDATA[</Inner></Outer>]]></Inner></Outer><Next /></Root>';
+        const start = xml.indexOf('>') + 1;
+        const end = xml.lastIndexOf('</Root>');
+        const bounds = findDirectChildElementBounds(xml, start, end);
+        assert.equal(bounds.length, 2, 'Should find 2 children: Outer and Next');
+    });
+
+    it('should handle multiple CDATA sections', () => {
+        const xml = '<Root><A><![CDATA[<x>]]></A><B><![CDATA[</B>]]></B></Root>';
+        const start = xml.indexOf('>') + 1;
+        const end = xml.lastIndexOf('</Root>');
+        const bounds = findDirectChildElementBounds(xml, start, end);
+        assert.equal(bounds.length, 2, 'Should find both A and B');
+    });
+});
+
+// ─── ensureNamespace single-quote handling (M6) ─────────────────
+
+describe('ensureNamespace — single-quote support', () => {
+    it('should not duplicate namespace when declaration uses single quotes', () => {
+        const xml = `<Package xmlns='http://schemas.microsoft.com/appx/manifest/foundation/windows10'
+  xmlns:uap='http://schemas.microsoft.com/appx/manifest/uap/windows10'>
+</Package>`;
+        const result = ensureNamespace(xml, 'uap', 'http://schemas.microsoft.com/appx/manifest/uap/windows10');
+        // Should not add a second xmlns:uap declaration
+        const uapCount = (result.match(/xmlns:uap=/g) || []).length;
+        assert.equal(uapCount, 1, 'Should not duplicate single-quoted xmlns:uap');
+    });
+
+    it('should add namespace when it does not exist in either quote style', () => {
+        const xml = `<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+</Package>`;
+        const result = ensureNamespace(xml, 'uap', 'http://schemas.microsoft.com/appx/manifest/uap/windows10');
+        assert.ok(result.includes('xmlns:uap='), 'Should add xmlns:uap');
+    });
 });

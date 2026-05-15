@@ -135,7 +135,7 @@ export function isValidCustomCapability(name: string): boolean {
  * Returns true if a value is an MRT resource reference.
  * MRT prefixed strings (ms-resource:) are explicit resource lookups.
  * All path values are also run through MRT before falling back to the literal path,
- * so even "foo.png" could be a key in resources.pri that resolves to a different file.
+ * so even "foo.png" could be a key that resolves to a different file.
  */
 function isMrtReference(value: string): boolean {
     return value.startsWith('ms-resource:');
@@ -218,7 +218,7 @@ export function validateManifest(data: ManifestData): ValidationError[] {
 
     // Phone Identity validation
     if (data.phoneIdentity) {
-        if (data.phoneIdentity.phoneProductId && !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
+        if (!data.phoneIdentity.phoneProductId || !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
             errors.push({ field: 'phoneIdentity.phoneProductId', message: 'Phone Product ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
         }
         if (data.phoneIdentity.phonePublisherId && !GUID_REGEX.test(data.phoneIdentity.phonePublisherId)) {

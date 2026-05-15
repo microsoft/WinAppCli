@@ -56,7 +56,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             localResourceRoots: resourceRoots,
         };
 
-        const nonce = crypto.randomBytes(16).toString('hex');
+        const freshNonce = () => crypto.randomBytes(16).toString('hex');
         const manifestDirUri = webviewPanel.webview.asWebviewUri(manifestDir).toString();
 
         // Track whether we're currently applying an edit to avoid feedback loops
@@ -72,7 +72,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                 const errMsg = e instanceof Error ? e.message : String(e);
                 if (!showingErrorView) {
                     showingErrorView = true;
-                    webviewPanel.webview.html = getParseErrorContent(webviewPanel.webview, nonce, errMsg);
+                    webviewPanel.webview.html = getParseErrorContent(webviewPanel.webview, freshNonce(), errMsg);
                 }
                 return false;
             }
@@ -81,7 +81,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         /** Load the full editor view. */
         const showEditorView = () => {
             showingErrorView = false;
-            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
+            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, freshNonce(), manifestDirUri);
             // The editor will send 'ready' once loaded, which triggers updateWebview
         };
 
@@ -101,7 +101,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Initial load: check if XML is valid
         if (tryParseOrShowError(document.getText())) {
-            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, nonce, manifestDirUri);
+            webviewPanel.webview.html = getWebviewContent(webviewPanel.webview, freshNonce(), manifestDirUri);
         }
 
         // Listen for document changes (e.g., from the text editor, undo, or external edits)
@@ -123,15 +123,19 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         // Flush pending webview input changes before save so Ctrl+S captures edits
         // that are still in the 300ms debounce window.
         let pendingSaveResolve: ((edits: vscode.TextEdit[]) => void) | null = null;
+        let pendingSaveNonce: string | null = null;
         const willSaveSub = vscode.workspace.onWillSaveTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString()) {
                 e.waitUntil(new Promise<vscode.TextEdit[]>((resolve) => {
+                    const nonce = crypto.randomUUID();
                     pendingSaveResolve = resolve;
-                    webviewPanel.webview.postMessage({ type: 'flushChanges' });
+                    pendingSaveNonce = nonce;
+                    webviewPanel.webview.postMessage({ type: 'flushChanges', nonce });
                     // Timeout fallback — don't block save forever
                     setTimeout(() => {
-                        if (pendingSaveResolve === resolve) {
+                        if (pendingSaveNonce === nonce) {
                             pendingSaveResolve = null;
+                            pendingSaveNonce = null;
                             resolve([]);
                         }
                     }, 500);
@@ -157,7 +161,8 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
 
                     case 'changesFlushed': {
                         // Apply all pending field changes and resolve the save promise
-                        if (pendingSaveResolve) {
+                        // Match nonce to prevent stale resolution from rapid double-saves
+                        if (pendingSaveResolve && message.nonce === pendingSaveNonce) {
                             let result = text;
                             for (const change of message.changes) {
                                 result = applyFieldChange(result, change.section, change.field, change.value, change.index);
@@ -167,6 +172,7 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                                 : [];
                             const resolve = pendingSaveResolve;
                             pendingSaveResolve = null;
+                            pendingSaveNonce = null;
                             resolve(edits);
                         }
                         return;
@@ -392,21 +398,24 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         return;
                     }
                 }
-            } catch {
-                // XML manipulation failed — ignore to avoid corrupting the document
+            } catch (err) {
+                console.warn('[ManifestEditor] XML manipulation failed:', err);
                 return;
             }
 
             if (newText !== undefined && newText !== text) {
                 isApplyingEdit = true;
-                const edit = new vscode.WorkspaceEdit();
-                edit.replace(
-                    document.uri,
-                    new vscode.Range(0, 0, document.lineCount, 0),
-                    newText,
-                );
-                await vscode.workspace.applyEdit(edit);
-                isApplyingEdit = false;
+                try {
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(
+                        document.uri,
+                        new vscode.Range(0, 0, document.lineCount, 0),
+                        newText,
+                    );
+                    await vscode.workspace.applyEdit(edit);
+                } finally {
+                    isApplyingEdit = false;
+                }
 
                 // Update webview with the new state (including validation)
                 updateWebview();

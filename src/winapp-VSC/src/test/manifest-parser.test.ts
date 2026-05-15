@@ -43,6 +43,7 @@ import {
     removeApplication,
     addExtension,
     removeExtension,
+    updateExtensionField,
     setShowNameOnTiles,
 } from '../manifest-editor/manifest-parser';
 
@@ -1029,5 +1030,72 @@ describe('Edge Cases', () => {
         assert.equal(parsed.dependencies.packageDependencies.length, 1);
         assert.equal(parsed.resources.length, 2);
         assert.equal(parsed.dependencies.targetDeviceFamilies.length, 2);
+    });
+});
+
+// ─── updateExtensionField ──────────────────────────────────────────────────
+
+describe('updateExtensionField', () => {
+    const XML_WITH_EXT = `<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+  <Applications>
+    <Application Id="App" Executable="App.exe" EntryPoint="App.App">
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="myapp" />
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="myext">
+            <uap:DisplayName>My Extension</uap:DisplayName>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>`;
+
+    it('should update an attribute value on the first extension', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 0, 'Protocol.Name', 'newapp');
+        assert.ok(result.includes('Name="newapp"'), 'Protocol name should be updated');
+        assert.ok(!result.includes('Name="myapp"'), 'Old name should be gone');
+    });
+
+    it('should update an attribute on the second extension (extIndex > 0)', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 1, 'FileTypeAssociation.Name', 'newext');
+        assert.ok(result.includes('Name="newext"'), 'FileTypeAssociation name should be updated');
+        assert.ok(!result.includes('Name="myext"'), 'Old name should be gone');
+    });
+
+    it('should update text content when isTextContent is true', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 1, 'DisplayName', 'New Display Name', true);
+        assert.ok(result.includes('>New Display Name</'), 'Text content should be updated');
+        assert.ok(!result.includes('>My Extension</'), 'Old text should be gone');
+    });
+
+    it('should return original XML when element is not found', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 0, 'NonExistent.Attr', 'value');
+        assert.equal(result, XML_WITH_EXT, 'Should return unchanged XML');
+    });
+
+    it('should return original XML when extIndex is out of range', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 99, 'Protocol.Name', 'value');
+        assert.equal(result, XML_WITH_EXT, 'Should return unchanged XML');
+    });
+
+    it('should return original XML when appIndex is out of range', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 99, 0, 'Protocol.Name', 'value');
+        assert.equal(result, XML_WITH_EXT, 'Should return unchanged XML');
+    });
+
+    it('should preserve other extensions when updating one', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 0, 'Protocol.Name', 'updated');
+        assert.ok(result.includes('windows.fileTypeAssociation'), 'Second extension should be preserved');
+        assert.ok(result.includes('Name="myext"'), 'Second extension name should be preserved');
+    });
+
+    it('should return original XML when fieldPath has no dot (attribute mode)', () => {
+        const result = updateExtensionField(XML_WITH_EXT, 0, 0, 'NoDotField', 'value');
+        assert.equal(result, XML_WITH_EXT, 'Should return unchanged XML for invalid fieldPath');
     });
 });

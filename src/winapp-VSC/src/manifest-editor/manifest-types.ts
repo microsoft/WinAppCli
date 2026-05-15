@@ -23,7 +23,7 @@ export interface IdentityData {
 
 export interface PhoneIdentityData {
     phoneProductId: string;
-    phonePublisherId: string;
+    phonePublisherId: string | undefined;
 }
 
 export interface PropertiesData {
@@ -192,7 +192,7 @@ export type WebviewToExtensionMessage =
     | { type: 'removePhoneIdentity' }
     | { type: 'packageTypeChanged'; value: string }
     | { type: 'ready' }
-    | { type: 'changesFlushed'; changes: Array<{ section: string; field: string; value: string; index: number }> };
+    | { type: 'changesFlushed'; changes: Array<{ section: string; field: string; value: string; index: number }>; nonce?: string };
 
 /** Known capabilities organized by category for the checklist UI. */
 export const KNOWN_CAPABILITIES = {
