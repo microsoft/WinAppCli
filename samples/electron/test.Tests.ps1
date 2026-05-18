@@ -124,15 +124,16 @@ Describe "Electron Sample" {
         }
 
         # ── JS bindings smoke (v2.x) ─────────────────────────────────────
-        # Verify the add jsbindings --ai path end-to-end. Use --ai because
-        # it's the narrowest preset (~7 winmds → ~65 .js, <5s on hot cache).
+        # Verify the node jsbindings add --ai path end-to-end. Use --ai
+        # because it's the narrowest preset (~7 winmds → ~65 .js, <5s on
+        # hot cache).
 
-        It "Should add JS bindings via 'add jsbindings --ai'" -Skip:$script:skip {
+        It "Should add JS bindings via 'node jsbindings add --ai'" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
                 # winapp.cmd via npx sets WINAPP_CLI_CALLER (the command
                 # refuses without it).
-                Invoke-WinappCommand -Arguments "add jsbindings --ai --force"
+                Invoke-WinappCommand -Arguments "node jsbindings add --ai --force"
             } finally { Pop-Location }
         }
 
@@ -153,7 +154,7 @@ Describe "Electron Sample" {
             $pkgPath = Join-Path $script:appDir "package.json"
             $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
             $pkg.dependencies.'@microsoft/dynwinrt' | Should -Not -BeNullOrEmpty `
-                -Because "add jsbindings must auto-inject the runtime dep"
+                -Because "node jsbindings add must auto-inject the runtime dep"
         }
 
         It "Should write a winmds.lock.json under .winapp/" -Skip:$script:skip {
