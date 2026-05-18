@@ -683,6 +683,58 @@
           "required": false,
           "recursive": false
         },
+        "--js-bindings": {
+          "description": "Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the @microsoft/winappcli npm package (npx winapp init --js-bindings).",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--js-bindings-ai": {
+          "description": "Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--js-bindings-lang": {
+          "description": "Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules.",
+          "hidden": false,
+          "helpName": "js",
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--js-bindings-output": {
+          "description": "Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:.",
+          "hidden": false,
+          "helpName": "PATH",
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--no-gitignore": {
           "description": "Don't update .gitignore file",
           "hidden": false,
@@ -1065,6 +1117,202 @@
               },
               "required": false,
               "recursive": false
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "description": "Node.js / Electron-specific winapp commands. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node ...).",
+      "hidden": false,
+      "subcommands": {
+        "jsbindings": {
+          "description": "Manage JS/TS WinRT bindings for an existing workspace. 'add' mutates winapp.yaml + runs codegen; 'generate' just runs codegen against the existing yaml. Only available via the @microsoft/winappcli npm package.",
+          "hidden": false,
+          "aliases": [
+            "js-bindings"
+          ],
+          "subcommands": {
+            "add": {
+              "description": "Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings add).",
+              "hidden": false,
+              "arguments": {
+                "base-directory": {
+                  "description": "Base/root directory for the winapp workspace (default: current directory)",
+                  "order": 0,
+                  "hidden": false,
+                  "valueType": "System.IO.DirectoryInfo",
+                  "hasDefaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "options": {
+                "--ai": {
+                  "description": "Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai.",
+                  "hidden": false,
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--config-dir": {
+                  "description": "Directory containing winapp.yaml (default: base-directory)",
+                  "hidden": false,
+                  "valueType": "System.IO.DirectoryInfo",
+                  "hasDefaultValue": false,
+                  "arity": {
+                    "minimum": 1,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--force": {
+                  "description": "Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors).",
+                  "hidden": false,
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--output": {
+                  "description": "Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field.",
+                  "hidden": false,
+                  "helpName": "PATH",
+                  "valueType": "System.String",
+                  "hasDefaultValue": false,
+                  "arity": {
+                    "minimum": 1,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--quiet": {
+                  "description": "Suppress progress messages",
+                  "hidden": false,
+                  "aliases": [
+                    "-q"
+                  ],
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--use-defaults": {
+                  "description": "Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively.",
+                  "hidden": false,
+                  "aliases": [
+                    "--no-prompt"
+                  ],
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--verbose": {
+                  "description": "Enable verbose output",
+                  "hidden": false,
+                  "aliases": [
+                    "-v"
+                  ],
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                }
+              }
+            },
+            "generate": {
+              "description": "Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings generate).",
+              "hidden": false,
+              "arguments": {
+                "base-directory": {
+                  "description": "Base/root directory for the winapp workspace (default: current directory)",
+                  "order": 0,
+                  "hidden": false,
+                  "valueType": "System.IO.DirectoryInfo",
+                  "hasDefaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "options": {
+                "--config-dir": {
+                  "description": "Directory containing winapp.yaml (default: base-directory)",
+                  "hidden": false,
+                  "valueType": "System.IO.DirectoryInfo",
+                  "hasDefaultValue": false,
+                  "arity": {
+                    "minimum": 1,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--quiet": {
+                  "description": "Suppress progress messages",
+                  "hidden": false,
+                  "aliases": [
+                    "-q"
+                  ],
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                },
+                "--verbose": {
+                  "description": "Enable verbose output",
+                  "hidden": false,
+                  "aliases": [
+                    "-v"
+                  ],
+                  "valueType": "System.Boolean",
+                  "hasDefaultValue": true,
+                  "defaultValue": false,
+                  "arity": {
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "required": false,
+                  "recursive": false
+                }
+              }
             }
           }
         }

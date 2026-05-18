@@ -73,10 +73,16 @@ function kebabToPascal(s) {
   return cc.charAt(0).toUpperCase() + cc.slice(1);
 }
 
-/** Clean up CLI description for JSDoc (single line, no trailing period). */
+// Clean up CLI description for JSDoc: single line, escape `*/` (closes the
+// JSDoc) and `@` (truncates description in TS doc extractors).
 function cleanDesc(desc) {
   if (!desc) return '';
-  return desc.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  return desc
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\*\//g, '*\\/')
+    .replace(/@/g, '\\@');
 }
 
 const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
@@ -248,7 +254,7 @@ function generate(schema) {
   for (const { path: cmdPath, cmd } of commands) {
     const cmdPathStr = cmdPath.join(' ');
     const fnName = getFunctionName(cmdPath);
-    const ifaceName = kebabToPascal(cmdPath.join('-')) + 'Options';
+    const ifaceName = getInterfaceName(cmdPath);
 
     // Check for passthrough command
     const passthrough = PASSTHROUGH_COMMANDS[cmdPath.join(' ')] || null;
@@ -355,6 +361,11 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
+  'add jsbindings': 'addJsBindings', // canonical camelCase for the compound name
+};
+
+const IFACE_NAME_OVERRIDES = {
+  'add jsbindings': 'AddJsBindingsOptions',
 };
 
 function getFunctionName(cmdPath) {
@@ -364,6 +375,12 @@ function getFunctionName(cmdPath) {
   // e.g. ['cert', 'generate'] → 'certGenerate'
   const name = cmdPath.map((p, i) => (i === 0 ? kebabToCamel(p) : kebabToPascal(p))).join('');
   return TS_RESERVED.has(name) ? name + 'Command' : name;
+}
+
+function getInterfaceName(cmdPath) {
+  const key = cmdPath.join(' ');
+  if (IFACE_NAME_OVERRIDES[key]) return IFACE_NAME_OVERRIDES[key];
+  return kebabToPascal(cmdPath.join('-')) + 'Options';
 }
 
 // ---------------------------------------------------------------------------

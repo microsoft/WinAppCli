@@ -51,6 +51,9 @@
   "os": [
     "win32"
   ],
+  "dependencies": {
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.1"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.5.0",

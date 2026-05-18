@@ -247,6 +247,14 @@ export interface InitOptions extends CommonOptions {
   configOnly?: boolean;
   /** Don't use configuration file for version management */
   ignoreConfig?: boolean;
+  /** Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp init --js-bindings). */
+  jsBindings?: boolean;
+  /** Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. */
+  jsBindingsAi?: boolean;
+  /** Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. */
+  jsBindingsLang?: string;
+  /** Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. */
+  jsBindingsOutput?: string;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
@@ -264,6 +272,10 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.configDir) args.push('--config-dir', options.configDir);
   if (options.configOnly) args.push('--config-only');
   if (options.ignoreConfig) args.push('--ignore-config');
+  if (options.jsBindings) args.push('--js-bindings');
+  if (options.jsBindingsAi) args.push('--js-bindings-ai');
+  if (options.jsBindingsLang) args.push('--js-bindings-lang', options.jsBindingsLang);
+  if (options.jsBindingsOutput) args.push('--js-bindings-output', options.jsBindingsOutput);
   if (options.noGitignore) args.push('--no-gitignore');
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.useDefaults) args.push('--use-defaults');
@@ -357,6 +369,60 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
   args.push(options.imagePath);
   if (options.lightImage) args.push('--light-image', options.lightImage);
   if (options.manifest) args.push('--manifest', options.manifest);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// node jsbindings add
+// ---------------------------------------------------------------------------
+
+export interface NodeJsbindingsAddOptions extends CommonOptions {
+  /** Base/root directory for the winapp workspace (default: current directory) */
+  baseDirectory?: string;
+  /** Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. */
+  ai?: boolean;
+  /** Directory containing winapp.yaml (default: base-directory) */
+  configDir?: string;
+  /** Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). */
+  force?: boolean;
+  /** Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. */
+  output?: string;
+  /** Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. */
+  useDefaults?: boolean;
+}
+
+/**
+ * Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings add).
+ */
+export async function nodeJsbindingsAdd(options: NodeJsbindingsAddOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['node', 'jsbindings', 'add'];
+  if (options.baseDirectory) args.push(options.baseDirectory);
+  if (options.ai) args.push('--ai');
+  if (options.configDir) args.push('--config-dir', options.configDir);
+  if (options.force) args.push('--force');
+  if (options.output) args.push('--output', options.output);
+  if (options.useDefaults) args.push('--use-defaults');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// node jsbindings generate
+// ---------------------------------------------------------------------------
+
+export interface NodeJsbindingsGenerateOptions extends CommonOptions {
+  /** Base/root directory for the winapp workspace (default: current directory) */
+  baseDirectory?: string;
+  /** Directory containing winapp.yaml (default: base-directory) */
+  configDir?: string;
+}
+
+/**
+ * Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings generate).
+ */
+export async function nodeJsbindingsGenerate(options: NodeJsbindingsGenerateOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['node', 'jsbindings', 'generate'];
+  if (options.baseDirectory) args.push(options.baseDirectory);
+  if (options.configDir) args.push('--config-dir', options.configDir);
   return execCommand(args, options);
 }
 

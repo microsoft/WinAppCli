@@ -34,21 +34,29 @@ First, you'll set up your development environment with the necessary tools and S
 
 [Get Started with Setup →](setup.md)
 
-### 2. Creating a Native Addon
+### 2. Calling Windows APIs
 
-Next, you'll create a native addon that calls Windows APIs. Choose one of the following guides:
+Next, choose how to call Windows APIs from your Electron app:
 
-#### Option A: [Creating a C++ Notification Addon](cpp-notification-addon.md)
+#### Option A: [JS/TypeScript bindings via dynwinrt](../../js-bindings.md) ✨ *new*
+
+The simplest path — typed JS/TypeScript wrappers generated from `.winmd` metadata, no native build step required from your Electron project. One command (`npx winapp node jsbindings add --ai`) drops a `bindings/winrt/` directory next to your sources; you `import { ChatClient } from './bindings/winrt'` and call WinRT directly. Bindings are typed at compile time but use `dynwinrt`'s libffi runtime to invoke methods at runtime, so no MSBuild / `node-gyp` step is involved.
+
+[Add JS bindings →](../../js-bindings.md)
+
+> Native addons (Options B–D below) are still the right choice when you need C++/C# code paths — for instance, to encapsulate a stateful service or to use APIs `dynwinrt` doesn't yet drive (XAML / DispatcherQueue). For data-style WinRT APIs, jsBindings is the easier on-ramp.
+
+#### Option B: [Creating a C++ Notification Addon](cpp-notification-addon.md)
 Learn how to create a C++ addon that calls the Windows App SDK notification APIs. This is a great starting point for understanding native addons before diving into more complex scenarios.
 
 [Create a C++ Notification Addon →](cpp-notification-addon.md)
 
-#### Option B: [Creating a Phi Silica Addon](phi-silica-addon.md)
+#### Option C: [Creating a Phi Silica Addon](phi-silica-addon.md)
 Learn how to create a C# addon that uses the Phi Silica AI model to summarize text on-device. Phi Silica is a small language model that runs locally on Windows 11 devices with NPUs.
 
 [Create a Phi Silica Addon →](phi-silica-addon.md)
 
-#### Option C: [Creating a WinML Addon](winml-addon.md)
+#### Option D: [Creating a WinML Addon](winml-addon.md)
 Learn how to create a C# addon that uses Windows Machine Learning (WinML) to run custom ONNX models for image classification, object detection, and more.
 
 [Create a WinML Addon →](winml-addon.md)
@@ -68,6 +76,7 @@ Finally, you'll package your app as an MSIX for distribution. This includes:
 | Phase | Guide | What You'll Learn |
 |-------|-------|-------------------|
 | 1️⃣ | [Setup](setup.md) | Install tools, initialize SDKs, configure build pipeline |
+| 2️⃣ | [JS bindings (dynwinrt)](../../js-bindings.md) | Generate typed JS/TS WinRT wrappers, no native build step |
 | 2️⃣ | [C++ Notification Addon](cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
 | 2️⃣ | [Phi Silica Addon](phi-silica-addon.md) | Create C# addon, call AI APIs, test with debug identity |
 | 2️⃣ | [WinML Addon](winml-addon.md) | Create C# addon, call WinML APIs, run ONNX models, integrate ML |

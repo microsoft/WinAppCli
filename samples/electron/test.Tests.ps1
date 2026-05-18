@@ -123,6 +123,48 @@ Describe "Electron Sample" {
             Join-Path $script:appDir "Package.appxmanifest" | Should -Exist
         }
 
+        # ── JS bindings smoke (v2.x) ─────────────────────────────────────
+        # Verify the add jsbindings --ai path end-to-end. Use --ai because
+        # it's the narrowest preset (~7 winmds → ~65 .js, <5s on hot cache).
+
+        It "Should add JS bindings via 'add jsbindings --ai'" -Skip:$script:skip {
+            Push-Location $script:appDir
+            try {
+                # winapp.cmd via npx sets WINAPP_CLI_CALLER (the command
+                # refuses without it).
+                Invoke-WinappCommand -Arguments "add jsbindings --ai --force"
+            } finally { Pop-Location }
+        }
+
+        It "Should have generated bindings/winrt/ with the managed marker" -Skip:$script:skip {
+            $bindingsDir = Join-Path $script:appDir "bindings\winrt"
+            $bindingsDir | Should -Exist
+            # Marker proves the staging-then-swap completed.
+            (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist
+            # AI preset generates around 65 .js files; assert at least a
+            # handful to catch the "0 files generated" regression.
+            $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -ErrorAction SilentlyContinue).Count
+            $jsCount | Should -BeGreaterThan 10 -Because "AI preset should generate 60+ JS files"
+        }
+
+        It "Should inject @microsoft/dynwinrt as a runtime dep in package.json" -Skip:$script:skip {
+            # Bindings import @microsoft/dynwinrt at load time — must be a
+            # production dep so `npm ci --omit=dev` doesn't strip it.
+            $pkgPath = Join-Path $script:appDir "package.json"
+            $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
+            $pkg.dependencies.'@microsoft/dynwinrt' | Should -Not -BeNullOrEmpty `
+                -Because "add jsbindings must auto-inject the runtime dep"
+        }
+
+        It "Should write a winmds.lock.json under .winapp/" -Skip:$script:skip {
+            # Seeded by restore (during init); enables the add fast path.
+            $lockfilePath = Join-Path $script:appDir ".winapp\winmds.lock.json"
+            $lockfilePath | Should -Exist
+            $lockfile = Get-Content $lockfilePath -Raw | ConvertFrom-Json
+            $lockfile.schema | Should -BeGreaterThan 0 -Because "Lockfile should have schema versioning"
+            $lockfile.packages | Should -Not -BeNullOrEmpty -Because "Lockfile should record discovered packages"
+        }
+
         It "Should create a C++ native addon" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
@@ -159,12 +201,9 @@ Describe "Electron Sample" {
         }
 
         It "Should download the Electron binary" -Skip:$script:skip {
-            # Electron 42+ no longer downloads its binary during `npm install` (see issue #524).
-            # Trigger the download explicitly so `add-electron-debug-identity` can find electron.exe.
-            # `install-electron` was added in Electron 42; older versions auto-download via
-            # postinstall, so the bin is absent and `npx --no-install` exits non-zero. Either
-            # outcome is fine as long as electron.exe ends up on disk — the Should -Exist below
-            # is the real assertion.
+            # Electron 42+ stopped auto-downloading on `npm install`; trigger
+            # it explicitly. install-electron is the v42 mechanism; exit code
+            # is ignored — the Should -Exist below is the real assertion.
             Push-Location $script:appDir
             try {
                 & npx --no-install install-electron 2>&1 | ForEach-Object { Write-Host $_ }

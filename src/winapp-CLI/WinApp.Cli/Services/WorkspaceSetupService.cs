@@ -10,9 +10,7 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-/// <summary>
-/// Parameters for workspace setup operations
-/// </summary>
+// Parameters for workspace setup operations
 internal class WorkspaceSetupOptions
 {
     public required DirectoryInfo BaseDirectory { get; set; }
@@ -24,18 +22,57 @@ internal class WorkspaceSetupOptions
     public bool RequireExistingConfig { get; set; }
     public bool ForceLatestBuildTools { get; set; }
     public bool ConfigOnly { get; set; }
+
+    // Enable JS/TS bindings generation in Step 5.5 of setup.
+    public bool AddJsBindings { get; set; }
+
+    // CLI override for jsBindings.output.
+    public string? JsBindingsOutputOverride { get; set; }
+
+    // CLI override for jsBindings.lang.
+    public string? JsBindingsLangOverride { get; set; }
+
+    // Preset names from JsBindingsPresets — unioned into jsBindings.packages.
+    public IReadOnlyList<string>? JsBindingsPresets { get; set; }
 }
 
-/// <summary>
-/// Shared service for setting up winapp workspaces
-/// </summary>
+// Params for AddJsBindingsAsync.
+internal class AddJsBindingsOptions
+{
+    public required DirectoryInfo BaseDirectory { get; set; }
+    public required DirectoryInfo ConfigDir { get; set; }
+
+    // CLI override for jsBindings.output.
+    public string? Output { get; set; }
+
+    // Preset names from JsBindingsPresets.
+    public IReadOnlyList<string>? Presets { get; set; }
+
+    // Patch an existing jsBindings: block without prompting.
+    public bool Force { get; set; }
+
+    // Preserve an existing jsBindings: block and exit 0 without prompting.
+    // Mutually exclusive with Force.
+    public bool UseDefaults { get; set; }
+}
+
+// Params for the read-only `node jsbindings generate` flow.
+internal class GenerateJsBindingsOptions
+{
+    public required DirectoryInfo BaseDirectory { get; set; }
+    public required DirectoryInfo ConfigDir { get; set; }
+}
+
+// Shared service for setting up winapp workspaces
 internal class WorkspaceSetupService(
     IConfigService configService,
     IWinappDirectoryService winappDirectoryService,
     IPackageInstallationService packageInstallationService,
     IBuildToolsService buildToolsService,
     ICppWinrtService cppWinrtService,
+    IJsBindingsWorkspaceService jsBindingsWorkspaceService,
     IPackageLayoutService packageLayoutService,
+    IWinmdsLockfileService winmdsLockfileService,
     IPackageRegistrationService packageRegistrationService,
     INugetService nugetService,
     IManifestService manifestService,
@@ -51,6 +88,18 @@ internal class WorkspaceSetupService(
     public async Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
     {
         configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
+
+        // --js-bindings needs installed SDK packages; --setup-sdks none would
+        // produce a silent no-op.
+        if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
+        {
+            logger.LogError(
+                "{UISymbol} --js-bindings requires SDK packages to be installed (it walks the NuGet cache for .winmd files), but --setup-sdks none was specified. " +
+                "Either drop --js-bindings here and add it later via 'npx winapp node jsbindings add' after restoring SDKs, " +
+                "or change --setup-sdks to a value other than none (stable / preview / experimental).",
+                UiSymbols.Error);
+            return 1;
+        }
 
         // Detect .NET project (.csproj) in the base directory
         FileInfo? csprojFile = null;
@@ -71,6 +120,19 @@ internal class WorkspaceSetupService(
         {
             // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
             logger.LogError(".NET project detected, but no winapp.yaml configuration file was found. The 'winapp restore' command is not supported for .NET projects without a winapp.yaml. Please run 'dotnet restore' to restore NuGet packages for this project.");
+            return 1;
+        }
+
+        // --js-bindings is unsupported on .NET projects — the local .winapp/
+        // workspace isn't initialized for them, so codegen would silently
+        // skip downstream. Reject up-front with an actionable error.
+        if (isDotNetProject && options.AddJsBindings)
+        {
+            logger.LogError(
+                "{UISymbol} --js-bindings is not supported for .NET (.csproj) projects yet. " +
+                "JS/TS bindings target native / Node-hosted apps. Run 'winapp init' (without --js-bindings) " +
+                "on the .NET project, and use 'winapp init --js-bindings' from your Node / Electron host instead.",
+                UiSymbols.Error);
             return 1;
         }
 
@@ -104,6 +166,18 @@ internal class WorkspaceSetupService(
                         logger.LogInformation("{UISymbol} {PackageName} = {PackageVersion}", UiSymbols.Bullet, pkg.Name, pkg.Version);
                     }
                 }
+
+                // Q3: when re-init adds a jsBindings block to an already-existing
+                // winapp.yaml (the v1.0 user case), --config-only would otherwise
+                // skip the save and the user would see no effect. Persist here
+                // so the freshly-injected jsBindings actually lands on disk.
+                if (options.AddJsBindings && config.JsBindings is not null)
+                {
+                    // Splice-save: preserve any user-edited comments + unknown
+                    // fields in the existing yaml.
+                    configService.SaveJsBindingsOnly(config);
+                    logger.LogDebug("{UISymbol} Persisted updated configuration with jsBindings → {ConfigPath}", UiSymbols.Save, configService.ConfigPath);
+                }
             }
             else if (options.SdkInstallMode != SdkInstallMode.None)
             {
@@ -127,7 +201,12 @@ internal class WorkspaceSetupService(
                     }
                 }
 
-                var finalConfig = new WinappConfig();
+                var finalConfig = new WinappConfig
+                {
+                    // Preserve any JsBindings block the user set (or that --js-bindings
+                    // injected upstream) so re-running init doesn't strip it.
+                    JsBindings = config?.JsBindings,
+                };
                 foreach (var kvp in defaultVersions)
                 {
                     finalConfig.SetVersion(kvp.Key, kvp.Value);
@@ -560,6 +639,20 @@ internal class WorkspaceSetupService(
                             return (2, "No .winmd files found for C++/WinRT projection.");
                         }
 
+                        // Persist the lockfile so subsequent `node jsbindings add`
+                        // can skip re-globbing / re-fetching nuspecs.
+                        //
+                        // Hash source must match what eventually lands in
+                        // winapp.yaml: restore uses config.Packages directly;
+                        // fresh init filters usedVersions to SDK_PACKAGES first
+                        // (same filter applied to yaml at ~line 929).
+                        var yamlHash = (options.RequireExistingConfig && config?.Packages.Count > 0)
+                            ? YamlPackagesHasher.Compute(config.Packages)
+                            : YamlPackagesHasher.ComputeFromVersions(usedVersions
+                                .Where(kvp => NugetService.SDK_PACKAGES.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase)));
+                        await winmdsLockfileService.WriteAsync(
+                            localWinappDir, usedVersions, winmds, nugetCacheDir, yamlHash, cancellationToken);
+
                         // Run cppwinrt
                         taskContext.UpdateSubStatus("Generating C++/WinRT projections");
                         await cppWinrtService.RunWithRspAsync(cppWinrtExe, winmds, includeOut, localWinappDir, taskContext, cancellationToken: cancellationToken);
@@ -610,6 +703,15 @@ internal class WorkspaceSetupService(
                     {
                         return (1, "Error determining installed package versions.");
                     }
+                }
+
+                // Step 5.5: Generate JS/TS bindings (opt-in via jsBindings: in winapp.yaml)
+                var jsBindingsStep = await MaybeRunJsBindingsStepAsync(
+                    config, usedVersions, nugetCacheDir, localWinappDir,
+                    options, taskContext, cancellationToken);
+                if (jsBindingsStep is { } failed)
+                {
+                    return failed;
                 }
 
                 // Install Windows App SDK Runtime (shared: both .NET and native paths)
@@ -682,7 +784,12 @@ internal class WorkspaceSetupService(
                     await taskContext.AddSubTaskAsync("Saving configuration", (taskContext, cancellationToken) =>
                     {
                         // Setup: Save winapp.yaml with used versions
-                        var finalConfig = new WinappConfig();
+                        var finalConfig = new WinappConfig
+                        {
+                            // Preserve any JsBindings block the user set (or that --js-bindings
+                            // injected upstream) so the persisted yaml round-trips correctly.
+                            JsBindings = config?.JsBindings,
+                        };
                         // only from SDK_PACKAGES
                         var versionsToSave = usedVersions
                             .Where(kvp => NugetService.SDK_PACKAGES.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
@@ -774,9 +881,7 @@ internal class WorkspaceSetupService(
         }, cancellationToken);
     }
 
-    /// <summary>
-    /// Selects the .csproj file to configure when multiple are found.
-    /// </summary>
+    // Selects the .csproj file to configure when multiple are found.
     private async Task<FileInfo> SelectCsprojFileAsync(IReadOnlyList<FileInfo> csprojFiles, CancellationToken cancellationToken)
     {
         if (csprojFiles.Count == 1)
@@ -792,6 +897,56 @@ internal class WorkspaceSetupService(
                 .AddChoices(choices),
             cancellationToken);
         return csprojFiles.First(f => f.Name == selected);
+    }
+
+    // Runs the JS-bindings step when its prerequisites (config, restore
+    // outputs, workspace dir) are all present. Returns null when skipped
+    // or when the step succeeded; returns a non-zero (exitCode, message)
+    // tuple when the step ran and failed, which the caller forwards as
+    // the overall init/restore result. Internal so unit tests can exercise
+    // it directly with a fake IJsBindingsWorkspaceService.
+    internal async Task<(int, string)?> MaybeRunJsBindingsStepAsync(
+        WinappConfig? config,
+        Dictionary<string, string>? usedVersions,
+        DirectoryInfo? nugetCacheDir,
+        DirectoryInfo? localWinappDir,
+        WorkspaceSetupOptions options,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        if (config?.JsBindings is null
+            || usedVersions is null
+            || nugetCacheDir is null
+            || localWinappDir is null)
+        {
+            return null;
+        }
+
+        var jsBindingsResult = await taskContext.AddSubTaskAsync("Generating JS bindings", async (taskContext, cancellationToken) =>
+        {
+            var orchResult = await jsBindingsWorkspaceService.RunAsync(
+                new JsBindingsOrchestrationContext
+                {
+                    JsBindingsConfig = config.JsBindings,
+                    WinappConfig = config,
+                    WorkspaceDir = options.BaseDirectory,
+                    LocalWinappDir = localWinappDir,
+                    NugetCacheDir = nugetCacheDir,
+                    UsedVersions = usedVersions,
+                },
+                taskContext,
+                cancellationToken);
+            return (orchResult.ExitCode, orchResult.Message);
+        }, cancellationToken);
+
+        // Propagate sub-task failure to the parent init/restore flow.
+        // Otherwise init reports overall success even when bindings
+        // didn't generate — silently shipping a broken workspace.
+        if (jsBindingsResult.Item1 != 0)
+        {
+            return jsBindingsResult;
+        }
+        return null;
     }
 
     private async Task SetupManifestSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateManifest, ManifestGenerationInfo? manifestGenerationInfo, TaskContext taskContext, CancellationToken cancellationToken)
@@ -867,6 +1022,23 @@ internal class WorkspaceSetupService(
             var operation = options.RequireExistingConfig ? "Found" : "Found existing";
             logger.LogDebug("{UISymbol} {Operation} winapp.yaml with {PackageCount} packages", UiSymbols.Package, operation, config.Packages.Count);
 
+            // Re-init UX: surface the JS bindings capability when the user
+            // hasn't opted in yet. npm-shim only — winget users can't use
+            // --js-bindings.
+            if (!options.RequireExistingConfig
+                && !options.AddJsBindings
+                && config.JsBindings is null
+                && string.Equals(
+                    Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER"),
+                    "nodejs-package",
+                    StringComparison.Ordinal))
+            {
+                // Informational hint — must respect --quiet.
+                logger.LogInformation(
+                    "{UISymbol} To add JS/TS bindings to this project, re-run: npx winapp init --js-bindings",
+                    UiSymbols.Info);
+            }
+
             if (!options.RequireExistingConfig && config.Packages.Count > 0)
             {
                 logger.LogDebug("{UISymbol} Using pinned package versions from winapp.yaml unless overridden.", UiSymbols.Note);
@@ -912,6 +1084,98 @@ internal class WorkspaceSetupService(
                 config = new WinappConfig();
                 logger.LogDebug("{UISymbol} No winapp.yaml found; will generate one after setup.", UiSymbols.New);
             }
+        }
+
+        // Re-check after AskSdkInstallModeAsync: the interactive prompt can
+        // land on SdkInstallMode=None, which silently breaks --js-bindings
+        // (codegen has no packages to walk).
+        if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
+        {
+            logger.LogError(
+                "{UISymbol} --js-bindings requires SDK packages but the SDK install mode was set to 'none'. " +
+                "Re-run without --js-bindings, or pick a non-'none' SDK mode (stable / preview / experimental).",
+                UiSymbols.Error);
+            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+        }
+
+        // --js-bindings: fill in a default block when none exists. Never
+        // overwrites a user-defined block.
+        if (options.AddJsBindings && config != null && config.JsBindings is not null)
+        {
+            // Warn when override flags were passed but the yaml already had
+            // a jsBindings block — we won't apply them silently.
+            var hasOverrides = !string.IsNullOrWhiteSpace(options.JsBindingsOutputOverride)
+                || !string.IsNullOrWhiteSpace(options.JsBindingsLangOverride)
+                || (options.JsBindingsPresets is { Count: > 0 });
+            if (hasOverrides)
+            {
+                logger.LogWarning(
+                    "{UISymbol} --js-bindings-output / --js-bindings-lang / --js-bindings-{{preset}} are " +
+                    "ignored because winapp.yaml already declares a jsBindings block. " +
+                    "Use 'npx winapp node jsbindings add --force' to overwrite specific fields.",
+                    UiSymbols.Warning);
+            }
+        }
+        if (options.AddJsBindings && config != null && config.JsBindings is null)
+        {
+            var jsCfg = new JsBindingsConfig();
+            if (!string.IsNullOrWhiteSpace(options.JsBindingsOutputOverride))
+            {
+                jsCfg.Output = options.JsBindingsOutputOverride!.Trim();
+            }
+            if (!string.IsNullOrWhiteSpace(options.JsBindingsLangOverride))
+            {
+                jsCfg.Lang = options.JsBindingsLangOverride!.Trim();
+            }
+
+            // Validate the resolved output path before persisting anything —
+            // mirrors the add-jsbindings path and prevents an invalid
+            // --js-bindings-output value from corrupting winapp.yaml.
+            try
+            {
+                DynWinrtCodegenService.ResolveOutputDir(options.BaseDirectory, jsCfg.Output);
+            }
+            catch (InvalidOperationException ex)
+            {
+                logger.LogError(
+                    "{UISymbol} Invalid --js-bindings-output: {Reason}",
+                    UiSymbols.Error, ex.Message);
+                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            }
+            if (options.JsBindingsPresets is { Count: > 0 } presetNames)
+            {
+                var packageIds = JsBindingsPresets.ResolveAndUnion(presetNames);
+                if (packageIds.Count > 0)
+                {
+                    jsCfg.Packages = new List<string>(packageIds);
+                    logger.LogDebug(
+                        "{UISymbol} jsBindings presets [{Presets}] → packages=[{Packages}]",
+                        UiSymbols.New,
+                        string.Join(", ", presetNames),
+                        string.Join(", ", packageIds));
+                }
+                else
+                {
+                    // Defensive: InitCommand validates preset names before
+                    // this is reached.
+                    logger.LogWarning(
+                        "{UISymbol} jsBindings presets [{Presets}] resolved to no prefixes; ignoring (known: {Known}).",
+                        UiSymbols.Warning,
+                        string.Join(", ", presetNames),
+                        JsBindingsPresets.KnownPresetsDisplay());
+                }
+            }
+            config.JsBindings = jsCfg;
+            logger.LogDebug(
+                "{UISymbol} --js-bindings: added default jsBindings block (lang={Lang}, output={Output})",
+                UiSymbols.New,
+                config.JsBindings.Lang,
+                config.JsBindings.Output);
+
+            // Generated bindings import @microsoft/dynwinrt at runtime — must
+            // be a production dep (not just a transitive of the devDep
+            // wrapper). Print a PM-aware install hint.
+            jsBindingsWorkspaceService.EnsureRuntimeDependencyAndPrintHint(options.BaseDirectory);
         }
 
         // .NET: Validate TargetFramework (interactive)
@@ -1153,21 +1417,14 @@ internal class WorkspaceSetupService(
         }
     }
 
-    /// <summary>
-    /// Package entry information from MSIX inventory
-    /// </summary>
+    // Package entry information from MSIX inventory
     public class MsixPackageEntry
     {
         public required string FileName { get; set; }
         public required string PackageIdentity { get; set; }
     }
 
-    /// <summary>
-    /// Parses the MSIX inventory file and returns package entries (shared implementation)
-    /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of package entries, or null if not found</returns>
+    // Parses the MSIX inventory file and returns package entries (shared implementation)
     public static async Task<List<MsixPackageEntry>?> ParseMsixInventoryAsync(TaskContext taskContext, DirectoryInfo msixDir, CancellationToken cancellationToken)
     {
         var architecture = GetSystemArchitecture();
@@ -1210,11 +1467,9 @@ internal class WorkspaceSetupService(
         return packageEntries;
     }
 
-    /// <summary>
-    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
-    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
-    /// the real identity directly from the package to ensure correct installation checks.
-    /// </summary>
+    // Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
+    // The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
+    // the real identity directly from the package to ensure correct installation checks.
     private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
     {
         try
@@ -1242,11 +1497,7 @@ internal class WorkspaceSetupService(
         }
     }
 
-    /// <summary>
-    /// Installs Windows App SDK runtime MSIX packages for the current system architecture
-    /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
+    // Installs Windows App SDK runtime MSIX packages for the current system architecture
     public async Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
     {
         var architecture = GetSystemArchitecture();
@@ -1338,10 +1589,7 @@ internal class WorkspaceSetupService(
         return (installedCount, errorCount);
     }
 
-    /// <summary>
-    /// Gets the current system architecture string for package selection
-    /// </summary>
-    /// <returns>Architecture string (x64, arm64, x86)</returns>
+    // Gets the current system architecture string for package selection
     public static string GetSystemArchitecture()
     {
         var arch = RuntimeInformation.ProcessArchitecture;
@@ -1354,20 +1602,14 @@ internal class WorkspaceSetupService(
         };
     }
 
-    /// <summary>
-    /// Finds the MSIX directory for Windows App SDK runtime packages
-    /// </summary>
-    /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages</param>
-    /// <returns>The path to the MSIX directory, or null if not found</returns>
+    // Finds the MSIX directory for Windows App SDK runtime packages
     public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
     {
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
         return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
     }
 
-    /// <summary>
-    /// Searches the NuGet global packages cache (lowercase id/version folder convention).
-    /// </summary>
+    // Searches the NuGet global packages cache (lowercase id/version folder convention).
     private static DirectoryInfo? FindMsixDirectoryInNuGetCache(DirectoryInfo nugetCacheDir, Dictionary<string, string>? usedVersions)
     {
         if (usedVersions != null)
@@ -1424,9 +1666,7 @@ internal class WorkspaceSetupService(
         return null;
     }
 
-    /// <summary>
-    /// Checks the NuGet cache for a specific package/version (lowercase ID/version layout).
-    /// </summary>
+    // Checks the NuGet cache for a specific package/version (lowercase ID/version layout).
     private static DirectoryInfo? TryGetMsixDirectoryFromNuGetCache(DirectoryInfo nugetCacheDir, string packageId, string version)
     {
         // NuGet global cache uses lowercase package IDs
@@ -1434,22 +1674,16 @@ internal class WorkspaceSetupService(
         return TryGetMsixDirectoryFromPath(pkgVersionDir);
     }
 
-    /// <summary>
-    /// Helper method to check if an MSIX directory exists for a given package path
-    /// </summary>
-    /// <param name="packagePath">The full path to the package directory</param>
-    /// <returns>The MSIX directory path if it exists, null otherwise</returns>
+    // Helper method to check if an MSIX directory exists for a given package path
     private static DirectoryInfo? TryGetMsixDirectoryFromPath(DirectoryInfo packagePath)
     {
         var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
         return msixDir.Exists ? msixDir : null;
     }
 
-    /// <summary>
-    /// Runs <paramref name="work"/> while showing a Spectre.Console spinner with <paramref name="message"/>.
-    /// In non-interactive contexts (redirected output, no Information logging), falls back to a single
-    /// log line so the user still sees what's happening (#463).
-    /// </summary>
+    // Runs work while showing a Spectre.Console spinner with message.
+    // In non-interactive contexts (redirected output, no Information logging), falls back to a single
+    // log line so the user still sees what's happening (#463).
     private async Task<T> RunWithStatusAsync<T>(string message, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
     {
         if (Environment.UserInteractive
@@ -1471,9 +1705,7 @@ internal class WorkspaceSetupService(
         return await work(cancellationToken);
     }
 
-    /// <summary>
-    /// Comparer for sorting version strings, including prerelease support
-    /// </summary>
+    // Comparer for sorting version strings, including prerelease support
     private class VersionStringComparer : IComparer<string>
     {
         public int Compare(string? x, string? y)

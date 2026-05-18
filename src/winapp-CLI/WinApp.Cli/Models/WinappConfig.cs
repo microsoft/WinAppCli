@@ -7,6 +7,9 @@ internal sealed class WinappConfig
 {
     public List<PackagePin> Packages { get; set; } = new();
 
+    // Optional JS/TS bindings; when set, restore runs the codegen step.
+    public JsBindingsConfig? JsBindings { get; set; }
+
     public string? GetVersion(string name)
         => Packages.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Version;
 

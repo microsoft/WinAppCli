@@ -69,9 +69,23 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Join array lines into single string with LF line endings (CLI outputs pretty-printed JSON)
-# Ensure exactly one trailing newline for consistency
+# Join lines into a single string with LF endings + one trailing newline.
 $SchemaJson = ($SchemaJsonLines -join "`n").TrimEnd() + "`n"
+
+# Override schema version with version.json (CLI binary may have the
+# AssemblyInformationalVersion default "1.0.0"). validate-llm-docs.ps1
+# does the same substitution at compare time.
+$VersionJsonPath = Join-Path (Split-Path $PSScriptRoot) "version.json"
+if (Test-Path $VersionJsonPath) {
+    $BaseVersion = (Get-Content $VersionJsonPath | ConvertFrom-Json).version
+    $SchemaObj = $SchemaJson | ConvertFrom-Json
+    if ($SchemaObj.version -ne $BaseVersion) {
+        Write-Host "[DOCS] Overriding schema version '$($SchemaObj.version)' (from CLI binary) with '$BaseVersion' (from version.json)" -ForegroundColor Yellow
+        $SchemaObj.version = $BaseVersion
+        $SchemaJson = ($SchemaObj | ConvertTo-Json -Depth 100) -replace "`r`n", "`n"
+        if (-not $SchemaJson.EndsWith("`n")) { $SchemaJson += "`n" }
+    }
+}
 
 # Save schema JSON with consistent LF line endings
 [System.IO.File]::WriteAllText($SchemaOutputPath, $SchemaJson, [System.Text.UTF8Encoding]::new($false))
@@ -95,7 +109,7 @@ $SkillsDir = $SkillsPath
 # Skill → CLI command mapping for auto-generated options/arguments tables
 # Each skill maps to one or more CLI commands whose options/arguments should be included
 $SkillCommandMap = @{
-    "setup"        = @("init", "restore", "update", "run")
+    "setup"        = @("init", "restore", "update", "run", "add jsbindings", "unregister")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "cert info", "sign")

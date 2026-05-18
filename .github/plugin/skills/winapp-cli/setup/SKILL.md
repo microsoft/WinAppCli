@@ -52,6 +52,22 @@ winapp init --use-defaults --setup-sdks none
 winapp init --use-defaults --setup-sdks preview
 ```
 
+### Add JS/TS bindings for Node / Electron apps (npm only)
+
+When invoked via the `@microsoft/winappcli` npm package, you can generate
+typed JS/TS bindings for WinRT APIs alongside the standard init:
+
+```powershell
+# Initialize with the AI slice of the SDK pre-wired.
+npx winapp init --use-defaults --js-bindings-ai
+
+# Or layer bindings onto an already-initialized workspace.
+npx winapp node jsbindings add --ai
+```
+
+Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is
+added to your `package.json` dependencies so production installs include it.
+
 After `init`, your project will contain:
 - `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
@@ -173,6 +189,10 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 | `--config-dir` | Directory to read/store configuration (default: current directory) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
+| `--js-bindings` | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the @microsoft/winappcli npm package (npx winapp init --js-bindings). | (none) |
+| `--js-bindings-ai` | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. | (none) |
+| `--js-bindings-lang` | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. | (none) |
+| `--js-bindings-output` | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
 | `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
@@ -230,3 +250,15 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |
 | `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
 | `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |
+
+### `winapp unregister`
+
+Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--force` | Skip the install-location directory check and unregister even if the package was registered from a different project tree | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--manifest` | Path to the Package.appxmanifest (default: auto-detect from current directory) | (none) |

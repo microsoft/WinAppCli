@@ -28,6 +28,8 @@ Does the project already have an appxmanifest.xml?
 └─ Yes
    ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder is missing?
    │  └─ winapp restore
+   ├─ Want to add typed JS/TypeScript WinRT bindings to an existing workspace?
+   │  └─ npx winapp node jsbindings add --ai     (or omit --ai for the full surface)
    ├─ Want to check for newer SDK versions?
    │  └─ winapp update
    ├─ Only need an appxmanifest.xml (no SDKs, no cert, no config)?
@@ -99,6 +101,16 @@ Want to inspect or interact with a running app's UI?
 **When to use:** When you want to update to the latest Windows SDK or Windows App SDK versions.
 **Key options:** `--setup-sdks stable|preview|experimental|none`
 **Requires:** `winapp.yaml`
+
+### `winapp node jsbindings add` (alias: `winapp node js-bindings add`)
+**Purpose:** Layer typed JS/TS WinRT bindings (via `@microsoft/dynwinrt-codegen`) onto an existing workspace.
+**When to use:** After `winapp init` on a Node/Electron host, when you want callable WinRT APIs without a native build step.
+**Key options:**
+- `--ai` — limit generation to the `Microsoft.WindowsAppSDK.AI` slice (the only ships-today preset)
+- `--output PATH` — output directory (default `bindings/winrt`); persisted to `winapp.yaml`
+- `--force` — patch an existing `jsBindings:` block (overwrites `output` and preset packages; preserves user customisations like `extraTypes` / `additionalWinmds` / `skipPackages`)
+- `--config-dir` — directory containing `winapp.yaml` (default: `base-directory`)
+**Requires:** `winapp.yaml` already exists; npm-only (run as `npx winapp node jsbindings add`). Never modifies `packages:` or installs SDK packages.
 
 ### `winapp package <input-folder>` (alias: `winapp pack`)
 **Purpose:** Create an MSIX installer from a built app.
@@ -217,12 +229,14 @@ Want to inspect or interact with a running app's UI?
 ## Framework-specific guidance
 
 ### Electron
-- **Setup:** `winapp init --use-defaults` → `winapp node create-addon --template cs` (or `--template cpp`) → `winapp node add-electron-debug-identity`
+- **Setup:** `winapp init --use-defaults` → choose your Windows API access path:
+  - **JS bindings (easiest, npm-only):** `npx winapp init --use-defaults --js-bindings-ai` (or `npx winapp node jsbindings add --ai` on an existing workspace) — generates typed `bindings/winrt/*.{js,d.ts}` for the WinAppSDK AI surface, callable directly from your main/renderer process via dynwinrt. No native build step.
+  - **Native addons:** `winapp node create-addon --template cs` (or `--template cpp`) for C#/C++ addons when you need full WinRT access or stateful native services.
+  - Then: `winapp node add-electron-debug-identity` to enable identity-required APIs.
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`
-- Use `winapp node create-addon` to create native C#/C++ addons for Windows APIs
-- Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
 - **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
+- JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md
 
 ### .NET (WPF, WinForms, Console)
 - **Setup:** `winapp init --use-defaults` — but if you already have a `Package.appxmanifest` (e.g., WinUI 3 apps), you likely **don't need `winapp init`**. Just ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds.

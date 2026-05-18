@@ -52,6 +52,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
             ConfigureServices(services)
             // Override services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(_tempDirectory.FullName))
+            .AddSingleton<INpmWrapperVersionProvider>(new FakeNpmWrapperVersionProvider())
             .AddSingleton<IAnsiConsole>(TestAnsiConsole)
             .AddLogging(b =>
             {
@@ -128,15 +129,9 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         return _serviceProvider.GetRequiredService<T>();
     }
 
-    /// <summary>
-    /// Ensures a single NuGet package is available in the test NuGet cache by copying it
-    /// from the real global NuGet cache if available, falling back to downloading from NuGet.org.
-    /// <para>
-    /// This avoids expensive HTTP downloads that can timeout (100 s default) when many tests
-    /// run in parallel (12-way method-level parallelism) and all try to download large packages
-    /// like <c>Microsoft.WindowsAppSDK.Runtime</c> simultaneously.
-    /// </para>
-    /// </summary>
+    // Make a NuGet package available in the test cache — copies from the real
+    // global cache if present, falls back to NuGet.org. Avoids HTTP timeouts
+    // when many parallel tests download large packages simultaneously.
     protected async Task EnsurePackageInTestCacheAsync(string packageId, string version, CancellationToken cancellationToken)
     {
         var nugetService = GetRequiredService<INugetService>();
@@ -148,9 +143,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
             return;
         }
 
-        // Try to copy from the real NuGet cache (fast, no network needed).
-        // For EndToEndTests, 'dotnet build' already downloads packages here.
-        // For PackageCommandTests, previous test runs will have cached them.
+        // Try the real cache first — `dotnet build` populates it for free.
         var realCachePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".nuget", "packages", packageId.ToLowerInvariant(), version);
@@ -169,9 +162,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
             version: version, cancellationToken: cancellationToken);
     }
 
-    /// <summary>
-    /// Recursively copies a directory and all its contents to a new location.
-    /// </summary>
+    // Recursively copies a directory and all its contents to a new location.
     private static void CopyDirectoryRecursive(DirectoryInfo source, DirectoryInfo target)
     {
         target.Create();
@@ -184,14 +175,20 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         }
     }
 
-    /// <summary>
-    /// Push default (Enter) answers for manifest prompts (packageName, publisherName, version, description)
-    /// </summary>
+    // Push default (Enter) answers for manifest prompts (packageName, publisherName, version, description)
     protected void DefaultAnswers()
     {
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+    }
+
+    // Stub INpmWrapperVersionProvider for tests so they don't try
+    // to walk up from the test runner exe path looking for the npm wrapper.
+    private sealed class FakeNpmWrapperVersionProvider : INpmWrapperVersionProvider
+    {
+        public string DynWinrtVersion => "0.0.0-test";
+        public string DynWinrtCodegenVersion => "0.0.0-test";
     }
 }

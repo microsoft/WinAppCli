@@ -47,6 +47,22 @@ winapp init --use-defaults --setup-sdks none
 winapp init --use-defaults --setup-sdks preview
 ```
 
+### Add JS/TS bindings for Node / Electron apps (npm only)
+
+When invoked via the `@microsoft/winappcli` npm package, you can generate
+typed JS/TS bindings for WinRT APIs alongside the standard init:
+
+```powershell
+# Initialize with the AI slice of the SDK pre-wired.
+npx winapp init --use-defaults --js-bindings-ai
+
+# Or layer bindings onto an already-initialized workspace.
+npx winapp node jsbindings add --ai
+```
+
+Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is
+added to your `package.json` dependencies so production installs include it.
+
 After `init`, your project will contain:
 - `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)

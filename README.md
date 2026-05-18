@@ -226,6 +226,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 **Node.js/Electron Specific:**
 
+- [`node jsbindings add`](./docs/usage.md#node-add-jsbindings) - Add typed JS/TypeScript WinRT bindings to an existing workspace
 - [`node create-addon`](./docs/usage.md#node-create-addon) - Generate native C# or C++ addons
 - [`node add-electron-debug-identity`](./docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 - [`node clear-electron-debug-identity`](./docs/usage.md#node-clear-electron-debug-identity) - Remove identity from Electron processes

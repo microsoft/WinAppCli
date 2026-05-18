@@ -86,7 +86,7 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
 
 // Node.js wrapper-only commands that should appear in completions
 const NODE_WRAPPER_COMMANDS = ['node'];
-const NODE_SUBCOMMANDS = ['create-addon', 'add-electron-debug-identity', 'clear-electron-debug-identity'];
+const NODE_SUBCOMMANDS = ['jsbindings', 'create-addon', 'add-electron-debug-identity', 'clear-electron-debug-identity'];
 
 /**
  * Handle completion requests by forwarding to the native CLI and augmenting
@@ -267,11 +267,15 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('Node.js-specific commands');
     console.log('');
     console.log('Subcommands:');
-    console.log('  create-addon                  Generate native addon files for Electron');
-    console.log('  add-electron-debug-identity   Add package identity to Electron debug process');
-    console.log('  clear-electron-debug-identity Remove package identity from Electron debug process');
+    console.log('  jsbindings add                 Add a jsBindings: block to winapp.yaml + run codegen');
+    console.log('  jsbindings generate            Re-run codegen against the existing jsBindings: block');
+    console.log('  create-addon                   Generate native addon files for Electron');
+    console.log('  add-electron-debug-identity    Add package identity to Electron debug process');
+    console.log('  clear-electron-debug-identity  Remove package identity from Electron debug process');
     console.log('');
     console.log('Examples:');
+    console.log(`  ${CLI_NAME} node jsbindings add --ai`);
+    console.log(`  ${CLI_NAME} node jsbindings generate`);
     console.log(`  ${CLI_NAME} node create-addon --help`);
     console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
     console.log(`  ${CLI_NAME} node create-addon --name myCsAddon --template cs`);
@@ -296,6 +300,12 @@ async function handleNode(args: string[]): Promise<void> {
 
     case 'clear-electron-debug-identity':
       await handleClearElectronDebugIdentity(subcommandArgs);
+      break;
+
+    case 'jsbindings':
+      // Native-CLI sub-command tree (`node jsbindings add` / `... generate`).
+      // Forward the full argv (including the leading `node`) to the .NET CLI.
+      await callWinappCli(['node', ...args], { exitOnError: true });
       break;
 
     default:

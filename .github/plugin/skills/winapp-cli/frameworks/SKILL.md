@@ -30,16 +30,22 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
+- `node jsbindings add` — generates typed JS/TypeScript WinRT wrappers via dynwinrt (no native build required)
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults
-npx winapp node create-addon --template cs   # create a C# native addon
+npx winapp init --use-defaults --js-bindings-ai   # init + generate typed AI bindings in bindings/winrt/
+# (or, if you already initialized the workspace:)
+npx winapp node jsbindings add --ai                    # layer JS bindings onto an existing workspace
+npx winapp node create-addon --template cs   # create a C# native addon (for stuff dynwinrt can't drive)
 npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
+The `--js-bindings*` flags (and the `node jsbindings add` sub-command) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The winget / standalone install will reject these surfaces with a clear error.
+
 Additional Electron guides:
+- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `jsBindings:` yaml schema, presets, per-package classification, lockfile
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

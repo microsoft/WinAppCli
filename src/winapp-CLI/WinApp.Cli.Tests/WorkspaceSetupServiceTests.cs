@@ -4,6 +4,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Tests.TestDoubles;
 
 namespace WinApp.Cli.Tests;
 
@@ -184,20 +185,17 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         // Act
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
-        // Assert
-        // Restore on a non-.NET project with no winapp.yaml is a graceful no-op:
-        // a project that doesn't declare SDK package versions has nothing to restore.
-        // (.NET projects without yaml are still rejected — handled separately by the
-        // csproj-detection branch in SetupWorkspaceAsync.)
+        // Restore on a non-.NET project without winapp.yaml is a no-op:
+        // nothing declared = nothing to restore. (.NET projects without yaml
+        // are rejected elsewhere.)
         Assert.AreEqual(0, exitCode, "Restore should be a no-op (exit 0) when no winapp.yaml exists on a non-.NET project");
     }
 }
 
 /// <summary>
-/// End-to-end tests for the merged .NET and native workspace setup code paths.
-/// These tests verify that the unified WorkspaceSetupService correctly handles
-/// both .NET (csproj) and native (C++) projects through the shared flow,
-/// including the key fix: Windows App SDK Runtime installation on the .NET path.
+/// End-to-end tests for the merged .NET / native workspace setup. Verifies the
+/// unified WorkspaceSetupService handles both csproj and C++ projects through
+/// the shared flow, including Windows App SDK Runtime install on .NET.
 /// </summary>
 [TestClass]
 public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
@@ -500,11 +498,8 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // (runtime install failure is non-blocking)
         Assert.AreEqual(0, exitCode, "Setup should complete despite runtime install not finding MSIX packages");
 
-        // Verify the runtime install was ATTEMPTED by checking output for the
-        // runtime install step. This is the key behavioral change from the merge:
-        // before, .NET projects never reached this code path.
-        // Note: Non-error log messages go to static AnsiConsole, error logs to ConsoleStdErr,
-        // and Spectre status display goes to TestAnsiConsole
+        // Verify the runtime install step was reached. (Pre-merge, .NET
+        // projects never hit this code path.)
         var ansiOutput = TestAnsiConsole.Output;
         var logOutput = ConsoleStdErr.ToString();
         var combinedOutput = ansiOutput + logOutput;
@@ -992,4 +987,197 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
     }
 
     #endregion
+}
+
+// JS-bindings step propagation tests. Drive
+// WorkspaceSetupService.MaybeRunJsBindingsStepAsync directly with a fake
+// IJsBindingsWorkspaceService to verify the propagation contract without
+// the full restore/install dependency tree.
+[TestClass]
+public class WorkspaceSetupServiceJsBindingsStepTests : BaseCommandTests
+{
+    private FakeJsBindingsWorkspaceService _fakeJsBindings = null!;
+
+    protected override IServiceCollection ConfigureServices(IServiceCollection services)
+    {
+        _fakeJsBindings = new FakeJsBindingsWorkspaceService();
+        var existing = services.FirstOrDefault(d => d.ServiceType == typeof(IJsBindingsWorkspaceService));
+        if (existing is not null)
+        {
+            services.Remove(existing);
+        }
+        services.AddSingleton<IJsBindingsWorkspaceService>(_fakeJsBindings);
+        return services;
+    }
+
+    private WorkspaceSetupService GetSut() => (WorkspaceSetupService)GetRequiredService<IWorkspaceSetupService>();
+
+    private static WorkspaceSetupOptions MinimalOptions(DirectoryInfo baseDir) => new()
+    {
+        BaseDirectory = baseDir,
+        ConfigDir = baseDir,
+        SdkInstallMode = SdkInstallMode.None,
+    };
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_NullConfig_ReturnsNull()
+    {
+        // Gate 1: no winapp config → step is a no-op.
+        var result = await GetSut().MaybeRunJsBindingsStepAsync(
+            config: null,
+            usedVersions: new Dictionary<string, string>(),
+            nugetCacheDir: _tempDirectory,
+            localWinappDir: _testWinappDirectory,
+            options: MinimalOptions(_tempDirectory),
+            taskContext: TestTaskContext,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNull(result, "Null config must short-circuit the step.");
+        Assert.AreEqual(0, _fakeJsBindings.Calls.Count,
+            "RunAsync MUST NOT be invoked when there's no jsBindings config.");
+    }
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_NoJsBindingsBlock_ReturnsNull()
+    {
+        // Gate 2: config exists but jsBindings: block is absent → no-op.
+        var config = new WinappConfig
+        {
+            Packages = { new PackagePin { Name = "Microsoft.WindowsAppSDK", Version = "1.8.39" } },
+            JsBindings = null,
+        };
+
+        var result = await GetSut().MaybeRunJsBindingsStepAsync(
+            config,
+            usedVersions: new Dictionary<string, string>(),
+            nugetCacheDir: _tempDirectory,
+            localWinappDir: _testWinappDirectory,
+            options: MinimalOptions(_tempDirectory),
+            taskContext: TestTaskContext,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNull(result);
+        Assert.AreEqual(0, _fakeJsBindings.Calls.Count);
+    }
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_NullUsedVersionsOrDirs_ReturnsNull()
+    {
+        // Gates 3/4/5: any of usedVersions / nugetCacheDir / localWinappDir
+        // null means restore hasn't produced enough state to invoke
+        // bindings. All three must short-circuit.
+        var config = new WinappConfig
+        {
+            JsBindings = new JsBindingsConfig { Output = "bindings/winrt", Lang = "js" },
+        };
+
+        var sut = GetSut();
+        Assert.IsNull(await sut.MaybeRunJsBindingsStepAsync(
+            config, usedVersions: null, _tempDirectory, _testWinappDirectory,
+            MinimalOptions(_tempDirectory), TestTaskContext, TestContext.CancellationToken));
+        Assert.IsNull(await sut.MaybeRunJsBindingsStepAsync(
+            config, new Dictionary<string, string>(), nugetCacheDir: null, _testWinappDirectory,
+            MinimalOptions(_tempDirectory), TestTaskContext, TestContext.CancellationToken));
+        Assert.IsNull(await sut.MaybeRunJsBindingsStepAsync(
+            config, new Dictionary<string, string>(), _tempDirectory, localWinappDir: null,
+            MinimalOptions(_tempDirectory), TestTaskContext, TestContext.CancellationToken));
+
+        Assert.AreEqual(0, _fakeJsBindings.Calls.Count,
+            "RunAsync MUST NOT be invoked when any gating dependency is null.");
+    }
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_RunAsyncReturnsZero_ReturnsNull()
+    {
+        // Happy path: all gates open, RunAsync reports success → caller
+        // treats this as a no-op and continues with the rest of init.
+        _fakeJsBindings.Result = new JsBindingsOrchestrationResult
+        {
+            ExitCode = 0,
+            Message = "ok",
+        };
+        var config = new WinappConfig
+        {
+            JsBindings = new JsBindingsConfig { Output = "bindings/winrt", Lang = "js" },
+        };
+
+        var result = await GetSut().MaybeRunJsBindingsStepAsync(
+            config,
+            new Dictionary<string, string> { ["Microsoft.WindowsAppSDK"] = "1.8.39" },
+            _tempDirectory,
+            _testWinappDirectory,
+            MinimalOptions(_tempDirectory),
+            TestTaskContext,
+            TestContext.CancellationToken);
+
+        Assert.IsNull(result, "Success must return null so init proceeds.");
+        Assert.AreEqual(1, _fakeJsBindings.Calls.Count, "RunAsync must be invoked exactly once.");
+    }
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_RunAsyncReturnsNonZero_PropagatesExitAndMessage()
+    {
+        // the core propagation contract. When the
+        // bindings sub-task fails, init MUST surface the same exit code
+        // — otherwise the user sees a green "init complete" while their
+        // bindings dir is empty / partial.
+        _fakeJsBindings.Result = new JsBindingsOrchestrationResult
+        {
+            ExitCode = 7,
+            Message = "simulated bindings failure",
+        };
+        var config = new WinappConfig
+        {
+            JsBindings = new JsBindingsConfig { Output = "bindings/winrt", Lang = "js" },
+        };
+
+        var result = await GetSut().MaybeRunJsBindingsStepAsync(
+            config,
+            new Dictionary<string, string> { ["Microsoft.WindowsAppSDK"] = "1.8.39" },
+            _tempDirectory,
+            _testWinappDirectory,
+            MinimalOptions(_tempDirectory),
+            TestTaskContext,
+            TestContext.CancellationToken);
+
+        Assert.IsNotNull(result, "Failure must return a non-null tuple so caller can propagate.");
+        Assert.AreEqual(7, result.Value.Item1,
+            "Exit code from JsBindingsOrchestrationResult.ExitCode must propagate verbatim.");
+        StringAssert.Contains(result.Value.Item2, "simulated bindings failure",
+            "Message must propagate so the user can diagnose.");
+        Assert.AreEqual(1, _fakeJsBindings.Calls.Count);
+    }
+
+    [TestMethod]
+    public async Task MaybeRunJsBindingsStepAsync_ForwardsContextFieldsCorrectly()
+    {
+        // Regression guard: the context passed to RunAsync must include
+        // exactly the fields the production SetupWorkspaceAsync passes —
+        // no field drift between callsite and helper.
+        _fakeJsBindings.Result = new JsBindingsOrchestrationResult { ExitCode = 0, Message = "ok" };
+        var config = new WinappConfig
+        {
+            JsBindings = new JsBindingsConfig { Output = "bindings/winrt", Lang = "js" },
+        };
+        var usedVersions = new Dictionary<string, string>
+        {
+            ["Microsoft.WindowsAppSDK"] = "1.8.39",
+            ["Microsoft.WindowsAppSDK.AI"] = "1.8.39",
+        };
+
+        await GetSut().MaybeRunJsBindingsStepAsync(
+            config, usedVersions, _tempDirectory, _testWinappDirectory,
+            MinimalOptions(_tempDirectory), TestTaskContext, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, _fakeJsBindings.Calls.Count);
+        var captured = _fakeJsBindings.Calls[0];
+        Assert.AreSame(config.JsBindings, captured.JsBindingsConfig);
+        Assert.AreSame(config, captured.WinappConfig);
+        Assert.AreEqual(_tempDirectory.FullName, captured.WorkspaceDir.FullName);
+        Assert.AreEqual(_testWinappDirectory.FullName, captured.LocalWinappDir.FullName);
+        Assert.AreEqual(_tempDirectory.FullName, captured.NugetCacheDir.FullName);
+        Assert.IsNotNull(captured.UsedVersions);
+        Assert.AreEqual(2, captured.UsedVersions!.Count);
+        Assert.AreEqual("1.8.39", captured.UsedVersions["Microsoft.WindowsAppSDK.AI"]);
+    }
 }

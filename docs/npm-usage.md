@@ -201,6 +201,10 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
+| `jsBindings` | `boolean \| undefined` | No | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp init --js-bindings). |
+| `jsBindingsAi` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. |
+| `jsBindingsLang` | `string \| undefined` | No | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. |
+| `jsBindingsOutput` | `string \| undefined` | No | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
@@ -275,6 +279,48 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
+### `nodeJsbindingsAdd()`
+
+Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings add).
+
+```typescript
+function nodeJsbindingsAdd(options?: NodeJsbindingsAddOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
+| `ai` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. |
+| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
+| `force` | `boolean \| undefined` | No | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). |
+| `output` | `string \| undefined` | No | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `nodeJsbindingsGenerate()`
+
+Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings generate).
+
+```typescript
+function nodeJsbindingsGenerate(options?: NodeJsbindingsGenerateOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
@@ -336,10 +382,12 @@ function run(options: RunOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -596,7 +644,8 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1163,6 +1212,10 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
+| `jsBindings` | `boolean \| undefined` | No | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp init --js-bindings). |
+| `jsBindingsAi` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. |
+| `jsBindingsLang` | `string \| undefined` | No | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. |
+| `jsBindingsOutput` | `string \| undefined` | No | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
@@ -1209,6 +1262,30 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `NodeJsbindingsAddOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
+| `ai` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. |
+| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
+| `force` | `boolean \| undefined` | No | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). |
+| `output` | `string \| undefined` | No | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `NodeJsbindingsGenerateOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `PackageOptions`
 
 | Property | Type | Required | Description |
@@ -1244,10 +1321,12 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -1396,7 +1475,8 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |

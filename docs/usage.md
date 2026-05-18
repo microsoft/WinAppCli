@@ -36,6 +36,13 @@ winapp init [base-directory] [options]
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
 
+**JS/TypeScript bindings flags** (npm-only — require invocation via `npx winapp …`):
+
+- `--js-bindings` - Enable jsBindings codegen as part of init/restore. Adds a `jsBindings:` block to `winapp.yaml`. See [JS bindings docs](js-bindings.md) for the full feature.
+- `--js-bindings-output <path>` - Override the bindings output dir (default `bindings/winrt`). Only effective with `--js-bindings`.
+- `--js-bindings-lang <js>` - Target language. Currently only `js` is supported (emits both `.js` and `.d.ts`). `py` exists in the underlying codegen but is not yet wired through here — reserved for forward-compat.
+- `--js-bindings-ai` - Shorthand for `--js-bindings` + AI preset (writes `Microsoft.WindowsAppSDK.AI` to `jsBindings.packages`). Auto-registered from `JsBindingsPresets.KnownPresets`.
+
 **What it does:**
 
 - Creates `winapp.yaml` configuration file (only when SDK packages are managed; skipped with `--setup-sdks none`)
@@ -144,6 +151,52 @@ winapp update
 # Update including experimental packages
 winapp update --setup-sdks experimental
 ```
+
+---
+
+### node jsbindings add
+
+Layer JS/TypeScript bindings (via `dynwinrt-codegen`) onto an already-initialized workspace, **without** rerunning the SDK install pipeline. Requires an existing `winapp.yaml` and previously-restored packages. npm-only — invoke as `npx winapp node jsbindings add`.
+
+```bash
+npx winapp node jsbindings add [base-directory] [options]
+```
+
+**Arguments:**
+
+- `base-directory` - Workspace root containing `winapp.yaml` (default: current directory)
+
+**Options:**
+
+- `--config-dir <path>` - Directory containing `winapp.yaml` (default: current directory)
+- `--output <path>` - Output dir for generated `.js` + `.d.ts`, persisted to `jsBindings.output` (default `bindings/winrt`)
+- `--force` - Replace an existing `jsBindings:` block without prompting (refuses by default to avoid clobbering hand edits)
+- `--ai` - Use the AI preset (writes `Microsoft.WindowsAppSDK.AI` to `jsBindings.packages`). Auto-registered from `JsBindingsPresets.KnownPresets` — one flag per preset.
+
+**What it does:**
+
+- Reads `winapp.yaml`, adds (or replaces with `--force`) a `jsBindings:` block from the CLI options
+- Discovers winmds via `.winapp/winmds.lock.json` (fast path, written by `restore`) or via NuGet cache walk + transitive-deps expansion (fallback when the lockfile is missing)
+- Spawns `@microsoft/dynwinrt-codegen` to emit `.js` + `.d.ts` into the output dir
+- Auto-injects `@microsoft/dynwinrt` as a production dep in your `package.json` so generated bindings can `import` it at runtime
+
+**Examples:**
+
+```bash
+# Add the AI preset to an existing workspace
+npx winapp node jsbindings add --ai
+
+# Add the full surface (no preset)
+npx winapp node jsbindings add
+
+# Replace an existing jsBindings: block
+npx winapp node jsbindings add --ai --force
+
+# Custom output directory
+npx winapp node jsbindings add --ai --output src/generated/winrt
+```
+
+> See [JS bindings docs](js-bindings.md) for the full feature reference, including `winapp.yaml` schema, presets, per-package winmd categorization, and the `winmds.lock.json` audit/cache artifact.
 
 ---
 
