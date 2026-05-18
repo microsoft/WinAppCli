@@ -212,6 +212,7 @@ CMakeCache.txt
 # Development certificate
 devcert.pfx
 *.msix
+*.vsix
 
 # GUI app package outputs
 /src/winapp-GUI/winapp-GUI/AppPackages
