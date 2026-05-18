@@ -10,6 +10,8 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class WinmdsLockfileServiceTests
 {
+    private static readonly string[] _arr00 = ["Microsoft.WindowsAppSDK.AI"];
+
     public TestContext TestContext { get; set; } = null!;
 
     private DirectoryInfo _temp = null!;
@@ -180,7 +182,7 @@ public class WinmdsLockfileServiceTests
             cache);
 
         var (emit, refOnly, skipped) = JsBindingsWorkspaceService.PartitionFromLockfile(
-            lockfile, new[] { "Microsoft.WindowsAppSDK.AI" });
+            lockfile, _arr00);
 
         Assert.AreEqual(1, emit.Count, "Only the scoped AI package emits.");
         Assert.IsTrue(emit[0].FullName.EndsWith("Microsoft.Windows.AI.winmd", StringComparison.OrdinalIgnoreCase));

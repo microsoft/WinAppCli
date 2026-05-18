@@ -9,6 +9,22 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class ConfigServiceJsBindingsTests : BaseCommandTests
 {
+    private static readonly string[] _arr00 = ["Microsoft.WindowsAppSDK.AI"];
+    private static readonly string[] _arr01 = ["Microsoft.WindowsAppSDK.AI", "Microsoft.WindowsAppSDK"];
+    private static readonly string[] _arr02 = ["vendor/BigVendor.winmd", @"C:\abs\OtherSdk.winmd"];
+    private static readonly string[] _arr03 = ["vendor/Foo.winmd"];
+    private static readonly string[] _arr04 = ["Lens", "Sensor"];
+    private static readonly string[] _arr05 = ["vendor/BigVendor.winmd", @"C:\shared\OtherCompany.SDK.winmd"];
+    private static readonly string[] _arr06 = ["vendor/Foo.winmd", @"C:\abs\Bar.winmd"];
+    private static readonly string[] _arr07 = ["vendor/MyCompany.Foo.winmd", @"C:\absolute\path\Other.winmd", "sibling.winmd"];
+    private static readonly string[] _arr08 = ["Uri"];
+    private static readonly string[] _arr09 = ["StorageFile"];
+    private static readonly string[] _arr10 = ["BitmapDecoder"];
+    private static readonly string[] _arr11 = ["StorageFile", "StorageFolder"];
+    private static readonly string[] _arr12 = ["LimitedAccessFeatures"];
+    private static readonly string[] _arr13 = ["Calendar"];
+    private static readonly string[] _arr14 = ["Uri", "PropertyValue"];
+
     [TestMethod]
     public void Load_NoJsBindings_ReturnsNull()
     {
@@ -77,16 +93,16 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
         Assert.IsNotNull(cfg.JsBindings);
         Assert.AreEqual("src/generated", cfg.JsBindings.Output);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr00,
             cfg.JsBindings.Packages);
 
         Assert.AreEqual(2, cfg.JsBindings.ExtraTypes.Count);
 
         Assert.AreEqual("Windows.Foundation", cfg.JsBindings.ExtraTypes[0].Namespace);
-        CollectionAssert.AreEqual(new[] { "Uri", "PropertyValue" }, cfg.JsBindings.ExtraTypes[0].Classes);
+        CollectionAssert.AreEqual(_arr14, cfg.JsBindings.ExtraTypes[0].Classes);
 
         Assert.AreEqual("Windows.Globalization", cfg.JsBindings.ExtraTypes[1].Namespace);
-        CollectionAssert.AreEqual(new[] { "Calendar" }, cfg.JsBindings.ExtraTypes[1].Classes);
+        CollectionAssert.AreEqual(_arr13, cfg.JsBindings.ExtraTypes[1].Classes);
     }
 
     [TestMethod]
@@ -109,9 +125,9 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(cfg.JsBindings);
         Assert.AreEqual(3, cfg.JsBindings.ExtraTypes.Count);
-        CollectionAssert.AreEqual(new[] { "LimitedAccessFeatures" }, cfg.JsBindings.ExtraTypes[0].Classes);
-        CollectionAssert.AreEqual(new[] { "StorageFile", "StorageFolder" }, cfg.JsBindings.ExtraTypes[1].Classes);
-        CollectionAssert.AreEqual(new[] { "BitmapDecoder" }, cfg.JsBindings.ExtraTypes[2].Classes);
+        CollectionAssert.AreEqual(_arr12, cfg.JsBindings.ExtraTypes[0].Classes);
+        CollectionAssert.AreEqual(_arr11, cfg.JsBindings.ExtraTypes[1].Classes);
+        CollectionAssert.AreEqual(_arr10, cfg.JsBindings.ExtraTypes[2].Classes);
     }
 
     [TestMethod]
@@ -131,7 +147,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(cfg.JsBindings);
         Assert.AreEqual(1, cfg.JsBindings.ExtraTypes.Count);
-        CollectionAssert.AreEqual(new[] { "StorageFile" }, cfg.JsBindings.ExtraTypes[0].Classes);
+        CollectionAssert.AreEqual(_arr09, cfg.JsBindings.ExtraTypes[0].Classes);
     }
 
     [TestMethod]
@@ -161,12 +177,12 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
         Assert.AreEqual("js", roundTrip.JsBindings.Lang);
         Assert.AreEqual("bindings/winrt", roundTrip.JsBindings.Output);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr00,
             roundTrip.JsBindings.Packages,
             "Round-trip must preserve the packages slice exactly.");
         Assert.AreEqual(1, roundTrip.JsBindings.ExtraTypes.Count);
         Assert.AreEqual("Windows.Foundation", roundTrip.JsBindings.ExtraTypes[0].Namespace);
-        CollectionAssert.AreEqual(new[] { "Uri" }, roundTrip.JsBindings.ExtraTypes[0].Classes);
+        CollectionAssert.AreEqual(_arr08, roundTrip.JsBindings.ExtraTypes[0].Classes);
     }
 
     [TestMethod]
@@ -208,12 +224,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(cfg.JsBindings);
         CollectionAssert.AreEqual(
-            new[]
-            {
-                "vendor/MyCompany.Foo.winmd",
-                @"C:\absolute\path\Other.winmd",
-                "sibling.winmd",
-            },
+            _arr07,
             cfg.JsBindings.AdditionalWinmds,
             "AdditionalWinmds entries must round-trip in declaration order, accepting both relative and absolute paths");
     }
@@ -259,7 +270,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(roundTrip.JsBindings);
         CollectionAssert.AreEqual(
-            new[] { "vendor/Foo.winmd", @"C:\abs\Bar.winmd" },
+            _arr06,
             roundTrip.JsBindings.AdditionalWinmds,
             "additionalWinmds must round-trip declaration order intact");
     }
@@ -293,13 +304,13 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(cfg.JsBindings);
         CollectionAssert.AreEqual(
-            new[] { "vendor/BigVendor.winmd", @"C:\shared\OtherCompany.SDK.winmd" },
+            _arr05,
             cfg.JsBindings.AdditionalRefs);
         // Adjacent extraTypes block must still parse correctly when
         // additionalRefs precedes it (regression guard for parser state).
         Assert.AreEqual(1, cfg.JsBindings.ExtraTypes.Count);
         Assert.AreEqual("BigVendor.Camera", cfg.JsBindings.ExtraTypes[0].Namespace);
-        CollectionAssert.AreEqual(new[] { "Lens", "Sensor" }, cfg.JsBindings.ExtraTypes[0].Classes);
+        CollectionAssert.AreEqual(_arr04, cfg.JsBindings.ExtraTypes[0].Classes);
     }
 
     [TestMethod]
@@ -351,10 +362,10 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
         Assert.IsNotNull(roundTrip.JsBindings);
         // Both list fields must coexist and round-trip in their declaration order.
         CollectionAssert.AreEqual(
-            new[] { "vendor/Foo.winmd" },
+            _arr03,
             roundTrip.JsBindings.AdditionalWinmds);
         CollectionAssert.AreEqual(
-            new[] { "vendor/BigVendor.winmd", @"C:\abs\OtherSdk.winmd" },
+            _arr02,
             roundTrip.JsBindings.AdditionalRefs);
         // Extras-types adjacent block must also survive
         Assert.AreEqual(1, roundTrip.JsBindings.ExtraTypes.Count);
@@ -403,7 +414,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(cfg.JsBindings);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI", "Microsoft.WindowsAppSDK" },
+            _arr01,
             cfg.JsBindings.Packages,
             "Packages list must dedupe case-insensitively while preserving the first-seen casing.");
     }
@@ -425,7 +436,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
 
         Assert.IsNotNull(roundTrip.JsBindings);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr00,
             roundTrip.JsBindings.Packages);
     }
 
@@ -599,7 +610,7 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
         Assert.AreEqual("bindings/winrt", loaded.JsBindings!.Output,
             "Unknown top-level key must NOT overwrite jsBindings.output");
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr00,
             loaded.JsBindings.Packages.ToList(),
             "Unknown top-level key's list children must NOT leak into jsBindings.packages");
     }

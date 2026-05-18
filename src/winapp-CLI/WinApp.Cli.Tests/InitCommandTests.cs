@@ -558,7 +558,10 @@ public class InitCommandJsBindingsWiringTests : BaseCommandTests
     {
         _fakeJsBindings = new FakeJsBindingsWorkspaceService();
         var existing = services.FirstOrDefault(d => d.ServiceType == typeof(IJsBindingsWorkspaceService));
-        if (existing is not null) services.Remove(existing);
+        if (existing is not null)
+        {
+            services.Remove(existing);
+        }
         services.AddSingleton<IJsBindingsWorkspaceService>(_fakeJsBindings);
         return services;
     }

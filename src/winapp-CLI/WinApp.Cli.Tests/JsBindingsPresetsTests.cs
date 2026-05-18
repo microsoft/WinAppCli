@@ -8,12 +8,19 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class JsBindingsPresetsTests
 {
+    private static readonly string[] _arr00 = ["Microsoft.WindowsAppSDK.AI", "Some.Vendor.Pkg"];
+    private static readonly string[] _arr01 = ["Microsoft.WindowsAppSDK.AI", "Microsoft.WindowsAppSDK.WinUI"];
+    private static readonly string[] _arr02 = ["Microsoft.WindowsAppSDK.AI"];
+    private static readonly string[] _arr03 = ["bogus", "ai", ""];
+    private static readonly string[] _arr04 = ["ai", "AI", "ai"];
+    private static readonly string[] _arr05 = ["ai"];
+
     [TestMethod]
     public void KnownPresets_AiPreset_MapsToAiPackage()
     {
         Assert.IsTrue(JsBindingsPresets.TryResolve("ai", out var packages));
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr02,
             packages.ToList(),
             "AI preset must map to the Microsoft.WindowsAppSDK.AI NuGet package");
     }
@@ -23,7 +30,7 @@ public class JsBindingsPresetsTests
     {
         // Only 'ai' ships today; trip this test when a new one lands.
         CollectionAssert.AreEqual(
-            new[] { "ai" },
+            _arr05,
             JsBindingsPresets.KnownPresets.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList(),
             "Unexpected preset registered. If intentional, update this test and docs/js-bindings.md.");
     }
@@ -64,9 +71,9 @@ public class JsBindingsPresetsTests
     [TestMethod]
     public void ResolveAndUnion_SinglePreset_EquivalentToTryResolve()
     {
-        var result = JsBindingsPresets.ResolveAndUnion(new[] { "ai" });
+        var result = JsBindingsPresets.ResolveAndUnion(_arr05);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr02,
             result.ToList(),
             "Single-preset union must produce the preset's package IDs in declaration order");
     }
@@ -76,9 +83,9 @@ public class JsBindingsPresetsTests
     {
         // ai listed multiple times (mixed case to also exercise the
         // case-insensitive comparer) — must collapse to one set.
-        var result = JsBindingsPresets.ResolveAndUnion(new[] { "ai", "AI", "ai" });
+        var result = JsBindingsPresets.ResolveAndUnion(_arr04);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr02,
             result.ToList(),
             "Repeated presets must collapse — no double package IDs");
     }
@@ -87,9 +94,9 @@ public class JsBindingsPresetsTests
     public void ResolveAndUnion_UnknownNames_AreSkippedSilently()
     {
         // Skip unknown but keep the known one. Validation is the CLI parser's job.
-        var result = JsBindingsPresets.ResolveAndUnion(new[] { "bogus", "ai", "" });
+        var result = JsBindingsPresets.ResolveAndUnion(_arr03);
         CollectionAssert.AreEqual(
-            new[] { "Microsoft.WindowsAppSDK.AI" },
+            _arr02,
             result.ToList());
     }
 
@@ -334,7 +341,7 @@ public class JsBindingsPresetsTests
             new FileInfo(@"C:\u\.nuget\packages\microsoft.web.webview2\1.0.0\runtimes\WebView2.winmd"),
         };
 
-        var scope = new[] { "Microsoft.WindowsAppSDK.AI" };
+        var scope = _arr02;
         var p = JsBindingsPresets.PartitionByPackageCategory(
             files, overrides: null, nugetCacheRoot: null, emitScope: scope);
 
@@ -378,7 +385,7 @@ public class JsBindingsPresetsTests
             new FileInfo(@"C:\u\.nuget\packages\microsoft.windowsappsdk.winui\1.8\metadata\Xaml.winmd"),
         };
 
-        var scope = new[] { "Microsoft.WindowsAppSDK.AI", "Microsoft.WindowsAppSDK.WinUI" };
+        var scope = _arr01;
         var p = JsBindingsPresets.PartitionByPackageCategory(
             files, overrides: null, nugetCacheRoot: null, emitScope: scope);
 
@@ -403,7 +410,7 @@ public class JsBindingsPresetsTests
 
         var p = JsBindingsPresets.PartitionByPackageCategory(
             files, ov, nugetCacheRoot: null,
-            emitScope: new[] { "Microsoft.WindowsAppSDK.AI", "Some.Vendor.Pkg" });
+            emitScope: _arr00);
 
         Assert.AreEqual(1, p.Emit.Count, "AI emits.");
         Assert.AreEqual(1, p.RefOnly.Count, "Vendor stays RefOnly via classification override.");

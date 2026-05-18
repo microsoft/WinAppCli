@@ -18,6 +18,8 @@ namespace WinApp.Cli.Tests;
 [DoNotParallelize]
 public class AddJsBindingsOrchestrationTests : BaseCommandTests
 {
+    private static readonly string[] _arr00 = ["Lens", "Sensor"];
+
     private FakeDynWinrtCodegenService _fakeCodegen = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
@@ -87,7 +89,10 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             foreach (var path in pkg.winmdPaths)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                if (!File.Exists(path)) File.WriteAllText(path, "stub winmd");
+                if (!File.Exists(path))
+                {
+                    File.WriteAllText(path, "stub winmd");
+                }
             }
         }
 
@@ -703,7 +708,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
         Assert.AreEqual(1, call.Config.ExtraTypes.Count, "extraTypes must be passed through.");
         Assert.AreEqual("Vendor.SDK.Camera", call.Config.ExtraTypes[0].Namespace);
         CollectionAssert.AreEquivalent(
-            new[] { "Lens", "Sensor" },
+            _arr00,
             call.Config.ExtraTypes[0].Classes.ToList());
     }
 
