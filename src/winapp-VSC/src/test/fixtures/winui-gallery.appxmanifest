@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap mp uap3">
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap mp uap3 uap5">
   <!--Note: package version and assembly version must be kept in sync-->
   <Identity Name="Microsoft.WinUI3ControlsGallery" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" Version="2.8.0.0" />
   <mp:PhoneIdentity PhoneProductId="863667e0-667a-4bb4-ac52-c59656c7333a" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
@@ -39,6 +39,30 @@
             <uap:DisplayName>WinUI 3 Gallery</uap:DisplayName>
           </uap:Protocol>
         </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="foo">
+            <uap:Logo>Images\StoreLogo.png</uap:Logo>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.foo</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.shareTarget">
+          <uap:ShareTarget Description="WinUI Share Target">
+            <uap:SupportedFileTypes>
+              <uap:SupportsAnyFileType/>
+            </uap:SupportedFileTypes>
+          </uap:ShareTarget>
+        </uap:Extension>
+        <uap5:Extension
+            Category="windows.startupTask"
+            Executable="WinUI3Gallery\WinUI3Gallery.exe"
+            EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask
+            TaskId="GalleryStartupId"
+            Enabled="false"
+            DisplayName="WinUI 3 Gallery Startup" />
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>

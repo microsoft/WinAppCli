@@ -34,6 +34,8 @@ Tests run against real AppxManifest files stored in `src/test/fixtures/`:
 | `winui-gallery.appxmanifest` | Default – used by the 7 core tab specs and the parse-error spec |
 | `push-notifications-sample.appxmanifest` | `push-notifications-fixture.spec.ts` |
 | `background-task-sample.appxmanifest` | `background-task-fixture.spec.ts` |
+| `widgets-sample.appxmanifest` | Unit tests for nested Capabilities and package-level Extensions |
+| `edge-cases.appxmanifest` | Unit tests for edge-case / adversarial parsing |
 
 `resetManifest(ctx, fixtureName?)` copies the selected fixture into the workspace before each spec file, waits for the editor to reload, and re-acquires the webview frame.
 

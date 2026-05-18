@@ -49,8 +49,7 @@ export function getEditorStyles(nonce: string): string {
         .view-xml-icon {
             font-size: 14px;
         }
-        .tab-btn {
-            padding: 8px 16px;
+        .tab-btn, .app-sub-tab {
             border: none;
             background: transparent;
             color: var(--vscode-foreground);
@@ -61,8 +60,10 @@ export function getEditorStyles(nonce: string): string {
             opacity: 0.7;
             transition: opacity 0.1s;
         }
-        .tab-btn:hover { opacity: 1; }
-        .tab-btn.active {
+        .tab-btn { padding: 8px 16px; }
+        .app-sub-tab { padding: 6px 14px; }
+        .tab-btn:hover, .app-sub-tab:hover { opacity: 1; }
+        .tab-btn.active, .app-sub-tab.active {
             opacity: 1;
             border-bottom-color: var(--vscode-focusBorder, #007acc);
             color: var(--vscode-foreground);
@@ -176,7 +177,8 @@ export function getEditorStyles(nonce: string): string {
         .form-group input[type="text"],
         .form-group input[type="color"],
         .form-group select,
-        .form-group textarea {
+        .form-group textarea,
+        .custom-cap-row input {
             width: 100%;
             padding: 4px 8px;
             font-family: inherit;
@@ -189,7 +191,8 @@ export function getEditorStyles(nonce: string): string {
         }
         .form-group input:focus,
         .form-group select:focus,
-        .form-group textarea:focus {
+        .form-group textarea:focus,
+        .custom-cap-row input:focus {
             border-color: var(--vscode-focusBorder, #007acc);
         }
         .form-group textarea {
@@ -310,13 +313,7 @@ export function getEditorStyles(nonce: string): string {
         .btn-add-field {
             display: inline-block;
             padding: 4px 10px;
-            font-size: 12px;
-            color: var(--vscode-button-foreground);
-            background: var(--vscode-button-background);
             margin-bottom: 12px;
-        }
-        .btn-add-field:hover {
-            background: var(--vscode-button-hoverBackground);
         }
         .optional-fields-group {
             display: flex;
@@ -339,35 +336,26 @@ export function getEditorStyles(nonce: string): string {
         .optional-field-content select {
             flex: 1;
         }
+        .btn-remove-field, .btn-remove-section {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            background: rgba(128, 128, 128, 0.3);
+            color: var(--vscode-editor-foreground, #ffffff);
+            font-size: 14px;
+            align-items: center;
+            justify-content: center;
+        }
         .btn-remove-field {
             flex-shrink: 0;
-            width: 24px;
-            height: 24px;
-            padding: 0;
-            background: rgba(128, 128, 128, 0.3);
-            color: var(--vscode-editor-foreground, #ffffff);
-            font-size: 14px;
             display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .btn-remove-field:hover {
-            background: rgba(128, 128, 128, 0.5);
         }
         .btn-remove-section {
-            width: 24px;
-            height: 24px;
-            padding: 0;
-            background: rgba(128, 128, 128, 0.3);
-            color: var(--vscode-editor-foreground, #ffffff);
-            font-size: 14px;
             display: inline-flex;
-            align-items: center;
-            justify-content: center;
             vertical-align: middle;
             margin-left: 8px;
         }
-        .btn-remove-section:hover {
+        .btn-remove-field:hover, .btn-remove-section:hover {
             background: rgba(128, 128, 128, 0.5);
         }
         .list-item .item-title {
@@ -382,19 +370,19 @@ export function getEditorStyles(nonce: string): string {
         }
 
         /* ─── Buttons ──────────────────────────────────────── */
-        .btn, .btn-sm, .btn-remove-field, .btn-remove-section, .btn-add-field {
+        .btn, .btn-sm, .btn-remove-field, .btn-remove-section, .btn-add-field, .custom-dropdown-btn {
             cursor: pointer;
             border: none;
             border-radius: 2px;
             font-family: inherit;
         }
-        .btn {
-            padding: 4px 12px;
+        .btn, .btn-add-field, .custom-dropdown-btn {
             font-size: 12px;
             color: var(--vscode-button-foreground);
             background: var(--vscode-button-background);
         }
-        .btn:hover {
+        .btn { padding: 4px 12px; }
+        .btn:hover, .btn-add-field:hover, .custom-dropdown-btn:hover {
             background: var(--vscode-button-hoverBackground);
         }
         .btn:focus-visible {
@@ -477,17 +465,7 @@ export function getEditorStyles(nonce: string): string {
         }
         .custom-cap-row input {
             flex: 1;
-            padding: 4px 8px;
-            font-family: inherit;
-            font-size: var(--vscode-font-size, 13px);
-            color: var(--vscode-input-foreground);
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border, transparent);
-            border-radius: 2px;
-        }
-        .custom-cap-row input:focus {
-            border-color: var(--vscode-focusBorder);
-            outline: none;
+            width: auto;
         }
 
         /* ─── Application cards ────────────────────────────── */
@@ -546,9 +524,6 @@ export function getEditorStyles(nonce: string): string {
         .logo-caption { font-size:11px; font-style:italic; color:var(--vscode-descriptionForeground); margin-top:4px; text-align:center; width:140px; }
 
         .app-sub-tabs { display:flex; border-bottom:1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border)); margin-bottom:16px; }
-        .app-sub-tab { padding:6px 14px; border:none; background:transparent; color:var(--vscode-foreground); cursor:pointer; font-size:13px; font-family:inherit; border-bottom:2px solid transparent; opacity:0.7; }
-        .app-sub-tab:hover { opacity:1; }
-        .app-sub-tab.active { opacity:1; border-bottom-color:var(--vscode-focusBorder, #007acc); }
         .app-sub-content { display:none; }
         .app-sub-content.active { display:block; }
 
@@ -559,8 +534,7 @@ export function getEditorStyles(nonce: string): string {
         .cap-description-name { font-weight:600; margin-bottom:4px; color:var(--vscode-foreground); }
 
         .custom-dropdown { position:relative; display:inline-block; }
-        .custom-dropdown-btn { padding:4px 12px; font-size:12px; font-family:inherit; cursor:pointer; border:none; border-radius:2px; color:var(--vscode-button-foreground); background:var(--vscode-button-background); }
-        .custom-dropdown-btn:hover { background:var(--vscode-button-hoverBackground); }
+        .custom-dropdown-btn { padding:4px 12px; }
         .custom-dropdown-menu { display:none; position:absolute; top:100%; left:0; margin-top:4px; min-width:180px; background:var(--vscode-menu-background, var(--vscode-editor-background)); border:1px solid var(--vscode-panel-border); border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:20; padding:4px; }
         .custom-dropdown-menu.open { display:block; }
         .custom-dropdown-item { padding:6px 12px; cursor:pointer; font-size:12px; color:var(--vscode-foreground); border-radius:4px; }

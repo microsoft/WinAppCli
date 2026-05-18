@@ -213,7 +213,7 @@ describe('Whitespace Preservation', () => {
     });
 
     it('should preserve fixture whitespace when applying a single field change', () => {
-        const xml = loadFixture('dotnet-app-sample.appxmanifest');
+        const xml = loadFixture('winui-gallery.appxmanifest');
         const result = applyFieldChange(xml, 'identity', 'version', '9.9.9.0');
         // Only the version line should differ
         const origLines = xml.split('\n');
