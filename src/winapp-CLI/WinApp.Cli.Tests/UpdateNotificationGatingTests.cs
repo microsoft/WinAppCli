@@ -58,14 +58,21 @@ public class UpdateNotificationGatingTests
         try { Directory.Delete(_tempCacheDir, recursive: true); } catch { /* best effort */ }
     }
 
+    // Substring uniquely produced by UpdateNotificationService.DisplayUpdateNotification
+    // (format: "v{ver} is available. To update, …"). Looser checks like
+    // .Contains("available") false-positive against command descriptions
+    // that use the word "available" (e.g. "Only available when invoked
+    // via the npm package").
+    private const string UpdateNoticeMarker = "is available. To update";
+
     [TestMethod]
     public async Task JsonMode_SuppressesUpdateNotice_StdoutHasNoNotice()
     {
         var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global", "--json"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--json stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--json stderr must not contain update notice. Got stderr: {stderr}");
     }
 
@@ -74,9 +81,9 @@ public class UpdateNotificationGatingTests
     {
         var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global", "--quiet"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--quiet stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--quiet stderr must not contain update notice. Got stderr: {stderr}");
     }
 
@@ -85,9 +92,9 @@ public class UpdateNotificationGatingTests
     {
         var (stdout, stderr, _) = await InvokeProgramAsync(["--cli-schema"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--cli-schema stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--cli-schema stderr must not contain update notice. Got stderr: {stderr}");
     }
 
@@ -98,9 +105,9 @@ public class UpdateNotificationGatingTests
         // never stdout. We capture stderr via Console.SetError.
         var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"Update notice must not appear on stdout. Got stdout: {stdout}");
-        Assert.IsTrue(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsTrue(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"Update notice should appear on stderr in normal mode. Got stderr: {stderr}");
     }
 
