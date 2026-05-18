@@ -507,10 +507,20 @@ function applyAutoUpdateUri(xml: string, value: string): string {
         return xml;
     }
 
-    // Try to update existing AppInstaller Uri attribute
-    const appInstallerRegex = /<[a-zA-Z0-9]*:?AppInstaller\b[^>]*\/?>/s;
-    const result = replaceAttribute(xml, appInstallerRegex, 'Uri', value);
-    if (result !== xml) { return result; }
+    // Try to update existing AppInstaller Uri attribute (scoped to AutoUpdate block)
+    const autoUpdateBounds = findParentBounds(xml, 'AutoUpdate');
+    if (autoUpdateBounds) {
+        const appInstallerRegex = /<[a-zA-Z0-9]*:?AppInstaller\b[^>]*\/?>/s;
+        const scopedXml = xml.substring(autoUpdateBounds.contentStart, autoUpdateBounds.contentEnd);
+        const appInstallerMatch = appInstallerRegex.exec(scopedXml);
+        if (appInstallerMatch) {
+            const absStart = autoUpdateBounds.contentStart + appInstallerMatch.index;
+            const absEnd = absStart + appInstallerMatch[0].length;
+            const fullRegex = new RegExp(escapeRegex(xml.substring(absStart, absEnd)));
+            const result = replaceAttribute(xml, fullRegex, 'Uri', value);
+            if (result !== xml) { return result; }
+        }
+    }
 
     // No AutoUpdate element — insert one into Properties
     let workXml = ensureNamespace(xml, 'uap13', 'http://schemas.microsoft.com/appx/manifest/uap/windows/10/13');
@@ -534,10 +544,20 @@ function applyPackageIntegrityEnforcement(xml: string, value: string): string {
         return xml;
     }
 
-    // Try to update existing Content Enforcement attribute
-    const contentRegex = /<[a-zA-Z0-9]*:?Content\b[^>]*\/?>/s;
-    const result = replaceAttribute(xml, contentRegex, 'Enforcement', value);
-    if (result !== xml) { return result; }
+    // Try to update existing Content Enforcement attribute (scoped to PackageIntegrity block)
+    const pkgIntBounds = findParentBounds(xml, 'PackageIntegrity');
+    if (pkgIntBounds) {
+        const contentRegex = /<[a-zA-Z0-9]*:?Content\b[^>]*\/?>/s;
+        const scopedXml = xml.substring(pkgIntBounds.contentStart, pkgIntBounds.contentEnd);
+        const contentMatch = contentRegex.exec(scopedXml);
+        if (contentMatch) {
+            const absStart = pkgIntBounds.contentStart + contentMatch.index;
+            const absEnd = absStart + contentMatch[0].length;
+            const fullRegex = new RegExp(escapeRegex(xml.substring(absStart, absEnd)));
+            const result = replaceAttribute(xml, fullRegex, 'Enforcement', value);
+            if (result !== xml) { return result; }
+        }
+    }
 
     // No PackageIntegrity element — insert one into Properties
     let workXml = ensureNamespace(xml, 'uap10', NS.uap10);
@@ -558,13 +578,21 @@ function applyNthElementAttrChange(
     let count = 0;
     while ((match = tagRegex.exec(xml)) !== null) {
         if (count === index) {
-            const elemRegex = new RegExp(escapeRegex(match[0]));
+            // Use positional slicing to ensure we operate on this specific match,
+            // not the first textually-identical element elsewhere in the XML.
+            const pos = match.index;
+            const elemText = match[0];
+            const before = xml.substring(0, pos);
+            const after = xml.substring(pos + elemText.length);
+            const elemRegex = new RegExp(escapeRegex(elemText));
             if (opts?.removeOnEmpty && !value) {
-                return removeAttribute(xml, elemRegex, attr);
+                const modified = removeAttribute(elemText, elemRegex, attr);
+                return before + modified + after;
             }
-            const result = replaceAttribute(xml, elemRegex, attr, value);
-            if (result !== xml) { return result; }
-            return addAttributeToElement(xml, elemRegex, attr, value);
+            const replaced = replaceAttribute(elemText, elemRegex, attr, value);
+            if (replaced !== elemText) { return before + replaced + after; }
+            const added = addAttributeToElement(elemText, elemRegex, attr, value);
+            return before + added + after;
         }
         count++;
     }

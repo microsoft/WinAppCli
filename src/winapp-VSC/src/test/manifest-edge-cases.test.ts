@@ -864,3 +864,77 @@ describe('ensureNamespace — single-quote support', () => {
         assert.ok(result.includes('xmlns:uap='), 'Should add xmlns:uap');
     });
 });
+
+describe('findPackageLevelParentBounds skip-inside-Applications', () => {
+    it('should target package-level Extensions and not app-level Extensions', () => {
+        // This manifest has Extensions at both package level and app level.
+        // addExtension targets app-level; package-level Extensions should not interfere.
+        const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+  <Identity Name="Test" Version="1.0.0.0" Publisher="CN=Test" />
+  <Applications>
+    <Application Id="App" Executable="app.exe" EntryPoint="App">
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="myproto" />
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer><Path>helper.dll</Path></InProcessServer>
+    </Extension>
+  </Extensions>
+</Package>`;
+
+        // Adding an extension to app 0 should add inside the Application's Extensions
+        const result = addExtension(xml, 0, '<uap:Extension Category="windows.fileTypeAssociation"><uap:FileTypeAssociation Name="myfile" /></uap:Extension>');
+        // The app-level Extensions should now have 2 entries
+        const appExtBounds = result.indexOf('<Extensions>', result.indexOf('<Application'));
+        const appExtEnd = result.indexOf('</Extensions>', appExtBounds);
+        const appExtSection = result.substring(appExtBounds, appExtEnd);
+        const extensionCount = (appExtSection.match(/<uap:Extension\b/g) || []).length;
+        assert.equal(extensionCount, 2, 'App-level Extensions should have 2 entries');
+
+        // Package-level Extensions should still have exactly 1 entry
+        const pkgExtStart = result.indexOf('<Extensions>', result.indexOf('</Applications>'));
+        const pkgExtEnd = result.indexOf('</Extensions>', pkgExtStart);
+        const pkgExtSection = result.substring(pkgExtStart, pkgExtEnd);
+        const pkgExtCount = (pkgExtSection.match(/<Extension\b/g) || []).length;
+        assert.equal(pkgExtCount, 1, 'Package-level Extensions should still have 1 entry');
+    });
+
+    it('should remove extension from app without affecting package-level Extensions', () => {
+        const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+  <Identity Name="Test" Version="1.0.0.0" Publisher="CN=Test" />
+  <Applications>
+    <Application Id="App" Executable="app.exe" EntryPoint="App">
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="myproto" />
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="myfile" />
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer><Path>helper.dll</Path></InProcessServer>
+    </Extension>
+  </Extensions>
+</Package>`;
+
+        const result = removeExtension(xml, 0, 0);
+        // Should still have the package-level Extension
+        assert.ok(result.includes('windows.activatableClass.inProcessServer'), 'Package-level extension should be preserved');
+        // App should only have 1 extension left
+        assert.ok(result.includes('windows.fileTypeAssociation'), 'Second app extension should remain');
+        assert.ok(!result.includes('windows.protocol'), 'First app extension should be removed');
+    });
+});

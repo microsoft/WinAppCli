@@ -928,7 +928,7 @@ export function updateExtensionField(
         if (!match) { return xmlText; }
 
         // Replace the attribute value within the matched element tag
-        const attrRegex = new RegExp(`(${escapeRegex(attrName)}\\s*=\\s*)(["'])([^"']*?)\\2`);
+        const attrRegex = new RegExp(`(${escapeRegex(attrName)}\\s*=\\s*)(["'])((?:(?!\\2).)*?)\\2`);
         const attrMatch = attrRegex.exec(match[0]);
         if (!attrMatch) { return xmlText; }
 

@@ -303,7 +303,9 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                     }
                 }
             } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
                 console.warn('[ManifestEditor] XML manipulation failed:', err);
+                vscode.window.showErrorMessage(`Manifest edit failed: ${errMsg}`);
                 return;
             }
 
