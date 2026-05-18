@@ -109,7 +109,7 @@ $SkillsDir = $SkillsPath
 # Skill → CLI command mapping for auto-generated options/arguments tables
 # Each skill maps to one or more CLI commands whose options/arguments should be included
 $SkillCommandMap = @{
-    "setup"        = @("init", "restore", "update", "run", "add jsbindings", "unregister")
+    "setup"        = @("init", "restore", "update", "run", "node jsbindings add", "node jsbindings generate", "unregister")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "cert info", "sign")
@@ -121,15 +121,25 @@ $SkillCommandMap = @{
 
 # Validate that all CLI commands are covered by at least one skill
 $allMappedCommands = $SkillCommandMap.Values | ForEach-Object { $_ } | Where-Object { $_ }
+
+# Recursively enumerate all leaf command paths in the schema.
+function Get-AllLeafPaths {
+    param([PSObject]$Node, [string]$Prefix)
+
+    $paths = @()
+    if (-not $Node.subcommands) {
+        return @($Prefix)
+    }
+    foreach ($sub in $Node.subcommands.PSObject.Properties) {
+        $childPath = if ($Prefix) { "$Prefix $($sub.Name)" } else { $sub.Name }
+        $paths += Get-AllLeafPaths -Node $sub.Value -Prefix $childPath
+    }
+    return $paths
+}
+
 $allSchemaCommands = @()
 foreach ($cmd in $Schema.subcommands.PSObject.Properties) {
-    if ($cmd.Value.subcommands) {
-        foreach ($sub in $cmd.Value.subcommands.PSObject.Properties) {
-            $allSchemaCommands += "$($cmd.Name) $($sub.Name)"
-        }
-    } else {
-        $allSchemaCommands += $cmd.Name
-    }
+    $allSchemaCommands += Get-AllLeafPaths -Node $cmd.Value -Prefix $cmd.Name
 }
 $unmappedCommands = $allSchemaCommands | Where-Object { $_ -notin $allMappedCommands }
 if ($unmappedCommands) {

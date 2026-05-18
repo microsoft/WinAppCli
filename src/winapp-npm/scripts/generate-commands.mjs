@@ -74,13 +74,15 @@ function kebabToPascal(s) {
 }
 
 // Clean up CLI description for JSDoc: single line, escape `*/` (closes the
-// JSDoc) and `@` (truncates description in TS doc extractors).
+// JSDoc) and `@` (truncates description in TS doc extractors). Escape `\`
+// first so the escape sequences we introduce below aren't double-processed.
 function cleanDesc(desc) {
   if (!desc) return '';
   return desc
     .replace(/\r?\n/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/\\/g, '\\\\')
     .replace(/\*\//g, '*\\/')
     .replace(/@/g, '\\@');
 }

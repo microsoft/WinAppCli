@@ -251,6 +251,42 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
 | `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |
 
+### `winapp node jsbindings add`
+
+Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings add).
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<base-directory>` | No | Base/root directory for the winapp workspace (default: current directory) |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--ai` | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. | (none) |
+| `--config-dir` | Directory containing winapp.yaml (default: base-directory) | (none) |
+| `--force` | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). | (none) |
+| `--output` | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. | (none) |
+| `--use-defaults` | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. | (none) |
+
+### `winapp node jsbindings generate`
+
+Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings generate).
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<base-directory>` | No | Base/root directory for the winapp workspace (default: current directory) |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--config-dir` | Directory containing winapp.yaml (default: base-directory) | (none) |
+
 ### `winapp unregister`
 
 Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').

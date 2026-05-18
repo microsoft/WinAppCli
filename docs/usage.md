@@ -200,6 +200,50 @@ npx winapp node jsbindings add --ai --output src/generated/winrt
 
 ---
 
+### node jsbindings generate
+
+Re-run `dynwinrt-codegen` against the **existing** `jsBindings:` block in `winapp.yaml`. Does **not** mutate the yaml — for that, use `node jsbindings add`. Errors if no `jsBindings:` block is declared. npm-only — invoke as `npx winapp node jsbindings generate`.
+
+```bash
+npx winapp node jsbindings generate [base-directory] [options]
+```
+
+**Arguments:**
+
+- `base-directory` - Workspace root containing `winapp.yaml` (default: current directory)
+
+**Options:**
+
+- `--config-dir <path>` - Directory containing `winapp.yaml` (default: current directory)
+
+**What it does:**
+
+- Reads the existing `jsBindings:` block from `winapp.yaml` (no mutation)
+- Resolves winmds via `.winapp/winmds.lock.json` (fast path) or NuGet cache walk (fallback)
+- Spawns `@microsoft/dynwinrt-codegen` to emit `.js` + `.d.ts` into the configured `jsBindings.output` directory
+- Replaces the previous output dir atomically (stage-then-swap); previous bindings are preserved on codegen failure
+
+**When to use which command:**
+
+| Want to … | Command |
+|---|---|
+| Bootstrap a fresh workspace with bindings | `winapp init --js-bindings` (or `--js-bindings-ai`) |
+| Declare `jsBindings:` on an existing workspace | `node jsbindings add` |
+| Re-run codegen after editing `jsBindings:` by hand | `node jsbindings generate` |
+| Re-run codegen as part of full restore (also handles NuGet + cppwinrt) | `winapp restore` |
+
+**Examples:**
+
+```bash
+# Regenerate bindings against the existing winapp.yaml jsBindings: block
+npx winapp node jsbindings generate
+
+# Regenerate from a specific workspace
+npx winapp node jsbindings generate ./packages/desktop
+```
+
+---
+
 ### pack
 
 Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
