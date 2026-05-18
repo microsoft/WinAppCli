@@ -311,11 +311,8 @@ export function getEditorStyles(nonce: string): string {
             display: inline-block;
             padding: 4px 10px;
             font-size: 12px;
-            cursor: pointer;
             color: var(--vscode-button-foreground);
             background: var(--vscode-button-background);
-            border: none;
-            border-radius: 2px;
             margin-bottom: 12px;
         }
         .btn-add-field:hover {
@@ -347,12 +344,9 @@ export function getEditorStyles(nonce: string): string {
             width: 24px;
             height: 24px;
             padding: 0;
-            border: none;
-            border-radius: 2px;
             background: rgba(128, 128, 128, 0.3);
             color: var(--vscode-editor-foreground, #ffffff);
             font-size: 14px;
-            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -364,12 +358,9 @@ export function getEditorStyles(nonce: string): string {
             width: 24px;
             height: 24px;
             padding: 0;
-            border: none;
-            border-radius: 2px;
             background: rgba(128, 128, 128, 0.3);
             color: var(--vscode-editor-foreground, #ffffff);
             font-size: 14px;
-            cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -391,13 +382,15 @@ export function getEditorStyles(nonce: string): string {
         }
 
         /* ─── Buttons ──────────────────────────────────────── */
-        .btn {
-            padding: 4px 12px;
-            font-size: 12px;
-            font-family: inherit;
+        .btn, .btn-sm, .btn-remove-field, .btn-remove-section, .btn-add-field {
             cursor: pointer;
             border: none;
             border-radius: 2px;
+            font-family: inherit;
+        }
+        .btn {
+            padding: 4px 12px;
+            font-size: 12px;
             color: var(--vscode-button-foreground);
             background: var(--vscode-button-background);
         }

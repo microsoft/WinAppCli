@@ -95,7 +95,7 @@ function removeElementWithWhitespace(xml: string, elemStart: number, elemEnd: nu
 }
 
 /** Insert a child element before a closing tag with proper indentation. */
-function insertChildBeforeClose(xml: string, closeTagPos: number, childXml: string, parentIndent: string): string {
+export function insertChildBeforeClose(xml: string, closeTagPos: number, childXml: string, parentIndent: string): string {
     const childIndent = parentIndent + '  ';
     let lineStart = closeTagPos;
     while (lineStart > 0 && xml[lineStart - 1] !== '\n') { lineStart--; }
@@ -133,9 +133,52 @@ function parseCapabilityString(capability: string): { attrName: string; namespac
     return { attrName: capability, namespace: '' };
 }
 
-/** Ensure the uap6 namespace declaration is present on the Package element. */
-function ensureUap6Namespace(xmlText: string): string {
-    return ensureNamespace(xmlText, 'uap6', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6');
+/** Remove nth child matching tagPattern within a parent section. */
+function removeNthChildByTag(xmlText: string, parentLocalName: string, tagPattern: RegExp, index: number, findParent?: typeof findParentBounds): string {
+    const find = findParent ?? findParentBounds;
+    const bounds = find(xmlText, parentLocalName);
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => tagPattern.test(xmlText.substring(c.start, c.end)));
+    if (index < 0 || index >= items.length) { return xmlText; }
+    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
+}
+
+/** Move nth child matching tagPattern within a parent section. */
+function moveNthChildByTag(xmlText: string, parentLocalName: string, tagPattern: RegExp, index: number, direction: 'up' | 'down', findParent?: typeof findParentBounds): string {
+    const find = findParent ?? findParentBounds;
+    const bounds = find(xmlText, parentLocalName);
+    if (!bounds) { return xmlText; }
+    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
+    const items = children.filter(c => tagPattern.test(xmlText.substring(c.start, c.end)));
+    const swapIdx = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || index >= items.length || swapIdx < 0 || swapIdx >= items.length) { return xmlText; }
+    return swapAdjacentElements(xmlText, items[index], items[swapIdx]);
+}
+
+/** Insert a child element into a section, creating the section if needed. */
+function addChildToSection(xmlText: string, sectionName: string, childXml: string, opts?: { expandSelfClosing?: boolean; findParent?: typeof findParentBounds; createIfMissing?: boolean }): string {
+    let result = xmlText;
+    if (opts?.expandSelfClosing) {
+        result = expandSelfClosingElement(result, sectionName);
+    }
+    const find = opts?.findParent ?? findParentBounds;
+    const bounds = find(result, sectionName);
+    if (bounds) {
+        const parentIndent = detectIndent(result, bounds.openStart);
+        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
+    }
+    if (opts?.createIfMissing === false) { return result; }
+    const pkgClose = result.lastIndexOf('</Package>');
+    if (pkgClose < 0) { return result; }
+    const pkgIndent = detectIndent(result, pkgClose);
+    const parentIndent = pkgIndent + '  ';
+    const block = parentIndent + '<' + sectionName + '>\n' +
+        parentIndent + '  ' + childXml + '\n' +
+        parentIndent + '</' + sectionName + '>\n';
+    let lineStart = pkgClose;
+    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
+    return result.substring(0, lineStart) + block + result.substring(lineStart);
 }
 
 /** Ensure a prefix is listed in the IgnorableNamespaces attribute on Package. */
@@ -156,6 +199,13 @@ function ensureIgnorableNamespace(xmlText: string, prefix: string): string {
     // No IgnorableNamespaces attribute — add one
     const newTag = pkgTag.replace(/<Package\b/, `<Package IgnorableNamespaces="${prefix}"`);
     return xmlText.substring(0, pkgMatch.index) + newTag + xmlText.substring(pkgMatch.index + pkgTag.length);
+}
+
+/** Ensure both the namespace declaration and IgnorableNamespaces entry for a prefix. */
+function ensureNamespaceWithIgnorable(xmlText: string, prefix: string, uri: string): string {
+    let result = ensureNamespace(xmlText, prefix, uri);
+    result = ensureIgnorableNamespace(result, prefix);
+    return result;
 }
 
 /** If DefaultTile is open/close but has no child elements, convert to self-closing. */
@@ -212,26 +262,7 @@ export function addCapability(xmlText: string, capability: string): string {
         result = ensureNamespace(result, 'uap4', CAPABILITY_NS_URIS['uap4']);
     }
 
-    // Expand self-closing <Capabilities /> to open/close pair
-    result = expandSelfClosingElement(result, 'Capabilities');
-
-    const bounds = findPackageLevelParentBounds(result, 'Capabilities');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-
-    // No Capabilities element — create one before </Package>
-    const pkgClose = result.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return result; }
-    const pkgIndent = detectIndent(result, pkgClose);
-    const parentIndent = pkgIndent + '  ';
-    const block = parentIndent + '<Capabilities>\n' +
-        parentIndent + '  ' + childXml + '\n' +
-        parentIndent + '</Capabilities>\n';
-    let lineStart = pkgClose;
-    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
-    return result.substring(0, lineStart) + block + result.substring(lineStart);
+    return addChildToSection(result, 'Capabilities', childXml, { expandSelfClosing: true, findParent: findPackageLevelParentBounds });
 }
 
 /** Remove a capability element from the XML. */
@@ -271,99 +302,36 @@ export function addPackageDependency(xmlText: string, dep: PackageDependencyData
     if (dep.publisher) { attrs += ` Publisher="${escapeXmlAttr(dep.publisher)}"`; }
     if (dep.optional === 'true' || dep.optional === 'false') {
         attrs += ` uap6:Optional="${dep.optional}"`;
-        result = ensureUap6Namespace(result);
+        result = ensureNamespace(result, 'uap6', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6');
     }
     const childXml = `<PackageDependency ${attrs} />`;
-
-    // Expand self-closing <Dependencies /> to open/close pair
-    result = expandSelfClosingElement(result, 'Dependencies');
-
-    const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-
-    // No Dependencies element — create one before </Package>
-    const pkgClose = result.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return result; }
-    const pkgIndent = detectIndent(result, pkgClose);
-    const parentIndent = pkgIndent + '  ';
-    const block = parentIndent + '<Dependencies>\n' +
-        parentIndent + '  ' + childXml + '\n' +
-        parentIndent + '</Dependencies>\n';
-    let lineStart = pkgClose;
-    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
-    return result.substring(0, lineStart) + block + result.substring(lineStart);
+    return addChildToSection(result, 'Dependencies', childXml, { expandSelfClosing: true });
 }
 
 /** Remove a PackageDependency element by index. */
 export function removePackageDependency(xmlText: string, index: number): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const pkgDeps = children.filter(c => /^<PackageDependency\b/.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= pkgDeps.length) { return xmlText; }
-
-    return removeElementWithWhitespace(xmlText, pkgDeps[index].start, pkgDeps[index].end, bounds.contentStart);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<PackageDependency\b/, index);
 }
 
 /** Add a TargetDeviceFamily element. */
 export function addTargetDeviceFamily(xmlText: string, family: TargetDeviceFamilyData): string {
     const childXml = `<TargetDeviceFamily Name="${escapeXmlAttr(family.name)}" MinVersion="${escapeXmlAttr(family.minVersion)}" MaxVersionTested="${escapeXmlAttr(family.maxVersionTested)}" />`;
-
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(xmlText, bounds.openStart);
-        return insertChildBeforeClose(xmlText, bounds.contentEnd, childXml, parentIndent);
-    }
-
-    // No Dependencies element — create one before </Package>
-    const pkgClose = xmlText.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return xmlText; }
-    const pkgIndent = detectIndent(xmlText, pkgClose);
-    const parentIndent = pkgIndent + '  ';
-    const block = parentIndent + '<Dependencies>\n' +
-        parentIndent + '  ' + childXml + '\n' +
-        parentIndent + '</Dependencies>\n';
-    let lineStart = pkgClose;
-    while (lineStart > 0 && xmlText[lineStart - 1] !== '\n') { lineStart--; }
-    return xmlText.substring(0, lineStart) + block + xmlText.substring(lineStart);
+    return addChildToSection(xmlText, 'Dependencies', childXml);
 }
 
 /** Remove a TargetDeviceFamily element by index. */
 export function removeTargetDeviceFamily(xmlText: string, index: number): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const families = children.filter(c => /^<TargetDeviceFamily\b/.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= families.length) { return xmlText; }
-
-    return removeElementWithWhitespace(xmlText, families[index].start, families[index].end, bounds.contentStart);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<TargetDeviceFamily\b/, index);
 }
 
 /** Move a TargetDeviceFamily element up or down by one position. */
 export function moveTargetDeviceFamily(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const families = children.filter(c => /^<TargetDeviceFamily\b/.test(xmlText.substring(c.start, c.end)));
-    const swapIdx = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || index >= families.length || swapIdx < 0 || swapIdx >= families.length) { return xmlText; }
-    return swapAdjacentElements(xmlText, families[index], families[swapIdx]);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<TargetDeviceFamily\b/, index, direction);
 }
 
 /** Move a PackageDependency element up or down by one position. */
 export function movePackageDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const pkgDeps = children.filter(c => /^<PackageDependency\b/.test(xmlText.substring(c.start, c.end)));
-    const swapIdx = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || index >= pkgDeps.length || swapIdx < 0 || swapIdx >= pkgDeps.length) { return xmlText; }
-    return swapAdjacentElements(xmlText, pkgDeps[index], pkgDeps[swapIdx]);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<PackageDependency\b/, index, direction);
 }
 
 // ── MainPackageDependency (uap3) ──
@@ -372,43 +340,17 @@ export function movePackageDependency(xmlText: string, index: number, direction:
 export function addMainPackageDependency(xmlText: string, dep: MainPackageDependencyData): string {
     let result = ensureNamespace(xmlText, 'uap3', NS.uap3);
     const childXml = `<uap3:MainPackageDependency Name="${escapeXmlAttr(dep.name)}" />`;
-    const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-    return result;
-}
-
-/** Remove a dependency element by tag pattern and index within the Dependencies section. */
-function removeDependencyByTag(xmlText: string, tagPattern: RegExp, index: number): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const items = children.filter(c => tagPattern.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= items.length) { return xmlText; }
-    return removeElementWithWhitespace(xmlText, items[index].start, items[index].end, bounds.contentStart);
-}
-
-/** Move a dependency element up or down by tag pattern and index within the Dependencies section. */
-function moveDependencyByTag(xmlText: string, tagPattern: RegExp, index: number, direction: 'up' | 'down'): string {
-    const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const items = children.filter(c => tagPattern.test(xmlText.substring(c.start, c.end)));
-    const swapIdx = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || index >= items.length || swapIdx < 0 || swapIdx >= items.length) { return xmlText; }
-    return swapAdjacentElements(xmlText, items[index], items[swapIdx]);
+    return addChildToSection(result, 'Dependencies', childXml, { createIfMissing: false });
 }
 
 /** Remove a uap3:MainPackageDependency by index. */
 export function removeMainPackageDependency(xmlText: string, index: number): string {
-    return removeDependencyByTag(xmlText, /^<uap3:MainPackageDependency\b/, index);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap3:MainPackageDependency\b/, index);
 }
 
 /** Move a uap3:MainPackageDependency up or down by swapping with its neighbor. */
 export function moveMainPackageDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    return moveDependencyByTag(xmlText, /^<uap3:MainPackageDependency\b/, index, direction);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<uap3:MainPackageDependency\b/, index, direction);
 }
 
 // ── DriverDependency (uap5) ──
@@ -496,24 +438,26 @@ export function removeDriverConstraint(xmlText: string, index: number): string {
     return xmlText;
 }
 
-/** Move a uap5:DriverConstraint up or down by flat index. */
-export function moveDriverConstraint(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    // Collect all DriverConstraint elements across all DriverDependency wrappers
+/** Collect all uap5:DriverConstraint elements across all DriverDependency wrappers. */
+function collectDriverConstraints(xmlText: string): { start: number; end: number }[] {
     const bounds = findParentBounds(xmlText, 'Dependencies');
-    if (!bounds) { return xmlText; }
+    if (!bounds) { return []; }
     const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
     const driverDeps = children.filter(c => /^<uap5:DriverDependency\b/.test(xmlText.substring(c.start, c.end)));
-
-    const allConstraints: { start: number; end: number }[] = [];
+    const all: { start: number; end: number }[] = [];
     for (const dd of driverDeps) {
         const ddContentStart = xmlText.indexOf('>', dd.start) + 1;
         const ddContentEnd = xmlText.lastIndexOf('</uap5:DriverDependency>', dd.end);
         if (ddContentEnd < 0) { continue; }
         const constraints = findDirectChildElementBounds(xmlText, ddContentStart, ddContentEnd);
-        const dcItems = constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end)));
-        allConstraints.push(...dcItems);
+        all.push(...constraints.filter(c => /^<uap5:DriverConstraint\b/.test(xmlText.substring(c.start, c.end))));
     }
+    return all;
+}
 
+/** Move a uap5:DriverConstraint up or down by flat index. */
+export function moveDriverConstraint(xmlText: string, index: number, direction: 'up' | 'down'): string {
+    const allConstraints = collectDriverConstraints(xmlText);
     const swapIdx = direction === 'up' ? index - 1 : index + 1;
     if (index < 0 || index >= allConstraints.length || swapIdx < 0 || swapIdx >= allConstraints.length) { return xmlText; }
     return swapAdjacentElements(xmlText, allConstraints[index], allConstraints[swapIdx]);
@@ -527,22 +471,17 @@ export function addOSPackageDependency(xmlText: string, dep: OSPackageDependency
     let attrs = `Name="${escapeXmlAttr(dep.name)}"`;
     if (dep.version) { attrs += ` Version="${escapeXmlAttr(dep.version)}"`; }
     const childXml = `<uap7:OSPackageDependency ${attrs} />`;
-    const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-    return result;
+    return addChildToSection(result, 'Dependencies', childXml, { createIfMissing: false });
 }
 
 /** Remove a uap7:OSPackageDependency by index. */
 export function removeOSPackageDependency(xmlText: string, index: number): string {
-    return removeDependencyByTag(xmlText, /^<uap7:OSPackageDependency\b/, index);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap7:OSPackageDependency\b/, index);
 }
 
 /** Move a uap7:OSPackageDependency up or down by swapping with its neighbor. */
 export function moveOSPackageDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    return moveDependencyByTag(xmlText, /^<uap7:OSPackageDependency\b/, index, direction);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<uap7:OSPackageDependency\b/, index, direction);
 }
 
 // ── HostRuntimeDependency (uap10) ──
@@ -554,22 +493,17 @@ export function addHostRuntimeDependency(xmlText: string, dep: HostRuntimeDepend
     if (dep.publisher) { attrs += ` Publisher="${escapeXmlAttr(dep.publisher)}"`; }
     if (dep.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(dep.minVersion)}"`; }
     const childXml = `<uap10:HostRuntimeDependency ${attrs} />`;
-    const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-    return result;
+    return addChildToSection(result, 'Dependencies', childXml, { createIfMissing: false });
 }
 
 /** Remove a uap10:HostRuntimeDependency by index. */
 export function removeHostRuntimeDependency(xmlText: string, index: number): string {
-    return removeDependencyByTag(xmlText, /^<uap10:HostRuntimeDependency\b/, index);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap10:HostRuntimeDependency\b/, index);
 }
 
 /** Move a uap10:HostRuntimeDependency up or down by swapping with its neighbor. */
 export function moveHostRuntimeDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    return moveDependencyByTag(xmlText, /^<uap10:HostRuntimeDependency\b/, index, direction);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<uap10:HostRuntimeDependency\b/, index, direction);
 }
 
 // ── ExternalDependency (win32dependencies) ──
@@ -582,22 +516,17 @@ export function addExternalDependency(xmlText: string, dep: ExternalDependencyDa
     if (dep.minVersion) { attrs += ` MinVersion="${escapeXmlAttr(dep.minVersion)}"`; }
     if (dep.optional === 'true' || dep.optional === 'false') { attrs += ` Optional="${dep.optional}"`; }
     const childXml = `<win32dependencies:ExternalDependency ${attrs} />`;
-    const bounds = findParentBounds(result, 'Dependencies');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-    return result;
+    return addChildToSection(result, 'Dependencies', childXml, { createIfMissing: false });
 }
 
 /** Remove a win32dependencies:ExternalDependency by index. */
 export function removeExternalDependency(xmlText: string, index: number): string {
-    return removeDependencyByTag(xmlText, /^<win32dependencies:ExternalDependency\b/, index);
+    return removeNthChildByTag(xmlText, 'Dependencies', /^<win32dependencies:ExternalDependency\b/, index);
 }
 
 /** Move a win32dependencies:ExternalDependency up or down by swapping with its neighbor. */
 export function moveExternalDependency(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    return moveDependencyByTag(xmlText, /^<win32dependencies:ExternalDependency\b/, index, direction);
+    return moveNthChildByTag(xmlText, 'Dependencies', /^<win32dependencies:ExternalDependency\b/, index, direction);
 }
 
 /** Add a Resource element to the XML. */
@@ -607,50 +536,17 @@ export function addResource(xmlText: string, resource: ResourceData): string {
     if (resource.scale) { attrs += ` uap:Scale="${resource.scale}"`; }
     if (resource.dxFeatureLevel) { attrs += ` uap:DXFeatureLevel="${resource.dxFeatureLevel}"`; }
     const childXml = `<Resource${attrs} />`;
-
-    // Expand self-closing <Resources /> to open/close pair
-    let result = expandSelfClosingElement(xmlText, 'Resources');
-
-    const bounds = findParentBounds(result, 'Resources');
-    if (bounds) {
-        const parentIndent = detectIndent(result, bounds.openStart);
-        return insertChildBeforeClose(result, bounds.contentEnd, childXml, parentIndent);
-    }
-
-    // No Resources element — create one before </Package>
-    const pkgClose = result.lastIndexOf('</Package>');
-    if (pkgClose < 0) { return result; }
-    const pkgIndent = detectIndent(result, pkgClose);
-    const parentIndent = pkgIndent + '  ';
-    const block = parentIndent + '<Resources>\n' +
-        parentIndent + '  ' + childXml + '\n' +
-        parentIndent + '</Resources>\n';
-    let lineStart = pkgClose;
-    while (lineStart > 0 && result[lineStart - 1] !== '\n') { lineStart--; }
-    return result.substring(0, lineStart) + block + result.substring(lineStart);
+    return addChildToSection(xmlText, 'Resources', childXml, { expandSelfClosing: true });
 }
 
 /** Remove a Resource element by index. */
 export function removeResource(xmlText: string, index: number): string {
-    const bounds = findParentBounds(xmlText, 'Resources');
-    if (!bounds) { return xmlText; }
-
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const resources = children.filter(c => /^<Resource\b/.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= resources.length) { return xmlText; }
-
-    return removeElementWithWhitespace(xmlText, resources[index].start, resources[index].end, bounds.contentStart);
+    return removeNthChildByTag(xmlText, 'Resources', /^<Resource\b/, index);
 }
 
 /** Move a Resource element up or down by one position. */
 export function moveResource(xmlText: string, index: number, direction: 'up' | 'down'): string {
-    const bounds = findParentBounds(xmlText, 'Resources');
-    if (!bounds) { return xmlText; }
-    const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
-    const resources = children.filter(c => /^<Resource\b/.test(xmlText.substring(c.start, c.end)));
-    const swapIdx = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || index >= resources.length || swapIdx < 0 || swapIdx >= resources.length) { return xmlText; }
-    return swapAdjacentElements(xmlText, resources[index], resources[swapIdx]);
+    return moveNthChildByTag(xmlText, 'Resources', /^<Resource\b/, index, direction);
 }
 
 /** Add an mp:PhoneIdentity element to the manifest. */
@@ -662,10 +558,7 @@ export function addPhoneIdentity(xmlText: string): string {
     const productId = '00000000-0000-0000-0000-000000000000';
 
     // Ensure mp namespace is declared
-    let result = ensureNamespace(xmlText, 'mp', 'http://schemas.microsoft.com/appx/2014/phone/manifest');
-
-    // Add IgnorableNamespaces="mp" if not already present
-    result = ensureIgnorableNamespace(result, 'mp');
+    let result = ensureNamespaceWithIgnorable(xmlText, 'mp', 'http://schemas.microsoft.com/appx/2014/phone/manifest');
 
     const phoneElement = `<mp:PhoneIdentity PhoneProductId="${productId}" />`;
 
@@ -848,12 +741,10 @@ export function addApplication(xmlText: string): string {
 export function removeApplication(xmlText: string, index: number): string {
     const bounds = findParentBounds(xmlText, 'Applications');
     if (!bounds) { return xmlText; }
-
     const children = findDirectChildElementBounds(xmlText, bounds.contentStart, bounds.contentEnd);
     const apps = children.filter(c => /^<Application\b/.test(xmlText.substring(c.start, c.end)));
-    if (index < 0 || index >= apps.length || apps.length <= 1) { return xmlText; }
-
-    return removeElementWithWhitespace(xmlText, apps[index].start, apps[index].end, bounds.contentStart);
+    if (apps.length <= 1) { return xmlText; }
+    return removeNthChildByTag(xmlText, 'Applications', /^<Application\b/, index);
 }
 
 export function addExtension(xmlText: string, appIndex: number, extensionXml: string): string {

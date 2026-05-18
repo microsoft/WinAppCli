@@ -85,6 +85,55 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             // The editor will send 'ready' once loaded, which triggers updateWebview
         };
 
+        // Table-driven dispatch for simple XML operations
+        const simpleDispatch: Record<string, (text: string, msg: any) => string> = {
+            addCapability: (t, m) => addCapability(t, m.capability),
+            removeCapability: (t, m) => removeCapability(t, m.capability),
+            addPhoneIdentity: (t) => addPhoneIdentity(t),
+            removePhoneIdentity: (t) => removePhoneIdentity(t),
+            addResource: (t, m) => addResource(t, m.resource),
+            removeResource: (t, m) => removeResource(t, m.index),
+            moveResource: (t, m) => moveResource(t, m.index, m.direction),
+            addPackageDependency: (t, m) => addPackageDependency(t, m.dependency),
+            removePackageDependency: (t, m) => removePackageDependency(t, m.index),
+            movePackageDependency: (t, m) => movePackageDependency(t, m.index, m.direction),
+            addTargetDeviceFamily: (t, m) => addTargetDeviceFamily(t, m.family),
+            removeTargetDeviceFamily: (t, m) => removeTargetDeviceFamily(t, m.index),
+            moveTargetDeviceFamily: (t, m) => moveTargetDeviceFamily(t, m.index, m.direction),
+            addMainPackageDependency: (t, m) => addMainPackageDependency(t, m.dependency),
+            removeMainPackageDependency: (t, m) => removeMainPackageDependency(t, m.index),
+            moveMainPackageDependency: (t, m) => moveMainPackageDependency(t, m.index, m.direction),
+            addDriverConstraint: (t, m) => addDriverConstraint(t, m.constraint),
+            removeDriverConstraint: (t, m) => removeDriverConstraint(t, m.index),
+            moveDriverConstraint: (t, m) => moveDriverConstraint(t, m.index, m.direction),
+            addOSPackageDependency: (t, m) => addOSPackageDependency(t, m.dependency),
+            removeOSPackageDependency: (t, m) => removeOSPackageDependency(t, m.index),
+            moveOSPackageDependency: (t, m) => moveOSPackageDependency(t, m.index, m.direction),
+            addHostRuntimeDependency: (t, m) => addHostRuntimeDependency(t, m.dependency),
+            removeHostRuntimeDependency: (t, m) => removeHostRuntimeDependency(t, m.index),
+            moveHostRuntimeDependency: (t, m) => moveHostRuntimeDependency(t, m.index, m.direction),
+            addExternalDependency: (t, m) => addExternalDependency(t, m.dependency),
+            removeExternalDependency: (t, m) => removeExternalDependency(t, m.index),
+            moveExternalDependency: (t, m) => moveExternalDependency(t, m.index, m.direction),
+            addApplication: (t) => addApplication(t),
+            removeApplication: (t, m) => removeApplication(t, m.index),
+            addExtension: (t, m) => addExtension(t, m.index, m.xml),
+            removeExtension: (t, m) => removeExtension(t, m.appIndex, m.extIndex),
+            updateExtensionField: (t, m) => updateExtensionField(t, m.appIndex, m.extIndex, m.fieldPath, m.value, m.isTextContent),
+            setShowNameOnTiles: (t, m) => setShowNameOnTiles(t, m.appIndex, m.tiles),
+        };
+
+        /** Browse for a file and return its path relative to the manifest directory. */
+        async function browseAndApplyField(title: string, filters: Record<string, string[]>): Promise<string | undefined> {
+            const filePath = await vscode.window.showOpenDialog({
+                canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+                title, filters,
+                defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
+            });
+            if (!filePath || filePath.length === 0) { return undefined; }
+            return path.relative(path.dirname(document.uri.fsPath), filePath[0].fsPath);
+        }
+
         /** Send the current document state to the webview. */
         const updateWebview = (forceAll = false) => {
             const text = document.getText();
@@ -154,248 +203,103 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             let newText: string | undefined;
 
             try {
-                switch (message.type) {
-                    case 'ready':
-                        updateWebview();
-                        return;
+                // Table-driven dispatch for simple XML operations
+                if (simpleDispatch[message.type]) {
+                    newText = simpleDispatch[message.type](text, message);
+                } else {
+                    switch (message.type) {
+                        case 'ready':
+                            updateWebview();
+                            return;
 
-                    case 'changesFlushed': {
-                        // Apply all pending field changes and resolve the save promise
-                        // Match nonce to prevent stale resolution from rapid double-saves
-                        if (pendingSaveResolve && message.nonce === pendingSaveNonce) {
-                            let result = text;
-                            for (const change of message.changes) {
-                                result = applyFieldChange(result, change.section, change.field, change.value, change.index);
+                        case 'changesFlushed': {
+                            // Apply all pending field changes and resolve the save promise
+                            // Match nonce to prevent stale resolution from rapid double-saves
+                            if (pendingSaveResolve && message.nonce === pendingSaveNonce) {
+                                let result = text;
+                                for (const change of message.changes) {
+                                    result = applyFieldChange(result, change.section, change.field, change.value, change.index);
+                                }
+                                const edits = result !== text
+                                    ? [vscode.TextEdit.replace(new vscode.Range(0, 0, document.lineCount, 0), result)]
+                                    : [];
+                                const resolve = pendingSaveResolve;
+                                pendingSaveResolve = null;
+                                pendingSaveNonce = null;
+                                resolve(edits);
                             }
-                            const edits = result !== text
-                                ? [vscode.TextEdit.replace(new vscode.Range(0, 0, document.lineCount, 0), result)]
-                                : [];
-                            const resolve = pendingSaveResolve;
-                            pendingSaveResolve = null;
-                            pendingSaveNonce = null;
-                            resolve(edits);
+                            return;
                         }
-                        return;
-                    }
 
-                    case 'openAsText':
-                        await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
-                        return;
+                        case 'openAsText':
+                            await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+                            return;
 
-                    case 'fieldChanged':
-                        newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
-                        break;
+                        case 'fieldChanged':
+                            newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
+                            break;
 
-                    case 'packageTypeChanged': {
-                        // Set/clear the three mutually exclusive package type properties
-                        let result = text;
-                        result = applyFieldChange(result, 'properties', 'framework', message.value === 'framework' ? 'true' : '');
-                        result = applyFieldChange(result, 'properties', 'resourcePackage', message.value === 'resource' ? 'true' : '');
-                        result = applyFieldChange(result, 'properties', 'modificationPackage', message.value === 'modification' ? 'true' : '');
-                        newText = result;
-                        break;
-                    }
+                        case 'packageTypeChanged': {
+                            // Set/clear the three mutually exclusive package type properties
+                            let result = text;
+                            result = applyFieldChange(result, 'properties', 'framework', message.value === 'framework' ? 'true' : '');
+                            result = applyFieldChange(result, 'properties', 'resourcePackage', message.value === 'resource' ? 'true' : '');
+                            result = applyFieldChange(result, 'properties', 'modificationPackage', message.value === 'modification' ? 'true' : '');
+                            newText = result;
+                            break;
+                        }
 
-                    case 'addCapability':
-                        newText = addCapability(text, message.capability);
-                        break;
+                        case 'browseFile': {
+                            const relPath = await browseAndApplyField('Select JSON file', { 'JSON': ['json'] });
+                            if (!relPath) { return; }
+                            newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, relPath, true);
+                            break;
+                        }
 
-                    case 'removeCapability':
-                        newText = removeCapability(text, message.capability);
-                        break;
+                        case 'browseImage': {
+                            const relPath = await browseAndApplyField('Select image', { 'Images': ['png', 'jpg', 'jpeg', 'svg', 'ico'] });
+                            if (!relPath) { return; }
+                            newText = applyFieldChange(text, message.section, message.field, relPath, message.index);
+                            break;
+                        }
 
-                    case 'addPhoneIdentity':
-                        newText = addPhoneIdentity(text);
-                        break;
+                        case 'browseExe': {
+                            const relPath = await browseAndApplyField('Select executable', { 'Executables': ['exe'] });
+                            if (!relPath) { return; }
+                            newText = applyFieldChange(text, message.section, message.field, relPath, message.index);
+                            break;
+                        }
 
-                    case 'removePhoneIdentity':
-                        newText = removePhoneIdentity(text);
-                        break;
+                        case 'updateAssets': {
+                            const imagePath = await vscode.window.showOpenDialog({
+                                canSelectFiles: true,
+                                canSelectFolders: false,
+                                canSelectMany: false,
+                                title: 'Select source image for assets',
+                                filters: { 'Images': ['png', 'jpg', 'jpeg', 'svg'] },
+                            });
+                            if (!imagePath || imagePath.length === 0) { return; }
 
-                    case 'addResource':
-                        newText = addResource(text, message.resource);
-                        break;
+                            const cliPath = getWinappCliPath(this.context.extensionPath);
+                            const cwd = path.dirname(document.uri.fsPath);
 
-                    case 'removeResource':
-                        newText = removeResource(text, message.index);
-                        break;
+                            await vscode.window.withProgress(
+                                { location: vscode.ProgressLocation.Notification, title: 'Regenerating assets…', cancellable: false },
+                                () => new Promise<void>((resolve, reject) => {
+                                    execFile(cliPath, ['manifest', 'update-assets', imagePath[0].fsPath], { cwd, env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE } }, (error) => {
+                                        if (error) {
+                                            vscode.window.showErrorMessage(`Asset regeneration failed: ${error.message}`);
+                                            reject(error);
+                                        } else {
+                                            resolve();
+                                        }
+                                    });
+                                }),
+                            );
 
-                    case 'moveResource':
-                        newText = moveResource(text, message.index, message.direction);
-                        break;
-
-                    case 'setShowNameOnTiles':
-                        newText = setShowNameOnTiles(text, message.appIndex, message.tiles);
-                        break;
-
-                    case 'addPackageDependency':
-                        newText = addPackageDependency(text, message.dependency);
-                        break;
-
-                    case 'removePackageDependency':
-                        newText = removePackageDependency(text, message.index);
-                        break;
-
-                    case 'addTargetDeviceFamily':
-                        newText = addTargetDeviceFamily(text, message.family);
-                        break;
-
-                    case 'removeTargetDeviceFamily':
-                        newText = removeTargetDeviceFamily(text, message.index);
-                        break;
-
-                    case 'moveTargetDeviceFamily':
-                        newText = moveTargetDeviceFamily(text, message.index, message.direction);
-                        break;
-
-                    case 'movePackageDependency':
-                        newText = movePackageDependency(text, message.index, message.direction);
-                        break;
-
-                    case 'addMainPackageDependency':
-                        newText = addMainPackageDependency(text, message.dependency);
-                        break;
-                    case 'removeMainPackageDependency':
-                        newText = removeMainPackageDependency(text, message.index);
-                        break;
-                    case 'moveMainPackageDependency':
-                        newText = moveMainPackageDependency(text, message.index, message.direction);
-                        break;
-
-                    case 'addDriverConstraint':
-                        newText = addDriverConstraint(text, message.constraint);
-                        break;
-                    case 'removeDriverConstraint':
-                        newText = removeDriverConstraint(text, message.index);
-                        break;
-                    case 'moveDriverConstraint':
-                        newText = moveDriverConstraint(text, message.index, message.direction);
-                        break;
-
-                    case 'addOSPackageDependency':
-                        newText = addOSPackageDependency(text, message.dependency);
-                        break;
-                    case 'removeOSPackageDependency':
-                        newText = removeOSPackageDependency(text, message.index);
-                        break;
-                    case 'moveOSPackageDependency':
-                        newText = moveOSPackageDependency(text, message.index, message.direction);
-                        break;
-
-                    case 'addHostRuntimeDependency':
-                        newText = addHostRuntimeDependency(text, message.dependency);
-                        break;
-                    case 'removeHostRuntimeDependency':
-                        newText = removeHostRuntimeDependency(text, message.index);
-                        break;
-                    case 'moveHostRuntimeDependency':
-                        newText = moveHostRuntimeDependency(text, message.index, message.direction);
-                        break;
-
-                    case 'addExternalDependency':
-                        newText = addExternalDependency(text, message.dependency);
-                        break;
-                    case 'removeExternalDependency':
-                        newText = removeExternalDependency(text, message.index);
-                        break;
-                    case 'moveExternalDependency':
-                        newText = moveExternalDependency(text, message.index, message.direction);
-                        break;
-
-                    case 'addApplication':
-                        newText = addApplication(text);
-                        break;
-
-                    case 'removeApplication':
-                        newText = removeApplication(text, message.index);
-                        break;
-
-                    case 'addExtension':
-                        newText = addExtension(text, message.index, message.xml);
-                        break;
-
-                    case 'removeExtension':
-                        newText = removeExtension(text, message.appIndex, message.extIndex);
-                        break;
-
-                    case 'updateExtensionField':
-                        newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, message.value, message.isTextContent);
-                        break;
-
-                    case 'browseFile': {
-                        const filePath = await vscode.window.showOpenDialog({
-                            canSelectFiles: true,
-                            canSelectFolders: false,
-                            canSelectMany: false,
-                            title: 'Select JSON file',
-                            filters: { 'JSON': ['json'] },
-                            defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
-                        });
-                        if (!filePath || filePath.length === 0) { return; }
-                        const relativePath = path.relative(path.dirname(document.uri.fsPath), filePath[0].fsPath);
-                        newText = updateExtensionField(text, message.appIndex, message.extIndex, message.fieldPath, relativePath, true);
-                        break;
-                    }
-
-                    case 'browseImage': {
-                        const imgPath = await vscode.window.showOpenDialog({
-                            canSelectFiles: true,
-                            canSelectFolders: false,
-                            canSelectMany: false,
-                            title: 'Select image',
-                            filters: { 'Images': ['png', 'jpg', 'jpeg', 'svg', 'ico'] },
-                            defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
-                        });
-                        if (!imgPath || imgPath.length === 0) { return; }
-                        const relPath = path.relative(path.dirname(document.uri.fsPath), imgPath[0].fsPath);
-                        newText = applyFieldChange(text, message.section, message.field, relPath, message.index);
-                        break;
-                    }
-
-                    case 'browseExe': {
-                        const exePath = await vscode.window.showOpenDialog({
-                            canSelectFiles: true,
-                            canSelectFolders: false,
-                            canSelectMany: false,
-                            title: 'Select executable',
-                            filters: { 'Executables': ['exe'] },
-                            defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
-                        });
-                        if (!exePath || exePath.length === 0) { return; }
-                        const relExePath = path.relative(path.dirname(document.uri.fsPath), exePath[0].fsPath);
-                        newText = applyFieldChange(text, message.section, message.field, relExePath, message.index);
-                        break;
-                    }
-
-                    case 'updateAssets': {
-                        const imagePath = await vscode.window.showOpenDialog({
-                            canSelectFiles: true,
-                            canSelectFolders: false,
-                            canSelectMany: false,
-                            title: 'Select source image for assets',
-                            filters: { 'Images': ['png', 'jpg', 'jpeg', 'svg'] },
-                        });
-                        if (!imagePath || imagePath.length === 0) { return; }
-
-                        const cliPath = getWinappCliPath(this.context.extensionPath);
-                        const cwd = path.dirname(document.uri.fsPath);
-
-                        await vscode.window.withProgress(
-                            { location: vscode.ProgressLocation.Notification, title: 'Regenerating assets…', cancellable: false },
-                            () => new Promise<void>((resolve, reject) => {
-                                execFile(cliPath, ['manifest', 'update-assets', imagePath[0].fsPath], { cwd, env: { ...process.env, WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE } }, (error) => {
-                                    if (error) {
-                                        vscode.window.showErrorMessage(`Asset regeneration failed: ${error.message}`);
-                                        reject(error);
-                                    } else {
-                                        resolve();
-                                    }
-                                });
-                            }),
-                        );
-
-                        webviewPanel.webview.postMessage({ type: 'refreshImages' });
-                        return;
+                            webviewPanel.webview.postMessage({ type: 'refreshImages' });
+                            return;
+                        }
                     }
                 }
             } catch (err) {

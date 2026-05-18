@@ -43,6 +43,8 @@ import {
     buildVisualChildElement,
 } from './xml-utils';
 
+import { insertChildBeforeClose } from './manifest-xml-ops';
+
 /**
  * Parse appxmanifest.xml text into a ManifestData object.
  *
@@ -358,18 +360,7 @@ function parseResources(root: Element): ResourceData[] {
 
 // ─── Surgical string-based field change helpers ─────────────────────
 
-/** Ensure the uap6 namespace declaration is present on the Package element. */
-function ensureUap6Namespace(xmlText: string): string {
-    return ensureNamespace(xmlText, 'uap6', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6');
-}
 
-/** Insert a child element before a closing tag with proper indentation. */
-function insertChildBeforeClose(xml: string, closeTagPos: number, childXml: string, parentIndent: string): string {
-    const childIndent = parentIndent + '  ';
-    let lineStart = closeTagPos;
-    while (lineStart > 0 && xml[lineStart - 1] !== '\n') { lineStart--; }
-    return xml.substring(0, lineStart) + childIndent + childXml + '\n' + xml.substring(lineStart);
-}
 
 function applyIdentityChangeString(xml: string, field: string, value: string): string {
     const attrMap: Record<string, string> = {
@@ -585,11 +576,19 @@ const DEP_FIELD_CONFIG: Record<string, {
     tagRegex: RegExp;
     attrMap: Record<string, string>;
     removeOnEmpty?: string[];
+    ensureNamespace?: { prefix: string; uri: string; fields: string[] };
 }> = {
     targetDeviceFamily: {
         prefix: 'targetDeviceFamily.',
         tagRegex: /<TargetDeviceFamily\b[^>]*\/?>/gs,
         attrMap: { name: 'Name', minVersion: 'MinVersion', maxVersionTested: 'MaxVersionTested' },
+    },
+    packageDependency: {
+        prefix: 'packageDependency.',
+        tagRegex: /<PackageDependency\b[^>]*\/?>/gs,
+        attrMap: { name: 'Name', minVersion: 'MinVersion', publisher: 'Publisher', optional: 'uap6:Optional' },
+        removeOnEmpty: ['optional'],
+        ensureNamespace: { prefix: 'uap6', uri: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/6', fields: ['optional'] },
     },
     mainPackageDependency: {
         prefix: 'mainPackageDependency.',
@@ -620,55 +619,6 @@ const DEP_FIELD_CONFIG: Record<string, {
 };
 
 function applyDependenciesChangeString(xml: string, field: string, value: string, index: number, subIndex?: number): string {
-    // packageDependency has special uap6 namespace handling — keep as explicit branch
-    if (field.startsWith('packageDependency.')) {
-        const subField = field.replace('packageDependency.', '');
-        const attrMap: Record<string, string> = {
-            name: 'Name',
-            minVersion: 'MinVersion',
-            publisher: 'Publisher',
-            optional: 'uap6:Optional',
-        };
-        const attr = attrMap[subField];
-        if (!attr) { return xml; }
-
-        const regex = /<PackageDependency\b[^>]*\/?>/gs;
-        let match: RegExpExecArray | null;
-        let count = 0;
-        while ((match = regex.exec(xml)) !== null) {
-            if (count === index) {
-                const elementRegex = new RegExp(escapeRegex(match[0]));
-                if (!value && subField === 'optional') {
-                    return removeAttribute(xml, elementRegex, attr);
-                }
-                // Ensure uap6 namespace when setting uap6:Optional
-                if (subField === 'optional') {
-                    xml = ensureUap6Namespace(xml);
-                    // Re-find after potential namespace insertion
-                    const regex2 = /<PackageDependency\b[^>]*\/?>/gs;
-                    let m2: RegExpExecArray | null;
-                    let c2 = 0;
-                    while ((m2 = regex2.exec(xml)) !== null) {
-                        if (c2 === index) {
-                            const elemRegex2 = new RegExp(escapeRegex(m2[0]));
-                            const result = replaceAttribute(xml, elemRegex2, attr, value);
-                            if (result !== xml) { return result; }
-                            return addAttributeToElement(xml, elemRegex2, attr, value);
-                        }
-                        c2++;
-                    }
-                    return xml;
-                }
-                const result = replaceAttribute(xml, elementRegex, attr, value);
-                if (result !== xml) { return result; }
-                return addAttributeToElement(xml, elementRegex, attr, value);
-            }
-            count++;
-        }
-        return xml;
-    }
-
-    // Table-driven handling for all other dependency types
     for (const cfg of Object.values(DEP_FIELD_CONFIG)) {
         if (field.startsWith(cfg.prefix)) {
             const subField = field.replace(cfg.prefix, '');
@@ -677,6 +627,10 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
             // Reset lastIndex since regexes have the global flag
             cfg.tagRegex.lastIndex = 0;
             const removeOnEmpty = cfg.removeOnEmpty?.includes(subField);
+            // Ensure namespace if configured for this field
+            if (cfg.ensureNamespace && cfg.ensureNamespace.fields.includes(subField) && value) {
+                xml = ensureNamespace(xml, cfg.ensureNamespace.prefix, cfg.ensureNamespace.uri);
+            }
             return applyNthElementAttrChange(xml, cfg.tagRegex, index, attr, value,
                 removeOnEmpty ? { removeOnEmpty: true } : undefined);
         }
@@ -775,23 +729,10 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         const { start: appStart, end: appEnd } = appRegion;
         const appXml = xml.substring(appStart, appEnd);
 
-        // Helper: apply a scoped replaceAttribute within the app region
-        function scopedReplaceAttribute(fullXml: string, pattern: RegExp, attrName: string, newValue: string): string {
-            const region = fullXml.substring(appStart, appEnd);
-            const match = pattern.exec(region);
-            if (!match) { return fullXml; }
-            const absIdx = appStart + match.index;
-            const elemRegex = new RegExp(escapeRegex(match[0]));
-            // Create a pattern that matches at the absolute position
-            const before = fullXml.substring(0, absIdx);
-            const after = fullXml.substring(absIdx);
-            const result = replaceAttribute(after, elemRegex, attrName, newValue);
-            if (result === after) { return fullXml; }
-            return before + result;
-        }
-
-        // Helper: apply a scoped addAttributeToElement within the app region
-        function scopedAddAttribute(fullXml: string, pattern: RegExp, attrName: string, newValue: string): string {
+        function applyScopedAttrOp(
+            fullXml: string, pattern: RegExp, attrName: string,
+            op: 'replace' | 'add' | 'remove', newValue?: string
+        ): string {
             const region = fullXml.substring(appStart, appEnd);
             const match = pattern.exec(region);
             if (!match) { return fullXml; }
@@ -799,21 +740,14 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             const elemRegex = new RegExp(escapeRegex(match[0]));
             const before = fullXml.substring(0, absIdx);
             const after = fullXml.substring(absIdx);
-            const result = addAttributeToElement(after, elemRegex, attrName, newValue);
-            if (result === after) { return fullXml; }
-            return before + result;
-        }
-
-        // Helper: apply a scoped removeAttribute within the app region
-        function scopedRemoveAttribute(fullXml: string, pattern: RegExp, attrName: string): string {
-            const region = fullXml.substring(appStart, appEnd);
-            const match = pattern.exec(region);
-            if (!match) { return fullXml; }
-            const absIdx = appStart + match.index;
-            const elemRegex = new RegExp(escapeRegex(match[0]));
-            const before = fullXml.substring(0, absIdx);
-            const after = fullXml.substring(absIdx);
-            const result = removeAttribute(after, elemRegex, attrName);
+            let result: string;
+            if (op === 'remove') {
+                result = removeAttribute(after, elemRegex, attrName);
+            } else if (op === 'replace') {
+                result = replaceAttribute(after, elemRegex, attrName, newValue!);
+            } else {
+                result = addAttributeToElement(after, elemRegex, attrName, newValue!);
+            }
             if (result === after) { return fullXml; }
             return before + result;
         }
@@ -826,37 +760,37 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             shortName: 'ShortName',
         };
         if (defaultTileAttrs[veField]) {
+            const dtPattern = /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s;
             if (!value && veField === 'shortName') {
-                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField]);
+                return applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'remove');
             }
-            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], value);
+            const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], 'replace', value);
             if (result !== xml) { return result; }
-            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s, defaultTileAttrs[veField], value);
-            if (addResult !== xml) { return addResult; }
+            return applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'add', value);
         }
 
         // Attributes on LockScreen
         if (veField === 'badgeLogo' || veField === 'lockScreenNotification') {
             const lockAttr = veField === 'badgeLogo' ? 'BadgeLogo' : 'Notification';
+            const lsPattern = /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s;
             if (!value && veField === 'lockScreenNotification') {
-                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr);
+                return applyScopedAttrOp(xml, lsPattern, lockAttr, 'remove');
             }
-            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, value);
+            const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, 'replace', value);
             if (result !== xml) { return result; }
-            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s, lockAttr, value);
-            if (addResult !== xml) { return addResult; }
+            return applyScopedAttrOp(xml, lsPattern, lockAttr, 'add', value);
         }
 
         // Attributes on SplashScreen
         if (veField === 'splashScreenImage' || veField === 'splashScreenBackgroundColor') {
             const splashAttr = veField === 'splashScreenImage' ? 'Image' : 'BackgroundColor';
+            const ssPattern = /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s;
             if (!value && veField === 'splashScreenBackgroundColor') {
-                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr);
+                return applyScopedAttrOp(xml, ssPattern, splashAttr, 'remove');
             }
-            const result = scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, value);
+            const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, 'replace', value);
             if (result !== xml) { return result; }
-            const addResult = scopedAddAttribute(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s, splashAttr, value);
-            if (addResult !== xml) { return addResult; }
+            return applyScopedAttrOp(xml, ssPattern, splashAttr, 'add', value);
         }
 
         // AppListEntry on VisualElements
@@ -870,9 +804,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         };
         if (attrMap[veField]) {
             if (!value && veField === 'appListEntry') {
-                return scopedRemoveAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField]);
+                return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField], 'remove');
             }
-            return scopedReplaceAttribute(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], value);
+            return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], 'replace', value);
         }
 
         // Fallback: surgically insert new child element inside VisualElements

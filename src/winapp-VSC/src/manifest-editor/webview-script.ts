@@ -65,6 +65,22 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             vscode.postMessage({ type: 'openAsText' });
         });
 
+        // ─── Validation helper ──────────────────────────────
+        function setGroupValidation(group, level, message) {
+            if (!group) return;
+            const msg = group.querySelector('.validation-msg');
+            if (level === 'error') {
+                group.classList.add('has-error');
+                if (msg) { msg.className = 'validation-msg error'; msg.textContent = message || ''; }
+            } else if (level === 'warning') {
+                group.classList.remove('has-error');
+                if (msg) { msg.className = 'validation-msg warning'; msg.textContent = message || ''; }
+            } else {
+                group.classList.remove('has-error');
+                if (msg) { msg.className = 'validation-msg'; msg.textContent = ''; }
+            }
+        }
+
         // ─── Field change handler ───────────────────────────
         function onFieldChange(el) {
             const section = el.getAttribute('data-section');
@@ -75,15 +91,12 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             // Inline GUID validation for phoneIdentity fields
             if (section === 'phoneIdentity' && (field === 'phoneProductId' || field === 'phonePublisherId')) {
                 const group = el.closest('.form-group');
-                const msg = group ? group.querySelector('.validation-msg') : null;
-                const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
                 const label = field === 'phoneProductId' ? 'Phone Product ID' : 'Phone Publisher ID';
+                const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
                 if (!value || !guidPattern.test(value)) {
-                    if (group) group.classList.add('has-error');
-                    if (msg) { msg.className = 'validation-msg error'; msg.textContent = label + ' must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000)'; }
+                    setGroupValidation(group, 'error', label + ' must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000)');
                 } else {
-                    if (group) group.classList.remove('has-error');
-                    if (msg) { msg.className = 'validation-msg'; msg.textContent = ''; }
+                    setGroupValidation(group, 'clear');
                 }
             }
 
@@ -123,103 +136,93 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             return changes;
         }
 
+        // ─── Shared custom-select wiring helper ────────────────
+        function wireCustomSelect(triggerEl, optionsEl, onChange) {
+            // ARIA setup
+            triggerEl.setAttribute('role', 'combobox');
+            triggerEl.setAttribute('aria-haspopup', 'listbox');
+            triggerEl.setAttribute('aria-expanded', 'false');
+            optionsEl.setAttribute('role', 'listbox');
+            optionsEl.querySelectorAll('.custom-select-option').forEach(opt => {
+                opt.setAttribute('role', 'option');
+            });
+
+            // Click to toggle
+            triggerEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = optionsEl.classList.toggle('open');
+                triggerEl.setAttribute('aria-expanded', String(isOpen));
+            });
+
+            // Keyboard navigation
+            triggerEl.addEventListener('keydown', (e) => {
+                const options = Array.from(optionsEl.querySelectorAll('.custom-select-option'));
+                if (!options.length) return;
+
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!optionsEl.classList.contains('open')) {
+                        optionsEl.classList.add('open');
+                        triggerEl.setAttribute('aria-expanded', 'true');
+                        const sel = optionsEl.querySelector('.custom-select-option.selected') || options[0];
+                        if (sel) sel.classList.add('focused');
+                    } else {
+                        const focused = optionsEl.querySelector('.custom-select-option.focused');
+                        if (focused) focused.click();
+                    }
+                } else if (e.key === 'Escape') {
+                    optionsEl.classList.remove('open');
+                    triggerEl.setAttribute('aria-expanded', 'false');
+                    options.forEach(o => o.classList.remove('focused'));
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (!optionsEl.classList.contains('open')) {
+                        optionsEl.classList.add('open');
+                        triggerEl.setAttribute('aria-expanded', 'true');
+                    }
+                    const cur = optionsEl.querySelector('.custom-select-option.focused');
+                    let idx = cur ? options.indexOf(cur) : -1;
+                    options.forEach(o => o.classList.remove('focused'));
+                    idx = e.key === 'ArrowDown' ? (idx + 1) % options.length : (idx <= 0 ? options.length - 1 : idx - 1);
+                    options[idx].classList.add('focused');
+                    options[idx].scrollIntoView({ block: 'nearest' });
+                }
+            });
+
+            // Option click
+            optionsEl.querySelectorAll('.custom-select-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const val = opt.getAttribute('data-value');
+                    triggerEl.textContent = opt.textContent;
+                    optionsEl.classList.remove('open');
+                    triggerEl.setAttribute('aria-expanded', 'false');
+                    optionsEl.querySelectorAll('.custom-select-option').forEach(o => {
+                        o.classList.remove('selected');
+                        o.classList.remove('focused');
+                    });
+                    opt.classList.add('selected');
+                    onChange(val, triggerEl);
+                });
+            });
+        }
+
         // ─── Generic custom-select initialization ─────────────
         function initCustomSelects(container) {
-            const root = container || document;
-            root.querySelectorAll('.custom-select').forEach(cs => {
-                const trigger = cs.querySelector('.custom-select-trigger');
-                const optionsDiv = cs.querySelector('.custom-select-options');
-                if (!trigger || !optionsDiv) return;
+            (container || document).querySelectorAll('.custom-select').forEach(wrapper => {
+                const trigger = wrapper.querySelector('.custom-select-trigger');
+                const options = wrapper.querySelector('.custom-select-options');
+                if (!trigger || !options) return;
                 // Skip if already initialized or if trigger has no data-section (special selects like pkg-type)
                 if (trigger.hasAttribute('data-cs-init')) return;
                 const section = trigger.getAttribute('data-section');
                 if (!section) return;
                 trigger.setAttribute('data-cs-init', '1');
 
-                // ARIA attributes
-                trigger.setAttribute('role', 'combobox');
-                trigger.setAttribute('aria-haspopup', 'listbox');
-                trigger.setAttribute('aria-expanded', 'false');
-                optionsDiv.setAttribute('role', 'listbox');
-                optionsDiv.querySelectorAll('.custom-select-option').forEach(opt => {
-                    opt.setAttribute('role', 'option');
-                });
-
-                trigger.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    document.querySelectorAll('.custom-select-options.open').forEach(o => {
-                        if (o !== optionsDiv) {
-                            o.classList.remove('open');
-                            const otherTrigger = o.closest('.custom-select')?.querySelector('.custom-select-trigger');
-                            if (otherTrigger) otherTrigger.setAttribute('aria-expanded', 'false');
-                        }
-                    });
-                    const isOpen = optionsDiv.classList.toggle('open');
-                    trigger.setAttribute('aria-expanded', String(isOpen));
-                });
-
-                // Keyboard navigation for custom selects
-                trigger.addEventListener('keydown', (e) => {
-                    const options = Array.from(optionsDiv.querySelectorAll('.custom-select-option'));
-                    if (!options.length) return;
-
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (!optionsDiv.classList.contains('open')) {
-                            document.querySelectorAll('.custom-select-options.open').forEach(o => {
-                                o.classList.remove('open');
-                                const t = o.closest('.custom-select')?.querySelector('.custom-select-trigger');
-                                if (t) t.setAttribute('aria-expanded', 'false');
-                            });
-                            optionsDiv.classList.add('open');
-                            trigger.setAttribute('aria-expanded', 'true');
-                            const selected = optionsDiv.querySelector('.custom-select-option.selected') || options[0];
-                            if (selected) selected.classList.add('focused');
-                        } else {
-                            const focused = optionsDiv.querySelector('.custom-select-option.focused');
-                            if (focused) focused.click();
-                        }
-                    } else if (e.key === 'Escape') {
-                        optionsDiv.classList.remove('open');
-                        trigger.setAttribute('aria-expanded', 'false');
-                        optionsDiv.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('focused'));
-                    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        if (!optionsDiv.classList.contains('open')) {
-                            optionsDiv.classList.add('open');
-                            trigger.setAttribute('aria-expanded', 'true');
-                        }
-                        const currentFocused = optionsDiv.querySelector('.custom-select-option.focused');
-                        let idx = currentFocused ? options.indexOf(currentFocused) : -1;
-                        options.forEach(o => o.classList.remove('focused'));
-                        if (e.key === 'ArrowDown') {
-                            idx = (idx + 1) % options.length;
-                        } else {
-                            idx = idx <= 0 ? options.length - 1 : idx - 1;
-                        }
-                        options[idx].classList.add('focused');
-                        options[idx].scrollIntoView({ block: 'nearest' });
-                    }
-                });
-
-                optionsDiv.querySelectorAll('.custom-select-option').forEach(opt => {
-                    opt.addEventListener('click', () => {
-                        const val = opt.getAttribute('data-value');
-                        const label = opt.textContent;
-                        trigger.textContent = label;
-                        trigger.setAttribute('data-current-value', val);
-                        optionsDiv.classList.remove('open');
-                        trigger.setAttribute('aria-expanded', 'false');
-                        optionsDiv.querySelectorAll('.custom-select-option').forEach(o => {
-                            o.classList.remove('selected');
-                            o.classList.remove('focused');
-                        });
-                        opt.classList.add('selected');
-
-                        const field = trigger.getAttribute('data-field-name');
-                        const index = parseInt(trigger.getAttribute('data-index') || '0', 10);
-                        vscode.postMessage({ type: 'fieldChanged', section, field, value: val, index });
-                    });
+                wireCustomSelect(trigger, options, (val, triggerEl) => {
+                    triggerEl.setAttribute('data-current-value', val);
+                    const field = triggerEl.getAttribute('data-field-name');
+                    const index = parseInt(triggerEl.getAttribute('data-index') || '0', 10);
+                    vscode.postMessage({ type: 'fieldChanged', section, field, value: val, index });
                 });
             });
         }
@@ -246,69 +249,10 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
         const pkgTypeTrigger = document.getElementById('pkg-type-select-trigger');
         const pkgTypeOptions = document.getElementById('pkg-type-select-options');
         if (pkgTypeTrigger && pkgTypeOptions) {
-            // ARIA attributes for package type select
-            pkgTypeTrigger.setAttribute('role', 'combobox');
-            pkgTypeTrigger.setAttribute('aria-haspopup', 'listbox');
-            pkgTypeTrigger.setAttribute('aria-expanded', 'false');
-            pkgTypeOptions.setAttribute('role', 'listbox');
-            pkgTypeOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-                opt.setAttribute('role', 'option');
+            wireCustomSelect(pkgTypeTrigger, pkgTypeOptions, (val) => {
+                vscode.postMessage({ type: 'packageTypeChanged', value: val });
             });
-
-            pkgTypeTrigger.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isOpen = pkgTypeOptions.classList.toggle('open');
-                pkgTypeTrigger.setAttribute('aria-expanded', String(isOpen));
-            });
-
-            // Keyboard navigation for package type select
-            pkgTypeTrigger.addEventListener('keydown', (e) => {
-                const options = Array.from(pkgTypeOptions.querySelectorAll('.custom-select-option'));
-                if (!options.length) return;
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (!pkgTypeOptions.classList.contains('open')) {
-                        pkgTypeOptions.classList.add('open');
-                        pkgTypeTrigger.setAttribute('aria-expanded', 'true');
-                        const sel = pkgTypeOptions.querySelector('.custom-select-option.selected') || options[0];
-                        if (sel) sel.classList.add('focused');
-                    } else {
-                        const focused = pkgTypeOptions.querySelector('.custom-select-option.focused');
-                        if (focused) focused.click();
-                    }
-                } else if (e.key === 'Escape') {
-                    pkgTypeOptions.classList.remove('open');
-                    pkgTypeTrigger.setAttribute('aria-expanded', 'false');
-                    options.forEach(o => o.classList.remove('focused'));
-                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (!pkgTypeOptions.classList.contains('open')) {
-                        pkgTypeOptions.classList.add('open');
-                        pkgTypeTrigger.setAttribute('aria-expanded', 'true');
-                    }
-                    const cur = pkgTypeOptions.querySelector('.custom-select-option.focused');
-                    let idx = cur ? options.indexOf(cur) : -1;
-                    options.forEach(o => o.classList.remove('focused'));
-                    idx = e.key === 'ArrowDown' ? (idx + 1) % options.length : (idx <= 0 ? options.length - 1 : idx - 1);
-                    options[idx].classList.add('focused');
-                    options[idx].scrollIntoView({ block: 'nearest' });
-                }
-            });
-
-            pkgTypeOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-                opt.addEventListener('click', () => {
-                    const val = opt.getAttribute('data-value');
-                    pkgTypeTrigger.textContent = opt.textContent;
-                    pkgTypeOptions.classList.remove('open');
-                    pkgTypeTrigger.setAttribute('aria-expanded', 'false');
-                    pkgTypeOptions.querySelectorAll('.custom-select-option').forEach(o => {
-                        o.classList.remove('selected');
-                        o.classList.remove('focused');
-                    });
-                    opt.classList.add('selected');
-                    vscode.postMessage({ type: 'packageTypeChanged', value: val });
-                });
-            });
+            // Close on outside click (the global handler covers generic selects)
             document.addEventListener('click', () => {
                 pkgTypeOptions.classList.remove('open');
                 pkgTypeTrigger.setAttribute('aria-expanded', 'false');
@@ -490,16 +434,11 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                                 vscode.postMessage(msg);
                             }
                         } else if (input.tagName === 'INPUT') {
-                            group.classList.add('has-error');
-                            const msg = group.querySelector('.validation-msg');
-                            if (msg) {
-                                const fieldAttr = group.getAttribute('data-field') || '';
-                                const errText = fieldAttr === 'identity.resourceId'
-                                    ? 'Resource ID must be at least 1 character.'
-                                    : 'This field is required. Enter a value or remove the field.';
-                                msg.className = 'validation-msg error';
-                                msg.textContent = errText;
-                            }
+                            const fieldAttr = group.getAttribute('data-field') || '';
+                            const errText = fieldAttr === 'identity.resourceId'
+                                ? 'Resource ID must be at least 1 character.'
+                                : 'This field is required. Enter a value or remove the field.';
+                            setGroupValidation(group, 'error', errText);
                         }
                     }
                 }
@@ -757,21 +696,48 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             }
         }
 
-        function renderTargetDeviceFamilies(families) {
-            const container = document.getElementById('target-device-families');
+        function renderReorderableList(containerId, items, config) {
+            const container = document.getElementById(containerId);
             container.innerHTML = '';
-            families.forEach((fam, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Target Device: \${escapeHtml(fam.name)}</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-family-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-family-down" data-index="\${idx}" \${idx === families.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-family" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            items.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.innerHTML =
+                    '<div class="item-header">' +
+                        '<span class="item-title">' + config.titleFn(item, idx) + '</span>' +
+                        '<div class="item-actions">' +
+                            '<button class="btn btn-sm move-up" data-index="' + idx + '"' + (idx === 0 ? ' disabled' : '') + ' title="Move Up">▲</button>' +
+                            '<button class="btn btn-sm move-down" data-index="' + idx + '"' + (idx === items.length - 1 ? ' disabled' : '') + ' title="Move Down">▼</button>' +
+                            '<button class="btn-remove-field remove-item" data-index="' + idx + '" title="Remove">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    config.fieldsFn(item, idx);
+                container.appendChild(div);
+
+                div.querySelectorAll('input[data-section]').forEach(inp => {
+                    inp.addEventListener('input', () => debouncedFieldChange(inp));
+                });
+                if (config.hasCustomSelects) {
+                    initCustomSelects(div);
+                }
+                div.querySelector('.remove-item').addEventListener('click', () => {
+                    vscode.postMessage({ type: config.removeType, index: idx });
+                });
+                div.querySelector('.move-up').addEventListener('click', () => {
+                    vscode.postMessage({ type: config.moveType, index: idx, direction: 'up' });
+                });
+                div.querySelector('.move-down').addEventListener('click', () => {
+                    vscode.postMessage({ type: config.moveType, index: idx, direction: 'down' });
+                });
+            });
+        }
+
+        function renderTargetDeviceFamilies(families) {
+            renderReorderableList('target-device-families', families, {
+                titleFn: (fam) => 'Target Device: ' + escapeHtml(fam.name),
+                removeType: 'removeTargetDeviceFamily',
+                moveType: 'moveTargetDeviceFamily',
+                fieldsFn: (fam, idx) => \`
                     <div class="form-group" data-field="dependencies.targetDeviceFamily.\${idx}.minVersion">
                         <label>Min Version:</label>
                         <input type="text" data-section="dependencies" data-field-name="targetDeviceFamily.minVersion" data-index="\${idx}" value="\${escapeHtml(fam.minVersion)}" placeholder="10.0.17763.0" />
@@ -783,40 +749,17 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         <input type="text" data-section="dependencies" data-field-name="targetDeviceFamily.maxVersionTested" data-index="\${idx}" value="\${escapeHtml(fam.maxVersionTested)}" placeholder="10.0.26100.0" />
                         <div class="description">Highest Windows version app has tested against, must be ≥ Min Version, used to determine compatibility behavior</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                item.querySelector('.remove-family').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeTargetDeviceFamily', index: idx });
-                });
-                item.querySelector('.move-family-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveTargetDeviceFamily', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-family-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveTargetDeviceFamily', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderPackageDependencies(deps) {
-            const container = document.getElementById('package-dependencies');
-            container.innerHTML = '';
-            deps.forEach((dep, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('package-dependencies', deps, {
+                titleFn: () => 'Name:',
+                removeType: 'removePackageDependency',
+                moveType: 'movePackageDependency',
+                hasCustomSelects: true,
+                fieldsFn: (dep, idx) => \`
                     <div class="form-group" data-field="dependencies.packageDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="packageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="Microsoft.VCLibs.140.00" />
                         <div class="description">Package identity name</div>
@@ -846,78 +789,30 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         </div>
                         <div class="description">Whether this dependency is optional (requires uap6 namespace)</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                initCustomSelects(item);
-                item.querySelector('.remove-pkg-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removePackageDependency', index: idx });
-                });
-                item.querySelector('.move-pkg-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'movePackageDependency', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-pkg-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'movePackageDependency', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderMainPackageDependencies(deps) {
-            const container = document.getElementById('main-package-dependencies');
-            container.innerHTML = '';
-            deps.forEach((dep, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-main-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-main-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-main-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('main-package-dependencies', deps, {
+                titleFn: () => 'Name:',
+                removeType: 'removeMainPackageDependency',
+                moveType: 'moveMainPackageDependency',
+                fieldsFn: (dep, idx) => \`
                     <div class="form-group" data-field="dependencies.mainPackageDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="mainPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" placeholder="MainPackageName" />
                         <div class="description">Package identity name of the main package</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                item.querySelector('.remove-main-pkg-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeMainPackageDependency', index: idx });
-                });
-                item.querySelector('.move-main-pkg-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveMainPackageDependency', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-main-pkg-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveMainPackageDependency', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderDriverConstraints(constraints) {
-            const container = document.getElementById('driver-constraints');
-            container.innerHTML = '';
-            constraints.forEach((dc, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-driver-constraint-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-driver-constraint-down" data-index="\${idx}" \${idx === constraints.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-driver-constraint" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('driver-constraints', constraints, {
+                titleFn: () => 'Name:',
+                removeType: 'removeDriverConstraint',
+                moveType: 'moveDriverConstraint',
+                fieldsFn: (dc, idx) => \`
                     <div class="form-group" data-field="dependencies.driverConstraint.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="driverConstraint.name" data-index="\${idx}" value="\${escapeHtml(dc.name)}" />
                         <div class="description">The driver package identity name that this constraint applies to</div>
@@ -934,39 +829,16 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         <input type="text" data-section="dependencies" data-field-name="driverConstraint.minDate" data-index="\${idx}" value="\${escapeHtml(dc.minDate)}" placeholder="2020-01-01" />
                         <div class="description">Earliest driver date accepted, in YYYY-MM-DD format</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-                item.querySelector('.remove-driver-constraint').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeDriverConstraint', index: idx });
-                });
-                item.querySelector('.move-driver-constraint-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveDriverConstraint', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-driver-constraint-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveDriverConstraint', index: idx, direction: 'down' });
-                });
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
+                    </div>\`,
             });
         }
 
         function renderOSPackageDependencies(deps) {
-            const container = document.getElementById('os-package-dependencies');
-            container.innerHTML = '';
-            deps.forEach((dep, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-os-pkg-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-os-pkg-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-os-pkg-dep" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('os-package-dependencies', deps, {
+                titleFn: () => 'Name:',
+                removeType: 'removeOSPackageDependency',
+                moveType: 'moveOSPackageDependency',
+                fieldsFn: (dep, idx) => \`
                     <div class="form-group" data-field="dependencies.osPackageDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="osPackageDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Package identity name of the OS package</div>
@@ -977,39 +849,16 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         <input type="text" data-section="dependencies" data-field-name="osPackageDependency.version" data-index="\${idx}" value="\${escapeHtml(dep.version)}" placeholder="10.0.0.0" />
                         <div class="description">DotQuad version number (e.g. 10.0.0.0), each part 0–65535</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                item.querySelector('.remove-os-pkg-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeOSPackageDependency', index: idx });
-                });
-                item.querySelector('.move-os-pkg-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveOSPackageDependency', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-os-pkg-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveOSPackageDependency', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderHostRuntimeDependencies(deps) {
-            const container = document.getElementById('host-runtime-dependencies');
-            container.innerHTML = '';
-            deps.forEach((dep, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-host-runtime-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-host-runtime-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-host-runtime-dep" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('host-runtime-dependencies', deps, {
+                titleFn: () => 'Name:',
+                removeType: 'removeHostRuntimeDependency',
+                moveType: 'moveHostRuntimeDependency',
+                fieldsFn: (dep, idx) => \`
                     <div class="form-group" data-field="dependencies.hostRuntimeDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Package identity name of the host runtime</div>
@@ -1026,39 +875,17 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         <input type="text" data-section="dependencies" data-field-name="hostRuntimeDependency.minVersion" data-index="\${idx}" value="\${escapeHtml(dep.minVersion)}" placeholder="1.0.0.0" />
                         <div class="description">Minimum DotQuad version required (e.g. 1.0.0.0), each part 0–65535</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                item.querySelector('.remove-host-runtime-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeHostRuntimeDependency', index: idx });
-                });
-                item.querySelector('.move-host-runtime-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveHostRuntimeDependency', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-host-runtime-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveHostRuntimeDependency', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderExternalDependencies(deps) {
-            const container = document.getElementById('external-dependencies');
-            container.innerHTML = '';
-            deps.forEach((dep, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Name:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-external-dep-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-external-dep-down" data-index="\${idx}" \${idx === deps.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-external-dep" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('external-dependencies', deps, {
+                titleFn: () => 'Name:',
+                removeType: 'removeExternalDependency',
+                moveType: 'moveExternalDependency',
+                hasCustomSelects: true,
+                fieldsFn: (dep, idx) => \`
                     <div class="form-group" data-field="dependencies.externalDependency.\${idx}.name">
                         <input type="text" data-section="dependencies" data-field-name="externalDependency.name" data-index="\${idx}" value="\${escapeHtml(dep.name)}" />
                         <div class="description">Name of the external Win32 component</div>
@@ -1087,52 +914,28 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                             </div>
                         </div>
                         <div class="description">Whether this external dependency is optional</div>
-                    </div>
-                \`;
-                container.appendChild(item);
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                initCustomSelects(item);
-                item.querySelector('.remove-external-dep').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeExternalDependency', index: idx });
-                });
-                item.querySelector('.move-external-dep-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveExternalDependency', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-external-dep-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveExternalDependency', index: idx, direction: 'down' });
-                });
+                    </div>\`,
             });
         }
 
         function renderResources(resources) {
-            const container = document.getElementById('resources-list');
-            container.innerHTML = '';
             const scaleOptions = ['', '80', '100', '120', '125', '140', '150', '160', '175', '180', '200', '225', '250', '300', '350', '400', '450'];
             const dxOptions = ['', 'dx9', 'dx10', 'dx11', 'dx12'];
-            resources.forEach((res, idx) => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-
-                const scaleOptionsHtml = scaleOptions.map(s =>
-                    '<div class="custom-select-option' + (res.scale === s ? ' selected' : '') + '" data-value="' + s + '">' + (s || '(none)') + '</div>'
-                ).join('');
-                const dxOptionsHtml = dxOptions.map(d =>
-                    '<div class="custom-select-option' + (res.dxFeatureLevel === d ? ' selected' : '') + '" data-value="' + d + '">' + (d || '(none)') + '</div>'
-                ).join('');
-                const scaleLabel = res.scale || '(none)';
-                const dxLabel = res.dxFeatureLevel || '(none)';
-
-                item.innerHTML = \`
-                    <div class="item-header">
-                        <span class="item-title">Language:</span>
-                        <div class="item-actions">
-                            <button class="btn btn-sm move-resource-up" data-index="\${idx}" \${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-                            <button class="btn btn-sm move-resource-down" data-index="\${idx}" \${idx === resources.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
-                            <button class="btn-remove-field remove-resource" data-index="\${idx}" title="Remove">✕</button>
-                        </div>
-                    </div>
+            renderReorderableList('resources-list', resources, {
+                titleFn: () => 'Language:',
+                removeType: 'removeResource',
+                moveType: 'moveResource',
+                hasCustomSelects: true,
+                fieldsFn: (res, idx) => {
+                    const scaleOptionsHtml = scaleOptions.map(s =>
+                        '<div class="custom-select-option' + (res.scale === s ? ' selected' : '') + '" data-value="' + s + '">' + (s || '(none)') + '</div>'
+                    ).join('');
+                    const dxOptionsHtml = dxOptions.map(d =>
+                        '<div class="custom-select-option' + (res.dxFeatureLevel === d ? ' selected' : '') + '" data-value="' + d + '">' + (d || '(none)') + '</div>'
+                    ).join('');
+                    const scaleLabel = res.scale || '(none)';
+                    const dxLabel = res.dxFeatureLevel || '(none)';
+                    return \`
                     <div class="form-group" data-field="resources.\${idx}.language">
                         <input type="text" data-section="resources" data-field-name="language" data-index="\${idx}" value="\${escapeHtml(res.language)}" placeholder="en-us" />
                         <div class="description">BCP-47 language tag (e.g. "en-us", "fr-fr", "ja-jp") or "x-generate"</div>
@@ -1159,23 +962,8 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         </div>
                         <div class="description">DirectX feature level for resource selection</div>
                         <div class="validation-msg"></div>
-                    </div>
-                \`;
-                container.appendChild(item);
-
-                item.querySelectorAll('input[data-section]').forEach(inp => {
-                    inp.addEventListener('input', () => debouncedFieldChange(inp));
-                });
-                initCustomSelects(item);
-                item.querySelector('.remove-resource').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'removeResource', index: idx });
-                });
-                item.querySelector('.move-resource-up').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveResource', index: idx, direction: 'up' });
-                });
-                item.querySelector('.move-resource-down').addEventListener('click', () => {
-                    vscode.postMessage({ type: 'moveResource', index: idx, direction: 'down' });
-                });
+                    </div>\`;
+                },
             });
         }
 
@@ -1595,13 +1383,11 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                         const isReq = requiredExtFields.has(fieldLabel);
                         if (fg) {
                             const validation = validateExtField(fieldLabel, inp.value, isReq);
-                            fg.classList.remove('has-error', 'has-warning');
-                            const vm = fg.querySelector('.validation-msg');
+                            fg.classList.remove('has-warning');
                             if (validation && validation.level) {
-                                fg.classList.add('has-' + validation.level);
-                                if (vm) { vm.className = 'validation-msg ' + validation.level; vm.textContent = validation.message; }
+                                setGroupValidation(fg, validation.level, validation.message);
                             } else {
-                                if (vm) { vm.className = 'validation-msg'; vm.textContent = ''; }
+                                setGroupValidation(fg, 'clear');
                             }
                         }
                         clearTimeout(extDebounce);
@@ -1800,21 +1586,16 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
         function showValidationErrors(errors) {
             // Clear only manifest-level validation errors (those with data-field), not extension field errors
             document.querySelectorAll('.form-group[data-field]').forEach(fg => {
-                fg.classList.remove('has-error', 'has-warning');
-                const msg = fg.querySelector('.validation-msg');
-                if (msg) { msg.className = 'validation-msg'; msg.textContent = ''; }
+                fg.classList.remove('has-warning');
+                setGroupValidation(fg, 'clear');
             });
 
             // Show new errors
             errors.forEach(err => {
                 const fg = document.querySelector('.form-group[data-field="' + err.field + '"]');
                 if (fg) {
-                    fg.classList.add(err.severity === 'warning' ? 'has-warning' : 'has-error');
-                    const msg = fg.querySelector('.validation-msg');
-                    if (msg) {
-                        msg.className = 'validation-msg ' + err.severity;
-                        msg.textContent = err.message;
-                    }
+                    if (err.severity === 'warning') { fg.classList.add('has-warning'); }
+                    setGroupValidation(fg, err.severity, err.message);
                 }
             });
 
@@ -1825,16 +1606,11 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                 if (group.classList.contains('has-error') || group.classList.contains('has-warning')) return;
                 const input = group.querySelector('input[data-section]');
                 if (input && !input.value) {
-                    group.classList.add('has-error');
-                    const msg = group.querySelector('.validation-msg');
-                    if (msg) {
-                        const fieldAttr = group.getAttribute('data-field') || '';
-                        const errText = fieldAttr === 'identity.resourceId'
-                            ? 'Resource ID must be at least 1 character.'
-                            : 'This field is required. Enter a value or remove the field.';
-                        msg.className = 'validation-msg error';
-                        msg.textContent = errText;
-                    }
+                    const fieldAttr = group.getAttribute('data-field') || '';
+                    const errText = fieldAttr === 'identity.resourceId'
+                        ? 'Resource ID must be at least 1 character.'
+                        : 'This field is required. Enter a value or remove the field.';
+                    setGroupValidation(group, 'error', errText);
                 }
             });
         }

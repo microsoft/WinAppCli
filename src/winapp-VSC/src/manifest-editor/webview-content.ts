@@ -8,6 +8,24 @@ import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS } from 
 import { getEditorStyles } from './webview-styles';
 import { getEditorScript } from './webview-script';
 
+function buildCapabilityCheckboxList(
+    capabilities: Array<{ name: string; label: string; namespace?: string }>,
+    prefix: string
+): string {
+    return capabilities.map(c => {
+        const capKey = prefix ? `${prefix}:${c.name}` : (c.namespace ? `${c.namespace}:${c.name}` : c.name);
+        return `<label class="cap-item" data-cap="${capKey}">
+            <input type="checkbox" data-capability="${capKey}" /><span>${c.label}</span>
+        </label>`;
+    }).join('');
+}
+
+function buildSelectOptions(options: Array<{ value: string; label: string; selected?: boolean }>): string {
+    return options.map(o =>
+        `<div class="custom-select-option${o.selected ? ' selected' : ''}" data-value="${o.value}">${o.label}</div>`
+    ).join('\n                    ');
+}
+
 /** Generates an error view shown when the manifest XML cannot be parsed. */
 export function getParseErrorContent(webview: vscode.Webview, nonce: string, errorMessage: string): string {
     return /*html*/`<!DOCTYPE html>
@@ -86,26 +104,11 @@ export function getParseErrorContent(webview: vscode.Webview, nonce: string, err
 </html>`;
 }
 export function getWebviewContent(webview: vscode.Webview, nonce: string, manifestDirUri: string): string {
-    const archOptionItems = ARCHITECTURE_OPTIONS.map(a => `<div class="custom-select-option" data-value="${a}">${a}</div>`).join('');
+    const archOptionItems = buildSelectOptions(ARCHITECTURE_OPTIONS.map(a => ({ value: a, label: a })));
 
-    const generalCaps= KNOWN_CAPABILITIES.general.map(c => {
-        const capKey = c.namespace ? `${c.namespace}:${c.name}` : c.name;
-        return `<label class="cap-item" data-cap="${capKey}">
-            <input type="checkbox" data-capability="${capKey}" /><span>${c.label}</span>
-        </label>`;
-    }).join('');
-
-    const restrictedCaps = KNOWN_CAPABILITIES.restricted.map(c =>
-        `<label class="cap-item" data-cap="rescap:${c.name}">
-            <input type="checkbox" data-capability="rescap:${c.name}" /><span>${c.label}</span>
-        </label>`
-    ).join('');
-
-    const deviceCaps = KNOWN_CAPABILITIES.device.map(c =>
-        `<label class="cap-item" data-cap="device:${c.name}">
-            <input type="checkbox" data-capability="device:${c.name}" /><span>${c.label}</span>
-        </label>`
-    ).join('');
+    const generalCaps = buildCapabilityCheckboxList(KNOWN_CAPABILITIES.general, '');
+    const restrictedCaps = buildCapabilityCheckboxList(KNOWN_CAPABILITIES.restricted, 'rescap');
+    const deviceCaps = buildCapabilityCheckboxList(KNOWN_CAPABILITIES.device, 'device');
 
     return /*html*/`<!DOCTYPE html>
 <html lang="en">
@@ -241,10 +244,12 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="pkg-type-select">
                 <button class="custom-select-trigger" id="pkg-type-select-trigger" type="button">Application (default)</button>
                 <div class="custom-select-options" id="pkg-type-select-options">
-                    <div class="custom-select-option selected" data-value="application">Application (default)</div>
-                    <div class="custom-select-option" data-value="framework">Framework</div>
-                    <div class="custom-select-option" data-value="resource">Resource</div>
-                    <div class="custom-select-option" data-value="modification">Modification</div>
+                    ${buildSelectOptions([
+                        { value: 'application', label: 'Application (default)', selected: true },
+                        { value: 'framework', label: 'Framework' },
+                        { value: 'resource', label: 'Resource' },
+                        { value: 'modification', label: 'Modification' },
+                    ])}
                 </div>
             </div>
             <div class="description">Application packages contain executable code and UI. Framework packages provide shared runtime libraries. Resource packages contain only language/scale assets. Modification packages customize a main package.</div>
@@ -257,9 +262,11 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="props-supportedUsers">
                 <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="supportedUsers">(omit)</button>
                 <div class="custom-select-options">
-                    <div class="custom-select-option selected" data-value="">(omit)</div>
-                    <div class="custom-select-option" data-value="multiple">multiple</div>
-                    <div class="custom-select-option" data-value="single">single</div>
+                    ${buildSelectOptions([
+                        { value: '', label: '(omit)', selected: true },
+                        { value: 'multiple', label: 'multiple' },
+                        { value: 'single', label: 'single' },
+                    ])}
                 </div>
             </div>
             <div class="description">Whether the app supports multiple user sessions or only a single user</div>
@@ -269,9 +276,11 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="props-allowExecution">
                 <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExecution">(omit)</button>
                 <div class="custom-select-options">
-                    <div class="custom-select-option selected" data-value="">(omit)</div>
-                    <div class="custom-select-option" data-value="true">true</div>
-                    <div class="custom-select-option" data-value="false">false</div>
+                    ${buildSelectOptions([
+                        { value: '', label: '(omit)', selected: true },
+                        { value: 'true', label: 'true' },
+                        { value: 'false', label: 'false' },
+                    ])}
                 </div>
             </div>
             <div class="description">Whether executables in the package can be launched (set to false for content-only packages)</div>
@@ -281,9 +290,11 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="props-allowExternalContent">
                 <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExternalContent">(omit)</button>
                 <div class="custom-select-options">
-                    <div class="custom-select-option selected" data-value="">(omit)</div>
-                    <div class="custom-select-option" data-value="true">true</div>
-                    <div class="custom-select-option" data-value="false">false</div>
+                    ${buildSelectOptions([
+                        { value: '', label: '(omit)', selected: true },
+                        { value: 'true', label: 'true' },
+                        { value: 'false', label: 'false' },
+                    ])}
                 </div>
             </div>
             <div class="description">Whether the package allows content outside its install directory to be treated as package content</div>
@@ -293,9 +304,11 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="props-fsWriteVirt">
                 <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="fileSystemWriteVirtualization">(omit)</button>
                 <div class="custom-select-options">
-                    <div class="custom-select-option selected" data-value="">(omit)</div>
-                    <div class="custom-select-option" data-value="enabled">enabled</div>
-                    <div class="custom-select-option" data-value="disabled">disabled</div>
+                    ${buildSelectOptions([
+                        { value: '', label: '(omit)', selected: true },
+                        { value: 'enabled', label: 'enabled' },
+                        { value: 'disabled', label: 'disabled' },
+                    ])}
                 </div>
             </div>
             <div class="description">Controls whether file system write operations are virtualized or written to the real file system</div>
@@ -305,9 +318,11 @@ ${getEditorStyles(nonce)}
             <div class="custom-select" id="props-regWriteVirt">
                 <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="registryWriteVirtualization">(omit)</button>
                 <div class="custom-select-options">
-                    <div class="custom-select-option selected" data-value="">(omit)</div>
-                    <div class="custom-select-option" data-value="enabled">enabled</div>
-                    <div class="custom-select-option" data-value="disabled">disabled</div>
+                    ${buildSelectOptions([
+                        { value: '', label: '(omit)', selected: true },
+                        { value: 'enabled', label: 'enabled' },
+                        { value: 'disabled', label: 'disabled' },
+                    ])}
                 </div>
             </div>
             <div class="description">Controls whether registry write operations are virtualized or written to the real registry</div>
@@ -330,9 +345,11 @@ ${getEditorStyles(nonce)}
                 <div class="custom-select" id="props-packageIntegrityEnforcement">
                     <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="packageIntegrityEnforcement">on</button>
                     <div class="custom-select-options">
-                        <div class="custom-select-option selected" data-value="on">on</div>
-                        <div class="custom-select-option" data-value="off">off</div>
-                        <div class="custom-select-option" data-value="default">default</div>
+                        ${buildSelectOptions([
+                            { value: 'on', label: 'on', selected: true },
+                            { value: 'off', label: 'off' },
+                            { value: 'default', label: 'default' },
+                        ])}
                     </div>
                 </div>
                 <button class="btn-remove-field" type="button" data-target="props-pkgintegrity-group" data-section="properties" data-field-name="packageIntegrityEnforcement" title="Remove Package Integrity Content Enforcement">✕</button>
@@ -346,8 +363,10 @@ ${getEditorStyles(nonce)}
                 <div class="custom-select" id="props-updateWhileInUse">
                     <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="updateWhileInUse">allow</button>
                     <div class="custom-select-options">
-                        <div class="custom-select-option selected" data-value="allow">allow</div>
-                        <div class="custom-select-option" data-value="defer">defer</div>
+                        ${buildSelectOptions([
+                            { value: 'allow', label: 'allow', selected: true },
+                            { value: 'defer', label: 'defer' },
+                        ])}
                     </div>
                 </div>
                 <button class="btn-remove-field" type="button" data-target="props-updatewhileinuse-group" data-section="properties" data-field-name="updateWhileInUse" title="Remove Update While In Use">✕</button>
