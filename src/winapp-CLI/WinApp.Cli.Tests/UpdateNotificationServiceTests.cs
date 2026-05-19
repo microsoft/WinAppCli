@@ -425,4 +425,40 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         using var doc = JsonDocument.Parse("""{"tag_name":"v2.0.0-beta.1"}""");
         Assert.AreEqual("2.0.0-beta.1", UpdateNotificationService.ParseTagName(doc));
     }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_StableVersion_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsPreReleaseVersion("1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_PreReleaseVersion_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("1.0.0-prerelease.73"));
+    }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_BetaVersion_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("0.3.2-beta.1"));
+    }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_WithBuildMetadata_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsPreReleaseVersion("1.0.0+build123"));
+    }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_PreReleaseWithBuildMetadata_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("1.0.0-rc.1+build456"));
+    }
+
+    [TestMethod]
+    public void IsPreReleaseVersion_BranchPrereleaseLabel_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("0.3.2-dev-my-feature.42"));
+    }
 }

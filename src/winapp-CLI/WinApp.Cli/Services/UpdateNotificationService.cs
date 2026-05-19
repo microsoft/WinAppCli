@@ -47,6 +47,13 @@ internal class UpdateNotificationService(
                 return;
             }
 
+            // Prerelease builds are always ahead of the latest stable release —
+            // never show an update notice for them.
+            if (IsPreReleaseVersion(VersionHelper.GetVersionString()))
+            {
+                return;
+            }
+
             var cacheFile = GetUpdateCheckFile();
             var cache = ReadCache(cacheFile);
 
@@ -170,6 +177,18 @@ internal class UpdateNotificationService(
         };
 
         NotificationConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
+    }
+
+    internal static bool IsPreReleaseVersion(string version)
+    {
+        // Strip build metadata (+...)
+        var plusIdx = version.IndexOf('+');
+        if (plusIdx >= 0)
+        {
+            version = version[..plusIdx];
+        }
+
+        return version.Contains('-');
     }
 
     internal static bool IsNewerVersion(string latest, string current)
