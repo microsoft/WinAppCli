@@ -1,4 +1,5 @@
 trigger:
+  batch: true
   branches:
     include:
       - vsc-rel/v*
@@ -19,6 +20,10 @@ parameters:
   - name: SkipPublish
     displayName: Skip publishing to VS Code Marketplace
     type: boolean
+    default: false
+  - name: DoEsrp
+    displayName: Sign the VSIX package (DoEsrp)
+    type: boolean
     default: true
 
 extends:
@@ -31,6 +36,8 @@ extends:
         os: windows
     stages:
     - stage: Build
+      variables:
+      - group: signingIdentity
       jobs:
       - job: Build
         pool:
@@ -44,10 +51,19 @@ extends:
             displayName: Setup Node.js 24
             inputs:
               version: '24.x'
+          - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: UseDotNet@2
+              displayName: Setup .NET 8.0 (For ESRP Task)
+              inputs:
+                packageType: runtime
+                version: 8.0.x
           - task: PowerShell@2
             displayName: Download public CLI release for VS Code extension
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN)
             inputs:
               pwsh: true
+              errorActionPreference: 'stop'
               targetType: 'inline'
               script: |
                 $cliReleaseTag = "${{ parameters.CliReleaseTag }}"
@@ -55,13 +71,13 @@ extends:
 
                 if ([string]::IsNullOrWhiteSpace($cliReleaseTag)) {
                     Write-Host "No CLI release tag specified, finding latest stable release..."
-                    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -Headers @{ "User-Agent" = "AzurePipelines" }
-                    $stableRelease = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
+                    $releases = gh release list --repo $repo --limit 10 --json tagName,isPrerelease,isDraft | ConvertFrom-Json
+                    $stableRelease = $releases | Where-Object { -not $_.isPrerelease -and -not $_.isDraft } | Select-Object -First 1
                     if (-not $stableRelease) {
                         Write-Error "No stable release found for $repo"
                         exit 1
                     }
-                    $cliReleaseTag = $stableRelease.tag_name
+                    $cliReleaseTag = $stableRelease.tagName
                     Write-Host "Found latest stable release: $cliReleaseTag"
                 } else {
                     Write-Host "Using specified CLI release tag: $cliReleaseTag"
@@ -69,33 +85,28 @@ extends:
 
                 Write-Host "##vso[task.setvariable variable=CliReleaseTag]$cliReleaseTag"
 
-                # Download x64 and arm64 CLI zips
-                $downloadBase = "https://github.com/$repo/releases/download/$cliReleaseTag"
+                # Download x64 and arm64 CLI zips using gh CLI
                 $cliDir = "$(System.DefaultWorkingDirectory)/artifacts/public-cli"
 
                 New-Item -ItemType Directory -Path "$cliDir/win-x64" -Force | Out-Null
                 New-Item -ItemType Directory -Path "$cliDir/win-arm64" -Force | Out-Null
 
-                $x64Url = "$downloadBase/winappcli-x64.zip"
-                $arm64Url = "$downloadBase/winappcli-arm64.zip"
-
-                Write-Host "Downloading x64 CLI from: $x64Url"
-                Invoke-WebRequest -Uri $x64Url -OutFile "$cliDir/x64.zip"
-                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/x64.zip")) {
-                    Write-Error "Failed to download x64 CLI from $x64Url"
+                Write-Host "Downloading CLI binaries from release $cliReleaseTag..."
+                gh release download $cliReleaseTag --repo $repo --pattern "winappcli-x64.zip" --dir $cliDir
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Failed to download winappcli-x64.zip from release $cliReleaseTag"
                     exit 1
                 }
 
-                Write-Host "Downloading arm64 CLI from: $arm64Url"
-                Invoke-WebRequest -Uri $arm64Url -OutFile "$cliDir/arm64.zip"
-                if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$cliDir/arm64.zip")) {
-                    Write-Error "Failed to download arm64 CLI from $arm64Url"
+                gh release download $cliReleaseTag --repo $repo --pattern "winappcli-arm64.zip" --dir $cliDir
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Failed to download winappcli-arm64.zip from release $cliReleaseTag"
                     exit 1
                 }
 
                 # Extract
-                Expand-Archive -Path "$cliDir/x64.zip" -DestinationPath "$cliDir/win-x64" -Force
-                Expand-Archive -Path "$cliDir/arm64.zip" -DestinationPath "$cliDir/win-arm64" -Force
+                Expand-Archive -Path "$cliDir/winappcli-x64.zip" -DestinationPath "$cliDir/win-x64" -Force
+                Expand-Archive -Path "$cliDir/winappcli-arm64.zip" -DestinationPath "$cliDir/win-arm64" -Force
 
                 # Validate
                 if (-not (Test-Path "$cliDir/win-x64/winapp.exe")) {
@@ -109,11 +120,57 @@ extends:
 
                 Write-Host "CLI binaries ($cliReleaseTag) downloaded and validated successfully"
           - task: PowerShell@2
+            displayName: Create temporary .npmrc for Build
+            inputs:
+              targetType: inline
+              pwsh: true
+              script: |
+                $npmrcContent = "registry=https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/winapp-npm-feed/npm/registry/`nalways-auth=true"
+                Set-Content -Path "$(System.DefaultWorkingDirectory)/src/winapp-VSC/.npmrc" -Value $npmrcContent
+                Write-Host "Created .npmrc for Azure Artifacts feed in winapp-VSC directory"
+          - task: npmAuthenticate@0
+            displayName: Authenticate with Azure Artifacts feed
+            inputs:
+              workingFile: '$(System.DefaultWorkingDirectory)/src/winapp-VSC/.npmrc'
+          - task: PowerShell@2
             displayName: Package VS Code extension with public CLI
             inputs:
               pwsh: true
               filePath: $(System.DefaultWorkingDirectory)\scripts\package-vsc.ps1
               arguments: "-Stable -CliBinariesPath '$(System.DefaultWorkingDirectory)/artifacts/public-cli'"
+          - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: EsrpCodeSigning@5
+              displayName: Code Sign ESRP - VSIX Package
+              inputs:
+                ConnectedServiceName: $(SigningServiceName)
+                AppRegistrationClientId: $(SigningAppId)
+                AppRegistrationTenantId: $(SigningTenantId)
+                AuthAKVName: $(SigningAKVName)
+                AuthCertName: $(SigningAuthCertName)
+                AuthSignCertName: $(SigningSignCertName)
+                FolderPath: '$(System.DefaultWorkingDirectory)/artifacts/'
+                Pattern: '*.vsix'
+                UseMinimatch: true
+                signConfigType: inlineSignParams
+                inlineOperation: |
+                  [
+                      {
+                          "KeyCode": "CP-401405",
+                          "OperationCode": "OpcSign",
+                          "Parameters": {
+                              "FileDigest": "/fd SHA256"
+                          },
+                          "ToolName": "sign",
+                          "ToolVersion": "1.0"
+                      },
+                      {
+                          "KeyCode": "CP-401405",
+                          "OperationCode": "OpcVerify",
+                          "Parameters": {},
+                          "ToolName": "sign",
+                          "ToolVersion": "1.0"
+                      }
+                  ]
           - task: CopyFiles@2
             displayName: Copy Artifacts - VS Code Extension
             inputs:
@@ -131,7 +188,7 @@ extends:
       dependsOn: Build
       condition: and(succeeded(), eq('${{ parameters.SkipPublish }}', 'false'))
       variables:
-      - group: vsceMarketplaceIdentity
+      - group: signingIdentity
       jobs:
       - job: publish_vsc_extension
         pool:
@@ -164,36 +221,21 @@ extends:
             displayName: Authenticate with Azure Artifacts feed
             inputs:
               workingFile: '.npmrc'
-          - task: PowerShell@2
-            displayName: "Publish to VS Code Marketplace"
-            env:
-              VSCE_PAT: $(VSCE_PAT)
+          - task: AzureCLI@2
+            displayName: Publish to VS Code Marketplace
             inputs:
-              targetType: 'inline'
-              errorActionPreference: 'stop'
-              script: |
-                Write-Host "Installing @vscode/vsce..."
-                npm install @vscode/vsce
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Failed to install @vscode/vsce"
+              azureSubscription: $(SigningServiceName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                npm install -g @vscode/vsce@3
+
+                VSIX=$(find "$(Pipeline.Workspace)/vscode-extension/" -name "*.vsix" | head -1)
+                if [ -z "$VSIX" ]; then
+                  echo "##[error]No VSIX file found in vscode-extension artifact"
                   exit 1
-                }
+                fi
 
-                $vsix = Get-ChildItem "$(Pipeline.Workspace)/vscode-extension/" -Filter "*.vsix" | Select-Object -First 1
-                if (-not $vsix) {
-                  Write-Error "No VSIX file found in vscode-extension artifact"
-                  exit 1
-                }
-
-                $sizeMB = [math]::Round($vsix.Length / 1MB, 2)
-                Write-Host "Publishing $($vsix.Name) ($sizeMB MB) to VS Code Marketplace..."
-
-                npx vsce publish --packagePath $vsix.FullName
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Failed to publish to VS Code Marketplace"
-                  exit 1
-                }
-
-                Write-Host "Successfully published to VS Code Marketplace!"
-
+                echo "Publishing $VSIX to VS Code Marketplace..."
+                vsce publish --packagePath "$VSIX" --azure-credential
 

@@ -83,7 +83,7 @@ Additional guides:
 | **Setup** | [init](usage.md#init), [restore](usage.md#restore), [update](usage.md#update) |
 | **Identity & Debugging** | [run](usage.md#run), [create-debug-identity](usage.md#create-debug-identity), [unregister](usage.md#unregister) |
 | **Packaging** | [pack](usage.md#pack) |
-| **Manifests** | [manifest generate](usage.md#manifest-generate), [manifest update-assets](usage.md#manifest), [manifest add-alias](usage.md#manifest-add-alias) |
+| **Manifests** | [manifest generate](usage.md#manifest-generate), [manifest update-assets](usage.md#manifest-update-assets), [manifest add-alias](usage.md#manifest-add-alias) |
 | **Certificates & Signing** | [cert generate](usage.md#cert-generate), [cert install](usage.md#cert-install), [sign](usage.md#sign), [create-external-catalog](usage.md#create-external-catalog) |
 | **Utilities** | [tool](usage.md#tool), [store](usage.md#store), [get-winapp-path](usage.md#get-winapp-path), [complete](usage.md#shell-completion) |
 | **UI Automation** | [ui](usage.md#ui) |

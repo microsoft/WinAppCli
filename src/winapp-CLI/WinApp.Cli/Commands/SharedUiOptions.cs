@@ -20,6 +20,7 @@ internal static class SharedUiOptions
     public static Option<string?> PropertyOption { get; }
     public static Argument<string?> ValueArgument { get; }
     public static Option<bool> CaptureScreenOption { get; }
+    public static Option<bool> FocusOption { get; }
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
     public static Option<bool> HideOffscreenOption { get; }
@@ -78,7 +79,12 @@ internal static class SharedUiOptions
 
         CaptureScreenOption = new Option<bool>("--capture-screen")
         {
-            Description = "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first."
+            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus."
+        };
+
+        FocusOption = new Option<bool>("--focus")
+        {
+            Description = "Bring the target window to the foreground before capture. Already implied by --capture-screen."
         };
 
         InteractiveOption = new Option<bool>("--interactive", "-i")
