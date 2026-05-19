@@ -104,7 +104,8 @@ winapp restore [options]
 - Regenerates C++/WinRT headers and binaries
 - Stores shareable files in the global cache directory
 
-> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
+> [!NOTE]
+> For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
@@ -178,11 +179,12 @@ winapp pack <input-folder> [options]
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
+- Automatically discovers and bundles any non-image files referenced in the manifest (e.g., AppExtension `manifest.json`, config files) from the manifest directory or input folder if they are missing from staging
 - Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
 
-**WinRT component discovery:**
+#### WinRT component discovery
 
 When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
@@ -229,6 +231,7 @@ winapp create-debug-identity [entrypoint] [options]
 - `entrypoint` - Path to executable (.exe) or script that needs identity
 
 **Options:**
+
 - `--manifest <path>` - Path to the app manifest file, either `Package.appxmanifest` or `appxmanifest.xml` (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
@@ -286,7 +289,7 @@ winapp manifest generate [directory] [options]
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
 
-**Manifest placeholders:**
+#### Manifest placeholders
 
 Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
 
@@ -934,6 +937,30 @@ $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+
+### Update Checks
+
+The winapp CLI periodically checks for new versions and displays a one-line notice when an update is available. This check runs in the background and adds no latency to commands.
+
+Update checks are automatically disabled in CI environments (GitHub Actions, Azure Pipelines, etc.).
+
+To manually disable update checks, set the `WINAPP_CLI_UPDATE_CHECK` environment variable to `0`.
+
+In **cmd**:
+```cmd
+set WINAPP_CLI_UPDATE_CHECK=0
+```
+
+In **PowerShell** and **pwsh**:
+```pwsh
+$env:WINAPP_CLI_UPDATE_CHECK = "0"
+```
+
+To make this permanent:
+```powershell
+[System.Environment]::SetEnvironmentVariable('WINAPP_CLI_UPDATE_CHECK', '0', 'User')
+```
+
 ### controls
 
 Search the **WinUI 3 Gallery**, **Windows Community Toolkit**, and a curated
