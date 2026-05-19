@@ -1,4 +1,6 @@
-<!-- mslearn: true -->
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -118,6 +120,74 @@ function certInstall(options: CertInstallOptions): Promise<WinappResult>
 | `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
 | `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
 | `password` | `string \| undefined` | No | Password for the PFX file |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `controlsGet()`
+
+Print the full XAML, C#, and pitfall notes for a single control pattern, identified by the id returned from `winapp controls search`.
+
+```typescript
+function controlsGet(options: ControlsGetOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | `string` | Yes | Pattern id from `winapp controls search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `controlsList()`
+
+List every available control pattern grouped by source (core platform patterns, WinUI Gallery, Community Toolkit). Useful for discovery and to see exact ids accepted by `winapp controls get`.
+
+```typescript
+function controlsList(options?: ControlsListOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `controlsRefresh()`
+
+Delete the cached WinUI Gallery and Community Toolkit dataset so the next `winapp controls search/get/list` re-fetches the latest snapshot from GitHub.
+
+```typescript
+function controlsRefresh(options?: CommonOptions): Promise<WinappResult>
+```
+
+*Inherits [CommonOptions](#commonoptions) only.*
+
+---
+
+### `controlsSearch()`
+
+Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for controls that match a free-text query.
+
+```typescript
+function controlsSearch(options: ControlsSearchOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string` | Yes | Free-text query (e.g. "tabbed document interface", "share contract", "settings card"). |
+| `max` | `number \| undefined` | No | Maximum number of matches to return. |
+| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1068,6 +1138,14 @@ IfExists values.
 type IfExists = "error" | "overwrite" | "skip"
 ```
 
+### `String`
+
+String values.
+
+```typescript
+type String = "gallery" | "toolkit" | "core"
+```
+
 ### `SdkInstallMode`
 
 SdkInstallMode values.
@@ -1119,6 +1197,41 @@ type ManifestTemplates = "packaged" | "sparse"
 | `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
 | `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
 | `password` | `string \| undefined` | No | Password for the PFX file |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `ControlsGetOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | `string` | Yes | Pattern id from `winapp controls search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `ControlsListOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `ControlsRefreshOptions`
+
+```typescript
+type ControlsRefreshOptions = CommonOptions
+```
+
+### `ControlsSearchOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string` | Yes | Free-text query (e.g. "tabbed document interface", "share contract", "settings card"). |
+| `max` | `number \| undefined` | No | Maximum number of matches to return. |
+| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

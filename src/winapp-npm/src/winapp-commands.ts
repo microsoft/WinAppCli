@@ -157,6 +157,80 @@ export async function certInstall(options: CertInstallOptions): Promise<WinappRe
 }
 
 // ---------------------------------------------------------------------------
+// controls get
+// ---------------------------------------------------------------------------
+
+export interface ControlsGetOptions extends CommonOptions {
+  /** Pattern id from `winapp controls search` (e.g. gallery-tabview, toolkit-segmented, jumplist-recent-files). */
+  id: string;
+}
+
+/**
+ * Print the full XAML, C#, and pitfall notes for a single control pattern, identified by the id returned from `winapp controls search`.
+ */
+export async function controlsGet(options: ControlsGetOptions): Promise<WinappResult> {
+  const args: string[] = ['controls', 'get'];
+  args.push(options.id);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// controls list
+// ---------------------------------------------------------------------------
+
+export interface ControlsListOptions extends CommonOptions {
+  /** Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. */
+  source?: 'gallery' | 'toolkit' | 'core';
+}
+
+/**
+ * List every available control pattern grouped by source (core platform patterns, WinUI Gallery, Community Toolkit). Useful for discovery and to see exact ids accepted by `winapp controls get`.
+ */
+export async function controlsList(options: ControlsListOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['controls', 'list'];
+  if (options.source) args.push('--source', options.source);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// controls refresh
+// ---------------------------------------------------------------------------
+
+export type ControlsRefreshOptions = CommonOptions;
+
+/**
+ * Delete the cached WinUI Gallery and Community Toolkit dataset so the next `winapp controls search/get/list` re-fetches the latest snapshot from GitHub.
+ */
+export async function controlsRefresh(options: ControlsRefreshOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['controls', 'refresh'];
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// controls search
+// ---------------------------------------------------------------------------
+
+export interface ControlsSearchOptions extends CommonOptions {
+  /** Free-text query (e.g. "tabbed document interface", "share contract", "settings card"). */
+  query: string;
+  /** Maximum number of matches to return. */
+  max?: number;
+  /** Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. */
+  source?: 'gallery' | 'toolkit' | 'core';
+}
+
+/**
+ * Search WinUI 3 Gallery, Community Toolkit, and core platform patterns for controls that match a free-text query.
+ */
+export async function controlsSearch(options: ControlsSearchOptions): Promise<WinappResult> {
+  const args: string[] = ['controls', 'search'];
+  args.push(options.query);
+  if (options.max !== undefined) args.push('--max', options.max.toString());
+  if (options.source) args.push('--source', options.source);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // create-debug-identity
 // ---------------------------------------------------------------------------
 

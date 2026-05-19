@@ -813,8 +813,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 			// Use a JSON-safe shell quoting strategy: pass the query as a single argument.
 			// runWinappCommand currently builds a shell command string, so wrap the query
-			// in double quotes and escape any embedded double quotes.
-			const escaped = query.replace(/"/g, '\\"');
+			// in double quotes and escape any embedded backslashes (first!) then double quotes
+			// so the shell sees the literal user input.
+			const escaped = query.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 			let command = `controls search "${escaped}"`;
 			if (source && source !== 'All sources') {
 				command += ` --source ${source}`;
@@ -840,7 +841,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			const escaped = id.replace(/"/g, '\\"');
+			const escaped = id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 			await runWinappCommand(extensionPath, `controls get "${escaped}"`, workspacePath);
 		})
 	);

@@ -110,10 +110,17 @@ function tsType(valueType, helpName) {
   if (valueType.includes('Boolean')) return 'boolean';
   if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double')) return 'number';
 
-  // If helpName has pipe-separated values, it's an enum — derive a named union type
+  // If helpName has pipe-separated values, it's an enum — emit a named union type.
   if (helpName && helpName.includes('|')) {
     const vals = helpName.split('|').map((v) => v.trim()).filter(Boolean);
     if (vals.length >= 2) {
+      // For System.String options whose enum-values are merely a help hint,
+      // emit an inline literal union — never reuse the name "String" (it would
+      // shadow TypeScript's built-in string type when collected into usedUnions).
+      const baseType = valueType.replace(/^System\.Nullable<(.+)>$/, '$1');
+      if (baseType === 'System.String') {
+        return vals.map((v) => `'${v}'`).join(' | ');
+      }
       const tsName = deriveUnionName(valueType);
       usedUnions.set(tsName, { tsName, values: vals });
       return tsName;
@@ -280,25 +287,33 @@ function generate(schema) {
     L();
 
     // --- Options interface ---
-    L(`export interface ${ifaceName} extends CommonOptions {`);
-    // positional args first
-    for (const arg of positionalArgs) {
-      const required = arg.def.arity?.minimum >= 1;
-      L(`  /** ${cleanDesc(arg.def.description)} */`);
-      L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+    // If the interface would have no members of its own beyond CommonOptions,
+    // emit a type alias instead — TypeScript's no-empty-object-type lint rule
+    // forbids `interface X extends Y {}` because it's equivalent to `Y`.
+    const hasOwnMembers = positionalArgs.length > 0 || opts.length > 0 || !!passthrough;
+    if (!hasOwnMembers) {
+      L(`export type ${ifaceName} = CommonOptions;`);
+    } else {
+      L(`export interface ${ifaceName} extends CommonOptions {`);
+      // positional args first
+      for (const arg of positionalArgs) {
+        const required = arg.def.arity?.minimum >= 1;
+        L(`  /** ${cleanDesc(arg.def.description)} */`);
+        L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+      }
+      // then named options
+      for (const opt of opts) {
+        const tp = tsType(opt.def.valueType, opt.def.helpName);
+        L(`  /** ${cleanDesc(opt.def.description)} */`);
+        L(`  ${opt.propName}?: ${tp};`);
+      }
+      // passthrough args property
+      if (passthrough) {
+        L(`  /** ${passthrough.description} */`);
+        L(`  ${passthrough.propName}?: string[];`);
+      }
+      L('}');
     }
-    // then named options
-    for (const opt of opts) {
-      const tp = tsType(opt.def.valueType, opt.def.helpName);
-      L(`  /** ${cleanDesc(opt.def.description)} */`);
-      L(`  ${opt.propName}?: ${tp};`);
-    }
-    // passthrough args property
-    if (passthrough) {
-      L(`  /** ${passthrough.description} */`);
-      L(`  ${passthrough.propName}?: string[];`);
-    }
-    L('}');
     L();
 
     // --- Wrapper function ---
