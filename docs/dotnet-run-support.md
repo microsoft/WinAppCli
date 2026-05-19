@@ -190,12 +190,28 @@ The CLI always re-registers when:
 - More than one package with the same identity name is installed.
 - `--clean` was passed (force fresh state).
 
-Verbose output (`dotnet run -v:detailed` or `winapp run --verbose`) prints the
-following when the skip path is taken:
+At default verbosity you will see a short status line whenever the skip path is taken:
+
+```text
+Reusing existing registration (manifest unchanged)
+```
+
+To see the full rationale, run the CLI directly with `--verbose`:
+
+```powershell
+winapp run --verbose
+```
+
+which prints a debug line such as:
 
 ```text
 Package already registered with identical manifest ... — skipping re-registration to preserve capability consent
 ```
+
+> **Note:** `dotnet run -v:detailed` does not currently forward MSBuild verbosity to
+> the embedded CLI invocation, so debug-level CLI messages are not surfaced through
+> the `dotnet run` host. Use `winapp run --verbose` (or set `<WinAppLaunchArgs>--verbose</WinAppLaunchArgs>`
+> in the project) when you need the debug rationale.
 
 ## Production Blockers
 

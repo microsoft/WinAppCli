@@ -1772,6 +1772,44 @@ public class MsixServiceTests
     }
 
     [TestMethod]
+    public void IsExistingRegistrationUpToDate_FindDevPackagesThrows_ReturnsFalse()
+    {
+        // L4 (PR #542 review): future code changes flipping the fallback to "true" or removing
+        // the debug message shouldn't slip past the test suite.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+        var newManifestPath = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        File.WriteAllText(newManifestPath.FullName, "<Package />");
+        var previousBytes = Encoding.UTF8.GetBytes("<Package />");
+
+        var fake = new FakePackageRegistrationService { FindDevPackagesThrows = new InvalidOperationException("WinRT exploded") };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+        var taskContext = CreateTestTaskContext();
+
+        var result = svc.IsExistingRegistrationUpToDate(
+            "MyApp", previousBytes, newManifestPath, outputDir, taskContext);
+
+        Assert.IsFalse(result, "Exceptions inspecting the existing registration must fall back to the unregister+register path");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_PropagatesOperationCanceled()
+    {
+        // M3 (PR #542 review): cancellation must NOT be swallowed by the generic catch.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+        var newManifestPath = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        File.WriteAllText(newManifestPath.FullName, "<Package />");
+        var previousBytes = Encoding.UTF8.GetBytes("<Package />");
+
+        var fake = new FakePackageRegistrationService { FindDevPackagesThrows = new OperationCanceledException() };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        Assert.ThrowsExactly<OperationCanceledException>(() =>
+            svc.IsExistingRegistrationUpToDate("MyApp", previousBytes, newManifestPath, outputDir, CreateTestTaskContext()));
+    }
+
+    [TestMethod]
     public void TryReadExistingLayoutManifestBytes_NoManifest_ReturnsNull()
     {
         var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "EmptyAppX"));
@@ -1783,17 +1821,33 @@ public class MsixServiceTests
     }
 
     [TestMethod]
-    public void TryReadExistingLayoutManifestBytes_FindsLowercaseFilename()
+    public void TryReadExistingLayoutManifestBytes_FindsAppxManifestXml()
     {
-        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "LowercaseAppX"));
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "PascalAppX"));
         dir.Create();
-        var content = "<Package id=\"lowercase\" />";
-        File.WriteAllText(Path.Combine(dir.FullName, "appxmanifest.xml"), content);
+        var content = "<Package id=\"pascal\" />";
+        File.WriteAllText(Path.Combine(dir.FullName, "AppxManifest.xml"), content);
 
         var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
 
         Assert.IsNotNull(bytes);
         Assert.AreEqual(content, Encoding.UTF8.GetString(bytes));
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_IgnoresStrayPackageAppxmanifest()
+    {
+        // L1 (PR #542 review): a stray Package.appxmanifest in the output dir is NEVER the
+        // file Windows actually registered — `winapp run` always normalizes to AppxManifest.xml
+        // / appxmanifest.xml. Using it as a snapshot baseline would silently let the skip
+        // path trigger off the wrong artifact.
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "StrayAppX"));
+        dir.Create();
+        File.WriteAllText(Path.Combine(dir.FullName, "Package.appxmanifest"), "<Package stray=\"true\" />");
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNull(bytes, "Package.appxmanifest must not be used as a registration snapshot baseline");
     }
 
     [TestMethod]
@@ -1804,6 +1858,72 @@ public class MsixServiceTests
         var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
 
         Assert.IsNull(bytes);
+    }
+
+    #endregion
+
+    #region TrySkipRegistration Tests (PR #542 review M6 — issue #537)
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenCleanIsTrue_ReturnsNullAndDoesNotQueryPackages()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: true, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result, "--clean must always force the unregister+register path");
+        Assert.AreEqual(0, fixture.Fake.FindDevPackagesCalls.Count,
+            "Should short-circuit before any package enumeration when clean=true");
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenRegistrationUpToDate_ReturnsExistingIdentity()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=TestPublisher", "AppId42",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("MyApp", result.PackageName);
+        Assert.AreEqual("CN=TestPublisher", result.Publisher);
+        Assert.AreEqual("AppId42", result.ApplicationId);
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenManifestChanged_ReturnsNull()
+    {
+        // Drives the most important integration assertion: when the helper says
+        // "not up to date", the caller will fall through and call Unregister/Register.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody:         "<Package new=\"true\"/>",
+            previousManifestBody: "<Package old=\"true\"/>");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result, "Changed manifest must drop through to unregister+register");
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenFirstRun_ReturnsNull()
+    {
+        // No previous snapshot (e.g. first run on this machine) — must register normally.
+        var fixture = CreateSkipRegistrationFixture("<Package />", capturePreviousManifest: false);
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result);
     }
 
     #endregion
