@@ -155,11 +155,10 @@ internal partial class MsixService
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
+            // ManifestHelper.FindManifest already probes both canonical filenames; if it
+            // returns a non-existent FileInfo, downstream RegisterLooseLayoutPackageAsync
+            // will surface the missing-manifest error.
             var registrationManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
-            if (!registrationManifest.Exists)
-            {
-                registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
-            }
 
             var skipResult = TrySkipRegistration(
                 identity.PackageName, identity.Publisher, identity.ApplicationId,

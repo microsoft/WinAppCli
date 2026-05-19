@@ -210,8 +210,9 @@ Package already registered with identical manifest ... — skipping re-registrat
 
 > **Note:** `dotnet run -v:detailed` does not currently forward MSBuild verbosity to
 > the embedded CLI invocation, so debug-level CLI messages are not surfaced through
-> the `dotnet run` host. Use `winapp run --verbose` (or set `<WinAppLaunchArgs>--verbose</WinAppLaunchArgs>`
-> in the project) when you need the debug rationale.
+> the `dotnet run` host. Invoke `winapp run --verbose` directly when you need the
+> debug rationale. (`WinAppLaunchArgs` is forwarded to your app via `--args`, not
+> to the CLI, so it cannot be used for this.)
 
 ## Production Blockers
 
