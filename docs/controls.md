@@ -1,3 +1,6 @@
+<!-- mslearn: true -->
+<!-- ms.topic: reference -->
+<!-- description: Reference for the winapp CLI controls command. Search the WinUI 3 Gallery, Windows Community Toolkit, and curated core platform patterns for grounded XAML and C# samples from the terminal. -->
 # Controls Search
 
 Search the **WinUI 3 Gallery**, **Windows Community Toolkit**, and a curated
