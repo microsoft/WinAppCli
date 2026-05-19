@@ -47,19 +47,27 @@ internal class UpdateNotificationService(
                 return;
             }
 
-            // Prerelease builds are always ahead of the latest stable release —
-            // never show an update notice for them.
-            if (IsPreReleaseVersion(VersionHelper.GetVersionString()))
-            {
-                return;
-            }
-
             var cacheFile = GetUpdateCheckFile();
             var cache = ReadCache(cacheFile);
 
-            // Show notice if a newer version is cached and not yet shown today
+            // Paranoia: discard cached versions that look like test artifacts (e.g., 99.0.0, 999.0.0)
+            if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion))
+            {
+                cache = cache with { LatestVersion = "" };
+                WriteCacheFile(cacheFile, cache);
+            }
+
+            // Show notice if a newer version is cached and not yet shown today.
+            // For prerelease builds, compare against the core version only — a prerelease
+            // like "0.3.2-prerelease.73" is conceptually at or ahead of stable "0.3.2",
+            // but should still be notified about a genuinely newer stable like "0.4.0".
+            var currentVersion = VersionHelper.GetVersionString();
+            var effectiveCurrentVersion = IsPreReleaseVersion(currentVersion)
+                ? GetCoreVersion(currentVersion)
+                : currentVersion;
+
             if (!string.IsNullOrEmpty(cache.LatestVersion)
-                && IsNewerVersion(cache.LatestVersion, VersionHelper.GetVersionString())
+                && IsNewerVersion(cache.LatestVersion, effectiveCurrentVersion)
                 && cache.LastShownDate != DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             {
                 DisplayUpdateNotification(cache.LatestVersion);
@@ -189,6 +197,34 @@ internal class UpdateNotificationService(
         }
 
         return version.Contains('-');
+    }
+
+    /// <summary>
+    /// Returns the core version without prerelease suffix or build metadata.
+    /// E.g., "0.3.2-prerelease.73+abc" → "0.3.2"
+    /// </summary>
+    internal static string GetCoreVersion(string version)
+    {
+        var plusIdx = version.IndexOf('+');
+        if (plusIdx >= 0)
+        {
+            version = version[..plusIdx];
+        }
+
+        var dashIdx = version.IndexOf('-');
+        return dashIdx >= 0 ? version[..dashIdx] : version;
+    }
+
+    /// <summary>
+    /// Detects unreasonably high version numbers that likely came from test fixtures
+    /// (e.g., 99.0.0, 999.0.0). Any major version ≥ 50 is considered unreasonable.
+    /// </summary>
+    internal static bool IsUnreasonableVersion(string version)
+    {
+        var core = GetCoreVersion(version);
+        var dotIdx = core.IndexOf('.');
+        var majorStr = dotIdx >= 0 ? core[..dotIdx] : core;
+        return int.TryParse(majorStr, out var major) && major >= 50;
     }
 
     internal static bool IsNewerVersion(string latest, string current)

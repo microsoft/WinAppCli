@@ -88,7 +88,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheFile = new FileInfo(Path.Combine(_testCacheDirectory.FullName, ".update-check"));
         // Write an existing cache with a lastShownDate
         cacheFile.Directory?.Create();
-        File.WriteAllText(cacheFile.FullName, $"{DateTime.UtcNow.AddHours(-25):O}\n999.0.0\n2026-01-15");
+        File.WriteAllText(cacheFile.FullName, $"{DateTime.UtcNow.AddHours(-25):O}\n5.0.0\n2026-01-15");
 
         await _concreteService.RefreshCacheAsync(cacheFile);
 
@@ -103,12 +103,12 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
         var output = TestAnsiConsole.Output;
-        Assert.IsTrue(output.Contains("999.0.0"), $"Expected notification with version, got: {output}");
+        Assert.IsTrue(output.Contains("5.0.0"), $"Expected notification with version, got: {output}");
         Assert.IsTrue(output.Contains("available"), $"Expected 'available' in notification, got: {output}");
     }
 
@@ -119,7 +119,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n{today}");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n{today}");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -162,7 +162,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFilePath = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -197,7 +197,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -212,7 +212,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -227,7 +227,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -242,7 +242,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -257,7 +257,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -272,7 +272,7 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFile = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
 
         _updateNotificationService.CheckAndNotify();
 
@@ -287,11 +287,11 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var cacheDir = _testCacheDirectory.FullName;
         var cacheFilePath = Path.Combine(cacheDir, ".update-check");
         Directory.CreateDirectory(cacheDir);
-        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n999.0.0");
+        File.WriteAllText(cacheFilePath, $"{DateTime.UtcNow:O}\n5.0.0");
 
         var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFilePath));
 
-        Assert.AreEqual("999.0.0", cache.LatestVersion);
+        Assert.AreEqual("5.0.0", cache.LatestVersion);
         Assert.AreEqual("", cache.LastShownDate, "Missing lastShownDate should default to empty (never shown)");
     }
 
@@ -460,5 +460,65 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     public void IsPreReleaseVersion_BranchPrereleaseLabel_ReturnsTrue()
     {
         Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("0.3.2-dev-my-feature.42"));
+    }
+
+    [TestMethod]
+    public void GetCoreVersion_StableVersion_ReturnsSame()
+    {
+        Assert.AreEqual("1.0.0", UpdateNotificationService.GetCoreVersion("1.0.0"));
+    }
+
+    [TestMethod]
+    public void GetCoreVersion_PreReleaseVersion_StripsPrerelease()
+    {
+        Assert.AreEqual("0.3.2", UpdateNotificationService.GetCoreVersion("0.3.2-prerelease.73"));
+    }
+
+    [TestMethod]
+    public void GetCoreVersion_WithBuildMetadata_StripsBoth()
+    {
+        Assert.AreEqual("1.0.0", UpdateNotificationService.GetCoreVersion("1.0.0-rc.1+build456"));
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_NormalVersion_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("5.0.0"));
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_HighVersion_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsUnreasonableVersion("99.0.0"));
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_TestArtifactVersion_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsUnreasonableVersion("999.0.0"));
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_BoundaryVersion_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("49.0.0"));
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_UnreasonableCachedVersion_DiscardsAndNoNotification()
+    {
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n999.0.0\n2020-01-01");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify for unreasonable version, got: {output}");
+
+        // Verify the cache was cleaned
+        var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFile));
+        Assert.AreEqual("", cache.LatestVersion, "Unreasonable version should be cleared from cache");
     }
 }

@@ -28,7 +28,7 @@ public class UpdateNotificationGatingTests
         // Create temp cache directory and seed with a "newer" version
         _tempCacheDir = Path.Combine(Path.GetTempPath(), $"winapp_gating_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempCacheDir);
-        SeedUpdateCheckCache("99.0.0");
+        SeedUpdateCheckCache("5.0.0");
 
         // Create first-run marker so FirstRunService doesn't trigger logging
         File.Create(Path.Combine(_tempCacheDir, ".first-run-complete")).Dispose();
