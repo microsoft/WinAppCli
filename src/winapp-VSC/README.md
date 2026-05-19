@@ -123,28 +123,24 @@ The extension includes a **visual editor** for `AppxManifest.xml` and `.appxmani
 
 | Tab | What you can edit |
 |-----|-------------------|
-| **Identity** | Package name, publisher, version, and processor architecture |
+| **Identity** | Package name, publisher, version, processor architecture, phone identity (optional), and resource ID |
 | **Properties** | Display name, publisher display name, description, and store logo path |
-| **Dependencies** | Target device families (min/max versions) and package dependencies |
+| **Dependencies** | Target device families (min/max versions), package dependencies, main package dependencies, driver constraints, OS package dependencies, host runtime dependencies, and external dependencies |
 | **Resources** | BCP-47 language declarations (e.g. `en-us`, `fr-fr`) |
-| **Capabilities** | General, restricted, and device capabilities (e.g. Internet Client, Run Full Trust, Microphone) |
-| **Applications** | Application entries including executable path, entry point, visual elements, and extensions |
+| **Capabilities** | General, restricted, device, and custom capabilities (e.g. Internet Client, Run Full Trust, Microphone) |
+| **Applications** | Application entries including executable path, entry point, trust level, runtime behavior, visual elements (logos, splash screen, tile options), and extensions (protocol activation, COM servers, background tasks, file type associations, app services, and more) |
 
-**Asset Generation:**
+**Key features:**
 
-The editor provides a **Regenerate Assets** button which invokes the CLI to auto-generate all icon sizes from a single source image.
-
-**Validation:**
-
-The editor provides real-time inline validation:
-- Required fields and field types
-- Version and publisher formats
+- **Real-time validation** — inline errors for required fields, format rules (publisher DN, version, GUIDs, BCP-47, hex colors), and extension field requirements
+- **Asset generation** — "Regenerate Assets" button invokes the CLI to auto-generate all icon sizes from a single source image
+- **Extension management** — add/remove typed extensions (Protocol Activation, COM Server, Background Tasks, File Type Association, App Execution Alias, Startup Task, Share Target, App Service, Toast Notification Activation, MCP Server) with pre-filled templates
+- **Reorderable lists** — drag dependencies and resources up/down to control XML element order
+- **Format-preserving edits** — changes are applied surgically to the XML text, preserving your whitespace, comments, and attribute ordering
 
 **How to open:**
 
 When you open an `AppxManifest.xml` or `.appxmanifest` file, VS Code will offer the visual editor as an option alongside the default text editor. You can switch between them at any time by right clicking on the file and selecting the **Open With…** command.
-
-For a detailed breakdown of every supported and unsupported manifest property, see [EDITOR_SUPPORT.md](EDITOR_SUPPORT.md).
 
 ## Scenarios
 
