@@ -202,7 +202,6 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
-| `searchAll` | `boolean \| undefined` | No | Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
 
@@ -1168,7 +1167,6 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
-| `searchAll` | `boolean \| undefined` | No | Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |

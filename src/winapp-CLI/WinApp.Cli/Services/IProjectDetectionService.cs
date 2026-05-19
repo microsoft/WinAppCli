@@ -21,4 +21,11 @@ internal interface IProjectDetectionService
         int maxProjects,
         IProgress<DetectedProject>? progress,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Checks a single directory for a compatible project marker.
+    /// </summary>
+    /// <param name="directory">The directory to check</param>
+    /// <returns>The detected project, or null if no project is found</returns>
+    DetectedProject? DetectProjectAt(DirectoryInfo directory);
 }

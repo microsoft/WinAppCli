@@ -215,26 +215,30 @@ public class InitCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_UseDefaults_NoProject_ProceedsAnyway()
+    public async Task InitCommand_UseDefaults_NoProject_NoDirectory_ErrorsWithGuidance()
     {
-        // Arrange — empty directory, no project markers
+        // Arrange — empty directory, no project markers, no explicit directory argument
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--use-defaults", "--config-only" };
 
         // Act — no prompts expected with --use-defaults
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
-        // Assert — should proceed with warnings but succeed (creates config even without a project)
-        Assert.AreEqual(0, exitCode, "Init should complete with --use-defaults even without a detected project");
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        Assert.IsTrue(File.Exists(configPath), "winapp.yaml should be created with --use-defaults even without a project");
+        // Assert — should error because --use-defaults without explicit directory requires a detectable project
+        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when no project is detected and no directory is specified");
     }
 
     [TestMethod]
     public async Task InitCommand_ExplicitDirectory_WithProject_NoConfirmationPrompt()
     {
         // Arrange — create a .csproj so the project is detected at the explicit path
-        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "MyApp.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "MyApp.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
 
         var initCommand = GetRequiredService<InitCommand>();
         // Use --no-prompt to skip workspace setup prompts (TFM update, etc.)

@@ -32,7 +32,7 @@ internal class InitCommand : Command, IShortDescription
         BaseDirectoryArgument.AcceptExistingOnly();
         ConfigDirOption = new Option<DirectoryInfo>("--config-dir")
         {
-            Description = "Directory to read/store configuration (default: current directory)"
+            Description = "Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected)"
         };
         ConfigDirOption.AcceptExistingOnly();
         SetupSdksOption = new Option<SdkInstallMode?>("--setup-sdks")
@@ -90,10 +90,15 @@ internal class InitCommand : Command, IShortDescription
 
             DirectoryInfo? selectedDirectory;
 
-            if (baseDirectoryExplicit || useDefaults)
+            if (baseDirectoryExplicit)
             {
-                // User specified a directory or --use-defaults: skip search, use the directory directly
+                // User specified a directory: skip search, use the directory directly
                 selectedDirectory = await InitDirectlyAsync(baseDirectory, useDefaults, cancellationToken);
+            }
+            else if (useDefaults)
+            {
+                // --use-defaults without explicit directory: search and error with guidance
+                selectedDirectory = await DetectAndErrorForDefaultsAsync(baseDirectory, cancellationToken);
             }
             else
             {
@@ -128,7 +133,57 @@ internal class InitCommand : Command, IShortDescription
                 ConfigOnly = configOnly
             };
 
-            return await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);
+            var result = await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);
+
+            // If init ran in a nested directory, remind the user to cd there for further commands
+            if (result == 0 && selectedDirectory.FullName != baseDirectory.FullName)
+            {
+                var relativePath = Path.GetRelativePath(baseDirectory.FullName, selectedDirectory.FullName);
+                logger.LogInformation("{Info} Run [blue]cd {Path}[/] to use further winapp commands in your project directory.",
+                    UiSymbols.Info, relativePath);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// When --use-defaults is set without an explicit directory argument, searches for projects
+        /// and errors out with guidance on which directory to pass.
+        /// </summary>
+        private async Task<DirectoryInfo?> DetectAndErrorForDefaultsAsync(
+            DirectoryInfo searchRoot,
+            CancellationToken cancellationToken)
+        {
+            const int maxProjects = 10;
+
+            var results = await projectDetectionService.DetectProjectsAsync(
+                searchRoot, maxProjects, progress: null, cancellationToken);
+
+            if (results.Count == 0)
+            {
+                logger.LogError("{Error} No compatible projects found. Provide a project directory: winapp init <path-to-project> --use-defaults",
+                    UiSymbols.Error);
+                return null;
+            }
+
+            // If the only result is at the search root, use it directly
+            if (results.Count == 1 && results[0].DisplayPath == ".")
+            {
+                logger.LogInformation("{Check} {TypeLabel} project detected in current directory",
+                    UiSymbols.Check, results[0].TypeLabel);
+                return results[0].Directory;
+            }
+
+            // Projects found but user didn't specify which one
+            logger.LogError("{Error} --use-defaults requires an explicit project directory. Detected projects:",
+                UiSymbols.Error);
+            foreach (var project in results)
+            {
+                logger.LogError("  {Bullet} {TypeLabel} project at {Path}",
+                    UiSymbols.Bullet, project.TypeLabel, project.DisplayPath);
+            }
+            logger.LogError("Run: winapp init <path-to-project> --use-defaults");
+            return null;
         }
 
         /// <summary>
@@ -201,7 +256,7 @@ internal class InitCommand : Command, IShortDescription
             bool useDefaults,
             CancellationToken cancellationToken)
         {
-            var detected = ProjectDetectionService.DetectProject(targetDirectory, targetDirectory);
+            var detected = projectDetectionService.DetectProjectAt(targetDirectory);
 
             if (detected != null)
             {
@@ -290,7 +345,7 @@ internal class InitCommand : Command, IShortDescription
             CancellationToken cancellationToken)
         {
             var choices = projects.Select(p =>
-                $"{p.TypeLabel} project at {p.DisplayPath}").ToList();
+                $"{Markup.Escape(p.TypeLabel)} project at {Markup.Escape(p.DisplayPath)}").ToList();
 
             // Always offer the current directory as a fallback option
             var currentDirIsListed = projects.Any(p => p.DisplayPath == ".");
@@ -299,9 +354,9 @@ internal class InitCommand : Command, IShortDescription
                 choices.Add(". (current directory — no project detected)");
             }
 
+            ansiConsole.WriteLine("Which project would you like to initialize with winapp?");
             var selected = await ansiConsole.PromptAsync(
                 new SelectionPrompt<string>()
-                    .Title("Which project would you like to initialize with winapp?")
                     .AddChoices(choices),
                 cancellationToken);
 

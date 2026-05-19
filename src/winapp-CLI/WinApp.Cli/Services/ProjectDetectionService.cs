@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 
 namespace WinApp.Cli.Services;
@@ -53,6 +54,11 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         ".git",
         "node_modules",
     };
+
+    public DetectedProject? DetectProjectAt(DirectoryInfo directory)
+    {
+        return DetectProject(directory, directory);
+    }
 
     public Task<IReadOnlyList<DetectedProject>> DetectProjectsAsync(
         DirectoryInfo root,
@@ -114,8 +120,8 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
             return new DetectedProject(DetectedProjectType.Flutter, directory, displayPath);
         }
 
-        // .NET: *.csproj
-        if (HasFileWithExtension(directory, "*.csproj"))
+        // .NET: *.csproj (only executable, non-test projects)
+        if (HasExecutableCsproj(directory))
         {
             return new DetectedProject(DetectedProjectType.Dotnet, directory, displayPath);
         }
@@ -141,6 +147,12 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         {
             foreach (var subDir in directory.EnumerateDirectories())
             {
+                // Skip symlinks/junctions to prevent reading outside the search root
+                if (subDir.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    continue;
+                }
+
                 if (File.Exists(Path.Combine(subDir.FullName, "tauri.conf.json")))
                 {
                     return true;
@@ -209,6 +221,85 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         }
         catch (IOException)
         {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the directory contains at least one .csproj that is an executable
+    /// (OutputType = Exe or WinExe) and is not a test project.
+    /// Library projects and test projects are excluded from init detection.
+    /// </summary>
+    internal static bool HasExecutableCsproj(DirectoryInfo directory)
+    {
+        IEnumerable<FileInfo> csprojFiles;
+        try
+        {
+            csprojFiles = directory.EnumerateFiles("*.csproj");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+
+        foreach (var csproj in csprojFiles)
+        {
+            if (IsExecutableNonTestProject(csproj))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExecutableNonTestProject(FileInfo csprojFile)
+    {
+        try
+        {
+            var doc = XDocument.Load(csprojFile.FullName);
+            var propertyGroups = doc.Descendants("PropertyGroup");
+
+            string? outputType = null;
+            bool? isTestProject = null;
+
+            foreach (var pg in propertyGroups)
+            {
+                var outputTypeEl = pg.Element("OutputType");
+                if (outputTypeEl != null)
+                {
+                    outputType = outputTypeEl.Value.Trim();
+                }
+
+                var isTestEl = pg.Element("IsTestProject");
+                if (isTestEl != null)
+                {
+                    isTestProject = string.Equals(isTestEl.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            // Exclude test projects
+            if (isTestProject == true)
+            {
+                return false;
+            }
+
+            // Only include executable projects (Exe or WinExe)
+            if (outputType == null)
+            {
+                return false;
+            }
+
+            return string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            // If we can't parse the csproj, skip it
             return false;
         }
     }

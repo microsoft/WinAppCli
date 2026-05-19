@@ -50,7 +50,111 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public void DetectProject_Dotnet_Csproj()
     {
-        CreateFile("MyApp.csproj", "<Project />");
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_WinExe()
+    {
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_ExcludesLibrary()
+    {
+        CreateFile("MyLib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_ExcludesDefaultOutputType()
+    {
+        // No OutputType defaults to Library
+        CreateFile("MyLib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_ExcludesTestProject()
+    {
+        CreateFile("MyApp.Tests.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <IsTestProject>true</IsTestProject>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_IncludesExeWithIsTestProjectFalse()
+    {
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <IsTestProject>false</IsTestProject>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_PicksExeOverLibraryInSameDir()
+    {
+        // Directory has both a library and an exe; should still detect
+        CreateFile("MyLib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
         var result = ProjectDetectionService.DetectProject(Root, Root);
         Assert.IsNotNull(result);
         Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
@@ -177,7 +281,13 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public void DetectProject_DotnetOverCpp_WhenBothPresent()
     {
-        CreateFile("MyApp.csproj", "<Project />");
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
         CreateFile("CMakeLists.txt", "cmake_minimum_required(VERSION 3.0)");
         var result = ProjectDetectionService.DetectProject(Root, Root);
         Assert.IsNotNull(result);
@@ -199,7 +309,13 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public async Task DetectProjects_BFS_FindsRootFirst()
     {
-        CreateFile("MyApp.csproj", "<Project />");
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
         CreateDir("sub");
         CreateFile(Path.Combine("sub", "Cargo.toml"), "[package]");
 
@@ -299,7 +415,13 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public void DetectProject_DisplayPath_RootIsDot()
     {
-        CreateFile("MyApp.csproj", "<Project />");
+        CreateFile("MyApp.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
         var result = ProjectDetectionService.DetectProject(Root, Root);
         Assert.IsNotNull(result);
         Assert.AreEqual(".", result.DisplayPath);
