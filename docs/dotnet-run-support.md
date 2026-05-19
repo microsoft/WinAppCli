@@ -190,9 +190,12 @@ The CLI always re-registers when:
 - More than one package with the same identity name is installed.
 - `--clean` was passed (force fresh state).
 
-Verbose output (`dotnet run -v:detailed` or `winapp run --verbose`) prints
-`Package already registered with identical manifest ... — skipping re-registration to
-preserve capability consent` when the skip path is taken.
+Verbose output (`dotnet run -v:detailed` or `winapp run --verbose`) prints the
+following when the skip path is taken:
+
+```text
+Package already registered with identical manifest ... — skipping re-registration to preserve capability consent
+```
 
 ## Production Blockers
 

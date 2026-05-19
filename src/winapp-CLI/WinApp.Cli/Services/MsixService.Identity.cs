@@ -1040,6 +1040,18 @@ internal partial class MsixService
             return false;
         }
 
+        // Cheap, side-effect-free checks first so we don't enumerate installed packages
+        // when we already know the manifest can't possibly match.
+        if (!newManifest.Exists)
+        {
+            return false;
+        }
+
+        if (previousManifestBytes.Length != newManifest.Length)
+        {
+            return false;
+        }
+
         try
         {
             var installed = packageRegistrationService.FindDevPackages(packageName);
@@ -1077,16 +1089,6 @@ internal partial class MsixService
             }
 
             if (!string.Equals(installedFullPath, outputFullPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (!newManifest.Exists)
-            {
-                return false;
-            }
-
-            if (previousManifestBytes.Length != newManifest.Length)
             {
                 return false;
             }
