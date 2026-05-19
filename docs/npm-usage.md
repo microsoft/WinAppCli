@@ -599,7 +599,8 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1402,7 +1403,8 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
