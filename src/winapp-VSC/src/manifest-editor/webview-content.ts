@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { KNOWN_CAPABILITIES, ARCHITECTURE_OPTIONS, DEVICE_FAMILY_OPTIONS } from './manifest-types';
-import { getEditorStyles } from './webview-styles';
+import { getEditorStyles, getErrorPageStyles } from './webview-styles';
 import { getEditorScript } from './webview-script';
 
 function buildCapabilityCheckboxList(
@@ -20,6 +20,7 @@ function buildCapabilityCheckboxList(
     }).join('');
 }
 
+/** Builds HTML for custom dropdown option divs (used instead of native <select> for consistent webview styling). */
 function buildSelectOptions(options: Array<{ value: string; label: string; selected?: boolean }>): string {
     return options.map(o =>
         `<div class="custom-select-option${o.selected ? ' selected' : ''}" data-value="${o.value}">${o.label}</div>`
@@ -35,47 +36,7 @@ export function getParseErrorContent(webview: vscode.Webview, nonce: string, err
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AppxManifest Editor</title>
-    <style nonce="${nonce}">
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body {
-            height: 100%;
-            font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-            font-size: var(--vscode-font-size, 13px);
-            color: var(--vscode-editor-foreground);
-            background: var(--vscode-editor-background);
-            display: flex; align-items: center; justify-content: center;
-        }
-        .error-container {
-            max-width: 520px; text-align: center; padding: 40px;
-        }
-        .error-icon {
-            font-size: 48px; margin-bottom: 16px;
-            color: var(--vscode-errorForeground, #f44747);
-        }
-        .error-title {
-            font-size: 18px; font-weight: 600; margin-bottom: 12px;
-        }
-        .error-message {
-            font-size: 13px; color: var(--vscode-descriptionForeground);
-            margin-bottom: 20px; line-height: 1.5;
-        }
-        .error-detail {
-            font-family: var(--vscode-editor-font-family, monospace);
-            font-size: 12px; background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border, transparent);
-            border-radius: 4px; padding: 10px; text-align: left;
-            white-space: pre-wrap; word-break: break-word;
-            color: var(--vscode-errorForeground, #f44747);
-            margin-bottom: 20px;
-        }
-        .btn {
-            padding: 6px 16px; font-size: 13px; font-family: inherit;
-            cursor: pointer; border: none; border-radius: 2px;
-            color: var(--vscode-button-foreground);
-            background: var(--vscode-button-background);
-        }
-        .btn:hover { background: var(--vscode-button-hoverBackground); }
-    </style>
+${getErrorPageStyles(nonce)}
 </head>
 <body>
     <div class="error-container">

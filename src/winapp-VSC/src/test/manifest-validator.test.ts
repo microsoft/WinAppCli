@@ -8,7 +8,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateManifest, isValidCustomCapability } from '../manifest-editor/manifest-validator';
+import { validateManifest, isValidCustomCapability, validateExtensionField } from '../manifest-editor/manifest-validator';
 import type { ManifestData, ValidationError } from '../manifest-editor/manifest-types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1395,5 +1395,73 @@ describe('Custom Capability validation', () => {
 
     it('should reject plain capability name: internetClient', () => {
         assert.ok(!isValidCustomCapability('internetClient'));
+    });
+});
+
+// ─── Extension Field Validation via validateManifest ────────────────────────
+
+describe('Extension Field Validation in validateManifest', () => {
+    it('should report error for invalid GUID in Class.Id extension field', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.comServer"><ComServer><ExeServer Executable="server.exe" DisplayName="MyServer"><Class Id="not-a-guid" /></ExeServer></ComServer></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.includes('extensions.0.Class.Id'));
+        assert.ok(extErrors.length > 0, 'Expected extension field error for invalid Class.Id GUID');
+        assert.equal(extErrors[0].severity, 'error');
+    });
+
+    it('should not report error for valid GUID in Class.Id extension field', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.comServer"><ComServer><ExeServer Executable="server.exe" DisplayName="MyServer"><Class Id="{12345678-1234-1234-1234-123456789012}" /></ExeServer></ComServer></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.includes('extensions.0.Class.Id'));
+        assert.equal(extErrors.length, 0, 'Expected no extension field error for valid Class.Id GUID');
+    });
+
+    it('should report error for invalid protocol name', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.protocol"><Protocol Name="MyProtocol" /></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.includes('extensions.0.Protocol.Name'));
+        assert.ok(extErrors.length > 0, 'Expected extension field error for uppercase protocol name');
+        assert.equal(extErrors[0].severity, 'error');
+    });
+
+    it('should report warning for non-exe/dll ExeServer.Executable', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.comServer"><ComServer><ExeServer Executable="server.bat" DisplayName="MyServer"><Class Id="{12345678-1234-1234-1234-123456789012}" /></ExeServer></ComServer></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.includes('extensions.0.ExeServer.Executable'));
+        assert.ok(extErrors.length > 0, 'Expected extension field warning for .bat executable');
+        assert.equal(extErrors[0].severity, 'warning');
+    });
+
+    it('should report no extension errors for valid extension XML', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.protocol"><Protocol Name="myprotocol" /></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.startsWith('applications.0.extensions.'));
+        assert.equal(extErrors.length, 0, 'Expected no extension field errors for valid extension');
+    });
+
+    it('should validate extension text content fields like FileType', () => {
+        const m = makeValidManifest();
+        m.applications[0].extensions = [
+            '<Extension Category="windows.fileTypeAssociation"><FileTypeAssociation Name="mytype"><SupportedFileTypes><FileType>txt</FileType></SupportedFileTypes></FileTypeAssociation></Extension>'
+        ];
+        const errors = validateManifest(m);
+        const extErrors = errors.filter(e => e.field.includes('extensions.0.FileType'));
+        assert.ok(extErrors.length > 0, 'Expected error for FileType without leading dot');
+        assert.equal(extErrors[0].severity, 'error');
     });
 });

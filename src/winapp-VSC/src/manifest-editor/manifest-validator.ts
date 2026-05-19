@@ -172,8 +172,16 @@ function validateImageField(errors: ValidationError[], field: string, value: str
 /** Validate all fields and return a list of errors. */
 export function validateManifest(data: ManifestData): ValidationError[] {
     const errors: ValidationError[] = [];
+    validateIdentity(data, errors);
+    validatePhoneIdentity(data, errors);
+    validateProperties(data, errors);
+    validateDependencies(data, errors);
+    validateResources(data, errors);
+    validateApplications(data, errors);
+    return errors;
+}
 
-    // Identity validation
+function validateIdentity(data: ManifestData, errors: ValidationError[]): void {
     if (!data.identity.name) {
         errors.push({ field: 'identity.name', message: 'Package name is required.', severity: 'error' });
     } else if (!IDENTITY_NAME_REGEX.test(data.identity.name)) {
@@ -198,7 +206,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         errors.push({ field: 'identity.version', message: 'Version must be a DotQuadNumber in Major.Minor.Build.Revision format (e.g. 1.0.0.0), each part 0–65535.', severity: 'error' });
     }
 
-    // Identity - optional ResourceId validation
     if (data.identity.resourceId) {
         if (!IDENTITY_NAME_REGEX.test(data.identity.resourceId)) {
             errors.push({ field: 'identity.resourceId', message: 'Resource ID can only contain letters, numbers, dots, and hyphens.', severity: 'error' });
@@ -209,24 +216,24 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Resource packages must use neutral architecture
     if (data.properties.resourcePackage === 'true' &&
         data.identity.processorArchitecture &&
         data.identity.processorArchitecture.toLowerCase() !== 'neutral') {
         errors.push({ field: 'identity.processorArchitecture', message: 'Resource packages must use neutral processor architecture.', severity: 'error' });
     }
+}
 
-    // Phone Identity validation
-    if (data.phoneIdentity) {
-        if (!data.phoneIdentity.phoneProductId || !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
-            errors.push({ field: 'phoneIdentity.phoneProductId', message: 'Phone Product ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
-        }
-        if (data.phoneIdentity.phonePublisherId && !GUID_REGEX.test(data.phoneIdentity.phonePublisherId)) {
-            errors.push({ field: 'phoneIdentity.phonePublisherId', message: 'Phone Publisher ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
-        }
+function validatePhoneIdentity(data: ManifestData, errors: ValidationError[]): void {
+    if (!data.phoneIdentity) { return; }
+    if (!data.phoneIdentity.phoneProductId || !GUID_REGEX.test(data.phoneIdentity.phoneProductId)) {
+        errors.push({ field: 'phoneIdentity.phoneProductId', message: 'Phone Product ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
     }
+    if (data.phoneIdentity.phonePublisherId && !GUID_REGEX.test(data.phoneIdentity.phonePublisherId)) {
+        errors.push({ field: 'phoneIdentity.phonePublisherId', message: 'Phone Publisher ID must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000).', severity: 'error' });
+    }
+}
 
-    // Properties validation
+function validateProperties(data: ManifestData, errors: ValidationError[]): void {
     if (!data.properties.displayName) {
         errors.push({ field: 'properties.displayName', message: 'Display name is required.', severity: 'error' });
     } else if (data.properties.displayName.length > 256) {
@@ -249,8 +256,9 @@ export function validateManifest(data: ManifestData): ValidationError[] {
     } else if (data.properties.description && /[\t\r\n]/.test(data.properties.description)) {
         errors.push({ field: 'properties.description', message: 'Description cannot contain tabs, carriage returns, or line feeds.', severity: 'error' });
     }
+}
 
-    // Dependencies validation
+function validateDependencies(data: ManifestData, errors: ValidationError[]): void {
     for (let i = 0; i < data.dependencies.targetDeviceFamilies.length; i++) {
         const family = data.dependencies.targetDeviceFamilies[i];
         const prefix = `dependencies.targetDeviceFamily.${i}`;
@@ -275,7 +283,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Package dependencies validation
     for (let i = 0; i < data.dependencies.packageDependencies.length; i++) {
         const dep = data.dependencies.packageDependencies[i];
         const prefix = `dependencies.packageDependency.${i}`;
@@ -301,7 +308,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Main package dependencies validation
     for (let i = 0; i < data.dependencies.mainPackageDependencies.length; i++) {
         const dep = data.dependencies.mainPackageDependencies[i];
         const prefix = `dependencies.mainPackageDependency.${i}`;
@@ -315,7 +321,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Driver constraints validation
     for (let i = 0; i < data.dependencies.driverConstraints.length; i++) {
         const constraint = data.dependencies.driverConstraints[i];
         const prefix = `dependencies.driverConstraint.${i}`;
@@ -337,7 +342,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // OS Package dependencies validation
     for (let i = 0; i < data.dependencies.osPackageDependencies.length; i++) {
         const dep = data.dependencies.osPackageDependencies[i];
         const prefix = `dependencies.osPackageDependency.${i}`;
@@ -357,7 +361,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // Host Runtime dependencies validation
     for (let i = 0; i < data.dependencies.hostRuntimeDependencies.length; i++) {
         const dep = data.dependencies.hostRuntimeDependencies[i];
         const prefix = `dependencies.hostRuntimeDependency.${i}`;
@@ -379,7 +382,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         }
     }
 
-    // External dependencies validation
     for (let i = 0; i < data.dependencies.externalDependencies.length; i++) {
         const dep = data.dependencies.externalDependencies[i];
         const prefix = `dependencies.externalDependency.${i}`;
@@ -400,8 +402,9 @@ export function validateManifest(data: ManifestData): ValidationError[] {
             errors.push({ field: `${prefix}.minVersion`, message: 'MinVersion must be a DotQuadNumber (e.g. 1.0.0.0), each part 0–65535.', severity: 'error' });
         }
     }
+}
 
-    // Resources validation
+function validateResources(data: ManifestData, errors: ValidationError[]): void {
     const isResourcePackage = data.properties.resourcePackage?.toLowerCase() === 'true';
     for (let i = 0; i < data.resources.length; i++) {
         const res = data.resources[i];
@@ -423,8 +426,9 @@ export function validateManifest(data: ManifestData): ValidationError[] {
             }
         }
     }
+}
 
-    // Applications validation
+function validateApplications(data: ManifestData, errors: ValidationError[]): void {
     for (let i = 0; i < data.applications.length; i++) {
         const app = data.applications[i];
         const prefix = `applications.${i}`;
@@ -471,7 +475,6 @@ export function validateManifest(data: ManifestData): ValidationError[] {
             errors.push({ field: `${prefix}.visualElements.backgroundColor`, message: 'Background color must be a hex color (e.g. #FFFFFF), "transparent", or a named color (e.g. cornflowerBlue).', severity: 'error' });
         }
 
-        // Visual asset PNG validation
         const ve = app.visualElements;
         const vePrefix = `${prefix}.visualElements`;
         validateImageField(errors, `${vePrefix}.square150x150Logo`, ve.square150x150Logo);
@@ -481,9 +484,159 @@ export function validateManifest(data: ManifestData): ValidationError[] {
         validateImageField(errors, `${vePrefix}.square310x310Logo`, ve.square310x310Logo);
         validateImageField(errors, `${vePrefix}.badgeLogo`, ve.badgeLogo);
         validateImageField(errors, `${vePrefix}.splashScreenImage`, ve.splashScreenImage);
+
+        if (app.extensions && app.extensions.length > 0) {
+            for (let extIdx = 0; extIdx < app.extensions.length; extIdx++) {
+                const extXml = app.extensions[extIdx];
+                const extFields = parseExtensionFieldsFromXml(extXml);
+                for (const field of extFields) {
+                    const isRequired = REQUIRED_EXT_FIELDS.has(field.label);
+                    const validation = validateExtensionField(field.label, field.value, isRequired);
+                    if (validation) {
+                        errors.push({
+                            field: `${prefix}.extensions.${extIdx}.${field.label}`,
+                            message: validation.message,
+                            severity: validation.level,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Extension Field Validation ─────────────────────────────────────────────
+
+export interface ExtFieldValidation {
+    level: 'error' | 'warning';
+    message: string;
+}
+
+// GUID regex that allows optional braces (CLSIDs typically have braces)
+const EXT_GUID_REGEX = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
+
+/** Required extension fields that must have a value. */
+const REQUIRED_EXT_FIELDS = new Set([
+    'ExeServer.Executable', 'ExeServer.DisplayName', 'Class.Id',
+    'AppExtension.Name', 'AppExtension.Id', 'AppExtension.DisplayName', 'AppExtension.PublicFolder',
+    'Registration', 'ExecutionAlias.Alias',
+    'Extension.EntryPoint', 'Task.Type',
+    'Protocol.Name',
+    'FileTypeAssociation.Name', 'FileType',
+    'StartupTask.TaskId', 'StartupTask.DisplayName',
+    'DataFormat',
+    'AppService.Name',
+    'ToastNotificationActivation.ToastActivatorCLSID'
+]);
+
+/**
+ * Validate an extension field value and return { level, message } or null if valid.
+ * This is the single source of truth for extension field validation.
+ */
+export function validateExtensionField(fieldLabel: string, value: string, isRequired: boolean): ExtFieldValidation | null {
+    // Required check first
+    if (isRequired && !value) {
+        return { level: 'error', message: 'This field is required.' };
+    }
+    if (!value) { return null; }
+
+    switch (fieldLabel) {
+        case 'Class.Id':
+        case 'ToastNotificationActivation.ToastActivatorCLSID':
+            if (!EXT_GUID_REGEX.test(value)) {
+                return { level: 'error', message: 'Must be a valid GUID, e.g., {12345678-1234-1234-1234-123456789012}' };
+            }
+            break;
+        case 'ExecutionAlias.Alias':
+            if (!/\.exe$/i.test(value)) {
+                return { level: 'error', message: 'Alias must end with .exe (e.g., "myapp.exe").' };
+            }
+            if (/[\\/:*?"<>|]/.test(value)) {
+                return { level: 'error', message: 'Alias must not contain path separators or special characters.' };
+            }
+            break;
+        case 'Protocol.Name':
+            if (!/^[a-z][a-z0-9.+\-]*$/.test(value)) {
+                return { level: 'error', message: 'Protocol must start with a lowercase letter and contain only lowercase letters, digits, ".", "+", or "-".' };
+            }
+            break;
+        case 'FileType':
+            if (!/^\.[a-zA-Z0-9]+$/.test(value)) {
+                return { level: 'error', message: 'File extension must start with "." followed by alphanumeric characters (e.g., ".txt").' };
+            }
+            break;
+        case 'FileTypeAssociation.Name':
+            if (!/^[a-zA-Z0-9.]+$/.test(value)) {
+                return { level: 'error', message: 'Name must contain only letters, digits, and periods.' };
+            }
+            break;
+        case 'StartupTask.Enabled':
+            if (value !== 'true' && value !== 'false') {
+                return { level: 'error', message: 'Value must be "true" or "false".' };
+            }
+            break;
+        case 'ExeServer.Executable':
+            if (!/\.(exe|dll)$/i.test(value)) {
+                return { level: 'warning', message: 'Expected a .exe or .dll path.' };
+            }
+            break;
+        case 'Task.Type': {
+            const validTypes = ['timer', 'pushNotification', 'systemEvent', 'general', 'audio', 'controlChannel', 'bluetooth', 'location', 'deviceUse', 'deviceServicing', 'deviceConnectionChange'];
+            if (!validTypes.includes(value)) {
+                return { level: 'warning', message: 'Common values: ' + validTypes.slice(0, 5).join(', ') + ', ...' };
+            }
+            break;
+        }
+        case 'AppService.Name':
+            if (!/^[a-zA-Z][a-zA-Z0-9._]*$/.test(value)) {
+                return { level: 'warning', message: 'Recommended format: reverse-domain style (e.g., "com.contoso.myservice").' };
+            }
+            break;
+    }
+    return null;
+}
+
+/**
+ * Parse extension XML and extract editable fields with their labels and values.
+ * Simplified server-side version of the webview's parseExtensionFields().
+ */
+function parseExtensionFieldsFromXml(xml: string): Array<{ label: string; value: string }> {
+    const fields: Array<{ label: string; value: string }> = [];
+
+    // Extract attributes from XML elements (Element.Attribute="value")
+    // Match: <ElementName AttrName="value" ...> patterns
+    const attrRegex = /<([a-zA-Z][a-zA-Z0-9]*)\s+([^>]*?)\/?>|<([a-zA-Z][a-zA-Z0-9]*)\s+([^>]*?)>/g;
+    let match: RegExpExecArray | null;
+    while ((match = attrRegex.exec(xml)) !== null) {
+        const elementName = match[1] || match[3];
+        const attrString = match[2] || match[4];
+        if (!attrString) continue;
+
+        // Parse individual attributes from the attribute string
+        const attrItemRegex = /([a-zA-Z][a-zA-Z0-9]*)="([^"]*)"/g;
+        let attrMatch: RegExpExecArray | null;
+        while ((attrMatch = attrItemRegex.exec(attrString)) !== null) {
+            const attrName = attrMatch[1];
+            const attrValue = attrMatch[2];
+            // Skip xmlns and Category on root
+            if (attrName.startsWith('xmlns') || attrName === 'xmlns') continue;
+            if (attrName === 'Category') continue;
+            const fieldKey = elementName + '.' + attrName;
+            fields.push({ label: fieldKey, value: attrValue });
+        }
     }
 
-    return errors;
+    // Extract text content from leaf elements: <Element>text</Element>
+    const textContentRegex = /<([a-zA-Z][a-zA-Z0-9]*)(?:\s[^>]*)?>([^<]+)<\/\1>/g;
+    while ((match = textContentRegex.exec(xml)) !== null) {
+        const elementName = match[1];
+        const textValue = match[2].trim();
+        if (textValue) {
+            fields.push({ label: elementName, value: textValue });
+        }
+    }
+
+    return fields;
 }
 
 /** Compare two version strings. Returns negative if a < b, 0 if equal, positive if a > b. */

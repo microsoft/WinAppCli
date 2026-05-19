@@ -88,18 +88,6 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             const value = el.value;
             const index = parseInt(el.getAttribute('data-index') || '0', 10);
 
-            // Inline GUID validation for phoneIdentity fields
-            if (section === 'phoneIdentity' && (field === 'phoneProductId' || field === 'phonePublisherId')) {
-                const group = el.closest('.form-group');
-                const label = field === 'phoneProductId' ? 'Phone Product ID' : 'Phone Publisher ID';
-                const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-                if (!value || !guidPattern.test(value)) {
-                    setGroupValidation(group, 'error', label + ' must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000)');
-                } else {
-                    setGroupValidation(group, 'clear');
-                }
-            }
-
             vscode.postMessage({ type: 'fieldChanged', section, field, value, index });
         }
 
@@ -1036,30 +1024,14 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
 
                 // Build extensions HTML
                 let extListHtml = '';
-                const requiredExtFields = new Set([
-                    'ExeServer.Executable', 'ExeServer.DisplayName', 'Class.Id',
-                    'AppExtension.Name', 'AppExtension.Id', 'AppExtension.DisplayName', 'AppExtension.PublicFolder',
-                    'Registration', 'ExecutionAlias.Alias',
-                    'Extension.EntryPoint', 'Task.Type',
-                    'Protocol.Name',
-                    'FileTypeAssociation.Name', 'FileType',
-                    'StartupTask.TaskId', 'StartupTask.DisplayName',
-                    'DataFormat',
-                    'AppService.Name',
-                    'ToastNotificationActivation.ToastActivatorCLSID'
-                ]);
                 if (app.extensions && app.extensions.length > 0) {
                     app.extensions.forEach((extXml, eidx) => {
                         const fields = parseExtensionFields(extXml);
                         let fieldsHtml = fields.map(f => {
                             let descHtml = f.description ? '<div class="description">' + escapeHtml(f.description) + '</div>' : '';
                             const textContentAttr = f.isTextContent ? ' data-ext-text-content="true"' : '';
-                            const isRequired = f.editable && requiredExtFields.has(f.label);
-                            const validation = f.editable ? validateExtField(f.label, f.value, isRequired) : null;
-                            const errorClass = validation && validation.level ? ' has-' + validation.level : '';
-                            const errorMsg = validation && validation.message
-                                ? '<div class="validation-msg ' + validation.level + '">' + escapeHtml(validation.message) + '</div>'
-                                : '<div class="validation-msg"></div>';
+                            const errorClass = '';
+                            const errorMsg = '<div class="validation-msg"></div>';
                             if (!f.editable) {
                                 return '<div class="form-group"><label>' + escapeHtml(f.label) + ':</label>' +
                                     '<input type="text" value="' + escapeHtml(f.value) + '" readonly class="ext-field-computed" />' +
@@ -1377,19 +1349,6 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                 card.querySelectorAll('input[data-ext-field]').forEach(inp => {
                     let extDebounce = null;
                     inp.addEventListener('input', () => {
-                        // Live validation for extension fields
-                        const fg = inp.closest('.form-group');
-                        const fieldLabel = inp.getAttribute('data-ext-field');
-                        const isReq = requiredExtFields.has(fieldLabel);
-                        if (fg) {
-                            const validation = validateExtField(fieldLabel, inp.value, isReq);
-                            fg.classList.remove('has-warning');
-                            if (validation && validation.level) {
-                                setGroupValidation(fg, validation.level, validation.message);
-                            } else {
-                                setGroupValidation(fg, 'clear');
-                            }
-                        }
                         clearTimeout(extDebounce);
                         extDebounce = setTimeout(() => {
                             vscode.postMessage({
@@ -1589,9 +1548,34 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                 fg.classList.remove('has-warning');
                 setGroupValidation(fg, 'clear');
             });
+            // Clear extension field validation errors
+            document.querySelectorAll('input[data-ext-field]').forEach(inp => {
+                const fg = inp.closest('.form-group');
+                if (fg) {
+                    fg.classList.remove('has-warning');
+                    setGroupValidation(fg, 'clear');
+                }
+            });
 
             // Show new errors
             errors.forEach(err => {
+                // Check if this is an extension field error (applications.N.extensions.M.FieldLabel)
+                const extMatch = err.field.match(/^applications\\.(\d+)\\.extensions\\.(\d+)\\.(.+)$/);
+                if (extMatch) {
+                    const appIdx = extMatch[1];
+                    const extIdx = extMatch[2];
+                    const fieldLabel = extMatch[3];
+                    const inp = document.querySelector('input[data-app-index="' + appIdx + '"][data-ext-index="' + extIdx + '"][data-ext-field="' + fieldLabel + '"]');
+                    if (inp) {
+                        const fg = inp.closest('.form-group');
+                        if (fg) {
+                            if (err.severity === 'warning') { fg.classList.add('has-warning'); }
+                            setGroupValidation(fg, err.severity, err.message);
+                        }
+                    }
+                    return;
+                }
+
                 const fg = document.querySelector('.form-group[data-field="' + err.field + '"]');
                 if (fg) {
                     if (err.severity === 'warning') { fg.classList.add('has-warning'); }
@@ -1749,72 +1733,6 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             }
             walk(root, 0);
             return fields;
-        }
-
-        /** Validate an extension field value and return { level, message } or null if valid.
-         *  Keep in sync with extension-field-validator.ts (canonical source). */
-        function validateExtField(fieldLabel, value, isRequired) {
-            const guidRegex = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
-
-            // Required check first
-            if (isRequired && !value) {
-                return { level: 'error', message: 'This field is required.' };
-            }
-            if (!value) return null;
-
-            switch (fieldLabel) {
-                case 'Class.Id':
-                case 'ToastNotificationActivation.ToastActivatorCLSID':
-                    if (!guidRegex.test(value)) {
-                        return { level: 'error', message: 'Must be a valid GUID, e.g., {12345678-1234-1234-1234-123456789012}' };
-                    }
-                    break;
-                case 'ExecutionAlias.Alias':
-                    if (!/\.exe$/i.test(value)) {
-                        return { level: 'error', message: 'Alias must end with .exe (e.g., "myapp.exe").' };
-                    }
-                    if (/[\\/:*?"<>|]/.test(value)) {
-                        return { level: 'error', message: 'Alias must not contain path separators or special characters.' };
-                    }
-                    break;
-                case 'Protocol.Name':
-                    if (!/^[a-z][a-z0-9.+\-]*$/.test(value)) {
-                        return { level: 'error', message: 'Protocol must start with a lowercase letter and contain only lowercase letters, digits, ".", "+", or "-".' };
-                    }
-                    break;
-                case 'FileType':
-                    if (!/^\.[a-zA-Z0-9]+$/.test(value)) {
-                        return { level: 'error', message: 'File extension must start with "." followed by alphanumeric characters (e.g., ".txt").' };
-                    }
-                    break;
-                case 'FileTypeAssociation.Name':
-                    if (!/^[a-zA-Z0-9.]+$/.test(value)) {
-                        return { level: 'error', message: 'Name must contain only letters, digits, and periods.' };
-                    }
-                    break;
-                case 'StartupTask.Enabled':
-                    if (value !== 'true' && value !== 'false') {
-                        return { level: 'error', message: 'Value must be "true" or "false".' };
-                    }
-                    break;
-                case 'ExeServer.Executable':
-                    if (!/\.(exe|dll)$/i.test(value)) {
-                        return { level: 'warning', message: 'Expected a .exe or .dll path.' };
-                    }
-                    break;
-                case 'Task.Type':
-                    var validTypes = ['timer', 'pushNotification', 'systemEvent', 'general', 'audio', 'controlChannel', 'bluetooth', 'location', 'deviceUse', 'deviceServicing', 'deviceConnectionChange'];
-                    if (!validTypes.includes(value)) {
-                        return { level: 'warning', message: 'Common values: ' + validTypes.slice(0, 5).join(', ') + ', ...' };
-                    }
-                    break;
-                case 'AppService.Name':
-                    if (!/^[a-zA-Z][a-zA-Z0-9._]*$/.test(value)) {
-                        return { level: 'warning', message: 'Recommended format: reverse-domain style (e.g., "com.contoso.myservice").' };
-                    }
-                    break;
-            }
-            return null;
         }
 
         function toColorValue(str) {

@@ -541,3 +541,44 @@ export function getEditorStyles(nonce: string): string {
         .custom-dropdown-item:hover { background:var(--vscode-list-hoverBackground, rgba(255,255,255,0.05)); }
     </style>`;
 }
+
+/** CSS styles for the parse-error page shown when the manifest XML is invalid. */
+export function getErrorPageStyles(nonce: string): string {
+    return `    <style nonce="${nonce}">
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%;
+            font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+            font-size: var(--vscode-font-size, 13px);
+            color: var(--vscode-editor-foreground);
+            background: var(--vscode-editor-background);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .error-container { max-width: 520px; text-align: center; padding: 40px; }
+        .error-icon {
+            font-size: 48px; margin-bottom: 16px;
+            color: var(--vscode-errorForeground, #f44747);
+        }
+        .error-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+        .error-message {
+            font-size: 13px; color: var(--vscode-descriptionForeground);
+            margin-bottom: 20px; line-height: 1.5;
+        }
+        .error-detail {
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px; background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border, transparent);
+            border-radius: 4px; padding: 10px; text-align: left;
+            white-space: pre-wrap; word-break: break-word;
+            color: var(--vscode-errorForeground, #f44747);
+            margin-bottom: 20px;
+        }
+        .btn {
+            padding: 6px 16px; font-size: 13px; font-family: inherit;
+            cursor: pointer; border: none; border-radius: 2px;
+            color: var(--vscode-button-foreground);
+            background: var(--vscode-button-background);
+        }
+        .btn:hover { background: var(--vscode-button-hoverBackground); }
+    </style>`;
+}
