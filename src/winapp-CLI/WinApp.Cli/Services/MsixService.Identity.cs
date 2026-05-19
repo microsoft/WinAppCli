@@ -130,6 +130,12 @@ internal partial class MsixService
         {
             taskContext.AddDebugMessage($"{UiSymbols.Note} MSBuild-generated manifest detected");
 
+            // Snapshot the previous registered manifest BEFORE the copy/sync overwrites it.
+            // Used below to detect a no-op re-registration so we can preserve capability consent
+            // (issue #537). Loose-layout dev packages register the file in-place, so once we
+            // overwrite it we can't recover the old bytes from disk.
+            var previousManifestBytes = TryReadExistingLayoutManifestBytes(outputAppXDirectory);
+
             // Look for a .build.appxrecipe file in the input directory
             var recipeFile = inputDirectory.EnumerateFiles("*.build.appxrecipe", SearchOption.TopDirectoryOnly).FirstOrDefault();
 
@@ -151,10 +157,10 @@ internal partial class MsixService
             var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
 
-            // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
-
-            // Register from the AppX layout directory
+            // Resolve the manifest that would be registered before deciding whether we can
+            // skip the unregister/register pair. Windows resets capability consent on every
+            // re-registration regardless of RemovalOptions.PreserveApplicationData (issue #537),
+            // so we match Visual Studio's behavior and only re-register when something changed.
             var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
             if (!registrationManifest.Exists)
             {
@@ -164,6 +170,17 @@ internal partial class MsixService
             {
                 registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
             }
+
+            if (!clean && IsExistingRegistrationUpToDate(identity.PackageName, previousManifestBytes, registrationManifest, outputAppXDirectory, taskContext))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Package already registered with identical manifest at {outputAppXDirectory.FullName} — skipping re-registration to preserve capability consent");
+                return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+            }
+
+            // Unregister any existing package first (preserving app data by default)
+            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+
+            // Register from the AppX layout directory
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);
 
             return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
@@ -175,6 +192,11 @@ internal partial class MsixService
         {
             outputAppXDirectory.Create();
         }
+
+        // Snapshot the previously-registered manifest BEFORE Sync/placeholder-resolution
+        // overwrites it. See the MSBuild branch above and IsExistingRegistrationUpToDate
+        // for the rationale (issue #537).
+        var previousRawManifestBytes = TryReadExistingLayoutManifestBytes(outputAppXDirectory);
 
         SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
 
@@ -275,6 +297,14 @@ internal partial class MsixService
 
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
+
+            // See MSBuild branch above for the rationale behind the skip-re-registration
+            // fast-path (issue #537: re-registration resets capability consent in Windows).
+            if (!clean && IsExistingRegistrationUpToDate(identity.PackageName, previousRawManifestBytes, copiedAppxManifestPath, outputAppXDirectory, taskContext))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Package already registered with identical manifest at {outputAppXDirectory.FullName} — skipping re-registration to preserve capability consent");
+                return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+            }
 
             // Unregister any existing package first (preserving app data by default)
             await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
@@ -972,5 +1002,136 @@ internal partial class MsixService
         {
             throw new InvalidOperationException($"Failed to register package: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the currently installed package for <paramref name="packageName"/>
+    /// is a development-mode loose layout rooted at <paramref name="outputAppXDirectory"/> AND its
+    /// previously-registered <c>AppxManifest.xml</c> (captured in <paramref name="previousManifestBytes"/>
+    /// before the new manifest was written) is byte-identical to <paramref name="newManifest"/>.
+    /// In that case, re-registration would be a no-op as far as the layout/identity is concerned
+    /// — but Windows would still treat it as a reinstall and reset capability consent
+    /// (camera, microphone, etc.), so callers should skip the unregister/register pair entirely.
+    /// </summary>
+    /// <param name="previousManifestBytes">
+    /// Bytes of the AppxManifest.xml as it existed in <paramref name="outputAppXDirectory"/>
+    /// before the current run wrote/copied the new manifest. <c>null</c> means there was no
+    /// previous manifest (e.g., first run), in which case the helper always returns <c>false</c>
+    /// — the unregister-register path must run so we can establish a registration to begin with.
+    /// We compare against this snapshot (instead of re-reading the installed manifest from the
+    /// install location) because, for a loose-layout dev package, the install location IS
+    /// <paramref name="outputAppXDirectory"/>, so reading it back would just re-read the file
+    /// we already overwrote.
+    /// </param>
+    /// <remarks>
+    /// Conservative by design: returns <c>false</c> on any uncertainty (multiple packages with
+    /// the same name, missing install location, read failures, etc.) so the caller falls back
+    /// to the safe unregister+register path.
+    /// </remarks>
+    internal bool IsExistingRegistrationUpToDate(
+        string packageName,
+        byte[]? previousManifestBytes,
+        FileInfo newManifest,
+        DirectoryInfo outputAppXDirectory,
+        TaskContext taskContext)
+    {
+        if (previousManifestBytes is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var installed = packageRegistrationService.FindDevPackages(packageName);
+
+            // Only short-circuit when exactly one package is registered with this name.
+            // Zero means a fresh install is needed; more than one means the existing
+            // unregister logic must run to clean up duplicates.
+            if (installed.Count != 1)
+            {
+                return false;
+            }
+
+            var pkg = installed[0];
+
+            if (!pkg.IsDevelopmentMode)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(pkg.InstallLocation))
+            {
+                return false;
+            }
+
+            string installedFullPath;
+            string outputFullPath;
+            try
+            {
+                installedFullPath = Path.GetFullPath(pkg.InstallLocation).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                outputFullPath = Path.GetFullPath(outputAppXDirectory.FullName).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (!string.Equals(installedFullPath, outputFullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!newManifest.Exists)
+            {
+                return false;
+            }
+
+            if (previousManifestBytes.Length != newManifest.Length)
+            {
+                return false;
+            }
+
+            var newBytes = File.ReadAllBytes(newManifest.FullName);
+            return previousManifestBytes.AsSpan().SequenceEqual(newBytes);
+        }
+        catch (Exception ex)
+        {
+            // Any failure inspecting the existing registration is non-fatal — fall back
+            // to the unregister+register path so behavior remains correct.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not determine if existing registration is up to date: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the bytes of the loose-layout manifest in <paramref name="outputAppXDirectory"/>
+    /// if one is present. Used to snapshot the previous registration's manifest before the
+    /// current run overwrites it, so <see cref="IsExistingRegistrationUpToDate"/> can detect
+    /// "no change" reliably. Returns <c>null</c> on any I/O failure or if no manifest exists.
+    /// </summary>
+    internal static byte[]? TryReadExistingLayoutManifestBytes(DirectoryInfo outputAppXDirectory)
+    {
+        if (!outputAppXDirectory.Exists)
+        {
+            return null;
+        }
+
+        foreach (var name in new[] { "AppxManifest.xml", "appxmanifest.xml", "Package.appxmanifest" })
+        {
+            var path = Path.Combine(outputAppXDirectory.FullName, name);
+            try
+            {
+                if (File.Exists(path))
+                {
+                    return File.ReadAllBytes(path);
+                }
+            }
+            catch
+            {
+                // Fall through to the next candidate / null
+            }
+        }
+
+        return null;
     }
 }

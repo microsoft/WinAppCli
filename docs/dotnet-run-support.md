@@ -164,6 +164,36 @@ Capture OutputDebugString messages and first-chance exceptions:
 </PropertyGroup>
 ```
 
+## Behavior
+
+### Re-registration is skipped when the manifest is unchanged
+
+`dotnet run` calls into `winapp run`, which materializes a loose-layout package
+under `$(WinAppLooseLayoutPath)` (default `$(OutputPath)AppX\`) and registers it
+in development mode with the Windows `PackageManager`.
+
+When you run `dotnet run` repeatedly **without changing the `Package.appxmanifest`**,
+the CLI detects that the existing development-mode registration already points at the
+same loose-layout directory and that the manifest bytes are identical. In that case it
+skips the unregister + register pair entirely.
+
+This matters because Windows resets **capability consent** (camera, microphone, etc.)
+on every package re-registration, regardless of `RemovalOptions.PreserveApplicationData`.
+Skipping the no-op re-registration preserves the camera/mic/etc. prompts you've already
+accepted, matching Visual Studio's F5 behavior.
+
+The CLI always re-registers when:
+
+- The manifest content changed since the last run (any byte difference).
+- The previous registration's `InstallLocation` is a different directory.
+- The previous registration is **not** in development mode.
+- More than one package with the same identity name is installed.
+- `--clean` was passed (force fresh state).
+
+Verbose output (`dotnet run -v:detailed` or `winapp run --verbose`) prints
+`Package already registered with identical manifest ... — skipping re-registration to
+preserve capability consent` when the skip path is taken.
+
 ## Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
