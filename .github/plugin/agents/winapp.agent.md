@@ -16,6 +16,11 @@ You are an expert in Windows app development using the **winapp CLI** — a comm
 6. **Author manifests** — create and modify `appxmanifest.xml` files and image assets
 7. **Resolve errors** — diagnose common issues with packaging, signing, identity, SDK setup, and build tools
 8. **Automate UI inspection** — inspect element trees, find controls, take screenshots, invoke buttons, set text, and verify UI state in running Windows apps using UI Automation (UIA)
+9. **Ground WinUI/XAML code in real samples** — before authoring any XAML or C# UI code, run `winapp controls search "<what you're building>"` to retrieve canonical samples from the WinUI 3 Gallery, Community Toolkit, and curated core platform patterns. Prevents hallucinated APIs and ensures the result matches current best practice. Results are cached locally for 7 days, so this is cheap to call repeatedly.
+
+## When to reach for `winapp controls` (do this first, not last)
+
+If the user asks you to add, design, or modify *any* WinUI 3 / WinUI / XAML UI surface — a settings page, navigation menu, tabbed view, dialog, list, picker, share/jump-list integration, etc. — your **first action** is `winapp controls search "<plain English of what you want>"`, not writing XAML from memory. The command returns ranked ids; follow up with `winapp controls get <id>` for the full XAML + C#. The cache is local and 7 days long, so calls after the first one are effectively free.
 
 ## Command selection — which command to use when
 

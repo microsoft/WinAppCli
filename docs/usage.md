@@ -938,6 +938,12 @@ catalog of core platform patterns for grounded XAML and C# samples. Designed for
 agents and developers who need the canonical sample for a control or pattern
 without leaving the terminal.
 
+> **For AI agents:** Run `winapp controls search "<what you want to build>"`
+> *before* writing any WinUI / XAML code. It returns grounded samples drawn
+> verbatim from maintained Microsoft repos, so you stop hallucinating APIs and
+> stop guessing which control is canonical. Results are cached locally for 7
+> days — calls after the first one are effectively free.
+
 ```bash
 winapp controls [command] [options]
 ```

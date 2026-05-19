@@ -4,11 +4,15 @@ description: Search the WinUI 3 Gallery, Windows Community Toolkit, and curated 
 version: 0.3.2
 ---
 ## When to use
-- An agent or developer needs the canonical XAML/C# sample for a WinUI 3 control or platform pattern
-- Authoring a new WinUI 3 page and want to reach for the right control without opening a browser
-- Looking up Community Toolkit controls (`SettingsCard`, `WrapPanel`, `TabbedCommandBar`, …) by what they do, not by name
-- Discovering core platform patterns (jump lists, share contract, system tray, file picker, drag-drop) without diving into win32 docs
-- Producing a grounded code suggestion that won't hallucinate API surface — every snippet returned came verbatim from a maintained Microsoft sample repo
+- **Before writing any XAML or WinUI UI code** — `winapp controls search` is the first step whenever you're about to build, modify, or recommend a WinUI 3 UI surface (page, dialog, settings page, navigation menu, tab view, list, picker, share target, jump list, system tray, etc.). Treat it as the WinUI equivalent of looking up MDN before writing HTML.
+- **Choosing the right control / best-practice control** — when you know *what* the UI should do but not *which* control is canonical (e.g. "tabbed document interface" → `TabView`, "hamburger menu" → `NavigationView`, "list of settings rows" → `SettingsCard`).
+- An agent or developer needs the canonical XAML/C# sample for a WinUI 3 control or platform pattern.
+- Authoring a new WinUI 3 page and want to reach for the right control without opening a browser.
+- Looking up Community Toolkit controls (`SettingsCard`, `WrapPanel`, `TabbedCommandBar`, …) by what they do, not by name.
+- Discovering core platform patterns (jump lists, share contract, system tray, file picker, drag-drop) without diving into win32 docs.
+- Producing a grounded code suggestion that won't hallucinate API surface — every snippet returned came verbatim from a maintained Microsoft sample repo.
+
+**Triggers for agents (match any of these phrases in a user request):** "build a WinUI", "add a settings page", "add a nav menu", "tab view", "design this UI", "what control should I use", "best practice WinUI control", "write the XAML for", "how do I do X in WinUI 3", "Community Toolkit", "share target", "jump list", "file picker", "system tray".
 
 ## Prerequisites
 - Network access on first use (fetches snapshots from `microsoft/WinUI-Gallery` and `CommunityToolkit/Windows` on GitHub)
