@@ -137,15 +137,20 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
         /** Send the current document state to the webview. */
         const updateWebview = (forceAll = false) => {
             const text = document.getText();
-            if (!tryParseOrShowError(text)) { return; }
-            if (showingErrorView) { showEditorView(); return; }
+            let data;
             try {
-                const data = parseManifest(text);
-                const errors = validateManifest(data);
-                webviewPanel.webview.postMessage({ type: 'update', data, errors, forceAll });
-            } catch {
-                // Should not happen since tryParseOrShowError succeeded
+                data = parseManifest(text);
+            } catch (e) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                if (!showingErrorView) {
+                    showingErrorView = true;
+                    webviewPanel.webview.html = getParseErrorContent(webviewPanel.webview, freshNonce(), errMsg);
+                }
+                return;
             }
+            if (showingErrorView) { showEditorView(); }
+            const errors = validateManifest(data);
+            webviewPanel.webview.postMessage({ type: 'update', data, errors, forceAll });
         };
 
         // Initial load: check if XML is valid

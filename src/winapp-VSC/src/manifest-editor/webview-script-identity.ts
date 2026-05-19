@@ -48,7 +48,7 @@ export function getIdentityScript(): string {
                             const index = input.getAttribute('data-index');
                             if (section && field) {
                                 const msg = { type: 'fieldChanged', section, field, value: defaultVal };
-                                if (index !== null && index !== undefined) { msg.index = parseInt(index, 10); }
+                                if (index !== null) { msg.index = parseInt(index, 10); }
                                 vscode.postMessage(msg);
                             }
                         } else if (input.tagName === 'INPUT') {
@@ -79,7 +79,7 @@ export function getIdentityScript(): string {
                     const index = removeBtn.getAttribute('data-index');
                     if (section && fieldName) {
                         const msg = { type: 'fieldChanged', section: section, field: fieldName, value: '' };
-                        if (index !== null && index !== undefined) { msg.index = parseInt(index, 10); }
+                        if (index !== null) { msg.index = parseInt(index, 10); }
                         vscode.postMessage(msg);
                     }
                 }

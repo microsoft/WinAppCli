@@ -487,7 +487,7 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             if (target) {
                 target.focus();
                 // Restore cursor position for text inputs
-                if (info.selectionStart !== null && info.selectionStart !== undefined &&
+                if (info.selectionStart !== null &&
                     typeof target.setSelectionRange === 'function') {
                     try { target.setSelectionRange(info.selectionStart, info.selectionEnd); } catch(e) {}
                 }

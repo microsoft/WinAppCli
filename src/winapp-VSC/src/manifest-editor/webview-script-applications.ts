@@ -13,7 +13,7 @@ export function getApplicationsScript(): string {
             let html = '';
             optionalVisualAssets.forEach(asset => {
                 const val = app.visualElements[asset.field];
-                if (val !== null && val !== undefined) {
+                if (val !== null) {
                     html += '<div class="form-group" data-field="applications.' + idx + '.visualElements.' + asset.field + '">' +
                         '<label>' + escapeHtml(asset.label) + ':</label>' +
                         '<div class="browse-row">' +
@@ -50,7 +50,7 @@ export function getApplicationsScript(): string {
                 // square150x150Logo is always required, so always a string
                 if (opt.veField === 'square150x150Logo') return true;
                 // Optional tiles: only show checkbox if the asset is defined (not null)
-                return ve[opt.veField] !== null && ve[opt.veField] !== undefined;
+                return ve[opt.veField] !== null;
             });
             if (availableTiles.length === 0) return '';
 
