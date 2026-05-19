@@ -1,6 +1,4 @@
----
-ms.custom: mslearn
----
+<!-- mslearn: true -->
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -155,7 +153,7 @@ function controlsList(options?: ControlsListOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+| `source` | `"gallery" \| "toolkit" \| "core" \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -187,7 +185,7 @@ function controlsSearch(options: ControlsSearchOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `query` | `string` | Yes | Free-text query (e.g. "tabbed document interface", "share contract", "settings card"). |
 | `max` | `number \| undefined` | No | Maximum number of matches to return. |
-| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+| `source` | `"gallery" \| "toolkit" \| "core" \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1138,14 +1136,6 @@ IfExists values.
 type IfExists = "error" | "overwrite" | "skip"
 ```
 
-### `String`
-
-String values.
-
-```typescript
-type String = "gallery" | "toolkit" | "core"
-```
-
 ### `SdkInstallMode`
 
 SdkInstallMode values.
@@ -1214,7 +1204,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+| `source` | `"gallery" \| "toolkit" \| "core" \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1231,7 +1221,7 @@ type ControlsRefreshOptions = CommonOptions
 |----------|------|----------|-------------|
 | `query` | `string` | Yes | Free-text query (e.g. "tabbed document interface", "share contract", "settings card"). |
 | `max` | `number \| undefined` | No | Maximum number of matches to return. |
-| `source` | `String \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
+| `source` | `"gallery" \| "toolkit" \| "core" \| undefined` | No | Constrain results to one source: gallery (WinUI 3 Gallery), toolkit (Community Toolkit), or core (curated platform patterns). Default: all sources. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

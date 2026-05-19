@@ -325,9 +325,7 @@ function generate() {
   const lines = [];
   const L = (s = '') => lines.push(s);
 
-  L('---');
-  L('ms.custom: mslearn');
-  L('---');
+  L('<!-- mslearn: true -->');
   L('<!-- AUTO-GENERATED — DO NOT EDIT -->');
   L('<!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->');
   L();
