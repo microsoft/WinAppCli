@@ -21,10 +21,12 @@ internal class UpdateNotificationService(
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/winappcli/releases/latest";
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
+    private const int MaxReasonableFutureMajorDelta = 20;
     private static readonly TimeSpan FirstRunRefreshTimeout = TimeSpan.FromMilliseconds(250);
 
     // For testing only — when true, skips the fire-and-forget background network refresh
     internal bool SkipBackgroundRefreshForTesting;
+    internal Func<string> CurrentVersionProvider { get; set; } = VersionHelper.GetVersionString;
 
     // The console used for upgrade notices. Defaults to stderr so scripted commands
     // (e.g. get-winapp-path, --version) are never corrupted. Tests can override to capture output.
@@ -50,24 +52,18 @@ internal class UpdateNotificationService(
             var cacheFile = GetUpdateCheckFile();
             var cache = ReadCache(cacheFile);
 
+            var currentVersion = CurrentVersionProvider();
+
             // Paranoia: discard cached versions that look like test artifacts (e.g., 99.0.0, 999.0.0)
-            if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion))
+            if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion, currentVersion))
             {
                 cache = cache with { LatestVersion = "", LastShownDate = "" };
                 WriteCacheFile(cacheFile, cache);
             }
 
             // Show notice if a newer version is cached and not yet shown today.
-            // For prerelease builds, compare against the core version only — a prerelease
-            // like "0.3.2-prerelease.73" is conceptually at or ahead of stable "0.3.2",
-            // but should still be notified about a genuinely newer stable like "0.4.0".
-            var currentVersion = VersionHelper.GetVersionString();
-            var effectiveCurrentVersion = IsPreReleaseVersion(currentVersion)
-                ? GetCoreVersion(currentVersion)
-                : currentVersion;
-
             if (!string.IsNullOrEmpty(cache.LatestVersion)
-                && IsNewerVersion(cache.LatestVersion, effectiveCurrentVersion)
+                && IsNewerVersion(cache.LatestVersion, currentVersion)
                 && cache.LastShownDate != DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             {
                 DisplayUpdateNotification(cache.LatestVersion);
@@ -216,17 +212,31 @@ internal class UpdateNotificationService(
     }
 
     /// <summary>
-    /// Detects unreasonably high version numbers that likely came from test fixtures
-    /// (e.g., 99.0.0, 999.0.0). Any major version ≥ 50 is considered unreasonable.
-    /// TODO: This threshold assumes the product stays below v50 for the foreseeable future.
-    /// Revisit if the project ever approaches major version 50.
+    /// Detects unreasonably high cached version numbers that likely came from test fixtures
+    /// (e.g., 99.0.0, 999.0.0) by comparing against the current CLI major version.
     /// </summary>
-    internal static bool IsUnreasonableVersion(string version)
+    internal static bool IsUnreasonableVersion(string version, string currentVersion)
+    {
+        if (!TryParseMajorVersion(version, out var cachedMajor)
+            || !TryParseMajorVersion(currentVersion, out var currentMajor))
+        {
+            return false;
+        }
+
+        return cachedMajor > currentMajor + MaxReasonableFutureMajorDelta;
+    }
+
+    private static bool TryParseMajorVersion(string version, out int major)
     {
         var core = GetCoreVersion(version);
+        if (core.StartsWith('v') || core.StartsWith('V'))
+        {
+            core = core[1..];
+        }
+
         var dotIdx = core.IndexOf('.');
         var majorStr = dotIdx >= 0 ? core[..dotIdx] : core;
-        return int.TryParse(majorStr, out var major) && major >= 50;
+        return int.TryParse(majorStr, out major);
     }
 
     internal static bool IsNewerVersion(string latest, string current)

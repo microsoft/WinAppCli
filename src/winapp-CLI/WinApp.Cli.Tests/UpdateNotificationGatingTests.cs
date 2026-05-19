@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Globalization;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
@@ -28,7 +29,7 @@ public class UpdateNotificationGatingTests
         // Create temp cache directory and seed with a "newer" version
         _tempCacheDir = Path.Combine(Path.GetTempPath(), $"winapp_gating_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempCacheDir);
-        SeedUpdateCheckCache("5.0.0");
+        SeedUpdateCheckCache(GetGuaranteedNewerVersion());
 
         // Create first-run marker so FirstRunService doesn't trigger logging
         File.Create(Path.Combine(_tempCacheDir, ".first-run-complete")).Dispose();
@@ -123,6 +124,14 @@ public class UpdateNotificationGatingTests
     {
         var content = $"{DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)}\n{version}\n";
         File.WriteAllText(Path.Combine(_tempCacheDir, ".update-check"), content);
+    }
+
+    private static string GetGuaranteedNewerVersion()
+    {
+        var currentCore = UpdateNotificationService.GetCoreVersion(WinApp.Cli.Helpers.VersionHelper.GetVersionString());
+        return Version.TryParse(currentCore, out var parsed)
+            ? $"{parsed.Major + 1}.0.0"
+            : "5.0.0";
     }
 
     /// <summary>
