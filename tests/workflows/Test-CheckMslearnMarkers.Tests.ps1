@@ -94,7 +94,7 @@ Describe 'check-mslearn-markers.ps1' {
         $result.Output   | Should -Match 'renamed to .*new\.md.* with marker preserved'
     }
 
-    It 'fails when a marked doc is deleted' {
+    It 'passes (with notice) when a marked doc is deleted' {
         $repo = New-TempRepo; $script:repos.Add($repo)
         $base = Commit-Doc -Repo $repo -RelPath 'docs/c.md' -Content "$script:marker`n# C" -Message 'base'
         Push-Location $repo
@@ -104,7 +104,8 @@ Describe 'check-mslearn-markers.ps1' {
         } finally { Pop-Location }
 
         $result = Invoke-Check -Repo $repo -BaseRef $base
-        $result.ExitCode | Should -Be 1
+        $result.ExitCode | Should -Be 0
+        $result.Output   | Should -Match 'deleted on HEAD'
         $result.Output   | Should -Match 'docs/c\.md'
     }
 

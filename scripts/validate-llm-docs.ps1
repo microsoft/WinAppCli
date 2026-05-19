@@ -18,7 +18,8 @@
 
 param(
     [string]$CliPath = "",
-    [switch]$FailOnDrift = $true
+    [switch]$FailOnDrift = $true,
+    [string]$BaseRef = ""
 )
 
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
@@ -228,6 +229,21 @@ finally {
 }
 
 Write-Host "[VALIDATE] CLI schema and agent skills are up-to-date!" -ForegroundColor Green
+
+# MS Learn marker check — when running under a PR, ensure no doc lost its
+# <!-- mslearn: true --> marker between the base ref and HEAD. We fold this in
+# here (rather than as a standalone workflow) so all docs validation lives in
+# one place. Skipped when $BaseRef is not supplied (e.g. local default run).
+if ($BaseRef) {
+    Write-Host ""
+    Write-Host "[VALIDATE] Checking MS Learn markers against $BaseRef..." -ForegroundColor Blue
+    & (Join-Path $PSScriptRoot "check-mslearn-markers.ps1") -BaseRef $BaseRef
+    if ($LASTEXITCODE -ne 0) {
+        if ($FailOnDrift) { exit 1 }
+    } else {
+        Write-Host "[VALIDATE] MS Learn markers are intact" -ForegroundColor Green
+    }
+}
 
 # Warn about potential stale artifacts
 Write-Host ""

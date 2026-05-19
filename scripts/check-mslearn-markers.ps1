@@ -74,25 +74,45 @@ try {
     $headMarkedSet = @{}
     foreach ($f in $headMarked) { $headMarkedSet[$f] = $true }
 
+    # Build the set of paths that exist on HEAD (regardless of marker state).
+    # If a base-marked doc is gone from HEAD entirely, treat that as an intentional
+    # delete — it's already visible in the PR diff and shouldn't fail this check.
+    $headPaths = @{}
+    foreach ($p in (git ls-tree -r --name-only HEAD -- $DocsPath)) {
+        if ($p -like '*.md') { $headPaths[$p] = $true }
+    }
+
     $lost = @()
+    $deleted = @()
     foreach ($f in $baseMarked) {
         if ($headMarkedSet.ContainsKey($f)) { continue }
         if ($renameMap.ContainsKey($f) -and $headMarkedSet.ContainsKey($renameMap[$f])) {
             Write-Host "OK: '$f' was renamed to '$($renameMap[$f])' with marker preserved."
             continue
         }
+        # If the file no longer exists on HEAD (and wasn't picked up as a rename),
+        # the doc was deleted — that's already explicit in the diff, so skip it.
+        if (-not $headPaths.ContainsKey($f)) {
+            $deleted += $f
+            continue
+        }
         $lost += $f
     }
 
+    if ($deleted.Count -gt 0) {
+        Write-Host "Skipping $($deleted.Count) doc(s) that were deleted on HEAD (delete is explicit in the diff):"
+        foreach ($f in $deleted) { Write-Host "  - $f" }
+    }
+
     if ($lost.Count -gt 0) {
+        Write-Host ""
         Write-Host "::error::The following docs were marked '<!-- mslearn: true -->' on $BaseRef but no longer are on HEAD:"
         foreach ($f in $lost) {
+            Write-Host "  - $f"
             Write-Host "::error file=${f}::Missing or moved '<!-- mslearn: true -->' marker"
         }
-        Write-Host "::error::"
+        Write-Host ""
         Write-Host "::error::If the file was renamed, re-add the marker at its new path."
-        Write-Host "::error::If you intentionally unpublished it from MS Learn, remove the"
-        Write-Host "::error::marker on $BaseRef first (separate PR) so the diff is explicit."
         exit 1
     }
 
