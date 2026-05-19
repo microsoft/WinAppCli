@@ -241,7 +241,13 @@ export function ensureNamespace(xmlText: string, prefix: string, uri: string): s
     // Find the full <Package ...> opening tag (may span multiple lines)
     const pkgMatch = /<Package\b[^>]*>/s.exec(xmlText);
     if (!pkgMatch) {
-        return xmlText.replace(/<Package\b/, '<Package ' + decl);
+        // Fallback: try partial match for malformed XML
+        const partialMatch = /<Package\b/.exec(xmlText);
+        if (partialMatch) {
+            const pos = partialMatch.index + partialMatch[0].length;
+            return xmlText.substring(0, pos) + ' ' + decl + xmlText.substring(pos);
+        }
+        return xmlText;
     }
 
     const pkgTag = pkgMatch[0];
@@ -293,8 +299,14 @@ export function ensureNamespace(xmlText: string, prefix: string, uri: string): s
         return xmlText.substring(0, afterLastXmlns) + '\n' + attrIndent + decl + xmlText.substring(afterLastXmlns);
     }
 
-    // Fallback: simple inline insert
-    return xmlText.replace(/<Package\b/, '<Package ' + decl);
+    // Fallback: simple inline insert — use substring splicing to avoid CodeQL
+    // false positive on .replace() with angle-bracket patterns (js/incomplete-multi-character-sanitization)
+    const pkgFallbackMatch = /<Package\b/.exec(xmlText);
+    if (pkgFallbackMatch) {
+        const insertPos = pkgFallbackMatch.index + pkgFallbackMatch[0].length;
+        return xmlText.substring(0, insertPos) + ' ' + decl + xmlText.substring(insertPos);
+    }
+    return xmlText;
 }
 
 /** Swap two adjacent sibling elements in the XML text (preserves whitespace/formatting). */

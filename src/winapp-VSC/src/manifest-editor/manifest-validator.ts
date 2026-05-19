@@ -13,7 +13,9 @@ const VERSION_REGEX = /^\d+\.\d+\.\d+\.\d+$/;
 // or encoded as hex (\XX). Values may also be quoted ("...") per RFC 2253.
 // Note: # is only reserved at the start of a value; positional rules (leading space/#,
 // trailing space) are enforced by isValidPublisherDN() below.
-const PUBLISHER_DN_REGEX = /^(CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=(([^,+="<>;\\/\r\n]|\\.)+|"(?:[^"\\]|\\.)*")(,\s*((CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=(([^,+="<>;\\/\r\n]|\\.)+|"(?:[^"\\]|\\.)*")))*$/;
+// ReDoS-safe: uses [^,+="<>;\\/\r\n\\]+ (non-backslash bulk) then (\\.[^,+="<>;\\/\r\n\\]*)*
+// to avoid ambiguous alternation that causes exponential backtracking.
+const PUBLISHER_DN_REGEX = /^(CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=([^,+="<>;\\/\r\n\\]+(\\.([^,+="<>;\\/\r\n\\])*)*|\\.[^,+="<>;\\/\r\n\\]*(\\.([^,+="<>;\\/\r\n\\])*)*|"[^"\\]*(\\.([^"\\])*)*")(,\s*((CN|L|O|OU|E|C|S|STREET|T|G|I|SN|DC|SERIALNUMBER|Description|PostalCode|POBox|Phone|X21Address|dnQualifier|(OID\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+))=([^,+="<>;\\/\r\n\\]+(\\.([^,+="<>;\\/\r\n\\])*)*|\\.[^,+="<>;\\/\r\n\\]*(\\.([^,+="<>;\\/\r\n\\])*)*|"[^"\\]*(\\.([^"\\])*)*")))*$/;
 const IDENTITY_NAME_REGEX = /^[a-zA-Z0-9.\-]+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;

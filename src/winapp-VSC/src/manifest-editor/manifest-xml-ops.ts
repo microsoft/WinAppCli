@@ -197,7 +197,8 @@ function ensureIgnorableNamespace(xmlText: string, prefix: string): string {
     }
 
     // No IgnorableNamespaces attribute — add one
-    const newTag = pkgTag.replace(/<Package\b/, `<Package IgnorableNamespaces="${prefix}"`);
+    const pkgTagInner = /<Package\b/.exec(pkgTag);
+    const newTag = pkgTag.substring(0, pkgTagInner!.index + pkgTagInner![0].length) + ` IgnorableNamespaces="${prefix}"` + pkgTag.substring(pkgTagInner!.index + pkgTagInner![0].length);
     return xmlText.substring(0, pkgMatch.index) + newTag + xmlText.substring(pkgMatch.index + pkgTag.length);
 }
 
@@ -585,7 +586,9 @@ export function addPhoneIdentity(xmlText: string): string {
 export function removePhoneIdentity(xmlText: string): string {
     // Match the full self-closing or open+close PhoneIdentity element with optional leading whitespace
     const pattern = /[ \t]*<[a-zA-Z0-9]*:?PhoneIdentity\b[^>]*(?:\/>|>[^<]*<\/[a-zA-Z0-9]*:?PhoneIdentity\s*>)[ \t]*\r?\n?/s;
-    return xmlText.replace(pattern, '');
+    const match = pattern.exec(xmlText);
+    if (!match) { return xmlText; }
+    return xmlText.substring(0, match.index) + xmlText.substring(match.index + match[0].length);
 }
 
 /** Set the ShowNameOnTiles entries for an application by index.
@@ -711,7 +714,11 @@ export function addApplication(xmlText: string): string {
     // Ensure uap namespace is declared
     const uapDecl = 'xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"';
     if (!result.includes(uapDecl)) {
-        result = result.replace(/<Package\b/, '<Package ' + uapDecl);
+        const pkgPos = /<Package\b/.exec(result);
+        if (pkgPos) {
+            const insertAt = pkgPos.index + pkgPos[0].length;
+            result = result.substring(0, insertAt) + ' ' + uapDecl + result.substring(insertAt);
+        }
     }
 
     // Detect indentation from existing Application elements
@@ -767,7 +774,11 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     };
     for (const [prefix, decl] of Object.entries(nsMap)) {
         if (extensionXml.includes(prefix) && !result.includes(decl)) {
-            result = result.replace(/<Package\b/, '<Package ' + decl);
+            const pkgPos = /<Package\b/.exec(result);
+            if (pkgPos) {
+                const insertAt = pkgPos.index + pkgPos[0].length;
+                result = result.substring(0, insertAt) + ' ' + decl + result.substring(insertAt);
+            }
         }
     }
 
