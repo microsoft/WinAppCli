@@ -53,7 +53,7 @@ internal class UpdateNotificationService(
             // Paranoia: discard cached versions that look like test artifacts (e.g., 99.0.0, 999.0.0)
             if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion))
             {
-                cache = cache with { LatestVersion = "" };
+                cache = cache with { LatestVersion = "", LastShownDate = "" };
                 WriteCacheFile(cacheFile, cache);
             }
 
@@ -218,6 +218,8 @@ internal class UpdateNotificationService(
     /// <summary>
     /// Detects unreasonably high version numbers that likely came from test fixtures
     /// (e.g., 99.0.0, 999.0.0). Any major version ≥ 50 is considered unreasonable.
+    /// TODO: This threshold assumes the product stays below v50 for the foreseeable future.
+    /// Revisit if the project ever approaches major version 50.
     /// </summary>
     internal static bool IsUnreasonableVersion(string version)
     {

@@ -505,6 +505,12 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void IsUnreasonableVersion_ExactThreshold_ReturnsTrue()
+    {
+        Assert.IsTrue(UpdateNotificationService.IsUnreasonableVersion("50.0.0"));
+    }
+
+    [TestMethod]
     public void CheckAndNotify_UnreasonableCachedVersion_DiscardsAndNoNotification()
     {
         var cacheDir = _testCacheDirectory.FullName;
