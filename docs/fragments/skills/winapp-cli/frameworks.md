@@ -32,12 +32,28 @@ Quick start:
 npm install --save-dev @microsoft/winappcli
 npx winapp init --use-defaults --js-bindings-ai   # init + generate typed AI bindings in bindings/winrt/
 # (or, if you already initialized the workspace:)
-npx winapp node jsbindings add --ai                    # layer JS bindings onto an existing workspace
-npx winapp node create-addon --template cs   # create a C# native addon (for stuff dynwinrt can't drive)
-npx winapp node add-electron-debug-identity  # register identity for debugging
+npx winapp node jsbindings add --ai               # layer JS bindings onto an existing workspace
+npx winapp node create-addon --template cs        # create a C# native addon (for what dynwinrt can't drive — see below)
+npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
 
 The `--js-bindings*` flags (and the `node jsbindings add` sub-command) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The winget / standalone install will reject these surfaces with a clear error.
+
+#### Choosing between jsBindings and a native addon
+
+The decision is almost entirely about the **shape of the API**, not preference.
+
+**Default: if the API is WinRT (ships in a `.winmd`), use `node jsbindings add`.** That covers nearly everything an Electron app actually calls on Windows — `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, Storage, AI inference like `TextRecognizer` / `LanguageModel`), most of `Windows.*`, and all of `Microsoft.WindowsAppSDK.AI`. dynwinrt's [own scope statement](https://github.com/microsoft/dynwinrt#scope) sums it up as "non-UI WinRT APIs ... headless services from the Windows SDK and WinAppSDK".
+
+**Fall back to `node create-addon` when one of these is true:**
+
+| Scenario | Template | Why dynwinrt can't help |
+|---|---|---|
+| The API is **Win32 / pure COM with no WinRT projection** (P/Invoke-style APIs, raw `IFileDialog`, registry, custom COM servers). | `--template cpp` | No `.winmd` exists, so there's nothing for the codegen to project. |
+| You're integrating a **C++ library that ships only headers + a static/shared lib** (no `.winmd`). | `--template cpp` | Same — dynwinrt requires WinRT metadata. |
+| You're integrating a **vendor SDK that only ships a managed .NET assembly** (no `.winmd`). | `--template cs` (uses [node-api-dotnet](https://github.com/microsoft/node-api-dotnet) under the hood). | Same — no WinRT projection to consume. |
+
+It's normal to mix both in one app: jsBindings for the non-UI WinRT surface, a small C# or C++ addon for the one or two Win32 / non-WinRT calls that don't fit.
 
 Additional Electron guides:
 - [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `jsBindings:` yaml schema, presets, per-package classification, lockfile

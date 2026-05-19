@@ -10,9 +10,9 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-// Default IJsBindingsWorkspaceService — composes the single-purpose
-// services into the end-to-end pipeline described on the interface.
-internal sealed class JsBindingsWorkspaceService(
+// Default IJsBindingsWorkspaceService — orchestration entrypoint.
+// Split into partials: .WinmdDiscovery.cs and .RuntimeDependency.cs.
+internal sealed partial class JsBindingsWorkspaceService(
     IPackageLayoutService packageLayoutService,
     IWinmdsLockfileService winmdsLockfileService,
     IDynWinrtCodegenService dynWinrtCodegenService,
@@ -150,7 +150,11 @@ internal sealed class JsBindingsWorkspaceService(
         {
             taskContext.AddDebugMessage($"{UiSymbols.Note} JS binding generation failed: {ex.Message}");
             logger.LogDebug(ex, "JS binding generation failed");
-            return new JsBindingsOrchestrationResult { ExitCode = 1, Message = "JS binding generation failed." };
+            return new JsBindingsOrchestrationResult
+            {
+                ExitCode = 1,
+                Message = $"JS binding generation failed: {ex.Message}",
+            };
         }
     }
 
@@ -328,7 +332,7 @@ internal sealed class JsBindingsWorkspaceService(
                     {
                         // Drop UNC paths so a tampered lockfile can't
                         // trigger credential-leaking SMB probes downstream.
-                        if (IsNetworkPath(path))
+                        if (PathSafety.IsNetworkPath(path))
                         {
                             continue;
                         }
@@ -338,7 +342,7 @@ internal sealed class JsBindingsWorkspaceService(
                 default:
                     foreach (var path in pkg.Winmds)
                     {
-                        if (IsNetworkPath(path))
+                        if (PathSafety.IsNetworkPath(path))
                         {
                             continue;
                         }
@@ -376,242 +380,6 @@ internal sealed class JsBindingsWorkspaceService(
         return result;
     }
 
-    internal async Task<Dictionary<string, string>> ExpandTransitiveDependenciesAsync(
-        Dictionary<string, string> usedVersions,
-        TaskContext taskContext,
-        CancellationToken cancellationToken)
-    {
-        var expanded = new Dictionary<string, string>(usedVersions, StringComparer.OrdinalIgnoreCase);
-        var roots = usedVersions.ToList();
-        foreach (var (name, version) in roots)
-        {
-            try
-            {
-                var deps = await nugetService.GetPackageDependenciesAsync(name, version, cancellationToken);
-                foreach (var (depId, depVersionSpec) in deps)
-                {
-                    var depVersion = NugetService.ParseMinimumVersion(depVersionSpec);
-                    if (string.IsNullOrEmpty(depVersion))
-                    {
-                        continue;
-                    }
-                    if (!expanded.ContainsKey(depId))
-                    {
-                        expanded[depId] = depVersion;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                taskContext.AddDebugMessage(
-                    $"{UiSymbols.Note} Could not expand transitive deps for {name} {version}: {ex.Message}");
-                logger.LogDebug(ex,
-                    "Transitive dependency expansion failed for {PackageName} {Version}", name, version);
-            }
-        }
-        return expanded;
-    }
-
-    private List<FileInfo> ResolveAdditionalWinmds(
-        List<string> entries,
-        DirectoryInfo workspaceDir,
-        TaskContext taskContext,
-        string fieldName)
-    {
-        var resolved = new List<FileInfo>();
-        if (entries is null || entries.Count == 0)
-        {
-            return resolved;
-        }
-
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries)
-        {
-            if (string.IsNullOrWhiteSpace(entry))
-            {
-                continue;
-            }
-            var trimmed = entry.Trim();
-
-            // Reject UNC / network paths before any probe — FileInfo.Exists
-            // on a UNC triggers SMB negotiation and would leak the user's
-            // NTLM hash to the remote host.
-            if (IsNetworkPath(trimmed))
-            {
-                taskContext.AddDebugMessage(
-                    $"{UiSymbols.Warning} {fieldName} entry rejected as network/UNC path (refusing to probe): {entry}");
-                logger.LogWarning(
-                    "{UISymbol} jsBindings.{FieldName} entry refused — network/UNC paths are not allowed (would probe attacker-controlled host on FileInfo.Exists). Entry: {Entry}",
-                    UiSymbols.Warning,
-                    fieldName,
-                    entry);
-                continue;
-            }
-
-            var fullPath = Path.IsPathFullyQualified(trimmed)
-                ? Path.GetFullPath(trimmed)
-                : Path.GetFullPath(Path.Combine(workspaceDir.FullName, trimmed));
-
-            // Second guard: after Path.GetFullPath the resolved form might
-            // still be a UNC (e.g. workspaceDir itself on a network share
-            // joined with a relative `..\\..\\share\\evil`).
-            if (IsNetworkPath(fullPath))
-            {
-                taskContext.AddDebugMessage(
-                    $"{UiSymbols.Warning} {fieldName} entry resolved to a network/UNC path, rejected: {entry} → {fullPath}");
-                logger.LogWarning(
-                    "{UISymbol} jsBindings.{FieldName} entry resolved to UNC path; refusing to probe. Entry: {Entry} → {FullPath}",
-                    UiSymbols.Warning,
-                    fieldName,
-                    entry,
-                    fullPath);
-                continue;
-            }
-
-            if (!seen.Add(fullPath))
-            {
-                continue;
-            }
-
-            var fi = new FileInfo(fullPath);
-            if (!fi.Exists)
-            {
-                taskContext.AddDebugMessage(
-                    $"{UiSymbols.Note} {fieldName} entry not found, skipping: {entry}");
-                logger.LogWarning(
-                    "{UISymbol} jsBindings.{FieldName} entry not found, skipping: {Entry} (resolved to {FullPath})",
-                    UiSymbols.Note,
-                    fieldName,
-                    entry,
-                    fullPath);
-                continue;
-            }
-
-            resolved.Add(fi);
-        }
-
-        return resolved;
-    }
-
-    // Count extraTypes entries codegen would actually process; entries with
-    // a blank namespace or no classes are silently skipped.
-    internal static int CountValidExtraTypes(IReadOnlyList<JsBindingsExtraType> extraTypes)
-    {
-        if (extraTypes is null)
-        {
-            return 0;
-        }
-        var count = 0;
-        foreach (var et in extraTypes)
-        {
-            if (!string.IsNullOrWhiteSpace(et.Namespace) && et.Classes.Count > 0)
-            {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    // True if `path` looks like a UNC / network location (plain `\\server\share`,
-    // long-path UNC `\\?\UNC\…`, or device UNC `\\.\UNC\…`). Local DOS device
-    // paths (`\\?\C:\…`) are NOT classified as network. Used to refuse probing
-    // attacker-controlled paths via FileInfo.Exists.
-    internal static bool IsNetworkPath(string path)
-    {
-        if (string.IsNullOrEmpty(path))
-        {
-            return false;
-        }
-
-        // Normalize separators to '\' for the prefix tests.
-        var p = path.Replace('/', '\\');
-
-        // Plain UNC: \\server\share…  (server is non-empty, not a device
-        // designator like '?' or '.').
-        if (p.Length >= 3
-            && p[0] == '\\' && p[1] == '\\'
-            && p[2] != '?' && p[2] != '.')
-        {
-            return true;
-        }
-
-        // Device-prefixed UNC: \\?\UNC\server\… or \\.\UNC\server\…
-        if (p.Length >= 8
-            && p[0] == '\\' && p[1] == '\\'
-            && (p[2] == '?' || p[2] == '.')
-            && p[3] == '\\'
-            && (p[4] == 'U' || p[4] == 'u')
-            && (p[5] == 'N' || p[5] == 'n')
-            && (p[6] == 'C' || p[6] == 'c')
-            && p[7] == '\\')
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    public void EnsureRuntimeDependencyAndPrintHint(DirectoryInfo workspaceDirectory)
-    {
-        const string DynWinrtPackageName = "@microsoft/dynwinrt";
-
-        string version;
-        try
-        {
-            version = npmWrapperVersionProvider.DynWinrtVersion;
-        }
-        catch (InvalidOperationException ex)
-        {
-            logger.LogWarning(
-                "{UISymbol} Could not resolve pinned {Package} version: {Reason}",
-                UiSymbols.Note, DynWinrtPackageName, ex.Message);
-            return;
-        }
-
-        RuntimeDependencyOutcome outcome;
-        try
-        {
-            outcome = userPackageJsonService.EnsureRuntimeDependency(
-                workspaceDirectory, DynWinrtPackageName, version);
-        }
-        catch (InvalidOperationException ex)
-        {
-            logger.LogWarning(
-                "{UISymbol} Could not update package.json for {Package}: {Reason}. " +
-                "Add it manually to your dependencies.",
-                UiSymbols.Note, DynWinrtPackageName, ex.Message);
-            return;
-        }
-
-        switch (outcome)
-        {
-            case RuntimeDependencyOutcome.Added:
-                var pmAdded = packageManagerDetector.Detect(workspaceDirectory);
-                // Info-level so --quiet suppresses; user runs the printed install cmd next.
-                logger.LogInformation(
-                    "{UISymbol} Added {Package} @ {Version} to your package.json dependencies. Run `{InstallCmd}` to materialize it.",
-                    UiSymbols.Check, DynWinrtPackageName, version, pmAdded.InstallCommand);
-                break;
-            case RuntimeDependencyOutcome.PresentInDevDependencies:
-                // Warning: production deploys (npm ci --omit=dev) will break.
-                logger.LogWarning(
-                    "{UISymbol} {Package} is in devDependencies — generated bindings need it as a production dep. Move it manually.",
-                    UiSymbols.Note, DynWinrtPackageName);
-                break;
-            case RuntimeDependencyOutcome.NoPackageJson:
-                logger.LogWarning(
-                    "{UISymbol} No package.json found in workspace. Generated bindings will fail to resolve {Package} at runtime. Run `npm init -y` first.",
-                    UiSymbols.Warning, DynWinrtPackageName);
-                break;
-            case RuntimeDependencyOutcome.AlreadyPresent:
-            default:
-                logger.LogInformation(
-                    "{UISymbol} {Package} already declared in package.json dependencies — leaving it alone.",
-                    UiSymbols.Check, DynWinrtPackageName);
-                break;
-        }
-    }
-
     public async Task<int> AddAsync(AddJsBindingsOptions options, CancellationToken cancellationToken = default)
     {
         configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
@@ -619,7 +387,8 @@ internal sealed class JsBindingsWorkspaceService(
         if (!configService.Exists())
         {
             logger.LogError(
-                "{UISymbol} winapp.yaml not found at {ConfigPath}. Run 'npx winapp init' first to bootstrap a workspace.",
+                "{UISymbol} winapp.yaml not found at {ConfigPath}. Run 'npx winapp init' first to bootstrap a workspace. "
+                + "Tip: --config-dir resolves relative to the current directory — verify it points to the same workspace 'init' targeted.",
                 UiSymbols.Error,
                 configService.ConfigPath.FullName);
             return 1;
@@ -815,7 +584,8 @@ internal sealed class JsBindingsWorkspaceService(
         if (!configService.Exists())
         {
             logger.LogError(
-                "{UISymbol} winapp.yaml not found at {ConfigPath}. Run 'npx winapp init' first to bootstrap a workspace.",
+                "{UISymbol} winapp.yaml not found at {ConfigPath}. Run 'npx winapp init' first to bootstrap a workspace. "
+                + "Tip: --config-dir resolves relative to the current directory — verify it points to the same workspace 'init' targeted.",
                 UiSymbols.Error,
                 configService.ConfigPath.FullName);
             return 1;
@@ -870,6 +640,12 @@ internal sealed class JsBindingsWorkspaceService(
                         LocalWinappDir = localWinappDir,
                         NugetCacheDir = nugetCacheDir,
                         UsedVersions = null,
+                        // Read-only contract: `node jsbindings generate` is
+                        // documented as a no-op on yaml AND package.json.
+                        // The runtime dep is added by `node jsbindings add`
+                        // and by `init --js-bindings`; re-adding it here
+                        // would silently un-do a deliberate user removal.
+                        EnsureRuntimeDependency = false,
                     },
                     taskContext,
                     ct);

@@ -86,7 +86,17 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
 
 // Node.js wrapper-only commands that should appear in completions
 const NODE_WRAPPER_COMMANDS = ['node'];
-const NODE_SUBCOMMANDS = ['jsbindings', 'create-addon', 'add-electron-debug-identity', 'clear-electron-debug-identity'];
+// `js-bindings` is a kebab-case alias for `jsbindings` exposed by the
+// native CLI (JsBindingsCommand.Aliases); keep the wrapper in sync so
+// users following the kebab-case convention from the init flag
+// (`--js-bindings`) don't get rejected with "Unknown node subcommand".
+const NODE_SUBCOMMANDS = [
+  'jsbindings',
+  'js-bindings',
+  'create-addon',
+  'add-electron-debug-identity',
+  'clear-electron-debug-identity',
+];
 
 /**
  * Handle completion requests by forwarding to the native CLI and augmenting
@@ -204,12 +214,17 @@ async function showCombinedHelp(): Promise<void> {
   console.log('');
   console.log('Node.js Subcommands:');
   console.log('  node create-addon         Generate native addon files for Electron');
+  console.log('  node jsbindings add       Edit winapp.yaml to declare JS/TS bindings');
+  console.log('  node jsbindings generate  Regenerate JS/TS bindings from winapp.yaml');
   console.log('  node add-electron-debug-identity  Add package identity to Electron debug process');
   console.log('  node clear-electron-debug-identity  Remove package identity from Electron debug process');
+  console.log('  (jsbindings is also spelled js-bindings — both forms work.)');
   console.log('');
   console.log('Examples:');
   console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
   console.log(`  ${CLI_NAME} node create-addon --template cs --name myAddon`);
+  console.log(`  ${CLI_NAME} node jsbindings add --ai`);
+  console.log(`  ${CLI_NAME} node jsbindings generate`);
   console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
   console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
 }
@@ -272,6 +287,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('  create-addon                   Generate native addon files for Electron');
     console.log('  add-electron-debug-identity    Add package identity to Electron debug process');
     console.log('  clear-electron-debug-identity  Remove package identity from Electron debug process');
+    console.log('  (jsbindings is also spelled js-bindings — both forms work.)');
     console.log('');
     console.log('Examples:');
     console.log(`  ${CLI_NAME} node jsbindings add --ai`);
@@ -303,13 +319,17 @@ async function handleNode(args: string[]): Promise<void> {
       break;
 
     case 'jsbindings':
+    case 'js-bindings':
       // Native-CLI sub-command tree (`node jsbindings add` / `... generate`).
       // Forward the full argv (including the leading `node`) to the .NET CLI.
+      // Both `jsbindings` and `js-bindings` (kebab-case alias matching the
+      // `--js-bindings` init flag) are forwarded unchanged — the native CLI
+      // accepts both via JsBindingsCommand.Aliases.
       await callWinappCli(['node', ...args], { exitOnError: true });
       break;
 
     default:
-      console.error(`❌ Unknown node subcommand: ${subcommand}`);
+      console.error(`Unknown node subcommand: ${subcommand}`);
       console.error(`Run "${CLI_NAME} node" for available subcommands.`);
       process.exit(1);
   }
@@ -354,7 +374,7 @@ async function handleCreateAddon(args: string[]): Promise<void> {
 
   // Validate template
   if (!['cpp', 'cs'].includes(options.template as string)) {
-    console.error(`❌ Invalid template: ${options.template}. Valid options: cpp, cs`);
+    console.error(`Invalid template: ${options.template}. Valid options: cpp, cs`);
     process.exit(1);
   }
 

@@ -42,8 +42,7 @@ public class WinmdsLockfileServiceTests
     public async Task WriteAsync_ProducesIndentedSchemaVersionedJson()
     {
         var winapp = _temp.CreateSubdirectory("winapp");
-        // ExtractPackageIdFromPath requires the literal "packages" segment
-        // (the NuGet cache convention) — keep test fixtures aligned with that.
+        // ExtractPackageIdFromPath requires the literal "packages" segment.
         var cache = _temp.CreateSubdirectory("packages");
         var winmd = new FileInfo(Path.Combine(
             cache.FullName, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd"));
@@ -165,9 +164,8 @@ public class WinmdsLockfileServiceTests
     [TestMethod]
     public void BuildLockfile_PartitionFromLockfile_AppliesScopeAsEmitFilter_DemotesUnscopedToRefOnly()
     {
-        // scope narrows EMIT output, not codegen visibility.
-        // Unscoped packages (whose default category is Emit) must end up
-        // as RefOnly so cross-package type resolution still works.
+        // scope narrows EMIT, not codegen visibility — unscoped Emit
+        // packages must end up RefOnly for cross-package type resolution.
         var cache = _temp.CreateSubdirectory("packages");
         var aiWinmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         var fdnWinmd = MakeFile(cache, "microsoft.windowsappsdk.foundation", "1.8.0", "metadata", "Microsoft.Windows.Foundation.winmd");
@@ -245,8 +243,8 @@ public class WinmdsLockfileServiceTests
     [TestMethod]
     public async Task TryReadAsync_Schema1Lockfile_ReturnsNull()
     {
-        // Existing pre-v2.3 lockfiles use schema=1. Readers must treat them
-        // as missing so the slow path (re-discovery) rebuilds the lockfile.
+        // pre-v2.3 lockfiles use schema=1; readers treat them as missing
+        // so the slow path rebuilds.
         var path = _svc.GetLockfilePath(_temp);
         await File.WriteAllTextAsync(path.FullName, "{\"schema\": 1, \"packages\": []}");
 
@@ -257,9 +255,8 @@ public class WinmdsLockfileServiceTests
     [TestMethod]
     public async Task WriteAsync_UsesAtomicTempThenRename()
     {
-        // No reliable way to observe the tmp file mid-write in a unit test;
-        // verify post-conditions: final lockfile exists, no .tmp files left
-        // behind on a successful write.
+        // Can't observe mid-write reliably; check post-conditions: final
+        // file exists, no .tmp left behind.
         var winapp = _temp.CreateSubdirectory("winapp");
         var cache = _temp.CreateSubdirectory("packages");
         var winmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "AI.winmd");
@@ -279,11 +276,184 @@ public class WinmdsLockfileServiceTests
             $"No tmp staging file should remain after a successful write. Found: {string.Join(", ", entries)}");
     }
 
+    [TestMethod]
+    public void PartitionFromLockfile_UncWinmdPaths_DroppedForBothEmitAndRefOnly()
+    {
+        // A tampered lockfile smuggling UNC paths must drop them for both
+        // emit and ref-only — any FileInfo() probe would SMB-handshake.
+        var cache = _temp.CreateSubdirectory("packages");
+        var legitEmit = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        var legitRef = MakeFile(cache, "microsoft.windowsappsdk.foundation", "1.8.0", "metadata", "Microsoft.Windows.Foundation.winmd");
+
+        // Hand-build the lockfile (BuildLockfile would reject paths outside
+        // the cache). RFC 2606 `.invalid` TLD never resolves.
+        var lockfile = new WinmdsLockfile
+        {
+            Schema = WinmdsLockfile.CurrentSchema,
+            GeneratedAt = DateTimeOffset.UtcNow.ToString("O"),
+            NugetCacheDir = cache.FullName,
+            YamlPackagesHash = "h",
+            Packages = new List<WinmdsLockfilePackage>
+            {
+                new WinmdsLockfilePackage
+                {
+                    Name = "Microsoft.WindowsAppSDK.AI",
+                    Version = "1.8.39",
+                    Category = "emit",
+                    Winmds = new List<string>
+                    {
+                        legitEmit.FullName,
+                        @"\\nonexistent-attacker.invalid\share\evil.emit.winmd",
+                    },
+                },
+                new WinmdsLockfilePackage
+                {
+                    Name = "Microsoft.WindowsAppSDK.Foundation",
+                    Version = "1.8.0",
+                    // Default category is Emit but no scope → demoted to RefOnly.
+                    Category = "emit",
+                    Winmds = new List<string>
+                    {
+                        legitRef.FullName,
+                        @"\\nonexistent-attacker.invalid\share\evil.ref.winmd",
+                    },
+                },
+            },
+        };
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (emit, refOnly, _) = JsBindingsWorkspaceService.PartitionFromLockfile(
+            lockfile, _arr00);
+        sw.Stop();
+
+        Assert.IsTrue(sw.ElapsedMilliseconds < 2_000,
+            $"PartitionFromLockfile must drop UNC paths before any FileInfo probe "
+            + $"(took {sw.ElapsedMilliseconds}ms; >1s suggests SMB negotiation).");
+
+        Assert.AreEqual(1, emit.Count, "Only the legit emit winmd survives.");
+        Assert.IsTrue(
+            emit[0].FullName.EndsWith("Microsoft.Windows.AI.winmd", StringComparison.OrdinalIgnoreCase),
+            $"Emit must keep the legit local path. Got: {string.Join(", ", emit.Select(f => f.FullName))}");
+        Assert.IsFalse(
+            emit.Any(f => f.FullName.Contains("nonexistent-attacker.invalid", StringComparison.OrdinalIgnoreCase)),
+            "Emit MUST drop the UNC entry.");
+
+        Assert.AreEqual(1, refOnly.Count, "Only the legit ref-only winmd survives.");
+        Assert.IsTrue(
+            refOnly[0].FullName.EndsWith("Microsoft.Windows.Foundation.winmd", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(
+            refOnly.Any(f => f.FullName.Contains("nonexistent-attacker.invalid", StringComparison.OrdinalIgnoreCase)),
+            "RefOnly MUST drop the UNC entry.");
+    }
+
     private static FileInfo MakeFile(DirectoryInfo cache, params string[] segments)
     {
         var path = Path.Combine(new[] { cache.FullName }.Concat(segments).ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "");
         return new FileInfo(path);
+    }
+
+    // ---------------------------------------------------------------------
+    // M9 — IsLockfilePathUnsafe rejects reparse-point ancestors silently
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task WriteAsync_WinappDirIsJunction_LogsAndSkipsWithoutWriting()
+    {
+        // The lockfile is an optimization, not correctness. When `.winapp/`
+        // is itself (or under) a junction/symlink, refuse to write rather
+        // than throw — otherwise a malicious workspace could redirect the
+        // write to a victim file. Skipping is still safe because codegen
+        // falls back to the full discovery path on next run.
+        var realDir = _temp.CreateSubdirectory("real-winapp");
+        var winappJunction = Path.Combine(_temp.FullName, ".winapp");
+        if (!TryCreateJunction(winappJunction, realDir.FullName))
+        {
+            Assert.Inconclusive("Could not create a junction (CI may lack the privilege).");
+            return;
+        }
+
+        try
+        {
+            var winappDir = new DirectoryInfo(winappJunction);
+            var cache = _temp.CreateSubdirectory("packages");
+            var winmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+            var usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Microsoft.WindowsAppSDK.AI"] = "1.8.39",
+            };
+
+            await _svc.WriteAsync(winappDir, usedVersions, new[] { winmd }, cache, default);
+
+            // Nothing inside the (junction-targeted) real dir AND nothing
+            // inside the junction view. Skip = no write.
+            Assert.IsFalse(File.Exists(Path.Combine(realDir.FullName, "winmds.lock.json")),
+                "Lockfile must NOT be written through a junctioned .winapp.");
+        }
+        finally
+        {
+            try { Directory.Delete(winappJunction, recursive: false); } catch { /* ignore */ }
+        }
+    }
+
+    [TestMethod]
+    public async Task TryReadAsync_WinappDirIsJunction_ReturnsNullWithoutReading()
+    {
+        var realDir = _temp.CreateSubdirectory("real-winapp");
+        // Plant a valid-looking lockfile under the REAL dir so the only
+        // way a read could succeed is by traversing the junction.
+        var lockfilePath = Path.Combine(realDir.FullName, "winmds.lock.json");
+        await File.WriteAllTextAsync(lockfilePath, """
+            { "schema": 2, "generated_at": "2025-01-01T00:00:00Z", "entries": [] }
+            """);
+
+        var winappJunction = Path.Combine(_temp.FullName, ".winapp");
+        if (!TryCreateJunction(winappJunction, realDir.FullName))
+        {
+            Assert.Inconclusive("Could not create a junction (CI may lack the privilege).");
+            return;
+        }
+
+        try
+        {
+            var winappDir = new DirectoryInfo(winappJunction);
+            var result = await _svc.TryReadAsync(winappDir, default);
+
+            Assert.IsNull(result,
+                "TryReadAsync must refuse to traverse a junctioned .winapp and return null.");
+        }
+        finally
+        {
+            try { Directory.Delete(winappJunction, recursive: false); } catch { /* ignore */ }
+        }
+    }
+
+    // Junction creation helper (mklink /J — non-elevating on Windows).
+    private static bool TryCreateJunction(string link, string target)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null)
+            {
+                return false;
+            }
+            p.WaitForExit(5000);
+            return p.ExitCode == 0 && Directory.Exists(link);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

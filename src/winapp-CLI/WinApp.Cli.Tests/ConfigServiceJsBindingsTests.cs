@@ -706,4 +706,106 @@ public class ConfigServiceJsBindingsTests : BaseCommandTests
         StringAssert.Contains(content, "jsBindings:");
         StringAssert.Contains(content, "output: bindings/winrt");
     }
+
+    [TestMethod]
+    public void Load_ConfigPathIsSymlink_Throws()
+    {
+        // Plant a real winapp.yaml elsewhere, point ConfigPath at a
+        // symlink to it inside the workspace, and assert Load() refuses.
+        // Without this guard, a malicious workspace could redirect the
+        // editor (Save / SaveJsBindingsOnly) at any victim file the user
+        // has write access to.
+        var realDir = new DirectoryInfo(
+            Path.Combine(Path.GetTempPath(), $"ConfigSvcRealCfg_{Guid.NewGuid():N}"));
+        realDir.Create();
+        try
+        {
+            var realCfg = Path.Combine(realDir.FullName, "real-winapp.yaml");
+            File.WriteAllText(realCfg, "packages: []\n");
+
+            var linked = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+            try
+            {
+                File.CreateSymbolicLink(linked, realCfg);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                Assert.Inconclusive($"Could not create symlink: {ex.Message}");
+                return;
+            }
+
+            _configService.ConfigPath = new FileInfo(linked);
+            var ex2 = Assert.ThrowsExactly<InvalidOperationException>(() => _configService.Load());
+            StringAssert.Contains(ex2.Message, "symbolic link",
+                "GuardConfigPath must explain why it refused the path");
+            Assert.AreEqual("packages: []\n", File.ReadAllText(realCfg),
+                "Real config file must be untouched by the refused Load");
+        }
+        finally
+        {
+            try { realDir.Delete(true); } catch { /* ignore */ }
+        }
+    }
+
+    [TestMethod]
+    public void Save_ConfigDirAncestorIsJunction_Throws()
+    {
+        // Same threat at a directory ancestor: the parent of winapp.yaml
+        // is a junction. SaveJsBindingsOnly must refuse so user changes
+        // can't get redirected to the junction target.
+        var realDir = new DirectoryInfo(
+            Path.Combine(Path.GetTempPath(), $"ConfigSvcRealDir_{Guid.NewGuid():N}"));
+        realDir.Create();
+        try
+        {
+            var junctionPath = Path.Combine(_tempDirectory.FullName, "nested");
+            if (!TryCreateJunction(junctionPath, realDir.FullName))
+            {
+                Assert.Inconclusive("Could not create a junction (CI may lack the privilege).");
+                return;
+            }
+
+            _configService.ConfigPath = new FileInfo(
+                Path.Combine(junctionPath, "winapp.yaml"));
+            File.WriteAllText(_configService.ConfigPath.FullName, "packages: []\n");
+
+            var ex2 = Assert.ThrowsExactly<InvalidOperationException>(() =>
+                _configService.SaveJsBindingsOnly(new WinappConfig
+                {
+                    JsBindings = new JsBindingsConfig { Lang = "js", Output = "bindings/winrt" },
+                }));
+            StringAssert.Contains(ex2.Message, "symbolic link");
+        }
+        finally
+        {
+            try { realDir.Delete(true); } catch { /* ignore */ }
+        }
+    }
+
+    private static bool TryCreateJunction(string link, string target)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null)
+            {
+                return false;
+            }
+            p.WaitForExit();
+            return p.ExitCode == 0 && Directory.Exists(link);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

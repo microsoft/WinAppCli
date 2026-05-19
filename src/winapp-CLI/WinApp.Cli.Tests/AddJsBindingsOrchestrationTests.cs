@@ -10,9 +10,9 @@ using WinApp.Cli.Tests.TestDoubles;
 
 namespace WinApp.Cli.Tests;
 
-// Hermetic orchestration tests for AddJsBindingsAsync. FakeDynWinrtCodegenService
-// is injected so the codegen executable is never spawned. Fast-path vs fallback
-// is driven by writing (or omitting) winmds.lock.json under .winapp/.
+// Hermetic orchestration tests for AddJsBindingsAsync. Injects a fake
+// codegen so the executable is never spawned. Fast-path vs fallback is
+// driven by writing (or omitting) .winapp/winmds.lock.json.
 // [DoNotParallelize] because the tests mutate WINAPP_CLI_CALLER.
 [TestClass]
 [DoNotParallelize]
@@ -38,9 +38,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestInitialize]
     public void SetNpmCallerEnv()
     {
-        // AddJsBindingsCommand gates behind this exact env value (matches the
-        // const NpmShimCaller in the command's handler). Tests in this class
-        // simulate npm-wrapper invocation throughout.
+        // AddJsBindingsCommand gates on this exact env value (NpmShimCaller).
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
     }
 
@@ -59,8 +57,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
 
         var winappDir = ws.CreateSubdirectory(".winapp");
 
-        // Must match the hash AddJsBindingsAsync will compute, or the
-        // fast-path rejects the lockfile as stale.
+        // Match the hash AddJsBindingsAsync computes; otherwise fast-path
+        // rejects as stale.
         var loadedConfig = new ConfigService(new CurrentDirectoryProvider(ws.FullName))
         {
             ConfigPath = new FileInfo(Path.Combine(ws.FullName, "winapp.yaml")),
@@ -110,9 +108,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_HappyPath_ExitsZero_GeneratesBindings_InjectsRuntimeDep()
     {
-        // Realistic scenario: workspace has a lockfile with one AI package +
-        // its winmds. fast-path partitions, calls codegen (which we fake to
-        // succeed), and add jsbindings exits 0.
+        // Workspace has a lockfile with one AI package + its winmds; fast-path
+        // partitions, calls (fake) codegen, exits 0.
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
 
@@ -185,9 +182,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(addCmd, new[] { _tempDirectory.FullName, "--ai", "--force" });
 
         Assert.AreEqual(0, exitCode);
-        // Lockfile path produces the AI winmd directly from the lockfile —
-        // no NuGet cache glob. If we'd taken fallback we'd fail since the
-        // (real) cache dir doesn't have proper layout.
+        // Lockfile path supplies the winmd directly — no NuGet cache glob.
         Assert.AreEqual(1, _fakeCodegen.Calls.Count);
         Assert.AreEqual(1, _fakeCodegen.Calls[0].EmitWinmds.Length);
     }
@@ -195,9 +190,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_StaleYamlHash_FallsBackOrFailsCleanly()
     {
-        // Stale-hash lockfile → fast-path rejects → fallback fails (no NuGet
-        // cache seeded). Either outcome is fine as long as we don't silently
-        // use the stale data.
+        // Stale-hash lockfile → fast-path rejects → fallback fails (no
+        // NuGet cache); never silently uses stale data.
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         Directory.CreateDirectory(Path.GetDirectoryName(aiWinmd)!);
@@ -244,7 +238,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     public async Task AddJsBindings_LockfileMissingWinmdPaths_FallsBackOrFailsCleanly()
     {
         // Lockfile references winmd paths that don't exist on disk
-        // (simulates `nuget locals all -clear` between restore and add).
+        // (e.g. `nuget locals all -clear` between restore and add).
         var bogusAiWinmd = Path.Combine(_tempDirectory.FullName, "deleted-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         // Intentionally do NOT create the file.
@@ -294,8 +288,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_CodegenThrows_PropagatesAsExit1()
     {
-        // FailWith causes the fake codegen to throw — caller must surface
-        // exit 1 (not silently succeed).
+        // FailWith makes fake codegen throw; caller must surface exit 1.
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         SetUpWorkspaceWithLockfile(
@@ -319,8 +312,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_AllScopedPackagesCategorizedAsSkip_FailsBeforeCodegen()
     {
-        // Scope narrows to a single package that gets categorized as Skip
-        // → emit set is empty → must fail before spawning codegen.
+        // Scope narrows to a single Skip-categorized package → empty emit
+        // set → must fail before spawning codegen.
         var winuiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.winui", "1.8.39", "metadata", "Microsoft.WindowsAppSDK.WinUI.winmd");
         Directory.CreateDirectory(Path.GetDirectoryName(winuiWinmd)!);
@@ -376,9 +369,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_ForceChangesOutput_OldOutputCleanupOnlyAfterCodegenSuccess()
     {
-        // M7 contract: when --force --output changes the output path AND
-        // codegen succeeds, the previous managed dir is wiped (with marker
-        // gating); unmanaged dirs are preserved.
+        // M7: --force --output change wipes a managed old dir on success,
+        // preserves an unmanaged one (marker-gated).
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         SetUpWorkspaceWithLockfile(
@@ -443,8 +435,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_CodegenFails_OldOutputIsPreserved()
     {
-        // M7 contract: codegen failure must leave the old bindings dir
-        // untouched (don't wipe before we know the new bindings will land).
+        // M7: codegen failure must leave the old bindings dir untouched.
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         SetUpWorkspaceWithLockfile(
@@ -487,8 +478,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task AddJsBindings_AdditionalWinmds_FlowsIntoCodegenEmitSet()
     {
-        // jsBindings.additionalWinmds entries must be passed to codegen
-        // as user-additional emit winmds.
+        // additionalWinmds entries must reach codegen as user-additional emit.
         var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
             "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         SetUpWorkspaceWithLockfile(
@@ -571,10 +561,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             $"additionalRefs must surface to codegen via UserAdditionalRefs. Got: {string.Join(", ", call.UserAdditionalRefs)}");
     }
 
-    // an attacker-controlled winapp.yaml with additionalWinmds
-    // or additionalRefs pointing at a UNC path must NOT be probed (which
-    // would trigger an SMB handshake and leak NTLM credentials). The
-    // entries are dropped silently-from-codegen but logged.
+    // UNC paths in additionalWinmds must be rejected without probing
+    // (FileInfo.Exists on a UNC triggers SMB / NTLM leak).
     [TestMethod]
     public async Task AddJsBindings_AdditionalWinmds_UncEntry_Rejected_NotProbedNotPassedToCodegen()
     {
@@ -586,16 +574,13 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
                 ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
             });
 
-        // Yaml contains BOTH a benign local entry AND a UNC entry. Only
-        // the benign one should reach codegen.
+        // Yaml has a benign local entry + a UNC entry; only the benign one
+        // should reach codegen.
         var legitWinmd = Path.Combine(_tempDirectory.FullName, "vendor", "Legit.winmd");
         Directory.CreateDirectory(Path.GetDirectoryName(legitWinmd)!);
         File.WriteAllText(legitWinmd, "stub");
 
-        // \\nonexistent-attacker.invalid\share\evil.winmd
-        // Using `.invalid` per RFC 2606 so even an accidental probe can't
-        // reach a real host. If our guard fails, FileInfo.Exists would
-        // still SMB-negotiate and the test would timeout / hang.
+        // RFC 2606 `.invalid` TLD — never resolves even if our guard fails.
         var uncWinmd = @"\\nonexistent-attacker.invalid\share\evil.winmd";
 
         File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
@@ -617,9 +602,7 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
 
         var addCmd = GetRequiredService<AddJsBindingsCommand>();
 
-        // Bound the test runtime: if our guard fails, FileInfo.Exists on
-        // the UNC path can take 20+ seconds to time out via SMB
-        // negotiation. We want < 5s.
+        // Cap runtime: a failed guard means a 20s+ SMB timeout per UNC entry.
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var exit = await ParseAndInvokeWithCaptureAsync(addCmd, new[] { _tempDirectory.FullName, "--force" });
         sw.Stop();
@@ -639,13 +622,12 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             $"UNC entry MUST be dropped — codegen received: {string.Join(", ", call.UserAdditionalWinmds)}");
     }
 
-    // extraTypes-only cherry-pick: only additionalRefs + extraTypes, no
-    // bulk emit. Must succeed and forward refs + extraTypes to codegen.
+    // extraTypes-only: additionalRefs + extraTypes, no bulk emit.
     [TestMethod]
     public async Task AddJsBindings_ExtraTypesOnlyWithAdditionalRefs_Succeeds()
     {
-        // Workspace has WinAppSDK installed; jsBindings declares only
-        // additionalRefs + extraTypes (no packages, no additionalWinmds).
+        // jsBindings declares only additionalRefs + extraTypes (no packages,
+        // no additionalWinmds).
         var vendorWinmd = Path.Combine(_tempDirectory.FullName, "vendor", "Vendor.SDK.winmd");
         Directory.CreateDirectory(Path.GetDirectoryName(vendorWinmd)!);
         File.WriteAllText(vendorWinmd, "stub");
@@ -712,10 +694,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             call.Config.ExtraTypes[0].Classes.ToList());
     }
 
-    // extraTypes-only flow with refs + only-malformed
-    // extraTypes (blank namespace OR empty classes list) must fail
-    // BEFORE codegen — otherwise we'd return success with zero bindings
-    // produced (DynWinrtCodegenService.RunAsync skips malformed entries).
+    // Only-malformed extraTypes (blank ns / empty classes) must fail
+    // before codegen — otherwise we'd return success with zero bindings.
     [TestMethod]
     public async Task AddJsBindings_ExtraTypesOnlyWithMalformedEntries_FailsBeforeCodegen()
     {
@@ -744,8 +724,8 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             lockfile, WinmdsLockfileJsonContext.Default.WinmdsLockfile);
         File.WriteAllText(Path.Combine(winappDir.FullName, "winmds.lock.json"), json);
 
-        // Two malformed entries — one blank namespace, one empty classes
-        // list. Codegen would silently skip both → zero output.
+        // Two malformed entries (blank ns + empty classes) → codegen would
+        // silently skip both.
         File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
             "packages:\n"
             + "  - name: Microsoft.WindowsAppSDK\n"
@@ -773,9 +753,264 @@ public class AddJsBindingsOrchestrationTests : BaseCommandTests
             "Malformed-only extraTypes must fail rather than silently produce zero bindings.");
         Assert.AreEqual(0, _fakeCodegen.Calls.Count,
             "Codegen MUST NOT be invoked when all extraTypes would be skipped.");
+    }
+
+    // Companion to the additionalWinmds UNC test: refs flow through the
+    // same lockfile-bypass route, so UNC entries must also be dropped.
+    [TestMethod]
+    public async Task AddJsBindings_AdditionalRefs_UncEntry_Rejected_NotProbedNotPassedToCodegen()
+    {
+        var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
+            "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        SetUpWorkspaceWithLockfile(
+            lockfilePackages: new[]
+            {
+                ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
+            });
+
+        // Yaml has a benign local ref + a UNC ref; only the benign reaches codegen.
+        var legitRef = Path.Combine(_tempDirectory.FullName, "vendor", "Legit.Ref.winmd");
+        Directory.CreateDirectory(Path.GetDirectoryName(legitRef)!);
+        File.WriteAllText(legitRef, "stub");
+
+        // RFC 2606 reserved TLD — never resolves, even if our guard fails.
+        var uncRef = @"\\nonexistent-attacker.invalid\share\evil.ref.winmd";
+
+        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
+            "packages:\n"
+            + "  - name: Microsoft.WindowsAppSDK\n"
+            + "    version: 1.8.39\n"
+            + "jsBindings:\n"
+            + "  output: bindings/winrt\n"
+            + "  lang: js\n"
+            + "  packages:\n"
+            + "    - Microsoft.WindowsAppSDK.AI\n"
+            + "  additionalRefs:\n"
+            + "    - vendor/Legit.Ref.winmd\n"
+            + $"    - {uncRef.Replace("\\", "\\\\")}\n");
+
+        File.WriteAllText(
+            Path.Combine(_tempDirectory.FullName, "package.json"),
+            """{"name":"app","version":"1.0.0","dependencies":{}}""");
+
+        var addCmd = GetRequiredService<AddJsBindingsCommand>();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var exit = await ParseAndInvokeWithCaptureAsync(addCmd, new[] { _tempDirectory.FullName, "--force" });
+        sw.Stop();
+
+        Assert.AreEqual(0, exit, $"Expected success; stderr: {ConsoleStdErr}");
+        Assert.IsTrue(sw.ElapsedMilliseconds < 10_000,
+            $"UNC ref must be rejected without SMB probe (took {sw.ElapsedMilliseconds}ms; "
+            + "anything >5s suggests we did probe).");
+
+        Assert.AreEqual(1, _fakeCodegen.Calls.Count);
+        var call = _fakeCodegen.Calls[0];
         Assert.IsTrue(
-            ConsoleStdOut.ToString().Contains("malformed", StringComparison.OrdinalIgnoreCase)
-            || ConsoleStdErr.ToString().Contains("malformed", StringComparison.OrdinalIgnoreCase),
-            $"Error message must call out the malformed extraTypes. stdout={ConsoleStdOut}; stderr={ConsoleStdErr}");
+            call.UserAdditionalRefs.Any(p => p.EndsWith("Legit.Ref.winmd", StringComparison.OrdinalIgnoreCase)),
+            "Legit local ref must still reach codegen.");
+        Assert.IsFalse(
+            call.UserAdditionalRefs.Any(p => p.Contains("nonexistent-attacker.invalid", StringComparison.OrdinalIgnoreCase)),
+            $"UNC ref MUST be dropped — codegen received: {string.Join(", ", call.UserAdditionalRefs)}");
+    }
+
+    // M1 (round-6): absolute paths outside the workspace must be accepted.
+    // docs/js-bindings.md:85,216,400 advertise absolute-path support; pre-r6
+    // the reparse-point guard used workspaceDir as boundary and silently
+    // dropped any out-of-workspace absolute path.
+    [TestMethod]
+    public async Task AddJsBindings_AdditionalWinmds_AbsolutePathOutsideWorkspace_ReachesCodegen()
+    {
+        var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
+            "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        SetUpWorkspaceWithLockfile(
+            lockfilePackages: new[]
+            {
+                ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
+            });
+
+        // Stage a vendor winmd in a SIBLING directory (outside workspace).
+        var siblingDir = new DirectoryInfo(Path.Combine(
+            Path.GetTempPath(),
+            string.Concat("winapp-r6-abs-".AsSpan(), Guid.NewGuid().ToString("N").AsSpan(0, 8))));
+        siblingDir.Create();
+        var externalWinmd = Path.Combine(siblingDir.FullName, "External.winmd");
+        File.WriteAllText(externalWinmd, "stub");
+
+        try
+        {
+            File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
+                "packages:\n"
+                + "  - name: Microsoft.WindowsAppSDK\n"
+                + "    version: 1.8.39\n"
+                + "jsBindings:\n"
+                + "  output: bindings/winrt\n"
+                + "  lang: js\n"
+                + "  packages:\n"
+                + "    - Microsoft.WindowsAppSDK.AI\n"
+                + "  additionalWinmds:\n"
+                + $"    - {externalWinmd.Replace("\\", "\\\\")}\n");
+
+            File.WriteAllText(
+                Path.Combine(_tempDirectory.FullName, "package.json"),
+                """{"name":"app","version":"1.0.0","dependencies":{}}""");
+
+            var addCmd = GetRequiredService<AddJsBindingsCommand>();
+            var exit = await ParseAndInvokeWithCaptureAsync(addCmd, new[] { _tempDirectory.FullName, "--force" });
+
+            Assert.AreEqual(0, exit, $"Expected success; stderr: {ConsoleStdErr}");
+            Assert.AreEqual(1, _fakeCodegen.Calls.Count);
+            var call = _fakeCodegen.Calls[0];
+            Assert.IsTrue(
+                call.UserAdditionalWinmds.Any(p => p.EndsWith("External.winmd", StringComparison.OrdinalIgnoreCase)),
+                $"Absolute path outside workspace must reach codegen. Got: {string.Join(", ", call.UserAdditionalWinmds)}");
+        }
+        finally
+        {
+            try { siblingDir.Delete(recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    // M1 (round-6) companion: absolute additionalRefs must also be accepted
+    // (same boundary fix; both fields flow through ResolveAdditionalWinmds).
+    [TestMethod]
+    public async Task AddJsBindings_AdditionalRefs_AbsolutePathOutsideWorkspace_ReachesCodegen()
+    {
+        var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
+            "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        SetUpWorkspaceWithLockfile(
+            lockfilePackages: new[]
+            {
+                ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
+            });
+
+        var siblingDir = new DirectoryInfo(Path.Combine(
+            Path.GetTempPath(),
+            string.Concat("winapp-r6-absref-".AsSpan(), Guid.NewGuid().ToString("N").AsSpan(0, 8))));
+        siblingDir.Create();
+        var externalRef = Path.Combine(siblingDir.FullName, "External.Ref.winmd");
+        File.WriteAllText(externalRef, "stub");
+
+        try
+        {
+            File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
+                "packages:\n"
+                + "  - name: Microsoft.WindowsAppSDK\n"
+                + "    version: 1.8.39\n"
+                + "jsBindings:\n"
+                + "  output: bindings/winrt\n"
+                + "  lang: js\n"
+                + "  packages:\n"
+                + "    - Microsoft.WindowsAppSDK.AI\n"
+                + "  additionalRefs:\n"
+                + $"    - {externalRef.Replace("\\", "\\\\")}\n");
+
+            File.WriteAllText(
+                Path.Combine(_tempDirectory.FullName, "package.json"),
+                """{"name":"app","version":"1.0.0","dependencies":{}}""");
+
+            var addCmd = GetRequiredService<AddJsBindingsCommand>();
+            var exit = await ParseAndInvokeWithCaptureAsync(addCmd, new[] { _tempDirectory.FullName, "--force" });
+
+            Assert.AreEqual(0, exit, $"Expected success; stderr: {ConsoleStdErr}");
+            Assert.AreEqual(1, _fakeCodegen.Calls.Count);
+            var call = _fakeCodegen.Calls[0];
+            Assert.IsTrue(
+                call.UserAdditionalRefs.Any(p => p.EndsWith("External.Ref.winmd", StringComparison.OrdinalIgnoreCase)),
+                $"Absolute ref outside workspace must reach codegen. Got: {string.Join(", ", call.UserAdditionalRefs)}");
+        }
+        finally
+        {
+            try { siblingDir.Delete(recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    // M8: when old/new output dirs nest (either direction), cleanup must
+    // be skipped or wiping old would erase the freshly generated bindings.
+    [TestMethod]
+    public async Task AddJsBindings_OutputChange_NewNestedInsideOld_CleanupSkipped()
+    {
+        // old = "bindings", new = "bindings/winrt" (child of old).
+        var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
+            "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        SetUpWorkspaceWithLockfile(
+            lockfilePackages: new[]
+            {
+                ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
+            });
+
+        // Marker-gated old dir would normally be wiped — overlap guard skips it.
+        var oldDir = Path.Combine(_tempDirectory.FullName, "bindings");
+        Directory.CreateDirectory(oldDir);
+        File.WriteAllText(Path.Combine(oldDir, "stale.js"), "// old");
+        File.WriteAllText(Path.Combine(oldDir, DynWinrtCodegenService.ManagedMarkerFileName), "# managed");
+
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath,
+            "packages:\n"
+            + "  - name: Microsoft.WindowsAppSDK\n"
+            + "    version: 1.8.39\n"
+            + "jsBindings:\n"
+            + "  output: bindings\n"
+            + "  lang: js\n"
+            + "  packages:\n"
+            + "    - Microsoft.WindowsAppSDK.AI\n");
+
+        File.WriteAllText(
+            Path.Combine(_tempDirectory.FullName, "package.json"),
+            """{"name":"app","version":"1.0.0","dependencies":{}}""");
+
+        var addCmd = GetRequiredService<AddJsBindingsCommand>();
+        var exit = await ParseAndInvokeWithCaptureAsync(addCmd,
+            new[] { _tempDirectory.FullName, "--force", "--output", "bindings/winrt" });
+
+        Assert.AreEqual(0, exit, $"Expected success; stderr: {ConsoleStdErr}");
+
+        var newFile = Path.Combine(_tempDirectory.FullName, "bindings", "winrt", "index.js");
+        Assert.IsTrue(File.Exists(newFile),
+            "Freshly generated bindings MUST survive — overlap cleanup must not delete them.");
+    }
+
+    [TestMethod]
+    public async Task AddJsBindings_OutputChange_OldNestedInsideNew_CleanupSkipped()
+    {
+        // old = "bindings/winrt" (child), new = "bindings" (parent).
+        var aiWinmd = Path.Combine(_tempDirectory.FullName, "fake-cache",
+            "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
+        SetUpWorkspaceWithLockfile(
+            lockfilePackages: new[]
+            {
+                ("Microsoft.WindowsAppSDK.AI", "1.8.39", "emit", new[] { aiWinmd }),
+            });
+
+        var oldDir = Path.Combine(_tempDirectory.FullName, "bindings", "winrt");
+        Directory.CreateDirectory(oldDir);
+        File.WriteAllText(Path.Combine(oldDir, "stale.js"), "// old");
+        File.WriteAllText(Path.Combine(oldDir, DynWinrtCodegenService.ManagedMarkerFileName), "# managed");
+
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath,
+            "packages:\n"
+            + "  - name: Microsoft.WindowsAppSDK\n"
+            + "    version: 1.8.39\n"
+            + "jsBindings:\n"
+            + "  output: bindings/winrt\n"
+            + "  lang: js\n"
+            + "  packages:\n"
+            + "    - Microsoft.WindowsAppSDK.AI\n");
+
+        File.WriteAllText(
+            Path.Combine(_tempDirectory.FullName, "package.json"),
+            """{"name":"app","version":"1.0.0","dependencies":{}}""");
+
+        var addCmd = GetRequiredService<AddJsBindingsCommand>();
+        var exit = await ParseAndInvokeWithCaptureAsync(addCmd,
+            new[] { _tempDirectory.FullName, "--force", "--output", "bindings" });
+
+        Assert.AreEqual(0, exit, $"Expected success; stderr: {ConsoleStdErr}");
+
+        var newFile = Path.Combine(_tempDirectory.FullName, "bindings", "index.js");
+        Assert.IsTrue(File.Exists(newFile),
+            "Freshly generated bindings MUST survive at the new (parent) location.");
     }
 }

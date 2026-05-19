@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -177,7 +178,7 @@ public class DynWinrtCodegenArgvTests
     }
 
     // -------------------------------------------------------------------------
-    // IsNetworkPath — classify UNC / network paths so the
+    // PathSafety.IsNetworkPath — classify UNC / network paths so the
     // additionalWinmds / additionalRefs / lockfile path probes can refuse
     // to negotiate SMB with attacker-controlled hosts.
     // -------------------------------------------------------------------------
@@ -197,7 +198,7 @@ public class DynWinrtCodegenArgvTests
     [DataRow("", false, "Empty")]
     public void IsNetworkPath_ClassifiesPathsCorrectly(string path, bool expected, string label)
     {
-        Assert.AreEqual(expected, JsBindingsWorkspaceService.IsNetworkPath(path),
+        Assert.AreEqual(expected, PathSafety.IsNetworkPath(path),
             $"Path classification mismatch for {label}: {path}");
     }
 

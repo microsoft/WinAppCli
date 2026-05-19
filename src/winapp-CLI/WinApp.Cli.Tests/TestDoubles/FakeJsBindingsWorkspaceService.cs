@@ -41,6 +41,14 @@ internal sealed class FakeJsBindingsWorkspaceService : IJsBindingsWorkspaceServi
     public Task<int> AddAsync(AddJsBindingsOptions options, CancellationToken cancellationToken = default)
         => Task.FromResult(0);
 
+    public List<GenerateJsBindingsOptions> GenerateCalls { get; } = new();
+
+    // When set, GenerateAsync returns this exit code instead of 0.
+    public int GenerateResult { get; set; }
+
     public Task<int> GenerateAsync(GenerateJsBindingsOptions options, CancellationToken cancellationToken = default)
-        => Task.FromResult(0);
+    {
+        GenerateCalls.Add(options);
+        return Task.FromResult(GenerateResult);
+    }
 }

@@ -191,4 +191,137 @@ public class UserPackageJsonServiceTests
         Assert.ThrowsExactly<ArgumentException>(() =>
             _service.EnsureRuntimeDependency(_tempDir, "x", ""));
     }
+
+    // ---- Reparse-point guard (M9) ----
+
+    [TestMethod]
+    public void EnsureRuntimeDependency_PackageJsonIsSymlink_Throws()
+    {
+        // Plant a real package.json elsewhere, then symlink it into the
+        // workspace. The guard must refuse to rewrite via the symlink so a
+        // malicious workspace can't redirect the edit to a victim file.
+        var realDir = new DirectoryInfo(
+            Path.Combine(Path.GetTempPath(), $"UserPkgJsonTests_Real_{Guid.NewGuid():N}"));
+        realDir.Create();
+        try
+        {
+            var realPackageJson = Path.Combine(realDir.FullName, "package.json");
+            File.WriteAllText(realPackageJson, "{\"name\":\"victim\"}");
+
+            try
+            {
+                File.CreateSymbolicLink(PackageJsonPath, realPackageJson);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                // Creating a symlink on Windows requires admin or Developer
+                // Mode. Skip this assertion silently rather than fail the
+                // suite on locked-down CI/dev machines.
+                Assert.Inconclusive($"Could not create a symbolic link in this environment: {ex.Message}");
+                return;
+            }
+
+            var ex2 = Assert.ThrowsExactly<InvalidOperationException>(() =>
+                _service.EnsureRuntimeDependency(_tempDir, "@microsoft/dynwinrt", "1.0.0"));
+            StringAssert.Contains(ex2.Message, "symbolic link", "Error must explain the refusal");
+            // Real file must be untouched.
+            Assert.AreEqual("{\"name\":\"victim\"}", File.ReadAllText(realPackageJson));
+        }
+        finally
+        {
+            try { realDir.Delete(true); } catch { /* ignore */ }
+        }
+    }
+
+    [TestMethod]
+    public void EnsureRuntimeDependency_AncestorIsJunction_Throws()
+    {
+        // Same threat as a file-level symlink, but at a directory ancestor:
+        // `<temp>\<wkspace>\nested\` is a junction pointing at a real dir
+        // that holds a package.json. Refusing must cover this case too.
+        var realDir = new DirectoryInfo(
+            Path.Combine(Path.GetTempPath(), $"UserPkgJsonTests_RealDir_{Guid.NewGuid():N}"));
+        realDir.Create();
+        try
+        {
+            File.WriteAllText(Path.Combine(realDir.FullName, "package.json"), "{\"name\":\"victim\"}");
+
+            var junctionPath = Path.Combine(_tempDir.FullName, "nested");
+            try
+            {
+                // mklink /J is non-elevating on Windows even without Dev Mode.
+                Directory.CreateSymbolicLink(junctionPath, realDir.FullName);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                Assert.Inconclusive($"Could not create a directory link in this environment: {ex.Message}");
+                return;
+            }
+
+            var junctionWorkspace = new DirectoryInfo(junctionPath);
+            var ex2 = Assert.ThrowsExactly<InvalidOperationException>(() =>
+                _service.EnsureRuntimeDependency(junctionWorkspace, "@microsoft/dynwinrt", "1.0.0"));
+            StringAssert.Contains(ex2.Message, "symbolic link", "Error must explain the refusal");
+        }
+        finally
+        {
+            try { realDir.Delete(true); } catch { /* ignore */ }
+        }
+    }
+
+    [TestMethod]
+    public void EnsureRuntimeDependency_LockedPackageJson_ThrowsWrapped()
+    {
+        File.WriteAllText(PackageJsonPath, "{\"name\":\"my-app\",\"version\":\"1.0.0\"}");
+        // Hold an exclusive lock so the service's atomic write
+        // (or its preceding read) fails. The wrapper must surface this as
+        // an InvalidOperationException, not a raw IOException — otherwise
+        // CLI orchestration aborts mid-init instead of degrading to a
+        // warning.
+        using var locker = new FileStream(
+            PackageJsonPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            _service.EnsureRuntimeDependency(_tempDir, "@microsoft/dynwinrt", "1.0.0"));
+        Assert.IsNotNull(ex.InnerException);
+        Assert.IsTrue(
+            ex.InnerException is IOException or UnauthorizedAccessException,
+            $"Inner exception should be IOException or UnauthorizedAccessException, was {ex.InnerException?.GetType().Name}");
+    }
+
+    // ---------------------------------------------------------------------
+    // L2 — write-path catch reachable when destination can be READ but
+    // cannot be REPLACED. Pre-existing LockedPackageJson_ThrowsWrapped uses
+    // FileShare.None which lights up the READ catch path; this test holds
+    // the destination open for FileShare.Read (so the service's read
+    // succeeds) and asserts the WRITE catch wraps the rename failure with
+    // the actionable "Failed to write" prefix.
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public void EnsureRuntimeDependency_DestinationWriteLocked_WrapsWithFailedToWrite()
+    {
+        File.WriteAllText(PackageJsonPath, "{\"name\":\"my-app\",\"version\":\"1.0.0\"}");
+
+        // Open WITH FileShare.Read: other readers (the service's
+        // File.OpenRead / File.ReadAllText) succeed, but File.Move
+        // overwriting the destination fails because no FileShare.Write
+        // is granted. That lands in the catch at lines 120-128 of
+        // UserPackageJsonService.
+        using var locker = new FileStream(
+            PackageJsonPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            _service.EnsureRuntimeDependency(_tempDir, "@microsoft/dynwinrt", "1.0.0"));
+
+        StringAssert.Matches(
+            ex.Message,
+            new System.Text.RegularExpressions.Regex("(Failed|No permission) to write"),
+            "Wrapper must surface the I/O / permission failure with an actionable 'to write' prefix.");
+        Assert.IsTrue(
+            ex.InnerException is IOException or UnauthorizedAccessException,
+            $"Inner must be IOException / UnauthorizedAccessException, was {ex.InnerException?.GetType().Name}");
+    }
 }

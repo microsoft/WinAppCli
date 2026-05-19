@@ -4,6 +4,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -16,6 +17,22 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
     public FileInfo GetLockfilePath(DirectoryInfo winappDir) =>
         new(Path.Combine(winappDir.FullName, LockfileName));
 
+    // Refuse to read/write the lockfile if `.winapp/` (or any segment of
+    // its path up to the workspace) is a symlink / junction. The lockfile
+    // lives next to user-controlled state; a malicious workspace can plant
+    // `.winapp` as a junction to a UNC share or a victim file before
+    // winapp ever runs, so we cannot trust the path even though we'd
+    // normally consider `.winapp/` winapp-managed.
+    private static bool IsLockfilePathUnsafe(DirectoryInfo winappDir, FileInfo lockfilePath)
+    {
+        // Use the parent of `.winapp` (i.e. the workspace) as the boundary
+        // when discoverable. Fall back to `.winapp` itself otherwise (the
+        // call still flags the dir being a reparse point because PathSafety
+        // checks the boundary).
+        var boundary = winappDir.Parent?.FullName ?? winappDir.FullName;
+        return PathSafety.HasReparsePointOnPath(lockfilePath.FullName, boundary);
+    }
+
     public async Task WriteAsync(
         DirectoryInfo winappDir,
         IReadOnlyDictionary<string, string> usedVersions,
@@ -27,9 +44,20 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         string? tempPath = null;
         try
         {
+            var path = GetLockfilePath(winappDir);
+            if (IsLockfilePathUnsafe(winappDir, path))
+            {
+                // Lockfile is an optimization, not a correctness requirement —
+                // log + skip rather than throw, so codegen still proceeds via
+                // live discovery.
+                logger.LogDebug(
+                    "Skipping winmds lockfile write at {LockfilePath}: .winapp or one of its ancestors is a symlink / reparse point.",
+                    path.FullName);
+                return;
+            }
+
             winappDir.Create();
             var lockfile = BuildLockfile(usedVersions, discoveredWinmds, nugetCacheDir, yamlPackagesHash);
-            var path = GetLockfilePath(winappDir);
 
             // Atomic write via tmp + rename; guid suffix avoids concurrent
             // writers colliding on staging.
@@ -68,6 +96,14 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         CancellationToken cancellationToken = default)
     {
         var path = GetLockfilePath(winappDir);
+        if (IsLockfilePathUnsafe(winappDir, path))
+        {
+            logger.LogDebug(
+                "Skipping winmds lockfile read at {LockfilePath}: .winapp or one of its ancestors is a symlink / reparse point.",
+                path.FullName);
+            return null;
+        }
+
         if (!path.Exists)
         {
             return null;

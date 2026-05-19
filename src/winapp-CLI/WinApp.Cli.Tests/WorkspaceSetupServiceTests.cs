@@ -192,6 +192,122 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
     }
 }
 
+// M2 (round-6): restore on a jsbindings-only workspace (packages: empty,
+// jsBindings: declared) used to short-circuit at the empty-packages early-
+// return, never regenerating bindings. Now it forwards to GenerateAsync.
+[TestClass]
+[DoNotParallelize]
+public class WorkspaceSetupServiceJsBindingsOnlyRestoreTests : BaseCommandTests
+{
+    private FakeJsBindingsWorkspaceService _fakeJsBindings = null!;
+
+    protected override IServiceCollection ConfigureServices(IServiceCollection services)
+    {
+        _fakeJsBindings = new FakeJsBindingsWorkspaceService();
+        var existing = services.FirstOrDefault(d => d.ServiceType == typeof(IJsBindingsWorkspaceService));
+        if (existing is not null)
+        {
+            services.Remove(existing);
+        }
+        services.AddSingleton<IJsBindingsWorkspaceService>(_fakeJsBindings);
+        return services;
+    }
+
+    [TestMethod]
+    public async Task Restore_JsBindingsOnly_NoPackages_InvokesGenerateAsync()
+    {
+        // Yaml with only a jsBindings: block — no packages: at all.
+        // Pre-r6 the empty-packages early-return swallowed this case.
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath,
+            "jsBindings:\n"
+            + "  output: bindings/winrt\n"
+            + "  lang: js\n");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            UseDefaults = true,
+            NoGitignore = true,
+        };
+
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, exitCode, "Restore must succeed for jsbindings-only yaml.");
+        Assert.AreEqual(1, _fakeJsBindings.GenerateCalls.Count,
+            "Restore must call GenerateAsync exactly once when jsBindings: is present and packages: is empty.");
+        Assert.IsTrue(_fakeJsBindings.EnsureRuntimeDependencyCalled,
+            "Restore on jsbindings-only must also ensure @microsoft/dynwinrt is in package.json (parity with init --js-bindings).");
+    }
+
+    [TestMethod]
+    public async Task Restore_JsBindingsOnly_GenerateFailure_PropagatesNonZero()
+    {
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath,
+            "jsBindings:\n"
+            + "  output: bindings/winrt\n"
+            + "  lang: js\n");
+
+        _fakeJsBindings.GenerateResult = 7;
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            UseDefaults = true,
+            NoGitignore = true,
+        };
+
+        var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreEqual(7, exitCode, "Restore must propagate GenerateAsync's non-zero exit code.");
+        Assert.IsFalse(_fakeJsBindings.EnsureRuntimeDependencyCalled,
+            "Runtime-dep injection must be skipped when generate fails (don't mutate package.json on a failed regen).");
+    }
+
+    [TestMethod]
+    public async Task Restore_EmptyYaml_NoPackagesNoJsBindings_DoesNotInvokeGenerateAsync()
+    {
+        // Pure no-op path: empty yaml, no jsBindings: — must NOT route through
+        // the jsbindings-only restore branch. The downstream SDK install flow
+        // is environment-dependent (cppwinrt is not available in the unit-test
+        // environment) and is covered by integration tests elsewhere, so this
+        // test only asserts the part that is mine to guard: GenerateAsync is
+        // not falsely triggered by the M2 short-circuit when JsBindings is
+        // null.
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath, "# nothing here\n");
+
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            UseDefaults = true,
+            NoGitignore = true,
+        };
+
+        try
+        {
+            await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+        }
+        catch
+        {
+            // Downstream cppwinrt / SDK install failures are out of scope here.
+        }
+
+        Assert.AreEqual(0, _fakeJsBindings.GenerateCalls.Count,
+            "Empty yaml without jsBindings: must NOT trigger codegen.");
+    }
+}
+
 /// <summary>
 /// End-to-end tests for the merged .NET / native workspace setup. Verifies the
 /// unified WorkspaceSetupService handles both csproj and C++ projects through

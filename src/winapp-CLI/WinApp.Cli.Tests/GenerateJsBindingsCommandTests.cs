@@ -120,6 +120,30 @@ public class GenerateJsBindingsCommandTests : BaseCommandTests
             "generate is read-only on yaml — file must be byte-identical.");
     }
 
+    // M3 (round-6): `node jsbindings generate` is documented as read-only.
+    // That contract covers package.json too — re-adding @microsoft/dynwinrt
+    // on every regen would silently un-do a deliberate user removal.
+    [TestMethod]
+    public async Task Generate_WithExistingJsBindings_DoesNotMutatePackageJson()
+    {
+        await WriteYamlWithJsBindingsAsync("generated-js");
+
+        // package.json WITHOUT @microsoft/dynwinrt in dependencies — the
+        // user has deliberately removed it, and generate must respect that.
+        var packageJsonPath = Path.Combine(_tempDirectory.FullName, "package.json");
+        const string originalPkg = """{"name":"app","version":"1.0.0","dependencies":{"react":"18.0.0"}}""";
+        await File.WriteAllTextAsync(packageJsonPath, originalPkg);
+
+        var cmd = GetRequiredService<GenerateJsBindingsCommand>();
+        var args = new[] { _tempDirectory.FullName };
+
+        await ParseAndInvokeWithCaptureAsync(cmd, args);
+
+        var after = await File.ReadAllTextAsync(packageJsonPath);
+        Assert.AreEqual(originalPkg, after,
+            "generate must NOT inject @microsoft/dynwinrt into package.json — that's add's job.");
+    }
+
     [TestMethod]
     public async Task Generate_RoutesViaWinAppRootCommand()
     {

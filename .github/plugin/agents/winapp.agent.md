@@ -106,11 +106,18 @@ Want to inspect or interact with a running app's UI?
 **Purpose:** Layer typed JS/TS WinRT bindings (via `@microsoft/dynwinrt-codegen`) onto an existing workspace.
 **When to use:** After `winapp init` on a Node/Electron host, when you want callable WinRT APIs without a native build step.
 **Key options:**
-- `--ai` — limit generation to the `Microsoft.WindowsAppSDK.AI` slice (the only ships-today preset)
+- `--ai` — limit generation to the AI surface — the `Microsoft.WindowsAppSDK.AI` NuGet package, which projects the `Microsoft.Windows.AI.*` namespaces (the only ships-today preset)
 - `--output PATH` — output directory (default `bindings/winrt`); persisted to `winapp.yaml`
 - `--force` — patch an existing `jsBindings:` block (overwrites `output` and preset packages; preserves user customisations like `extraTypes` / `additionalWinmds` / `skipPackages`)
 - `--config-dir` — directory containing `winapp.yaml` (default: `base-directory`)
 **Requires:** `winapp.yaml` already exists; npm-only (run as `npx winapp node jsbindings add`). Never modifies `packages:` or installs SDK packages.
+
+### `winapp node jsbindings generate` (alias: `winapp node js-bindings generate`)
+**Purpose:** Re-run codegen for the existing `jsBindings:` block in `winapp.yaml` without mutating config.
+**When to use:** After editing `jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand, after pulling teammates' `winapp.yaml`, or after a `restore` that brought new SDK versions in.
+**Key options:**
+- `--config-dir` — directory containing `winapp.yaml` (default: `base-directory`)
+**Requires:** `winapp.yaml` already has a `jsBindings:` block; npm-only (run as `npx winapp node jsbindings generate`). Does not edit `winapp.yaml` or `package.json`.
 
 ### `winapp package <input-folder>` (alias: `winapp pack`)
 **Purpose:** Create an MSIX installer from a built app.

@@ -17,7 +17,7 @@ You have two paths depending on whether your Electron app already has a `winapp.
 
 ### Path A — Fresh project (init with bindings)
 
-If you're setting up `winapp` for the first time, ask `init` to wire bindings in the same step. The `--js-bindings-ai` preset narrows generation to the Windows AI surface (`Microsoft.WindowsAppSDK.AI`):
+If you're setting up `winapp` for the first time, ask `init` to wire bindings in the same step. The `--js-bindings-ai` preset narrows generation to the Windows AI surface — the [`Microsoft.WindowsAppSDK.AI`](https://www.nuget.org/packages/Microsoft.WindowsAppSDK.AI) NuGet package, which projects the `Microsoft.Windows.AI.*` namespaces:
 
 ```bash
 npx winapp init --use-defaults --js-bindings-ai
@@ -54,6 +54,8 @@ Both paths produce a `bindings/winrt/` directory next to your sources:
 bindings/winrt/
 ├── index.js                                          # entry — re-exports every emitted class
 ├── index.d.ts                                        # TS bundle
+├── Microsoft.Windows.Vision.TextRecognizer.js
+├── Microsoft.Windows.Vision.TextRecognizer.d.ts
 ├── Microsoft.Windows.AI.Generative.LanguageModel.js
 ├── Microsoft.Windows.AI.Generative.LanguageModel.d.ts
 └── …                                                 # one pair of files per emitted class
@@ -66,59 +68,55 @@ To put them somewhere else, pass `--js-bindings-output PATH` (for `init`) or `--
 
 ## Step 2: Call a WinRT API from your Electron code
 
-Import from the generated `index.js` — you don't need to know which file inside `bindings/winrt/` a class lives in. Here's the full Phi Silica text-generation flow as it would run in your Electron main process:
+Import from the generated `index.js` — you don't need to know which file inside `bindings/winrt/` a class lives in. Here's an OCR (text recognition) flow as it would run in your Electron main process. We use `TextRecognizer` rather than `LanguageModel` because it doesn't require a Limited Access Feature token, so you can run this end-to-end on any Copilot+ PC without applying for access:
 
 ```js
 // src/index.js (Electron main)
+const path = require('path');
 const {
-  LanguageModel,
-  LanguageModelOptions,
-  LimitedAccessFeatures,
-  LimitedAccessFeatureStatus,
+  TextRecognizer,
+  AIFeatureReadyState,
 } = require('./bindings/winrt/index.js');
 
-async function generateText(prompt, onProgress) {
-  // Phi Silica is a Limited Access Feature — unlock it first.
-  const access = LimitedAccessFeatures.tryUnlockFeature(
-    'com.microsoft.windows.ai.languagemodel',
-    process.env.LAF_TOKEN,
-    'See the LAF docs at https://learn.microsoft.com/windows/apps/develop/limited-access-features'
-  );
-  if (access.status !== LimitedAccessFeatureStatus.Available &&
-      access.status !== LimitedAccessFeatureStatus.AvailableWithoutToken) {
-    throw new Error('Phi Silica not available on this device.');
+async function recognizeText(imagePath) {
+  // First-run model download (one time per user) — cheap no-op once cached.
+  if (TextRecognizer.getReadyState() !== AIFeatureReadyState.ready) {
+    await TextRecognizer.ensureReadyAsync();
   }
 
-  const languageModel = await LanguageModel.createAsync();
+  const recognizer = await TextRecognizer.createAsync();
   try {
-    const options = LanguageModelOptions.create();
-    options.temperature = 0.9;
-    options.topK = 15;
-    options.topP = 0.8;
-
-    const op = languageModel.generateResponseAsync(prompt, options);
-    op.progress((value) => onProgress?.(value));
-    const result = await op;
-    return result.text;
+    const recognized = await recognizer.recognizeTextFromImageAsync(imagePath);
+    return recognized.lines.map(line => ({
+      text: line.text,
+      x: line.boundingBox.topLeft.x,
+      y: line.boundingBox.topLeft.y,
+    }));
   } finally {
-    languageModel.close();
+    recognizer.close();
   }
 }
+
+// Usage:
+// const lines = await recognizeText(path.join(__dirname, 'screenshot.png'));
+// lines.forEach(l => console.log(`(${l.x}, ${l.y}): ${l.text}`));
 ```
+
+For the full text-generation (Phi Silica `LanguageModel`) flow — which also lives in the same `bindings/winrt/` output — see the [Windows AI APIs reference](https://learn.microsoft.com/windows/ai/apis/). That surface requires a [Limited Access Feature token](https://learn.microsoft.com/windows/apps/develop/limited-access-features) before `LanguageModel.createAsync()` will succeed.
 
 A few conventions to remember:
 
-- **Method names are camelCase.** WinRT methods like `GenerateResponseAsync` become `generateResponseAsync`; properties like `result.Text` become `result.text`. The codegen lowercases the first letter to match JavaScript style.
-- **Structs use a `create()` factory, not `new`.** `LanguageModelOptions.create()` — not `new LanguageModelOptions()`.
-- **Async methods return a `progressOperation` thenable.** It's both `await`-able and exposes `op.progress(cb)` for streaming progress updates.
+- **Method names are camelCase.** WinRT methods like `RecognizeTextFromImageAsync` become `recognizeTextFromImageAsync`; properties like `line.Text` become `line.text`. The codegen lowercases the first letter to match JavaScript style.
+- **Structs use a `create()` factory, not `new`.** For example, `LanguageModelOptions.create()` — not `new LanguageModelOptions()`.
+- **Async methods return a `progressOperation` thenable.** It's both `await`-able and exposes `op.progress(cb)` for streaming progress updates (e.g., `LanguageModel.generateResponseAsync` token streams).
 - **Always `close()` IDisposable WinRT objects** in a `try/finally`. This frees the underlying COM resources promptly.
-- **Pass `AbortSignal` for cancellation** when the underlying API supports it: `LanguageModel.createAsync(signal)`, `op = languageModel.generateResponseAsync(prompt, options, signal)`. Calling `controller.abort()` releases the awaiting Promise.
+- **Pass `AbortSignal` for cancellation** when the underlying API supports it: `recognizer.recognizeTextFromImageAsync(imagePath, signal)`, `LanguageModel.createAsync(signal)`. Calling `controller.abort()` releases the awaiting Promise.
 
 You can call the same API from the renderer via `contextBridge` / `ipcRenderer` — exactly as you would for a native addon. The bindings have no dependency on Electron's main process; they work anywhere Node.js can `require()` them.
 
 ## Step 3: Run it
 
-WinRT APIs that require an MSIX package identity (notifications, file pickers, …) need debug identity in development. If you haven't already, set it up:
+WinRT APIs that require an MSIX package identity (notifications, file pickers, …) need debug identity in development. See [Step 5 of the Electron setup guide](setup.md#step-5-understanding-debug-identity) for the full explanation; if you haven't already wired it up, the one-shot command is:
 
 ```bash
 npx winapp node add-electron-debug-identity
@@ -164,7 +162,7 @@ The generator hasn't produced output yet. Re-run `npx winapp restore` (or `node 
 A class your code imports is in a `.winmd` that isn't on the codegen's input. Check the `packages:` list (or `additionalWinmds:`) in `winapp.yaml` — empty/omitted `jsBindings.packages` means "all installed packages participate", but if you've curated the list make sure the relevant package is there.
 
 **`HRESULT 0x8007XXXX` at call time**
-The metadata was emitted but the OS implementation isn't available — usually a missing OS feature (e.g., Phi Silica on a non-Copilot+ PC) or missing capability declaration in `Package.appxmanifest`. The exception message preserves the WinRT error string from the COM layer.
+The metadata was emitted but the OS implementation isn't available — usually a missing OS feature (e.g., a Windows AI API on a non-Copilot+ PC) or missing capability declaration in `Package.appxmanifest`. The exception message preserves the WinRT error string from the COM layer.
 
 **Bindings work in development but not after `electron-packager` / `electron-builder`**
 Make sure `@microsoft/dynwinrt` is in your runtime `dependencies` (not just `devDependencies`) and that the packager's `asarUnpack` rules include the native binary. See [`packaging.md`](packaging.md) for the recommended config.

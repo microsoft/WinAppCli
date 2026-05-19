@@ -224,9 +224,22 @@ public class DynWinrtCodegenInvocationTests
     }
 
     // -------------------------------------------------------------------------
-    // ResolveCodegenInvocation — direct .exe wins; cli.js fallback;
-    // friendly error when both missing.
+    // ResolveCodegenInvocation — wrapper-bundled is the only trusted source.
     // -------------------------------------------------------------------------
+
+    // Helper for arranging a wrapper layout under _temp.
+    private static string Arch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+
+    private static FileInfo PlantCodegenExe(DirectoryInfo root)
+    {
+        var packageDir = new DirectoryInfo(Path.Combine(
+            root.FullName, "node_modules", "@microsoft", "dynwinrt-codegen"));
+        var binDir = new DirectoryInfo(Path.Combine(packageDir.FullName, "bin", Arch));
+        binDir.Create();
+        var exe = new FileInfo(Path.Combine(binDir.FullName, "dynwinrt-codegen.exe"));
+        File.WriteAllText(exe.FullName, "");
+        return exe;
+    }
 
     [TestMethod]
     public void ResolveCodegenInvocation_DirectExePreferred()
@@ -239,7 +252,7 @@ public class DynWinrtCodegenInvocationTests
         File.WriteAllBytes(exe.FullName, Array.Empty<byte>());
         File.WriteAllText(Path.Combine(packageDir.FullName, "cli.js"), "// stub");
 
-        var (resolved, args) = DynWinrtCodegenService.ResolveCodegenInvocation(_temp);
+        var (resolved, args) = DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: _temp);
 
         Assert.AreEqual(exe.FullName, resolved, "Direct .exe must win over cli.js fallback");
         Assert.AreEqual(0, args.Count, "Direct .exe call passes no prefix args");
@@ -253,23 +266,22 @@ public class DynWinrtCodegenInvocationTests
         var cli = new FileInfo(Path.Combine(packageDir.FullName, "cli.js"));
         File.WriteAllText(cli.FullName, "// stub");
 
-        // The fallback now uses nativeOnly=true — only finds node.exe/.com.
+        // The fallback uses nativeOnly=true — only finds node.exe/.com.
         var resolvedNode = DynWinrtCodegenService.ResolveExecutableOnPath("node", nativeOnly: true);
         if (resolvedNode is null)
         {
             Assert.ThrowsExactly<InvalidOperationException>(
-                () => DynWinrtCodegenService.ResolveCodegenInvocation(_temp),
+                () => DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: _temp),
                 "Without a native node executable, the fallback must refuse.");
             return;
         }
 
-        var (exe, args) = DynWinrtCodegenService.ResolveCodegenInvocation(_temp);
+        var (exe, args) = DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: _temp);
 
         Assert.AreEqual(resolvedNode, exe,
             "Node executable must be the fully-resolved PATH lookup.");
         Assert.IsTrue(Path.IsPathRooted(exe),
             "Spawned executable path must be absolute to prevent CWD-search hijacks.");
-        // error message in the fallback path mentions native node.
         var ext = Path.GetExtension(exe);
         Assert.IsTrue(
             ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)
@@ -282,64 +294,48 @@ public class DynWinrtCodegenInvocationTests
     [TestMethod]
     public void ResolveCodegenInvocation_NothingFound_ThrowsActionableError()
     {
+        // No wrapper install — error must point at the npm/yarn classic install.
         var ex = Assert.ThrowsExactly<InvalidOperationException>(
-            () => DynWinrtCodegenService.ResolveCodegenInvocation(_temp));
+            () => DynWinrtCodegenService.ResolveCodegenInvocationCore(
+                wrapperDir: _temp.CreateSubdirectory("empty-wrapper")));
 
         StringAssert.Contains(ex.Message, "@microsoft/dynwinrt-codegen");
         StringAssert.Contains(ex.Message, "@microsoft/winappcli");
-        StringAssert.Contains(ex.Message, "yarn berry");
-        StringAssert.Contains(ex.Message, "pnpm");
+    }
+
+    [TestMethod]
+    public void ResolveCodegenInvocation_NullWrapperDir_ThrowsWithReinstallHint()
+    {
+        // wrapperDir is null on `dotnet run` and any host where Environment.ProcessPath
+        // is empty. The error must skip the per-dir search entirely and tell the user
+        // to reinstall the npm package rather than echoing .NET internals.
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(
+            () => DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: null));
+
+        StringAssert.Contains(ex.Message, "@microsoft/dynwinrt-codegen");
+        StringAssert.Contains(ex.Message, "winapp install directory could not be determined");
+        StringAssert.Contains(ex.Message, "reinstalling @microsoft/winappcli");
     }
 
     [TestMethod]
     public void ResolveCodegenInvocation_UpwardLookup_FindsHoistedPackage()
     {
+        // Hoisted layout reachable by walking up from wrapperDir — npm/yarn-classic happy path.
         var repoRoot = _temp;
-        var nestedWorkspace = repoRoot.CreateSubdirectory("apps").CreateSubdirectory("electron-app");
+        var nestedWrapper = repoRoot.CreateSubdirectory("apps").CreateSubdirectory("electron-app");
 
         var packageDir = new DirectoryInfo(Path.Combine(
             repoRoot.FullName, "node_modules", "@microsoft", "dynwinrt-codegen"));
         packageDir.Create();
-        var arch = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            _ => "x64",
-        };
-        var exe = new FileInfo(Path.Combine(packageDir.FullName, "bin", arch, "dynwinrt-codegen.exe"));
+        var exe = new FileInfo(Path.Combine(packageDir.FullName, "bin", Arch, "dynwinrt-codegen.exe"));
         exe.Directory!.Create();
         File.WriteAllText(exe.FullName, "stub");
 
-        var (resolved, args) = DynWinrtCodegenService.ResolveCodegenInvocation(nestedWorkspace);
+        var (resolved, args) = DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: nestedWrapper);
 
         Assert.AreEqual(exe.FullName, resolved,
-            "Resolver must walk upward from the nested workspace to find the codegen at the repo root.");
+            "Resolver must walk upward from the nested wrapper dir to find the hoisted codegen.");
         Assert.AreEqual(0, args.Count);
-    }
-
-    [TestMethod]
-    public void ResolveCodegenInvocation_InnerNodeModulesShadowsOuter()
-    {
-        var repoRoot = _temp;
-        var nestedWorkspace = repoRoot.CreateSubdirectory("apps").CreateSubdirectory("inner");
-        var arch = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            _ => "x64",
-        };
-
-        var outerExe = new FileInfo(Path.Combine(
-            repoRoot.FullName, "node_modules", "@microsoft", "dynwinrt-codegen", "bin", arch, "dynwinrt-codegen.exe"));
-        outerExe.Directory!.Create();
-        File.WriteAllText(outerExe.FullName, "outer-stub");
-
-        var innerExe = new FileInfo(Path.Combine(
-            nestedWorkspace.FullName, "node_modules", "@microsoft", "dynwinrt-codegen", "bin", arch, "dynwinrt-codegen.exe"));
-        innerExe.Directory!.Create();
-        File.WriteAllText(innerExe.FullName, "inner-stub");
-
-        var (resolved, _) = DynWinrtCodegenService.ResolveCodegenInvocation(nestedWorkspace);
-        Assert.AreEqual(innerExe.FullName, resolved,
-            "When package exists at multiple ancestors, the workspace-local one wins.");
     }
 
     // -------------------------------------------------------------------------
@@ -400,5 +396,37 @@ public class DynWinrtCodegenInvocationTests
         Assert.IsTrue(p.HasExited, "Child must be dead after cancel-and-kill.");
         Assert.IsTrue(sw.ElapsedMilliseconds < 5_000,
             $"Cancel+kill should complete fast; took {sw.ElapsedMilliseconds}ms.");
+    }
+
+    // -------------------------------------------------------------------------
+    // M6 — workspace-local codegen install must NOT be trusted as a fallback.
+    // The resolver searches up from the wrapper dir ONLY; anything planted
+    // under the user workspace must NOT short-circuit the wrapper-bundled
+    // requirement (this is the post-r3 security model).
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void ResolveCodegenInvocation_WorkspaceLocalInstall_NotTrustedWhenWrapperEmpty()
+    {
+        // Plant a fully-formed codegen exe under a SIBLING dir of the wrapper
+        // (think: user workspace at `_temp/workspace/...`, wrapper at
+        // `_temp/empty-wrapper/`). The resolver must refuse — workspace-local
+        // installs no longer count as a fallback.
+        var workspaceRoot = _temp.CreateSubdirectory("workspace");
+        var workspaceCodegen = PlantCodegenExe(workspaceRoot);
+        Assert.IsTrue(workspaceCodegen.Exists, "fixture sanity");
+
+        var emptyWrapper = _temp.CreateSubdirectory("empty-wrapper");
+
+        // The wrapper dir (and its ancestor chain) does NOT contain the
+        // codegen install; the workspace install must NOT rescue this.
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(
+            () => DynWinrtCodegenService.ResolveCodegenInvocationCore(wrapperDir: emptyWrapper));
+
+        StringAssert.Contains(ex.Message, "@microsoft/dynwinrt-codegen",
+            "Refusal message must explain what was missing.");
+        // The error must not point at the workspace plant.
+        Assert.IsFalse(ex.Message.Contains(workspaceCodegen.FullName),
+            "Resolver must not have considered the workspace-local install.");
     }
 }

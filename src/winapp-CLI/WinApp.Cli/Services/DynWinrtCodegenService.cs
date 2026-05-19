@@ -47,11 +47,10 @@ internal sealed class DynWinrtCodegenService(
         var refWinmds = CollectRefWinmds(userAdditionalRefs, listedWinmds);
 
         // Locate codegen BEFORE touching the output dir so a missing install
-        // doesn't first wipe the user's previous bindings. Use the npm
-        // wrapper's pinned version for any error hints so they don't drift.
+        // doesn't first wipe the user's previous bindings.
         var versionHint = TryReadCodegenVersionHint();
-        var (executable, prefixArgs) = ResolveCodegenInvocation(workspaceDir, versionHint);
-        logger.LogInformation(
+        var (executable, prefixArgs) = ResolveCodegenInvocation(versionHint);
+        logger.LogDebug(
             "{UISymbol} Resolved dynwinrt-codegen → {Executable} {PrefixArgs}",
             UiSymbols.Tools, executable, string.Join(' ', prefixArgs));
         taskContext.AddDebugMessage($"{UiSymbols.Tools} Using codegen → {executable} {string.Join(' ', prefixArgs)}");
@@ -497,88 +496,110 @@ internal sealed class DynWinrtCodegenService(
         }
     }
 
-    // Walk parent dirs for node_modules/@microsoft/dynwinrt-codegen (Node.js
-    // bare-specifier resolution). Prefers the pre-built .exe; falls back to
-    // cli.js via a PATHEXT-resolved `node`.
+    // Resolves the dynwinrt-codegen binary winapp will spawn. Only the
+    // wrapper-bundled install is honored — workspace-local installs are
+    // never trusted (they could be substituted by a cloned/malicious repo).
     internal static (string Executable, List<string> PrefixArgs) ResolveCodegenInvocation(
-        DirectoryInfo workspaceDir,
+        string? codegenVersionHint = null)
+        => ResolveCodegenInvocationCore(TryGetWrapperDir(), codegenVersionHint);
+
+    // Test seam: inject wrapperDir directly. Production reads from
+    // Environment.ProcessPath (which under test points at testhost.exe).
+    internal static (string Executable, List<string> PrefixArgs) ResolveCodegenInvocationCore(
+        DirectoryInfo? wrapperDir,
         string? codegenVersionHint = null)
     {
         var arch = ResolveArchSubdir();
         DirectoryInfo? lastChecked = null;
 
-        // Search workspace ancestry first (user-installed override), then fall
-        // back to the wrapper's own node_modules near Environment.ProcessPath.
-        // pnpm / yarn-Berry layouts often place the codegen under the wrapper
-        // package rather than the workspace.
-        var roots = new List<DirectoryInfo> { workspaceDir };
-        var exePath = Environment.ProcessPath;
-        if (!string.IsNullOrEmpty(exePath))
+        if (wrapperDir is not null)
         {
-            var exeDir = Path.GetDirectoryName(exePath);
-            if (!string.IsNullOrEmpty(exeDir))
+            var (wrapperHit, wrapperLastChecked) = TryFindCodegenIn(wrapperDir, arch);
+            if (wrapperHit is not null)
             {
-                var d = new DirectoryInfo(exeDir);
-                if (!string.Equals(d.FullName, workspaceDir.FullName, StringComparison.OrdinalIgnoreCase))
-                {
-                    roots.Add(d);
-                }
+                return wrapperHit.Value;
             }
+            lastChecked = wrapperLastChecked;
         }
 
-        foreach (var root in roots)
-        {
-            for (var probe = root; probe is not null; probe = probe.Parent)
-            {
-                var packageDir = Path.Combine(probe.FullName, "node_modules", "@microsoft", "dynwinrt-codegen");
-                if (!Directory.Exists(packageDir))
-                {
-                    continue;
-                }
+        var wrapperLocationHint = wrapperDir is not null
+            ? $" at '{wrapperDir.FullName}'"
+            : " (winapp install directory could not be determined; try reinstalling @microsoft/winappcli)";
 
-                // Priority 1: pre-built .exe (no Node startup needed).
-                var directExe = new FileInfo(Path.Combine(packageDir, "bin", arch, "dynwinrt-codegen.exe"));
-                if (directExe.Exists)
-                {
-                    return (directExe.FullName, new List<string>());
-                }
-
-                // Priority 2: cli.js via node.exe (defensive fallback).
-                var localCli = new FileInfo(Path.Combine(packageDir, "cli.js"));
-                if (localCli.Exists)
-                {
-                    // Reject .bat/.cmd/.ps1 — those go through cmd.exe parsing
-                    // where user-derived args could be misinterpreted. Only
-                    // spawn native executables (node.exe / node.com).
-                    var nodePath = ResolveExecutableOnPath("node", nativeOnly: true)
-                        ?? throw new InvalidOperationException(
-                            $"The codegen at '{localCli.FullName}' requires a native Node.js executable "
-                            + "(node.exe) on PATH. Install Node 18+ (winget install OpenJS.NodeJS) "
-                            + $"or install {CodegenPackageName} so the pre-built .exe is available.");
-                    return (nodePath, new List<string> { localCli.FullName });
-                }
-
-                // Partial install (no exe + no cli.js); remember and keep walking.
-                lastChecked = new DirectoryInfo(packageDir);
-            }
-        }
-
-        var hint = lastChecked is not null
-            ? $"Found {CodegenPackageName} at '{lastChecked.FullName}' but no executable inside "
-                + $"(expected 'bin/{arch}/dynwinrt-codegen.exe' or 'cli.js'). The npm package may be corrupt; reinstall it.\n\n"
-            : $"Searched {CodegenPackageName} upward from '{workspaceDir.FullName}' and the wrapper install — no node_modules/@microsoft/dynwinrt-codegen found.\n\n";
+        var partialInstallHint = lastChecked is not null
+            ? $"Found {CodegenPackageName} at '{lastChecked.FullName}' but no executable "
+                + $"inside (expected 'bin/{arch}/dynwinrt-codegen.exe' or 'cli.js'). "
+                + "The npm package may be corrupt; reinstall it.\n\n"
+            : $"Searched {CodegenPackageName} from the wrapper install{wrapperLocationHint} — "
+                + "no node_modules/@microsoft/dynwinrt-codegen found.\n\n";
 
         var versionForHint = codegenVersionHint ?? CodegenPinnedVersionFallback;
+
         throw new InvalidOperationException(
-            hint
-            + "To enable JS bindings, install the codegen via one of:\n"
-            + "  • npm/yarn classic/pnpm (default):  npm i -D @microsoft/winappcli\n"
-            + "    (bundles " + CodegenPackageName + " as a transitive dependency)\n"
-            + "  • Install the codegen directly:     npm i -D "
-            + CodegenPackageName + "@" + versionForHint + "\n"
-            + "  • yarn berry (PnP):                 set 'nodeLinker: node-modules' in .yarnrc.yml, then yarn install\n"
-            + "  • pnpm with isolated linker:        set 'node-linker=hoisted' in .npmrc, then pnpm install\n\n"
+            partialInstallHint
+            + "To enable JS bindings, install via npm or yarn classic:\n"
+            + "  npm i -D @microsoft/winappcli\n"
+            + $"(bundles {CodegenPackageName}@{versionForHint} as a transitive dependency.)\n\n"
+            + "Non-hoisting layouts (pnpm default, yarn-Berry PnP) are not supported: the\n"
+            + "codegen binary must live next to the winapp launcher so winapp can verify\n"
+            + "it ships the binary it's spawning. For pnpm, set 'node-linker=hoisted' in\n"
+            + ".npmrc; for yarn-Berry, set 'nodeLinker: node-modules' in .yarnrc.yml.\n\n"
             + "See https://github.com/microsoft/WinAppCli#electron--nodejs for setup details.");
+    }
+
+    // Walks up from `root` looking for node_modules/@microsoft/dynwinrt-codegen.
+    private static (
+        (string Executable, List<string> PrefixArgs)? Hit,
+        DirectoryInfo? LastChecked)
+        TryFindCodegenIn(DirectoryInfo root, string arch)
+    {
+        DirectoryInfo? lastChecked = null;
+        for (var probe = root; probe is not null; probe = probe.Parent)
+        {
+            var packageDir = Path.Combine(probe.FullName, "node_modules", "@microsoft", "dynwinrt-codegen");
+            if (!Directory.Exists(packageDir))
+            {
+                continue;
+            }
+
+            // Priority 1: pre-built .exe (no Node startup needed).
+            var directExe = new FileInfo(Path.Combine(packageDir, "bin", arch, "dynwinrt-codegen.exe"));
+            if (directExe.Exists)
+            {
+                return ((directExe.FullName, new List<string>()), null);
+            }
+
+            // Priority 2: cli.js via node.exe (defensive fallback).
+            var localCli = new FileInfo(Path.Combine(packageDir, "cli.js"));
+            if (localCli.Exists)
+            {
+                // Reject .bat/.cmd/.ps1 — those go through cmd.exe parsing
+                // where user-derived args could be misinterpreted.
+                var nodePath = ResolveExecutableOnPath("node", nativeOnly: true)
+                    ?? throw new InvalidOperationException(
+                        $"The codegen at '{localCli.FullName}' requires a native Node.js executable "
+                        + "(node.exe) on PATH. Install Node 18+ (winget install OpenJS.NodeJS) "
+                        + $"or install {CodegenPackageName} so the pre-built .exe is available.");
+                return ((nodePath, new List<string> { localCli.FullName }), null);
+            }
+
+            // Partial install (no exe + no cli.js); remember and keep walking.
+            lastChecked = new DirectoryInfo(packageDir);
+        }
+        return (null, lastChecked);
+    }
+
+    // Directory containing winapp.exe. Null when ProcessPath is empty
+    // (test / `dotnet run`).
+    private static DirectoryInfo? TryGetWrapperDir()
+    {
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            return null;
+        }
+        var dir = Path.GetDirectoryName(exePath);
+        return string.IsNullOrEmpty(dir) ? null : new DirectoryInfo(dir);
     }
 
     // Read the codegen version from the npm wrapper's package.json; falls

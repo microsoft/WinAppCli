@@ -63,6 +63,10 @@ npx winapp init --use-defaults --js-bindings-ai
 
 # Or layer bindings onto an already-initialized workspace.
 npx winapp node jsbindings add --ai
+
+# After editing winapp.yaml jsBindings: by hand (or pulling a teammate's
+# winapp.yaml), regenerate bindings without re-prompting:
+npx winapp node jsbindings generate
 ```
 
 Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is

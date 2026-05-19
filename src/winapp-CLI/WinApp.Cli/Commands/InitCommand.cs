@@ -135,7 +135,7 @@ internal class InitCommand : Command, IShortDescription
             var jsBindingsOutput = parseResult.GetValue(JsBindingsOutputOption);
             var jsBindingsLang = parseResult.GetValue(JsBindingsLangOption);
 
-            // Iteration order is alphabetical (registration order), so the
+            // Iteration order is alphabetical(registration order), so the
             // resulting prefix union is deterministic.
             var enabledAliases = JsBindingsPresetAliasOptions
                 .Where(kv => parseResult.GetValue(kv.Value))
