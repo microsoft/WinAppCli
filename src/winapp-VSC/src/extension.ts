@@ -786,6 +786,101 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 		})
 	);
+
+	// Register winapp.controlsSearch command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.controlsSearch', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			const query = await vscode.window.showInputBox({
+				prompt: 'Describe the control or pattern you want (natural language)',
+				placeHolder: 'e.g., tabbed document interface, settings card, share contract'
+			});
+			if (!query) {
+				return;
+			}
+
+			const source = await vscode.window.showQuickPick(
+				['All sources', 'gallery', 'toolkit', 'core'],
+				{ placeHolder: 'Constrain to a source? (default: all)' }
+			);
+			if (source === undefined) {
+				return;
+			}
+
+			// Use a JSON-safe shell quoting strategy: pass the query as a single argument.
+			// runWinappCommand currently builds a shell command string, so wrap the query
+			// in double quotes and escape any embedded double quotes.
+			const escaped = query.replace(/"/g, '\\"');
+			let command = `controls search "${escaped}"`;
+			if (source && source !== 'All sources') {
+				command += ` --source ${source}`;
+			}
+
+			await runWinappCommand(extensionPath, command, workspacePath);
+		})
+	);
+
+	// Register winapp.controlsGet command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.controlsGet', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			const id = await vscode.window.showInputBox({
+				prompt: 'Control ID (from a previous `controls search` result)',
+				placeHolder: 'e.g., tabview, settingscard, button-primary'
+			});
+			if (!id) {
+				return;
+			}
+
+			const escaped = id.replace(/"/g, '\\"');
+			await runWinappCommand(extensionPath, `controls get "${escaped}"`, workspacePath);
+		})
+	);
+
+	// Register winapp.controlsList command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.controlsList', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			const source = await vscode.window.showQuickPick(
+				['All sources', 'gallery', 'toolkit', 'core'],
+				{ placeHolder: 'Constrain to a source? (default: all)' }
+			);
+			if (source === undefined) {
+				return;
+			}
+
+			let command = 'controls list';
+			if (source && source !== 'All sources') {
+				command += ` --source ${source}`;
+			}
+
+			await runWinappCommand(extensionPath, command, workspacePath);
+		})
+	);
+
+	// Register winapp.controlsRefresh command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.controlsRefresh', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'controls refresh', workspacePath);
+		})
+	);
 }
 
 /**

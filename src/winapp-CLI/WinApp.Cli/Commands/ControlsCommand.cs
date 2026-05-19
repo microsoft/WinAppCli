@@ -5,7 +5,7 @@ using System.CommandLine;
 
 namespace WinApp.Cli.Commands;
 
-internal class ControlsCommand : Command, IShortDescription
+internal class ControlsCommand : Command, IShortDescription, ISuppressesStartupNotices
 {
     public string ShortDescription => "Search WinUI 3 controls and Community Toolkit samples";
 

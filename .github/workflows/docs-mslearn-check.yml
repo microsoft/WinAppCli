@@ -33,51 +33,5 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          $marker = '<!-- mslearn: true -->'
-
-          function Get-MarkedDocs([string]$ref) {
-            # List all docs/**/*.md tracked at $ref, then filter to those
-            # whose content contains the marker. Uses `git cat-file` so we
-            # never depend on a working-tree checkout of the base branch.
-            $files = git ls-tree -r --name-only $ref -- 'docs/' |
-              Where-Object { $_ -like '*.md' }
-            $marked = @()
-            foreach ($f in $files) {
-              $content = git show "${ref}:${f}" 2>$null
-              if ($LASTEXITCODE -eq 0 -and ($content -join "`n") -match [regex]::Escape($marker)) {
-                $marked += $f
-              }
-            }
-            return $marked
-          }
-
-          $baseRef = "origin/$env:BASE_REF"
           git fetch --no-tags --depth=1 origin $env:BASE_REF | Out-Null
-
-          $baseMarked = Get-MarkedDocs $baseRef
-          $headMarked = Get-MarkedDocs 'HEAD'
-
-          Write-Host "Marked on $baseRef : $($baseMarked.Count)"
-          Write-Host "Marked on HEAD    : $($headMarked.Count)"
-
-          $lost = $baseMarked | Where-Object { $headMarked -notcontains $_ }
-
-          if ($lost.Count -gt 0) {
-            Write-Host "::error::The following docs were marked '<!-- mslearn: true -->' on $env:BASE_REF but no longer are on this PR:"
-            foreach ($f in $lost) {
-              Write-Host "::error file=$f::Missing or moved '<!-- mslearn: true -->' marker"
-            }
-            Write-Host "::error::"
-            Write-Host "::error::If the file was renamed, re-add the marker at its new path."
-            Write-Host "::error::If you intentionally unpublished it from MS Learn, remove the"
-            Write-Host "::error::marker on $env:BASE_REF first (separate PR) so the diff is explicit."
-            exit 1
-          }
-
-          $added = $headMarked | Where-Object { $baseMarked -notcontains $_ }
-          if ($added.Count -gt 0) {
-            Write-Host "New docs added to MS Learn in this PR:"
-            $added | ForEach-Object { Write-Host "  + $_" }
-          }
-
-          Write-Host "OK: no mslearn markers were dropped."
+          ./scripts/check-mslearn-markers.ps1 -BaseRef "origin/$env:BASE_REF"

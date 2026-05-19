@@ -226,7 +226,7 @@ internal sealed class SearchEngine
     {
         var sb = new System.Text.StringBuilder();
         var sourceTag = s.Source == "toolkit" ? " [CommunityToolkit]" : "";
-        sb.AppendLine($"## {s.ControlName}: {s.HeaderText}{sourceTag}");
+        sb.AppendLine($"## {StripControlChars(s.ControlName)}: {StripControlChars(s.HeaderText)}{sourceTag}");
         sb.AppendLine();
 
         // Toolkit-specific prerequisites
@@ -234,9 +234,9 @@ internal sealed class SearchEngine
         {
             sb.AppendLine("**Prerequisites:**");
             if (!string.IsNullOrEmpty(s.NuGetPackage))
-                sb.AppendLine($"- Install NuGet package: `{s.NuGetPackage}`");
+                sb.AppendLine($"- Install NuGet package: `{StripControlChars(s.NuGetPackage)}`");
             foreach (var ns in s.XmlnsImports)
-                sb.AppendLine($"- Add XAML namespace: `{ns}`");
+                sb.AppendLine($"- Add XAML namespace: `{StripControlChars(ns)}`");
             sb.AppendLine();
         }
 
@@ -244,7 +244,7 @@ internal sealed class SearchEngine
         {
             sb.AppendLine("**XAML:**");
             sb.AppendLine("```xml");
-            sb.AppendLine(s.Xaml);
+            sb.AppendLine(StripControlChars(s.Xaml));
             sb.AppendLine("```");
         }
         if (s.CSharp != null)
@@ -252,7 +252,7 @@ internal sealed class SearchEngine
             sb.AppendLine();
             sb.AppendLine("**C#:**");
             sb.AppendLine("```csharp");
-            sb.AppendLine(s.CSharp);
+            sb.AppendLine(StripControlChars(s.CSharp));
             sb.AppendLine("```");
         }
         var notes = Notes.GetNotes(s.ControlName);
@@ -260,7 +260,28 @@ internal sealed class SearchEngine
         {
             sb.AppendLine();
             sb.AppendLine("**Important:**");
-            foreach (var n in notes) sb.AppendLine($"- {n}");
+            foreach (var n in notes) sb.AppendLine($"- {StripControlChars(n)}");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Removes ASCII control characters (other than \t, \n, \r) from text that
+    /// originated outside the CLI (fetched docs / sample code). Prevents raw
+    /// ANSI escape sequences and other terminal-mangling bytes from being
+    /// forwarded straight to the user's stdout.
+    /// </summary>
+    private static string StripControlChars(string? input)
+    {
+        if (string.IsNullOrEmpty(input)) return input ?? string.Empty;
+
+        var sb = new System.Text.StringBuilder(input.Length);
+        foreach (var c in input)
+        {
+            if (c == '\t' || c == '\n' || c == '\r' || c >= 0x20)
+            {
+                sb.Append(c);
+            }
         }
         return sb.ToString();
     }

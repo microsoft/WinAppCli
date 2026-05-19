@@ -58,27 +58,10 @@ internal static partial class WinUIGalleryFetcher
     /// <summary>Load scenarios + tags: use cache if fresh, otherwise fetch from GitHub. Fallback to embedded.</summary>
     public static (Scenario[] scenarios, Dictionary<string, string[]> tags) Load(string cacheDir)
     {
-        var scenarioCache = Path.Combine(cacheDir, "scenarios.json");
-        var tagCache = Path.Combine(cacheDir, "tags.json");
-        var timestampFile = Path.Combine(cacheDir, "last-updated.txt");
-        var versionFile = Path.Combine(cacheDir, "schema-version.txt");
-
-        // Check cache freshness AND schema version
-        if (File.Exists(scenarioCache) && File.Exists(tagCache) && File.Exists(timestampFile) && File.Exists(versionFile))
+        var cached = ControlsCacheStore.TryLoad(cacheDir, CacheSchemaVersion, CacheTtl);
+        if (cached.HasValue)
         {
-            var cachedVersion = File.ReadAllText(versionFile).Trim();
-            if (cachedVersion == CacheSchemaVersion
-                && DateTime.TryParse(File.ReadAllText(timestampFile).Trim(), out var lastUpdated)
-                && DateTime.UtcNow - lastUpdated < CacheTtl)
-            {
-                try
-                {
-                    var s = JsonSerializer.Deserialize(File.ReadAllText(scenarioCache), ControlsJsonContext.Default.ScenarioArray);
-                    var t = JsonSerializer.Deserialize(File.ReadAllText(tagCache), ControlsJsonContext.Default.DictionaryStringStringArray);
-                    if (s != null && s.Length > 0 && t != null) return (s, t);
-                }
-                catch { /* fall through to fetch */ }
-            }
+            return cached.Value;
         }
 
         // Try fetching from GitHub
@@ -89,11 +72,7 @@ internal static partial class WinUIGalleryFetcher
             {
                 ApplyOverrides(scenarios);
                 scenarios = InjectMissing(scenarios);
-                Directory.CreateDirectory(cacheDir);
-                File.WriteAllText(scenarioCache, JsonSerializer.Serialize(scenarios, ControlsJsonContext.Default.ScenarioArray));
-                File.WriteAllText(tagCache, JsonSerializer.Serialize(tags, ControlsJsonContext.Default.DictionaryStringStringArray));
-                File.WriteAllText(timestampFile, DateTime.UtcNow.ToString("o"));
-                File.WriteAllText(versionFile, CacheSchemaVersion);
+                ControlsCacheStore.Save(cacheDir, CacheSchemaVersion, scenarios, tags);
                 return (scenarios, tags);
             }
         }
@@ -109,7 +88,7 @@ internal static partial class WinUIGalleryFetcher
     private static async Task<(Scenario[], Dictionary<string, string[]>)> FetchFromGitHub()
     {
         // Step 1: Fetch ControlInfoData.json — list of controls + their Subtitle (used for tags)
-        var infoJson = await Http.GetStringAsync(ControlInfoUrl);
+        var infoJson = await ControlsHttpHelper.GetStringWithLimitAsync(Http, ControlInfoUrl);
         using var doc = JsonDocument.Parse(infoJson);
         var groups = doc.RootElement.GetProperty("Groups");
 
@@ -221,10 +200,10 @@ internal static partial class WinUIGalleryFetcher
                 : $"{uniqueId}Page.xaml";
             var url = ControlPagesBase + pagePath;
 
-            var response = await Http.GetAsync(url);
+            using var response = await ControlsHttpHelper.GetAsync(Http, url);
             if (!response.IsSuccessStatusCode) return scenarios;
 
-            var xamlContent = await response.Content.ReadAsStringAsync();
+            var xamlContent = await ControlsHttpHelper.ReadAsLimitedStringAsync(response);
             var controlId = uniqueId.ToLowerInvariant();
             int scenarioIndex = 0;
             var seenIds = new HashSet<string>();
@@ -246,6 +225,12 @@ internal static partial class WinUIGalleryFetcher
 
                 scenarioIndex++;
                 var slug = HeaderToSlug(headerText);
+                if (slug == null)
+                {
+                    // HeaderText contained no alphanumeric tokens — skip rather than
+                    // creating a scenario with an empty/garbage id.
+                    continue;
+                }
                 var baseId = scenarioIndex == 1 ? controlId : $"{controlId}-{slug}";
                 var scenarioId = baseId;
                 int suffix = 2;
@@ -282,6 +267,15 @@ internal static partial class WinUIGalleryFetcher
     /// <summary>
     /// Find all top-level &lt;controls:ControlExample&gt; blocks via stack-aware tag matching,
     /// handling nested ScrollViewer/StackPanel inside ControlExample.Example.
+    ///
+    /// TODO(M10): rewrite this stack-aware tag scanner on top of XDocument once we have
+    /// upstream-XAML test fixtures captured in WinApp.Cli.Tests. The blocker today is
+    /// not the API choice — it's that we have no behavioral tests against real Gallery
+    /// pages, so swapping the parser blindly risks silently dropping samples. Plan: capture
+    /// a handful of representative .xaml pages (TabViewPage, InfoBarPage, NumberBoxPage,
+    /// nested-StackPanel case) as test resources, write characterization tests asserting
+    /// the current (headerText, block) tuples extracted, then port to XDocument + the
+    /// xmlns:controls URI read from the root Page element.
     /// </summary>
     private static IEnumerable<(string headerText, string block)> ExtractControlExampleBlocks(string xaml)
     {
@@ -432,9 +426,9 @@ internal static partial class WinUIGalleryFetcher
 
         try
         {
-            var response = await Http.GetAsync(url);
+            using var response = await ControlsHttpHelper.GetAsync(Http, url);
             if (!response.IsSuccessStatusCode) return null;
-            var code = await response.Content.ReadAsStringAsync();
+            var code = await ControlsHttpHelper.ReadAsLimitedStringAsync(response);
             return CleanGalleryContent(code.Trim());
         }
         catch { return null; }
@@ -497,12 +491,16 @@ internal static partial class WinUIGalleryFetcher
                 .Replace("&#13;", "\r");
     }
 
-    private static string HeaderToSlug(string header)
+    private static string? HeaderToSlug(string header)
     {
-        return Regex.Replace(header.ToLowerInvariant(), @"[^a-z0-9\s]", "")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Take(4)
-            .Aggregate((a, b) => a + "-" + b);
+        var cleaned = Regex.Replace(header.ToLowerInvariant(), @"[^a-z0-9\s]", "");
+        var parts = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(4).ToArray();
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        return string.Join("-", parts);
     }
 
     /// <summary>

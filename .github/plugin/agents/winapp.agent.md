@@ -52,6 +52,13 @@ Does the project already have an appxmanifest.xml?
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
       └─ winapp tool <toolname> <args>
 
+Need WinUI 3 / XAML samples or canonical control usage to ground UI code?
+├─ Search across all sources → winapp controls search "<query>"
+├─ Restrict to a single source → winapp controls search "<query>" --source <gallery|toolkit|core>
+├─ List controls in a source → winapp controls list --source <gallery|toolkit|core>
+├─ Get full XAML/C# for a control → winapp controls get <id>
+└─ Refresh local cache (7-day TTL) → winapp controls refresh
+
 Want to inspect or interact with a running app's UI?
 ├─ See element tree → winapp ui inspect -a <appname>
 ├─ See only clickable elements → winapp ui inspect -a <appname> --interactive
@@ -195,6 +202,16 @@ Want to inspect or interact with a running app's UI?
 ### `winapp create-external-catalog <input-folder>`
 **Purpose:** Generate a `CodeIntegrityExternal.cat` catalog file for sparse packages with `AllowExternalContent`.
 **When to use:** When your sparse package manifest uses `TrustedLaunch` and you need to catalog external executable files.
+
+### `winapp controls` — WinUI / XAML sample discovery
+**Purpose:** Search and retrieve canonical UI samples from the WinUI 3 Gallery, Community Toolkit, and curated core platform patterns. Grounds AI-authored XAML/C# in real, current samples instead of hallucinated APIs.
+**When to use:** **Before writing any WinUI 3 / WinUI / XAML UI code** — even small snippets. Use natural-language queries describing what the user wants (e.g., "settings page with toggle and slider", "tabbed navigation", "share target").
+**Key subcommands:**
+- `controls search "<query>" [--source gallery|toolkit|core] [--max N]` — natural-language search returning ranked control ids
+- `controls get <id>` — full XAML + C# + description for a single control
+- `controls list [--source gallery|toolkit|core]` — enumerate all known controls
+- `controls refresh` — clear the on-disk cache and refetch from upstream
+**Notes:** Results are cached locally for 7 days, so repeated calls are effectively free. The default search spans all three sources; use `--source` only to narrow.
 
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).

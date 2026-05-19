@@ -37,9 +37,37 @@ internal class ControlsDataService(IWinappDirectoryService directoryService) : I
     {
         var winuiGalleryCacheDir = GetWinUIGalleryCacheDir();
         var toolkitCacheDir = GetToolkitCacheDir();
-        try { if (Directory.Exists(winuiGalleryCacheDir)) { Directory.Delete(winuiGalleryCacheDir, recursive: true); } } catch { /* best-effort */ }
-        try { if (Directory.Exists(toolkitCacheDir)) { Directory.Delete(toolkitCacheDir, recursive: true); } } catch { /* best-effort */ }
+
+        // Reset the in-memory engine first so a partial failure below still forces
+        // a re-fetch on the next call.
         _engine = null;
+
+        var failures = new List<Exception>();
+        TryDelete(winuiGalleryCacheDir, failures);
+        TryDelete(toolkitCacheDir, failures);
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException(
+                $"Failed to clear one or more controls cache directories. " +
+                $"This usually means a file in the cache is locked by another process.",
+                failures);
+        }
+    }
+
+    private static void TryDelete(string path, List<Exception> failures)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add(new IOException($"Could not delete '{path}': {ex.Message}", ex));
+        }
     }
 
     private string GetWinUIGalleryCacheDir() =>

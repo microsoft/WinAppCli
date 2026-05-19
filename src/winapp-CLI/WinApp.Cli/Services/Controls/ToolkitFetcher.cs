@@ -156,27 +156,10 @@ internal static partial class ToolkitFetcher
 
     public static (Scenario[] scenarios, Dictionary<string, string[]> tags) Load(string cacheDir)
     {
-        var cacheScenarios = Path.Combine(cacheDir, "scenarios.json");
-        var cacheTags = Path.Combine(cacheDir, "tags.json");
-        var timestamp = Path.Combine(cacheDir, "last-updated.txt");
-        var versionFile = Path.Combine(cacheDir, "schema-version.txt");
-
-        // Cache hit? Check both freshness and schema version.
-        if (File.Exists(cacheScenarios) && File.Exists(cacheTags) && File.Exists(timestamp) && File.Exists(versionFile))
+        var cached = ControlsCacheStore.TryLoad(cacheDir, CacheSchemaVersion, CacheTtl);
+        if (cached.HasValue)
         {
-            var cachedVersion = File.ReadAllText(versionFile).Trim();
-            if (cachedVersion == CacheSchemaVersion
-                && DateTime.TryParse(File.ReadAllText(timestamp).Trim(), out var lastUpdated)
-                && DateTime.UtcNow - lastUpdated < CacheTtl)
-            {
-                try
-                {
-                    var s = JsonSerializer.Deserialize(File.ReadAllText(cacheScenarios), ControlsJsonContext.Default.ScenarioArray);
-                    var t = JsonSerializer.Deserialize(File.ReadAllText(cacheTags), ControlsJsonContext.Default.DictionaryStringStringArray);
-                    if (s != null && s.Length > 0 && t != null) return (s, t);
-                }
-                catch { /* fall through */ }
-            }
+            return cached.Value;
         }
 
         // Try fetch
@@ -185,11 +168,7 @@ internal static partial class ToolkitFetcher
             var (scenarios, tags) = FetchFromGitHub().GetAwaiter().GetResult();
             if (scenarios.Length > 0)
             {
-                Directory.CreateDirectory(cacheDir);
-                File.WriteAllText(cacheScenarios, JsonSerializer.Serialize(scenarios, ControlsJsonContext.Default.ScenarioArray));
-                File.WriteAllText(cacheTags, JsonSerializer.Serialize(tags, ControlsJsonContext.Default.DictionaryStringStringArray));
-                File.WriteAllText(timestamp, DateTime.UtcNow.ToString("o"));
-                File.WriteAllText(versionFile, CacheSchemaVersion);
+                ControlsCacheStore.Save(cacheDir, CacheSchemaVersion, scenarios, tags);
                 return (scenarios, tags);
             }
         }
@@ -210,7 +189,7 @@ internal static partial class ToolkitFetcher
     private static async Task<(Scenario[], Dictionary<string, string[]>)> FetchFromGitHub()
     {
         // Step 1: Get full file tree
-        var treeJson = await Http.GetStringAsync(TreeApiUrl);
+        var treeJson = await ControlsHttpHelper.GetStringWithLimitAsync(Http, TreeApiUrl);
         using var doc = JsonDocument.Parse(treeJson);
         var tree = doc.RootElement.GetProperty("tree");
 
@@ -405,9 +384,9 @@ internal static partial class ToolkitFetcher
     {
         try
         {
-            var resp = await Http.GetAsync(url);
+            using var resp = await ControlsHttpHelper.GetAsync(Http, url);
             if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadAsStringAsync();
+            return await ControlsHttpHelper.ReadAsLimitedStringAsync(resp);
         }
         catch { return null; }
     }

@@ -51,7 +51,8 @@ internal class ControlsSearchCommand : Command, IShortDescription
             var source = parseResult.GetValue(SourceOption);
             if (max <= 0)
             {
-                max = 5;
+                logger.LogError("--max must be greater than 0 (received {Max}).", max);
+                return Task.FromResult(1);
             }
 
             if (string.IsNullOrWhiteSpace(query))

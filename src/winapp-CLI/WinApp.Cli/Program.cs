@@ -103,11 +103,12 @@ internal static class Program
             }
         }
 
-        // Skip first-run notice for machine-readable output modes, completions, and the
-        // controls commands (which emit pure markdown to stdout — see ADR-001 F10).
+        // Skip first-run notice for machine-readable output modes, completions, and
+        // any command marked with ISuppressesStartupNotices (e.g. `winapp controls`,
+        // whose stdout is pure markdown — see ADR-001 F10).
         var didShowFirstRunNotice = false;
-        var isControlsMode = args.Length > 0 && string.Equals(args[0], "controls", StringComparison.Ordinal);
-        if (!isCliSchemaMode && !isCompleteMode && !json && !isControlsMode)
+        var suppressNotices = parseResult != null && CommandTreeContainsSuppressor(parseResult.CommandResult);
+        if (!isCliSchemaMode && !isCompleteMode && !json && !suppressNotices)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
@@ -176,5 +177,26 @@ internal static class Program
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Walks the resolved command tree (leaf → root) and returns true if any
+    /// command on the path implements <see cref="Commands.ISuppressesStartupNotices"/>.
+    /// Lets a top-level command opt the entire subtree out of the first-run and
+    /// update notices.
+    /// </summary>
+    private static bool CommandTreeContainsSuppressor(System.CommandLine.Parsing.CommandResult? commandResult)
+    {
+        System.CommandLine.Parsing.SymbolResult? current = commandResult;
+        while (current != null)
+        {
+            if (current is System.CommandLine.Parsing.CommandResult cr &&
+                cr.Command is Commands.ISuppressesStartupNotices)
+            {
+                return true;
+            }
+            current = current.Parent;
+        }
+        return false;
     }
 }

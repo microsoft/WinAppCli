@@ -32,7 +32,11 @@
     "onCommand:winapp.getWinappPath",
     "onCommand:winapp.manifestAddAlias",
     "onCommand:winapp.unregister",
-    "onCommand:winapp.certInfo"
+    "onCommand:winapp.certInfo",
+    "onCommand:winapp.controlsSearch",
+    "onCommand:winapp.controlsGet",
+    "onCommand:winapp.controlsList",
+    "onCommand:winapp.controlsRefresh"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -115,6 +119,26 @@
       {
         "command": "winapp.certInfo",
         "title": "Certificate Info",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.controlsSearch",
+        "title": "Controls: Search WinUI / Toolkit Samples",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.controlsGet",
+        "title": "Controls: Get Sample by ID",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.controlsList",
+        "title": "Controls: List Available Samples",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.controlsRefresh",
+        "title": "Controls: Refresh Sample Cache",
         "category": "WinApp"
       }
     ],
