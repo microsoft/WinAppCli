@@ -372,6 +372,34 @@ try
             Write-Warning "NuGet packages creation failed, but continuing..."
         } else {
             Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+
+            # Run NuGet Pester tests (gate matrix + dual-pack layout parity).
+            # Skipped if -SkipTests was passed.
+            if (-not $SkipTests) {
+                $NuGetTestsPath = Join-Path $ProjectRoot "src\winapp-NuGet\tests\NuGet.Tests.ps1"
+                if (Test-Path $NuGetTestsPath) {
+                    $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
+                    if ($pesterMod) {
+                        Write-Host "[TEST] Running NuGet Pester tests..." -ForegroundColor Blue
+                        $pesterConfig = New-PesterConfiguration
+                        $pesterConfig.Run.Path = $NuGetTestsPath
+                        $pesterConfig.Run.Exit = $false
+                        $pesterConfig.Output.Verbosity = 'Normal'
+                        $pesterResult = Invoke-Pester -Configuration $pesterConfig
+                        if ($pesterResult.FailedCount -gt 0) {
+                            if ($FailOnTestFailure) {
+                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed"
+                            } else {
+                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failure(s) — continuing"
+                            }
+                        } else {
+                            Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
+                        }
+                    } else {
+                        Write-Warning "Pester 5.x not installed — skipping NuGet Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
+                    }
+                }
+            }
         }
     } else {
         Write-Host ""
