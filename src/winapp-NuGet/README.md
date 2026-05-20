@@ -15,17 +15,34 @@ This package provides MSBuild targets that seamlessly integrate with the .NET CL
 
 ## Usage
 
-1. Add this package to your WinUI project:
+### Direct consumption (head app)
+
+Add this package to your packaged Windows app project. `PrivateAssets="all"` is recommended so that downstream consumers of your app (if any) don't see this build tooling:
 
 ```xml
-<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.1.10" PrivateAssets="all" />
+<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="<latest>" PrivateAssets="all" />
 ```
 
-2. Run your application:
+> Replace `<latest>` with the latest version from [the NuGet feed](https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinApp/).
+
+Then run your application:
 
 ```bash
 dotnet run
 ```
+
+### Transitive consumption (library author)
+
+If you ship a library that you want to expose this package's behavior to its consumers (e.g. a MAUI library wrapper), reference the package with `PrivateAssets="none"` and `IncludeAssets="build;buildTransitive"`:
+
+```xml
+<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp"
+                  Version="<latest>"
+                  PrivateAssets="none"
+                  IncludeAssets="build;buildTransitive" />
+```
+
+The package ships its props and targets in both `build/` and `buildTransitive/`, so consumers of your library will pick them up automatically. The targets only activate when the consuming project is a packaged Windows app (has an appxmanifest, OutputType is not `Library`, target platform is `windows`); they are no-ops in unrelated TFMs (e.g. the `net*-android` / `net*-ios` TFMs of a multi-targeted MAUI app), libraries, and test projects.
 
 ## How It Works
 
@@ -70,6 +87,24 @@ Example:
 
 ## Troubleshooting
 
+### `dotnet run` is not intercepted (app is not registered or launched)
+
+If `dotnet run` runs your app as a plain executable instead of registering it as a packaged app, the package's run-support gate did not activate. Run the diagnostic target to see why:
+
+```bash
+dotnet msbuild -t:WinAppRunSupportInfo
+```
+
+The gate (`_WinAppRunSupportActive`) requires **all five** of these to be true:
+
+1. `EnableWinAppRunSupport` is `true` (the default — set to `false` to disable explicitly).
+2. `WindowsPackageType` is not `None`.
+3. `OutputType` is not `Library` (must be `Exe`, `WinExe`, etc.).
+4. `_WinAppEffectiveTargetPlatformIdentifier` is `windows` (derived from `$(TargetPlatformIdentifier)` if set, else from `$(TargetFramework)`).
+5. A manifest exists in the project directory (`Package.appxmanifest`, `AppxManifest.xml`, or `appxmanifest.xml`) **or** you explicitly set `WinAppManifestPath` to a file that exists.
+
+Look at the `WinAppRunSupportInfo` output — the property whose value disagrees with the list above is the one that's keeping the gate inactive.
+
 ### Application fails to launch
 
 Ensure your `appxmanifest.xml` is correctly configured with:
@@ -79,6 +114,13 @@ Ensure your `appxmanifest.xml` is correctly configured with:
 ### Debug identity registration fails
 
 Run Visual Studio or the terminal as Administrator, or ensure Developer Mode is enabled in Windows Settings.
+
+## Behavior changes
+
+Starting with the version that introduced transitive consumption support (`buildTransitive/`):
+
+- The package is no longer marked `<DevelopmentDependency>true`. This was required to allow the targets to flow transitively to consumers of a library that depends on this package. Direct head-app consumers using the default `PrivateAssets` setting will now also flow this package as a regular dependency in their own `.nupkg` output. **If you ship a packaged `.nupkg` and do not want consumers to inherit this build tooling, add `PrivateAssets="all"` to your `<PackageReference>` (see "Direct consumption" above).**
+- The targets are now gated by a single property (`_WinAppRunSupportActive`) and are inert in any project that is not a packaged Windows app (libraries, test projects, console apps without a manifest, non-Windows TFMs of multi-targeted projects). If you previously relied on side effects from importing this package without meeting the gate criteria, those side effects no longer occur. Use the `WinAppRunSupportInfo` MSBuild target (see "Troubleshooting") to inspect the gate inputs.
 
 ## License
 
