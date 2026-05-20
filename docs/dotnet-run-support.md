@@ -164,54 +164,6 @@ Capture OutputDebugString messages and first-chance exceptions:
 </PropertyGroup>
 ```
 
-## Behavior
-
-### Re-registration is skipped when the manifest is unchanged
-
-`dotnet run` calls into `winapp run`, which materializes a loose-layout package
-under `$(WinAppLooseLayoutPath)` (default `$(OutputPath)AppX\`) and registers it
-in development mode with the Windows `PackageManager`.
-
-When you run `dotnet run` repeatedly **without changing the `Package.appxmanifest`**,
-the CLI detects that the existing development-mode registration already points at the
-same loose-layout directory and that the manifest bytes are identical. In that case it
-skips the unregister + register pair entirely.
-
-This matters because Windows resets **capability consent** (camera, microphone, etc.)
-on every package re-registration, regardless of `RemovalOptions.PreserveApplicationData`.
-Skipping the no-op re-registration preserves the camera/mic/etc. prompts you've already
-accepted, matching Visual Studio's F5 behavior.
-
-The CLI always re-registers when:
-
-- The manifest content changed since the last run (any byte difference).
-- The previous registration's `InstallLocation` is a different directory.
-- The previous registration is **not** in development mode.
-- More than one package with the same identity name is installed.
-- `--clean` was passed (force fresh state).
-
-At default verbosity the skip path is silent — `winapp run` / `dotnet run` output
-looks the same as before this optimization existed, so existing scripts and UX
-are unchanged.
-
-To confirm the skip path was taken, run the CLI with `--verbose`:
-
-```powershell
-winapp run --verbose
-```
-
-which prints a debug line such as:
-
-```text
-Package already registered with identical manifest ... — skipping re-registration to preserve capability consent
-```
-
-> **Note:** `dotnet run -v:detailed` does not currently forward MSBuild verbosity to
-> the embedded CLI invocation, so debug-level CLI messages are not surfaced through
-> the `dotnet run` host. Invoke `winapp run --verbose` directly when you need the
-> debug rationale. (`WinAppLaunchArgs` is forwarded to your app via `--args`, not
-> to the CLI, so it cannot be used for this.)
-
 ## Production Blockers
 
 ### 1. CLI AOT Build Issues (BLOCKING)
