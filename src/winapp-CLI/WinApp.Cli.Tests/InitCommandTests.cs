@@ -283,18 +283,63 @@ public class InitCommandBindingsPromptTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_NpmCallerWithSetupSdksNone_RejectsBecauseBindingsNeedSdks()
+    public async Task InitCommand_NpmCallerWithSetupSdksNone_SilentlyFallsBackToCppOnly()
     {
-        // npm-caller + --use-defaults requests Both, which needs SDK packages
-        // for the winmd source. --setup-sdks none conflicts → exit 1.
+        // JS bindings need SDK packages for codegen's winmd source. Rather
+        // than tripping the SDK-None guard when --use-defaults → Both, the
+        // prompt path silently picks CppOnly for `--setup-sdks none` so
+        // samples like rust-app (which don't need winapp to install SDKs)
+        // succeed without intervention.
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
 
         var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--use-defaults", "--setup-sdks", "none" };
+        var args = new[] { _tempDirectory.FullName, "--use-defaults", "--setup-sdks", "none", "--config-only" };
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(0, exitCode,
+            "--setup-sdks none + npm caller must succeed (silently downgraded to CppOnly).");
+        var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
+        Assert.IsFalse(
+            combined.Contains("JS/TS bindings need SDK packages", StringComparison.OrdinalIgnoreCase),
+            $"--setup-sdks none must not surface the SDK-None rejection error — the prompt silently picks CppOnly. Combined output: {combined}");
+        // winapp.yaml may or may not be written when SdkInstallMode==None;
+        // the key invariant is that, if one is written, it must NOT contain
+        // a jsBindings block.
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        if (File.Exists(configPath))
+        {
+            var configContent = await File.ReadAllTextAsync(configPath);
+            Assert.IsFalse(configContent.Contains("jsBindings:"),
+                "--setup-sdks none must not gain a jsBindings block — the prompt path silently picks CppOnly.");
+        }
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NpmCallerWithHandEditedJsBindingsAndSetupSdksNone_RejectedWithActionableError()
+    {
+        // Defense-in-depth: if a user manually adds a jsBindings: block to
+        // winapp.yaml AND runs init with --setup-sdks none, the SDK-None
+        // guard must still fire — codegen has no winmd source to consume.
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+        var existing = """
+            packages:
+              - name: Microsoft.WindowsAppSDK
+                version: 1.8.39
+              - name: Microsoft.Windows.SDK.BuildTools
+                version: 10.0.26100.5040
+            jsBindings:
+              output: bindings/winrt
+              lang: js
+            """;
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath, existing);
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults", "--setup-sdks", "none" };
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
         Assert.AreEqual(1, exitCode,
-            "--setup-sdks none + JS bindings (via npm caller default Both) must exit 1.");
+            "Hand-edited jsBindings: + --setup-sdks none must be rejected by the SDK-None guard.");
         var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
         Assert.IsTrue(
             combined.Contains("none", StringComparison.OrdinalIgnoreCase)

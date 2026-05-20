@@ -131,13 +131,16 @@ internal partial class WorkspaceSetupService
             return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
-        // Re-check after AskSdkInstallModeAsync: the interactive prompt
-        // can leave SdkInstallMode=None, which breaks JS bindings.
+        // Re-check after AskSdkInstallModeAsync: if a hand-edited yaml has
+        // jsBindings: but the user picked --setup-sdks none, codegen has no
+        // winmd source. AskBindingsKindAsync already silently downgrades the
+        // SDK-None case for fresh init, so this guard only catches the
+        // hand-edited-yaml + SDK-None conflict.
         if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
         {
             logger.LogError(
                 "{UISymbol} JS/TS bindings need SDK packages, but the SDK install mode was set to 'none'. " +
-                "Re-run and pick a non-'none' SDK mode (stable / preview / experimental), or pick 'C++ only' at the bindings prompt.",
+                "Remove the `jsBindings:` block from winapp.yaml, or re-run with a non-'none' SDK mode (stable / preview / experimental).",
                 UiSymbols.Error);
             return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }

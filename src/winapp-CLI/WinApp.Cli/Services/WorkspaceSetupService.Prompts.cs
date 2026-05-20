@@ -287,6 +287,15 @@ internal partial class WorkspaceSetupService
             return BindingsKind.CppOnly;
         }
 
+        // JS bindings need SDK packages for the winmd source. If the user
+        // (or sample tests like rust-app) picked `--setup-sdks none`, there's
+        // nothing for codegen to consume. Silently downgrade rather than
+        // tripping the SDK-None guard with --use-defaults → Both.
+        if (options.SdkInstallMode == SdkInstallMode.None)
+        {
+            return BindingsKind.CppOnly;
+        }
+
         // Non-interactive: default to Both so `npx winapp init --use-defaults`
         // (sample tests, CI) wires up everything the npm wrapper enables.
         if (options.UseDefaults)
