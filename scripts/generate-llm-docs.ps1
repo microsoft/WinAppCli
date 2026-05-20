@@ -109,7 +109,7 @@ $SkillsDir = $SkillsPath
 # Skill → CLI command mapping for auto-generated options/arguments tables
 # Each skill maps to one or more CLI commands whose options/arguments should be included
 $SkillCommandMap = @{
-    "setup"        = @("init", "restore", "update", "run", "node jsbindings add", "node jsbindings generate", "unregister")
+    "setup"        = @("init", "restore", "update", "run", "unregister")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
     "signing"      = @("cert generate", "cert install", "cert info", "sign")

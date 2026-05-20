@@ -9,41 +9,55 @@ This guide shows you how to call modern Windows Runtime (WinRT) APIs directly fr
 
 Before starting this guide, make sure you've:
 - Completed the [development environment setup](setup.md)
-- Used `winapp` via `npx` (i.e., the `@microsoft/winappcli` npm package) — JS bindings are gated to npm-invoked `winapp` because the generator (`@microsoft/dynwinrt-codegen`) and runtime (`@microsoft/dynwinrt`) ship as npm dependencies. A winget / standalone install of `winapp.exe` will reject `--js-bindings*` and `node jsbindings add` with a clear error.
+- Used `winapp` via `npx` (i.e., the `@microsoft/winappcli` npm package) — JS bindings are gated to npm-invoked `winapp` because the generator (`@microsoft/dynwinrt-codegen`) and runtime (`@microsoft/dynwinrt`) ship as npm dependencies. The standalone winget / installer build does not surface the bindings prompt and does not generate JS bindings.
 
 ## Step 1: Add JS bindings to your project
 
 You have two paths depending on whether your Electron app already has a `winapp.yaml`.
 
-### Path A — Fresh project (init with bindings)
+### Path A — Fresh project (init with bindings prompt)
 
-If you're setting up `winapp` for the first time, ask `init` to wire bindings in the same step. The `--js-bindings-ai` preset narrows generation to the Windows AI surface — the [`Microsoft.WindowsAppSDK.AI`](https://www.nuget.org/packages/Microsoft.WindowsAppSDK.AI) NuGet package, which projects the `Microsoft.Windows.AI.*` namespaces:
+When you run `npx winapp init` for the first time, the CLI shows an interactive **bindings prompt** asking whether to generate **C++ projections**, **JS/TS bindings**, or **Both**:
 
 ```bash
-npx winapp init --use-defaults --js-bindings-ai
-npm install
+npx winapp init
+# > Bindings to generate:
+#     C++ projections
+#     JS/TS bindings
+#   ❯ Both                         (default)
 ```
 
-`init` installs the AI NuGet package, writes a `winapp.yaml` with a `jsBindings:` block, and runs the codegen. `npm install` picks up the `@microsoft/dynwinrt` runtime dependency that `init` injected into your `package.json`.
+Pick **JS/TS bindings** for a pure Node/Electron project (skips cppwinrt headers/libs — saves ~130 MB and ~20 s), or **Both** to keep both surfaces available. `init` then installs the WinAppSDK packages, writes a `winapp.yaml` containing a default `jsBindings:` block (covering the full Windows App SDK), and runs the codegen.
 
-For the full WinAppSDK surface (every namespace), drop the preset:
+For a scripted / CI install, `--use-defaults` auto-picks **Both** without prompting:
 
 ```bash
-npx winapp init --js-bindings
+npx winapp init --use-defaults
+npm install                        # picks up the @microsoft/dynwinrt runtime dep that init injected
 ```
 
 ### Path B — Existing project (layer bindings on)
 
-If `winapp.yaml` already exists and you don't want to re-run the full `init` pipeline, use the layered `node jsbindings add` sub-command. It edits **only** the `jsBindings:` block, never re-restores SDK packages, and runs codegen against your already-restored winmds:
+If `winapp.yaml` already exists and you want to add JS bindings, edit the yaml and add a `jsBindings:` block. The empty form covers the full Windows App SDK:
 
-```bash
-npx winapp node jsbindings add --ai
+```yaml
+# winapp.yaml
+jsBindings: {}
 ```
 
-If `jsBindings:` already exists and you want to overwrite, pass `--force`:
+If you want JS bindings without cppwinrt projections, also set `cppProjections: false` at the top level:
+
+```yaml
+# winapp.yaml
+cppProjections: false
+jsBindings: {}
+```
+
+Then run `restore` — it will pick up the new block, run codegen, and inject the `@microsoft/dynwinrt` runtime dep into `package.json`:
 
 ```bash
-npx winapp node jsbindings add --ai --force
+npx winapp restore
+npm install
 ```
 
 ### What you get
@@ -61,10 +75,10 @@ bindings/winrt/
 └── …                                                 # one pair of files per emitted class
 ```
 
-To put them somewhere else, pass `--js-bindings-output PATH` (for `init`) or `--output PATH` (for `node jsbindings add`).
+To put them somewhere else, set `jsBindings.output:` in `winapp.yaml` (e.g. `output: src/generated/winrt`) and re-run `restore`.
 
 > [!NOTE]
-> If you need to slice generation by NuGet package, add your own `.winmd`, or cherry-pick a few classes from a giant vendor SDK, see the recipes in [JS / TypeScript bindings for WinRT](../../js-bindings.md). This guide sticks to the simplest preset-driven flow.
+> If you need to slice generation by NuGet package, add your own `.winmd`, or cherry-pick a few classes from a giant vendor SDK, see the recipes in [JS / TypeScript bindings for WinRT](../../js-bindings.md). This guide sticks to the simplest default-scope flow.
 
 ## Step 2: Call a WinRT API from your Electron code
 
@@ -138,25 +152,19 @@ The first call to a WinRT method imported from `bindings/winrt/` will load `@mic
 The generated `bindings/winrt/` files are committed-or-gitignored at your discretion (treat them like `package-lock.json` — generated, but stable enough to commit if you want diff visibility). Regenerate whenever:
 
 - You bump a WinAppSDK / WinRT package version in `winapp.yaml`
-- You add or remove entries in `additionalWinmds:` / `extraTypes:`
+- You add or remove entries in `jsBindings.packages:` / `additionalWinmds:` / `extraTypes:`
 - The codegen itself is upgraded (`npm update @microsoft/dynwinrt-codegen`)
 
-To regenerate without changing the `jsBindings:` configuration:
+In all cases, re-run `restore` — it picks up the current `winapp.yaml` (no yaml mutation) and re-runs codegen:
 
 ```bash
-npx winapp restore        # regenerates bindings as part of the standard restore step
-```
-
-Or, to replace the block and regenerate from scratch:
-
-```bash
-npx winapp node jsbindings add --ai --force
+npx winapp restore
 ```
 
 ## Troubleshooting
 
 **`Cannot find module './bindings/winrt'`**
-The generator hasn't produced output yet. Re-run `npx winapp restore` (or `node jsbindings add`) and verify `bindings/winrt/index.js` exists.
+The generator hasn't produced output yet. Re-run `npx winapp restore` and verify `bindings/winrt/index.js` exists.
 
 **`MissingMethodException` / `Type not registered`**
 A class your code imports is in a `.winmd` that isn't on the codegen's input. Check the `packages:` list (or `additionalWinmds:`) in `winapp.yaml` — empty/omitted `jsBindings.packages` means "all installed packages participate", but if you've curated the list make sure the relevant package is there.
@@ -169,7 +177,7 @@ Make sure `@microsoft/dynwinrt` is in your runtime `dependencies` (not just `dev
 
 ## Next steps
 
-- **Reference** — [JS / TypeScript bindings for WinRT (`jsBindings`)](../../js-bindings.md) for the full `winapp.yaml` schema, every CLI flag, and advanced recipes (slice by package, cherry-pick types, ship a vendor `.winmd`).
-- **CLI** — [`npx winapp node jsbindings add` reference](../../usage.md#node-jsbindings-add) and [`npx winapp init` reference](../../usage.md#init).
+- **Reference** — [JS / TypeScript bindings for WinRT (`jsBindings`)](../../js-bindings.md) for the full `winapp.yaml` schema and advanced recipes (slice by package, cherry-pick types, ship a vendor `.winmd`).
+- **CLI** — [`npx winapp init` reference](../../usage.md#init) and [`npx winapp restore` reference](../../usage.md#restore).
 - **Runtime** — [`@microsoft/dynwinrt` on GitHub](https://github.com/microsoft/dynwinrt) for the libffi-based runtime that powers the generated bindings.
 - **Package & ship** — [Packaging Your App](packaging.md) once you're ready to produce an MSIX for distribution.

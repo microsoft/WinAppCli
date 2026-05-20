@@ -237,4 +237,80 @@ internal partial class WorkspaceSetupService
         logger.LogInformation("{Message}", message);
         return await work(cancellationToken);
     }
+
+    // Result of the npm-caller bindings prompt.
+    private enum BindingsKind
+    {
+        CppOnly,
+        JsOnly,
+        Both,
+    }
+
+    // Asks the user (npm caller only) which bindings to generate for this
+    // workspace: C++ projections, JS/TS bindings, or both. Defaults to Both
+    // under --use-defaults. Returns CppOnly (the historical default) for
+    // non-npm callers so winget / standalone-CLI users see no behavior change.
+    private async Task<BindingsKind> AskBindingsKindAsync(WorkspaceSetupOptions options, WinappConfig? existingConfig, CancellationToken cancellationToken)
+    {
+        // Restore (winapp restore) never re-prompts: it respects whatever the
+        // existing yaml already declares.
+        if (options.RequireExistingConfig)
+        {
+            return BindingsKindFromConfig(existingConfig);
+        }
+
+        // Standalone CLI (winget / native binary) keeps its current C++ default.
+        var caller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
+        if (!string.Equals(caller, "nodejs-package", StringComparison.Ordinal))
+        {
+            return BindingsKind.CppOnly;
+        }
+
+        // Existing yaml that already declares jsBindings: — don't change the
+        // user's earlier choice. Map it back to a kind so callers can still
+        // gate on AddJsBindings / SkipCppProjections.
+        if (existingConfig?.JsBindings is not null)
+        {
+            return BindingsKindFromConfig(existingConfig);
+        }
+
+        // Non-interactive: default to Both so `npx winapp init --use-defaults`
+        // (sample tests, CI) wires up everything the npm wrapper enables.
+        if (options.UseDefaults)
+        {
+            return BindingsKind.Both;
+        }
+
+        var choices = new[]
+        {
+            "Both C++ and JS/TS bindings (default)",
+            "JS/TS bindings only",
+            "C++ projections only",
+        };
+
+        ansiConsole.WriteLine("Select which bindings to generate:");
+        var pick = await ansiConsole.PromptAsync(
+            new SelectionPrompt<string>().AddChoices(choices),
+            cancellationToken);
+
+        ansiConsole.Cursor.MoveUp();
+        ansiConsole.Write("\x1b[2K"); // Clear line
+        ansiConsole.MarkupLine($"Bindings: [underline]{Markup.Remove(pick)}[/]");
+
+        return pick switch
+        {
+            "JS/TS bindings only" => BindingsKind.JsOnly,
+            "C++ projections only" => BindingsKind.CppOnly,
+            _ => BindingsKind.Both,
+        };
+    }
+
+    private static BindingsKind BindingsKindFromConfig(WinappConfig? config)
+    {
+        if (config?.JsBindings is null)
+        {
+            return BindingsKind.CppOnly;
+        }
+        return config.CppProjections ? BindingsKind.Both : BindingsKind.JsOnly;
+    }
 }

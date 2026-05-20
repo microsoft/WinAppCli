@@ -140,12 +140,13 @@ public class InitCommandTests : BaseCommandTests
     }
 }
 
-// --js-bindings flag gating — only allowed from the npm shim
-// (WINAPP_CLI_CALLER=nodejs-package). [DoNotParallelize] because tests
-// mutate that process-wide env var.
+// Npm-caller bindings prompt — only fires under WINAPP_CLI_CALLER=nodejs-package,
+// and only when there's no existing jsBindings: block to preserve. Default Both
+// under --use-defaults, no prompt for native callers. [DoNotParallelize] because
+// tests mutate that process-wide env var.
 [TestClass]
 [DoNotParallelize]
-public class InitCommandJsBindingsTests : BaseCommandTests
+public class InitCommandBindingsPromptTests : BaseCommandTests
 {
     private string? _savedCaller;
 
@@ -162,355 +163,51 @@ public class InitCommandJsBindingsTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_WithJsBindingsAndWingetCaller_ExitsWithActionableError()
+    public async Task InitCommand_NpmCallerWithUseDefaults_AddsJsBindingsBlock()
     {
-        // Arrange — simulate winget invocation: env var unset.
+        // Default for npm caller under --use-defaults is "Both", so jsBindings
+        // must land in winapp.yaml without any explicit flag.
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDirectory.FullName, "package.json"),
+            """{"name":"my-app","version":"1.0.0"}""");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults" };
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(0, exitCode);
+        var configContent = await File.ReadAllTextAsync(Path.Combine(_tempDirectory.FullName, "winapp.yaml"));
+        StringAssert.Contains(configContent, "jsBindings:",
+            "npm caller + --use-defaults defaults to Both, so jsBindings: must be added");
+        Assert.IsFalse(configContent.Contains("cppProjections: false"),
+            "Both mode keeps cppProjections at default (true); explicit false should not be written");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NativeCallerWithUseDefaults_OmitsJsBindingsBlock()
+    {
+        // Standalone CLI (winget) keeps historical C++-only behavior even
+        // under --use-defaults — no prompt, no jsBindings.
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
 
         var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings" };
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        // Assert
-        Assert.AreEqual(1, exitCode, "winget caller passing --js-bindings should exit with code 1");
-
-        var stderr = ConsoleStdErr.ToString();
-        StringAssert.Contains(stderr, "--js-bindings requires the @microsoft/winappcli npm package",
-            "Error must name the flag and the required package");
-        StringAssert.Contains(stderr, "npm i -D @microsoft/winappcli",
-            "Error must include the recovery command");
-        StringAssert.Contains(stderr, "npx winapp init --js-bindings",
-            "Error must show the post-install invocation");
-
-        // No yaml should have been written — we bailed before InitializeConfigurationAsync ran.
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        Assert.IsFalse(File.Exists(configPath), "winapp.yaml should not be written when init bails early");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsAndVscodeCaller_ExitsWithActionableError()
-    {
-        // Arrange — VSCode extension is also a Node host but is not the npm
-        // shim that ships dynwinrt-codegen as a transitive dep, so it is
-        // explicitly NOT allowed (matches design choice 3=b).
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "vscode-extension");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings" };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(1, exitCode, "vscode-extension caller passing --js-bindings should exit 1");
-        StringAssert.Contains(ConsoleStdErr.ToString(), "--js-bindings requires the @microsoft/winappcli npm package");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsAndNpmCaller_AddsJsBindingsBlockToConfig()
-    {
-        // Arrange — simulate npm shim invocation. Pre-create a package.json in
-        // the workspace so we exercise the v1.2 happy-path that adds
-        // @microsoft/dynwinrt to dependencies.
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-        var packageJsonPath = Path.Combine(_tempDirectory.FullName, "package.json");
-        await File.WriteAllTextAsync(packageJsonPath,
-            "{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\"\n}\n");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings" };
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        // Assert
-        Assert.AreEqual(0, exitCode, "npm caller with --js-bindings should succeed");
-
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        Assert.IsTrue(File.Exists(configPath), $"winapp.yaml should be written at {configPath}");
-
-        var configContent = await File.ReadAllTextAsync(configPath);
-        StringAssert.Contains(configContent, "packages:", "Standard packages section should still be written");
-        StringAssert.Contains(configContent, "jsBindings:", "jsBindings: block should be injected by --js-bindings");
-        StringAssert.Contains(configContent, "lang: js", "Default lang=js should be persisted");
-        // XAML denylisting now lives in the codegen, not yaml.
-        StringAssert.DoesNotMatch(configContent, new System.Text.RegularExpressions.Regex(@"excludeNamespacePrefixes\s*:"),
-            "Default jsBindings yaml must not emit the deprecated excludeNamespacePrefixes block.");
-
-        // @microsoft/dynwinrt must be a runtime dep so `npm ci --omit=dev` works.
-        var packageJsonContent = await File.ReadAllTextAsync(packageJsonPath);
-        StringAssert.Contains(packageJsonContent, "@microsoft/dynwinrt",
-            "package.json should now contain @microsoft/dynwinrt");
-        StringAssert.Contains(packageJsonContent, "0.0.0-test",
-            "Pinned version from FakeNpmWrapperVersionProvider should be written");
-        StringAssert.Contains(packageJsonContent, "\"dependencies\"",
-            "Dependency must be added under dependencies (not devDependencies)");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsAndNpmCaller_NoPackageJson_StillSucceeds()
-    {
-        // No package.json: don't fail, don't synthesize one — just skip the
-        // dep edit with a warning.
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings" };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(0, exitCode, "Missing package.json must not fail init");
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        Assert.IsTrue(File.Exists(configPath), "winapp.yaml should still be written");
-        StringAssert.Contains(await File.ReadAllTextAsync(configPath), "jsBindings:");
-        Assert.IsFalse(
-            File.Exists(Path.Combine(_tempDirectory.FullName, "package.json")),
-            "We must not synthesize a package.json on the user's behalf");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_WithoutJsBindingsFlag_DoesNotAddJsBindingsBlock()
-    {
-        // Arrange — even with npm caller set, omitting the flag must not
-        // inject jsBindings (design choice 2=a: opt-in only, no auto-detect).
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only" };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(0, exitCode);
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        var configContent = await File.ReadAllTextAsync(configPath);
-        Assert.DoesNotContain("jsBindings:", configContent,
-            "Without --js-bindings, no jsBindings block should be added even when npm-invoked");
-    }
-
-    // -------------------------------------------------------------------------
-    // Q4: --js-bindings-output / --js-bindings-lang / --js-bindings-only flags
-    // -------------------------------------------------------------------------
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsOutput_OverridesDefaultOutputDir()
-    {
-        // Arrange
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--config-only",
-            "--js-bindings",
-            "--js-bindings-output", "src/generated/winrt",
-        };
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        // Assert
-        Assert.AreEqual(0, exitCode);
-        var configContent = await File.ReadAllTextAsync(Path.Combine(_tempDirectory.FullName, "winapp.yaml"));
-        StringAssert.Contains(configContent, "output: src/generated/winrt",
-            "--js-bindings-output must override the default 'bindings/winrt' in the persisted yaml");
-        // Make sure we did not double-write a default output line as well.
-        Assert.DoesNotContain("output: bindings/winrt", configContent,
-            "Default output must be replaced, not appended");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_JsBindingsSubOptionsWithoutFlag_FailsAsInvalidUsage()
-    {
-        // sub-options without --js-bindings are invalid
-        // usage (they'd silently no-op while init reports success — bad
-        // UX). Treat as exit 1 with a clear error message.
-        // Alias flags (--js-bindings-{preset}) bypass this — they imply the parent.
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--config-only",
-            "--js-bindings-output", "src/g",
-        };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(1, exitCode,
-            "Sub-options without --js-bindings must fail loudly (exit 1) rather than silently no-op.");
-        var stderr = ConsoleStdErr.ToString();
-        StringAssert.Contains(stderr, "require --js-bindings",
-            "Error must spell out the dependency on --js-bindings.");
-        StringAssert.Contains(stderr, "Error:",
-            "Should be surfaced as an Error, not a Warning.");
-
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        if (File.Exists(configPath))
-        {
-            var configContent = await File.ReadAllTextAsync(configPath);
-            Assert.DoesNotContain("jsBindings:", configContent,
-                "yaml must not gain a jsBindings block when init failed with invalid usage.");
-        }
-    }
-
-    // --js-bindings-{preset} alias flags — each implies --js-bindings;
-    // multiple aliases union their package sets.
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsAiAlias_ImpliesParentAndAppliesAiPackages()
-    {
-        // `--js-bindings-ai` alone (no `--js-bindings`) must apply the AI
-        // preset (expands to Microsoft.WindowsAppSDK.AI).
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--config-only",
-            "--js-bindings-ai",
-        };
-
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults" };
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
         Assert.AreEqual(0, exitCode);
         var configContent = await File.ReadAllTextAsync(Path.Combine(_tempDirectory.FullName, "winapp.yaml"));
-        StringAssert.Contains(configContent, "jsBindings:",
-            "Alias must imply --js-bindings, so the jsBindings block is created");
-        StringAssert.Contains(configContent, "packages:",
-            "AI preset (v2.0) writes a packages: list under jsBindings");
-        foreach (var pkg in JsBindingsPresets.KnownPresets["ai"])
-        {
-            StringAssert.Contains(configContent, pkg,
-                $"AI preset package id {pkg} must appear in the persisted yaml");
-        }
+        Assert.IsFalse(configContent.Contains("jsBindings:"),
+            "Native caller must not gain a jsBindings block — bindings prompt only fires for npm caller");
     }
 
     [TestMethod]
-    public async Task InitCommand_AliasFlagAlone_DoesNotTriggerSubOptionWarning()
+    public async Task InitCommand_NpmCallerOnDotNetProject_RejectedWithActionableError()
     {
-        // Regression guard: aliases imply --js-bindings, so the
-        // "sub-options without parent" warning must NOT fire when only an
-        // alias is given (without --js-bindings).
+        // .NET projects can't host JS bindings; the npm-caller prompt path
+        // tries to enable them via --use-defaults → Both, so the .NET guard
+        // must surface a clear error rather than silently producing junk yaml.
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[]
-        {
-            _tempDirectory.FullName,
-            "--config-only",
-            "--js-bindings-ai",
-        };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(0, exitCode);
-        var stderr = ConsoleStdErr.ToString();
-        Assert.IsFalse(stderr.Contains("require --js-bindings"),
-            "Alias implies --js-bindings; the invalid-usage error must not be printed.");
-        Assert.IsFalse(stderr.Contains("have no effect without --js-bindings"),
-            "Legacy warning text must not appear either (kept in case of partial revert).");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_AllPresetAliasesRegistered()
-    {
-        // Meta-test: each KnownPreset must have a corresponding registered
-        // CLI flag. Catches regressions if someone adds a preset to the dict
-        // but breaks the auto-registration loop in InitCommand's static ctor.
-        foreach (var preset in JsBindingsPresets.KnownPresets.Keys)
-        {
-            Assert.IsTrue(
-                InitCommand.JsBindingsPresetAliasOptions.ContainsKey(preset),
-                $"Missing alias option for preset '{preset}'");
-            var flag = JsBindingsPresets.AliasFlagName(preset);
-            var option = InitCommand.JsBindingsPresetAliasOptions[preset];
-            CollectionAssert.Contains(option.Aliases.Concat(new[] { option.Name }).ToList(), flag,
-                $"Option for '{preset}' must surface as '{flag}' on the CLI");
-        }
-    }
-
-    // Re-running init with --js-bindings on an existing yaml ADDS the
-    // jsBindings block without touching the existing packages: list.
-
-    [TestMethod]
-    public async Task InitCommand_OnExistingConfig_WithJsBindingsFlag_AddsBlockAndPreservesPackages()
-    {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-        var existing = """
-            packages:
-              - name: Microsoft.WindowsAppSDK
-                version: 1.8.39
-              - name: Microsoft.Windows.SDK.BuildTools
-                version: 10.0.26100.5040
-            """;
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        await File.WriteAllTextAsync(configPath, existing);
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings", "--use-defaults" };
-
-        // Act
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        // Assert
-        Assert.AreEqual(0, exitCode, "Re-init with --js-bindings on existing yaml must succeed");
-
-        var configContent = await File.ReadAllTextAsync(configPath);
-        // Packages preserved
-        StringAssert.Contains(configContent, "Microsoft.WindowsAppSDK",
-            "Re-init must NOT lose previously pinned packages");
-        StringAssert.Contains(configContent, "1.8.39",
-            "Pinned package version must survive re-init");
-        StringAssert.Contains(configContent, "Microsoft.Windows.SDK.BuildTools",
-            "Second pinned package must also survive re-init");
-        // jsBindings block was added
-        StringAssert.Contains(configContent, "jsBindings:",
-            "Re-init with --js-bindings must add the jsBindings block");
-        StringAssert.Contains(configContent, "lang: js",
-            "Re-init must persist default lang=js");
-    }
-
-    // --js-bindings + --setup-sdks none is rejected at
-    // SetupWorkspaceAsync entry. Verify with the npm shim caller set
-    // (otherwise the npm-only gate fires first).
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsAndSetupSdksNone_RejectedWithActionableError()
-    {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--js-bindings", "--setup-sdks", "none" };
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
-
-        Assert.AreEqual(1, exitCode,
-            "--js-bindings + --setup-sdks none must exit 1 (no SDKs → nothing to scan for winmd).");
-        var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
-        Assert.IsTrue(
-            combined.Contains("--setup-sdks none", StringComparison.OrdinalIgnoreCase)
-            && combined.Contains("requires SDK packages", StringComparison.OrdinalIgnoreCase),
-            $"Error must call out the setup-sdks=none conflict. Combined output: {combined}");
-
-        // Yaml must not gain a jsBindings: block when the guard rejects.
-        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        if (File.Exists(configPath))
-        {
-            var content = await File.ReadAllTextAsync(configPath);
-            Assert.IsFalse(content.Contains("jsBindings:"),
-                "Rejected init must NOT write a jsBindings: block.");
-        }
-    }
-
-    // --js-bindings is unsupported on .NET (.csproj) projects.
-    [TestMethod]
-    public async Task InitCommand_WithJsBindingsOnDotNetProject_RejectedWithActionableError()
-    {
-        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
-
-        // Seed a minimal .csproj so dotNetService.FindCsproj returns 1.
         var csprojPath = Path.Combine(_tempDirectory.FullName, "Sample.csproj");
         await File.WriteAllTextAsync(csprojPath,
             "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
@@ -521,35 +218,77 @@ public class InitCommandJsBindingsTests : BaseCommandTests
             + "</Project>\n");
 
         var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--js-bindings", "--use-defaults" };
-
+        var args = new[] { _tempDirectory.FullName, "--use-defaults" };
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
         Assert.AreEqual(1, exitCode,
-            "--js-bindings on a .NET project must exit 1 (codegen target is Node/native, not .NET).");
+            "JS bindings on a .NET project must exit 1 (codegen target is Node/native, not .NET).");
         var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
         Assert.IsTrue(
             combined.Contains(".NET", StringComparison.OrdinalIgnoreCase)
             && combined.Contains("not supported", StringComparison.OrdinalIgnoreCase),
             $"Error must call out the .NET-not-supported case. Combined output: {combined}");
+    }
 
-        // Yaml must not be mutated.
+    [TestMethod]
+    public async Task InitCommand_NpmCallerWithSetupSdksNone_RejectsBecauseBindingsNeedSdks()
+    {
+        // npm-caller + --use-defaults requests Both, which needs SDK packages
+        // for the winmd source. --setup-sdks none conflicts → exit 1.
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--use-defaults", "--setup-sdks", "none" };
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(1, exitCode,
+            "--setup-sdks none + JS bindings (via npm caller default Both) must exit 1.");
+        var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
+        Assert.IsTrue(
+            combined.Contains("none", StringComparison.OrdinalIgnoreCase)
+            && combined.Contains("SDK packages", StringComparison.OrdinalIgnoreCase),
+            $"Error must call out the setup-sdks=none conflict. Combined output: {combined}");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NpmCallerWithExistingJsBindings_PreservesUserChoice()
+    {
+        // Existing yaml that already declares jsBindings: must not be
+        // re-prompted; the existing choice (here: JS-only via
+        // cppProjections: false) round-trips through init.
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+        var existing = """
+            cppProjections: false
+            packages:
+              - name: Microsoft.WindowsAppSDK
+                version: 1.8.39
+              - name: Microsoft.Windows.SDK.BuildTools
+                version: 10.0.26100.5040
+            jsBindings:
+              output: bindings/winrt
+              lang: js
+            """;
         var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
-        if (File.Exists(configPath))
-        {
-            var content = await File.ReadAllTextAsync(configPath);
-            Assert.IsFalse(content.Contains("jsBindings:"),
-                "Rejected init on .NET project must NOT write a jsBindings: block.");
-        }
+        await File.WriteAllTextAsync(configPath, existing);
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults" };
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(0, exitCode);
+        var configContent = await File.ReadAllTextAsync(configPath);
+        StringAssert.Contains(configContent, "jsBindings:",
+            "Existing jsBindings block must survive re-init.");
+        StringAssert.Contains(configContent, "Microsoft.WindowsAppSDK",
+            "Existing pinned packages must survive re-init.");
     }
 }
 
-// init --js-bindings* path that injects the runtime dep via the
-// extracted IJsBindingsWorkspaceService. Uses a fake service to verify the
-// init→orchestration wiring without spawning real codegen.
+// Verifies the init → orchestration wiring delivers the runtime-dep
+// injection call once the npm-caller prompt opts into JS bindings.
 [TestClass]
 [DoNotParallelize]
-public class InitCommandJsBindingsWiringTests : BaseCommandTests
+public class InitCommandBindingsWiringTests : BaseCommandTests
 {
     private FakeJsBindingsWorkspaceService _fakeJsBindings = null!;
     private string? _savedCaller;
@@ -580,55 +319,19 @@ public class InitCommandJsBindingsWiringTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_WithJsBindings_InvokesEnsureRuntimeDependencyOnJsBindingsService()
+    public async Task InitCommand_NpmCallerWithUseDefaults_InvokesEnsureRuntimeDependency()
     {
-        // init --js-bindings (config-only) must route through the
-        // extracted IJsBindingsWorkspaceService for runtime-dep injection.
+        // npm caller + --use-defaults → Both → must wire @microsoft/dynwinrt.
         File.WriteAllText(
             Path.Combine(_tempDirectory.FullName, "package.json"),
             """{"name":"app","version":"1.0.0","dependencies":{}}""");
 
         var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--config-only", "--js-bindings" };
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults" };
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(_fakeJsBindings.EnsureRuntimeDependencyCalled,
-            "init --js-bindings must call IJsBindingsWorkspaceService.EnsureRuntimeDependencyAndPrintHint.");
-    }
-
-    [TestMethod]
-    public async Task InitCommand_WithJsBindings_JsBindingsRunAsyncFailure_PropagatesNonZeroExit()
-    {
-        // Verifies the fake JsBindings service surfaces its non-zero exit
-        // when invoked directly. End-to-end SetupWorkspaceAsync propagation
-        // is covered by WorkspaceSetupServiceJsBindingsStepTests.
-        _fakeJsBindings.Result = new JsBindingsOrchestrationResult
-        {
-            ExitCode = 7,
-            Message = "simulated failure",
-        };
-
-        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "winapp.yaml"),
-            "packages:\n  - name: Microsoft.WindowsAppSDK\n    version: 1.8.39\n");
-        File.WriteAllText(
-            Path.Combine(_tempDirectory.FullName, "package.json"),
-            """{"name":"app","version":"1.0.0","dependencies":{}}""");
-
-        var addCmd = GetRequiredService<AddJsBindingsCommand>();
-        // The fake's AddAsync stub returns 0, but our specific point is to
-        // verify the RunAsync result wiring through orchestration. Set up
-        // the fake's Result and call RunAsync directly to confirm propagation.
-        var ctx = new JsBindingsOrchestrationContext
-        {
-            JsBindingsConfig = new Models.JsBindingsConfig { Output = "bindings/winrt" },
-            WinappConfig = new Models.WinappConfig(),
-            WorkspaceDir = _tempDirectory,
-            LocalWinappDir = _tempDirectory.CreateSubdirectory(".winapp"),
-            NugetCacheDir = _tempDirectory,
-        };
-        var result = await _fakeJsBindings.RunAsync(ctx, default!, CancellationToken.None);
-        Assert.AreEqual(7, result.ExitCode,
-            "Fake RunAsync must return the configured non-zero exit code (propagation contract).");
+            "Default Both for npm caller must call IJsBindingsWorkspaceService.EnsureRuntimeDependencyAndPrintHint.");
     }
 }

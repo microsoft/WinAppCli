@@ -393,7 +393,7 @@ public class WinappConfigDocumentTests
         // including a leading comment line and the trailing packages:
         // section. ConfigService.SaveJsBindingsOnly is the production
         // caller; if this drifts, user-authored YAML loses comments
-        // every time `node jsbindings add/generate` runs.
+        // every time the JS bindings step runs.
         var existing = string.Join('\n', new[]
         {
             "# user-managed file — do not edit jsBindings by hand",

@@ -82,11 +82,6 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
                 .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>()
-                // `node` verb tree (Node.js / Electron-specific, npm-only)
-                .ConfigureCommand<NodeCommand>()
-                .ConfigureCommand<JsBindingsCommand>()
-                .UseCommandHandler<AddJsBindingsCommand, AddJsBindingsCommand.Handler>()
-                .UseCommandHandler<GenerateJsBindingsCommand, GenerateJsBindingsCommand.Handler>()
                 // UI Automation commands
                 .ConfigureCommand<UiCommand>()
                 .UseCommandHandler<UiStatusCommand, UiStatusCommand.Handler>()

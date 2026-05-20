@@ -11,69 +11,11 @@ internal enum WinmdPackageCategory
     Skip,
 }
 
-// Named WinAppSDK slices selectable via --js-bindings-{preset} or
-// `node jsbindings add --{preset}`. Maps to NuGet package IDs.
+// Winmd / package categorization for JS bindings. Owns the static denylists
+// (skip / ref-only) and merging them with user `jsBindings:` overrides from
+// winapp.yaml. Shared by JsBindingsWorkspaceService and WinmdsLockfileService.
 internal static class JsBindingsPresets
 {
-    public static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> KnownPresets =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["ai"] = new[]
-            {
-                "Microsoft.WindowsAppSDK.AI",
-            },
-        };
-
-    public static bool TryResolve(string presetName, out IReadOnlyList<string> packageIds)
-    {
-        if (KnownPresets.TryGetValue(presetName, out var resolved))
-        {
-            packageIds = resolved;
-            return true;
-        }
-        packageIds = Array.Empty<string>();
-        return false;
-    }
-
-    public static string KnownPresetsDisplay()
-    {
-        return string.Join(", ", KnownPresets.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
-    }
-
-    // Union package IDs of multiple presets; dedup case-insensitively.
-    public static IReadOnlyList<string> ResolveAndUnion(IEnumerable<string> presetNames)
-    {
-        var result = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in presetNames)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                continue;
-            }
-            if (!KnownPresets.TryGetValue(name, out var packageIds))
-            {
-                continue;
-            }
-            foreach (var p in packageIds)
-            {
-                if (seen.Add(p))
-                {
-                    result.Add(p);
-                }
-            }
-        }
-        return result;
-    }
-
-    // "ai" → "--js-bindings-ai"  (init flag)
-    public static string AliasFlagName(string presetName) =>
-        $"--js-bindings-{presetName.ToLowerInvariant()}";
-
-    // "ai" → "--ai"  (add sub-command flag)
-    public static string AddAliasFlagName(string presetName) =>
-        $"--{presetName.ToLowerInvariant()}";
-
     // Built-in denylists; user `jsBindings` overrides layer on top.
 
     // RefOnly: own classes are undriveable but other packages reference them.

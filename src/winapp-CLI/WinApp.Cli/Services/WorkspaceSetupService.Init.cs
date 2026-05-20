@@ -13,9 +13,9 @@ namespace WinApp.Cli.Services;
 // Owns the logic that decides whether we're "init" or "restore", loads or
 // scaffolds winapp.yaml, walks the user through SDK / manifest / dev-mode
 // prompts on first run, validates a .NET project's TargetFramework, and
-// emits the default jsBindings: block when `--js-bindings` is supplied.
-// Result tuple is consumed by SetupWorkspaceAsync to decide the rest of
-// the flow.
+// (for npm callers) prompts which bindings — C++ / JS/TS / Both — to wire
+// into winapp.yaml. Result tuple is consumed by SetupWorkspaceAsync to
+// decide the rest of the flow.
 internal partial class WorkspaceSetupService
 {
     private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
@@ -50,7 +50,7 @@ internal partial class WorkspaceSetupService
         {
             config = configService.Load();
 
-            if (config.Packages.Count == 0 && options.RequireExistingConfig)
+            if (config.Packages.Count == 0 && options.RequireExistingConfig && config.JsBindings is null)
             {
                 logger.LogInformation("{UISymbol} winapp.yaml found but contains no packages. Nothing to restore.", UiSymbols.Note);
                 shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
@@ -59,21 +59,6 @@ internal partial class WorkspaceSetupService
 
             var operation = options.RequireExistingConfig ? "Found" : "Found existing";
             logger.LogDebug("{UISymbol} {Operation} winapp.yaml with {PackageCount} packages", UiSymbols.Package, operation, config.Packages.Count);
-
-            // Re-init hint: surface JS bindings capability for npm-shim users
-            // who haven't opted in (winget users can't use --js-bindings).
-            if (!options.RequireExistingConfig
-                && !options.AddJsBindings
-                && config.JsBindings is null
-                && string.Equals(
-                    Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER"),
-                    "nodejs-package",
-                    StringComparison.Ordinal))
-            {
-                logger.LogInformation(
-                    "{UISymbol} To add JS/TS bindings to this project, re-run: npx winapp init --js-bindings",
-                    UiSymbols.Info);
-            }
 
             if (!options.RequireExistingConfig && config.Packages.Count > 0)
             {
@@ -122,82 +107,47 @@ internal partial class WorkspaceSetupService
             }
         }
 
-        // Re-check after AskSdkInstallModeAsync: the interactive prompt
-        // can leave SdkInstallMode=None, which breaks --js-bindings.
-        if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
+        // npm-caller bindings prompt: ask whether to wire C++ projections,
+        // JS/TS bindings, or both into winapp.yaml. Fills options.AddJsBindings
+        // and options.SkipCppProjections so the rest of the flow knows what
+        // to generate. No-op when not running via the npm shim, or when an
+        // existing yaml already declares jsBindings:.
+        var bindingsKind = await AskBindingsKindAsync(options, config, cancellationToken);
+        options.AddJsBindings = bindingsKind is BindingsKind.JsOnly or BindingsKind.Both;
+        options.SkipCppProjections = bindingsKind == BindingsKind.JsOnly;
+
+        // JS/TS bindings target Node/Electron hosts via dynwinrt; .NET projects
+        // already have first-class WinRT projections through CsWinRT and the
+        // codegen does not produce a .NET-consumable surface. Reject early
+        // rather than silently writing a jsBindings: block that would fail
+        // at codegen time.
+        if (options.AddJsBindings && isDotNetProject)
         {
             logger.LogError(
-                "{UISymbol} --js-bindings requires SDK packages but the SDK install mode was set to 'none'. " +
-                "Re-run without --js-bindings, or pick a non-'none' SDK mode (stable / preview / experimental).",
+                "{UISymbol} JS/TS bindings are not supported on .NET projects — the codegen targets Node/Electron via dynwinrt, and .NET projects already get WinRT via CsWinRT. " +
+                "Re-run from a non-.NET project, or omit JS bindings at the prompt.",
                 UiSymbols.Error);
             return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
-        // --js-bindings: fill a default block when none exists; never overwrite.
-        if (options.AddJsBindings && config != null && config.JsBindings is not null)
+        // Re-check after AskSdkInstallModeAsync: the interactive prompt
+        // can leave SdkInstallMode=None, which breaks JS bindings.
+        if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
         {
-            // Warn when override flags are ignored because a block already exists.
-            var hasOverrides = !string.IsNullOrWhiteSpace(options.JsBindingsOutputOverride)
-                || !string.IsNullOrWhiteSpace(options.JsBindingsLangOverride)
-                || (options.JsBindingsPresets is { Count: > 0 });
-            if (hasOverrides)
-            {
-                logger.LogWarning(
-                    "{UISymbol} --js-bindings-output / --js-bindings-lang / --js-bindings-{{preset}} are " +
-                    "ignored because winapp.yaml already declares a jsBindings block. " +
-                    "Use 'npx winapp node jsbindings add --force' to overwrite specific fields.",
-                    UiSymbols.Warning);
-            }
+            logger.LogError(
+                "{UISymbol} JS/TS bindings need SDK packages, but the SDK install mode was set to 'none'. " +
+                "Re-run and pick a non-'none' SDK mode (stable / preview / experimental), or pick 'C++ only' at the bindings prompt.",
+                UiSymbols.Error);
+            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
+
+        // Inject a default jsBindings: block (empty packages: ⇒ all WinAppSDK)
+        // when the prompt opted in and the existing yaml hasn't declared one.
         if (options.AddJsBindings && config != null && config.JsBindings is null)
         {
-            var jsCfg = new JsBindingsConfig();
-            if (!string.IsNullOrWhiteSpace(options.JsBindingsOutputOverride))
-            {
-                jsCfg.Output = options.JsBindingsOutputOverride!.Trim();
-            }
-            if (!string.IsNullOrWhiteSpace(options.JsBindingsLangOverride))
-            {
-                jsCfg.Lang = options.JsBindingsLangOverride!.Trim();
-            }
-
-            // Validate the resolved output path before persisting.
-            try
-            {
-                DynWinrtCodegenService.ResolveOutputDir(options.BaseDirectory, jsCfg.Output);
-            }
-            catch (InvalidOperationException ex)
-            {
-                logger.LogError(
-                    "{UISymbol} Invalid --js-bindings-output: {Reason}",
-                    UiSymbols.Error, ex.Message);
-                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
-            }
-            if (options.JsBindingsPresets is { Count: > 0 } presetNames)
-            {
-                var packageIds = JsBindingsPresets.ResolveAndUnion(presetNames);
-                if (packageIds.Count > 0)
-                {
-                    jsCfg.Packages = new List<string>(packageIds);
-                    logger.LogDebug(
-                        "{UISymbol} jsBindings presets [{Presets}] → packages=[{Packages}]",
-                        UiSymbols.New,
-                        string.Join(", ", presetNames),
-                        string.Join(", ", packageIds));
-                }
-                else
-                {
-                    // Defensive: InitCommand validates preset names upstream.
-                    logger.LogWarning(
-                        "{UISymbol} jsBindings presets [{Presets}] resolved to no prefixes; ignoring (known: {Known}).",
-                        UiSymbols.Warning,
-                        string.Join(", ", presetNames),
-                        JsBindingsPresets.KnownPresetsDisplay());
-                }
-            }
-            config.JsBindings = jsCfg;
+            config.JsBindings = new JsBindingsConfig();
             logger.LogDebug(
-                "{UISymbol} --js-bindings: added default jsBindings block (lang={Lang}, output={Output})",
+                "{UISymbol} Added default jsBindings block (lang={Lang}, output={Output}); empty packages ⇒ full WinAppSDK.",
                 UiSymbols.New,
                 config.JsBindings.Lang,
                 config.JsBindings.Output);
@@ -205,6 +155,14 @@ internal partial class WorkspaceSetupService
             // Note: @microsoft/dynwinrt is added as a production dep AFTER
             // bindings succeed (JsBindingsWorkspaceService.RunAsync). Doing
             // it here would leave package.json mutated if codegen failed.
+        }
+
+        // Persist cppProjections: false when the JS-only choice diverges from
+        // the model default (true). Init's later save path round-trips this
+        // field through WinappConfigDocument.
+        if (options.SkipCppProjections && config != null)
+        {
+            config.CppProjections = false;
         }
 
         // .NET: Validate TargetFramework (interactive)

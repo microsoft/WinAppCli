@@ -12,8 +12,8 @@ namespace WinApp.Cli.Services;
 
 // Shared service for setting up winapp workspaces. Split into partials:
 // - this file: orchestration (SetupWorkspaceAsync, init/restore flow, JS bindings step glue)
-// - WorkspaceSetupService.Options.cs: option DTOs (WorkspaceSetupOptions, AddJsBindingsOptions, GenerateJsBindingsOptions)
-// - WorkspaceSetupService.Prompts.cs: Spectre.Console prompts (SDK choice, manifest, dev mode, .csproj picker)
+// - WorkspaceSetupService.Options.cs: option DTO (WorkspaceSetupOptions)
+// - WorkspaceSetupService.Prompts.cs: Spectre.Console prompts (SDK choice, manifest, dev mode, .csproj picker, bindings kind)
 // - WorkspaceSetupService.Msix.cs: Windows App SDK runtime MSIX install / NuGet-cache discovery
 internal partial class WorkspaceSetupService(
     IConfigService configService,
@@ -40,17 +40,6 @@ internal partial class WorkspaceSetupService(
     {
         configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
 
-        // --js-bindings needs installed SDK packages; reject --setup-sdks none.
-        if (options.AddJsBindings && options.SdkInstallMode == SdkInstallMode.None)
-        {
-            logger.LogError(
-                "{UISymbol} --js-bindings requires SDK packages to be installed (it walks the NuGet cache for .winmd files), but --setup-sdks none was specified. " +
-                "Either drop --js-bindings here and add it later via 'npx winapp node jsbindings add' after restoring SDKs, " +
-                "or change --setup-sdks to a value other than none (stable / preview / experimental).",
-                UiSymbols.Error);
-            return 1;
-        }
-
         // Detect .NET project (.csproj) in the base directory
         FileInfo? csprojFile = null;
         bool isDotNetProject = false;
@@ -73,17 +62,6 @@ internal partial class WorkspaceSetupService(
             return 1;
         }
 
-        // --js-bindings is unsupported on .NET projects (no .winapp/ workspace).
-        if (isDotNetProject && options.AddJsBindings)
-        {
-            logger.LogError(
-                "{UISymbol} --js-bindings is not supported for .NET (.csproj) projects yet. " +
-                "JS/TS bindings target native / Node-hosted apps. Run 'winapp init' (without --js-bindings) " +
-                "on the .NET project, and use 'winapp init --js-bindings' from your Node / Electron host instead.",
-                UiSymbols.Error);
-            return 1;
-        }
-
         // Configuration / prompting phase
         bool hadExistingConfig;
         WinappConfig? config;
@@ -96,36 +74,6 @@ internal partial class WorkspaceSetupService(
         if (initializationResult != 0)
         {
             return initializationResult;
-        }
-
-        // M2 (round-6): restore on a jsbindings-only workspace (no packages:,
-        // just jsBindings:) short-circuits the SDK install pipeline and
-        // forwards to the codegen-regen path. Without this guard the flow
-        // falls through to InstallPackagesAsync with the default SDK_PACKAGES
-        // set and then runs cppwinrt — neither of which the user asked for.
-        if (options.RequireExistingConfig
-            && !isDotNetProject
-            && config is not null
-            && config.Packages.Count == 0
-            && config.JsBindings is not null)
-        {
-            logger.LogInformation(
-                "{UISymbol} winapp.yaml has no packages: but declares jsBindings: — regenerating JS bindings.",
-                UiSymbols.Note);
-            var generateExit = await jsBindingsWorkspaceService.GenerateAsync(
-                new GenerateJsBindingsOptions
-                {
-                    BaseDirectory = options.BaseDirectory,
-                    ConfigDir = options.ConfigDir,
-                },
-                cancellationToken);
-            if (generateExit == 0)
-            {
-                // Parity with init --js-bindings: keep @microsoft/dynwinrt
-                // wired into package.json after a fresh clone restore.
-                jsBindingsWorkspaceService.EnsureRuntimeDependencyAndPrintHint(options.BaseDirectory);
-            }
-            return generateExit;
         }
 
         // Handle config-only mode: just create/validate config file and exit (only for non-.NET path)
@@ -145,12 +93,22 @@ internal partial class WorkspaceSetupService(
                     }
                 }
 
-                // Persist re-init's freshly-injected jsBindings even under
-                // --config-only (otherwise the save would be skipped).
+                // Persist the prompt's freshly-injected jsBindings (and any
+                // cppProjections override) even under --config-only.
                 if (options.AddJsBindings && config.JsBindings is not null)
                 {
-                    // Splice-save preserves user comments + unknown fields.
-                    configService.SaveJsBindingsOnly(config);
+                    if (options.SkipCppProjections)
+                    {
+                        // SaveJsBindingsOnly only splices jsBindings; full-save
+                        // is the simplest way to round-trip cppProjections too
+                        // (loses comments — acceptable trade-off for a niche
+                        // --config-only + JS-only path).
+                        configService.Save(config);
+                    }
+                    else
+                    {
+                        configService.SaveJsBindingsOnly(config);
+                    }
                     logger.LogDebug("{UISymbol} Persisted updated configuration with jsBindings → {ConfigPath}", UiSymbols.Save, configService.ConfigPath);
                 }
             }
@@ -178,8 +136,9 @@ internal partial class WorkspaceSetupService(
 
                 var finalConfig = new WinappConfig
                 {
-                    // Preserve JsBindings across re-init.
+                    // Preserve JsBindings + CppProjections across re-init.
                     JsBindings = config?.JsBindings,
+                    CppProjections = config?.CppProjections ?? true,
                 };
                 foreach (var kvp in defaultVersions)
                 {
@@ -567,65 +526,76 @@ internal partial class WorkspaceSetupService(
                             return (1, "Error installing packages.");
                         }
 
-                        // Step 5: Run cppwinrt and set up projections
-                        var cppWinrtExe = cppWinrtService.FindCppWinrtExe(nugetCacheDir, usedVersions);
-                        if (cppWinrtExe is null)
+                        // Step 5: Run cppwinrt and set up projections.
+                        // Gated by config.CppProjections (default true): JS-only workspaces
+                        // (config.CppProjections == false) skip cppwinrt + headers/libs/runtimes
+                        // but still need .winmd discovery + lockfile for the JS bindings step.
+                        var generateCppProjections = config?.CppProjections != false;
+                        FileInfo? cppWinrtExe = null;
+                        if (generateCppProjections)
                         {
-                            return (1, "cppwinrt.exe not found in installed packages.");
-                        }
-
-                        taskContext.AddDebugMessage($"{UiSymbols.Tools} Using cppwinrt tool → {cppWinrtExe}");
-
-                        // Copy headers, libs, runtimes
-                        taskContext.UpdateSubStatus("Copying headers");
-                        packageLayoutService.CopyIncludesFromPackages(nugetCacheDir, includeOut, usedVersions);
-                        taskContext.AddDebugMessage($"{UiSymbols.Check} Headers ready → {includeOut}");
-
-                        taskContext.UpdateSubStatus("Copying import libraries");
-                        packageLayoutService.CopyLibsAllArch(nugetCacheDir, libRoot, usedVersions);
-                        var libArchs = libRoot.Exists ? string.Join(", ", libRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
-                        taskContext.AddDebugMessage($"{UiSymbols.Books} Import libs ready for archs: {libArchs}");
-
-                        taskContext.UpdateSubStatus("Copying runtime binaries");
-                        packageLayoutService.CopyRuntimesAllArch(nugetCacheDir, binRoot, usedVersions);
-                        var binArchs = binRoot.Exists ? string.Join(", ", binRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
-                        taskContext.AddDebugMessage($"{UiSymbols.Check} Runtime binaries ready for archs: {binArchs}");
-
-                        // Copy Windows App SDK license
-                        try
-                        {
-                            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var wasdkVersion))
+                            cppWinrtExe = cppWinrtService.FindCppWinrtExe(nugetCacheDir, usedVersions);
+                            if (cppWinrtExe is null)
                             {
-                                var pkgDir = nugetService.GetNuGetPackageDir(BuildToolsService.WINAPP_SDK_PACKAGE, wasdkVersion);
-                                var licenseSrc = Path.Combine(pkgDir.FullName, "license.txt");
-                                if (File.Exists(licenseSrc))
+                                return (1, "cppwinrt.exe not found in installed packages.");
+                            }
+
+                            taskContext.AddDebugMessage($"{UiSymbols.Tools} Using cppwinrt tool → {cppWinrtExe}");
+
+                            // Copy headers, libs, runtimes
+                            taskContext.UpdateSubStatus("Copying headers");
+                            packageLayoutService.CopyIncludesFromPackages(nugetCacheDir, includeOut, usedVersions);
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} Headers ready → {includeOut}");
+
+                            taskContext.UpdateSubStatus("Copying import libraries");
+                            packageLayoutService.CopyLibsAllArch(nugetCacheDir, libRoot, usedVersions);
+                            var libArchs = libRoot.Exists ? string.Join(", ", libRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
+                            taskContext.AddDebugMessage($"{UiSymbols.Books} Import libs ready for archs: {libArchs}");
+
+                            taskContext.UpdateSubStatus("Copying runtime binaries");
+                            packageLayoutService.CopyRuntimesAllArch(nugetCacheDir, binRoot, usedVersions);
+                            var binArchs = binRoot.Exists ? string.Join(", ", binRoot.EnumerateDirectories().Select(d => d.Name)) : "(none)";
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} Runtime binaries ready for archs: {binArchs}");
+
+                            // Copy Windows App SDK license
+                            try
+                            {
+                                if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var wasdkVersion))
                                 {
-                                    var shareDir = Path.Combine(localWinappDir.FullName, "share", BuildToolsService.WINAPP_SDK_PACKAGE);
-                                    Directory.CreateDirectory(shareDir);
-                                    var licenseDst = Path.Combine(shareDir, "copyright");
-                                    File.Copy(licenseSrc, licenseDst, overwrite: true);
-                                    taskContext.AddDebugMessage($"{UiSymbols.Check} License copied → {licenseDst}");
+                                    var pkgDir = nugetService.GetNuGetPackageDir(BuildToolsService.WINAPP_SDK_PACKAGE, wasdkVersion);
+                                    var licenseSrc = Path.Combine(pkgDir.FullName, "license.txt");
+                                    if (File.Exists(licenseSrc))
+                                    {
+                                        var shareDir = Path.Combine(localWinappDir.FullName, "share", BuildToolsService.WINAPP_SDK_PACKAGE);
+                                        Directory.CreateDirectory(shareDir);
+                                        var licenseDst = Path.Combine(shareDir, "copyright");
+                                        File.Copy(licenseSrc, licenseDst, overwrite: true);
+                                        taskContext.AddDebugMessage($"{UiSymbols.Check} License copied → {licenseDst}");
+                                    }
                                 }
                             }
+                            catch (Exception ex)
+                            {
+                                taskContext.AddDebugMessage($"{UiSymbols.Note} Failed to copy license: {ex.Message}");
+                            }
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            taskContext.AddDebugMessage($"{UiSymbols.Note} Failed to copy license: {ex.Message}");
+                            taskContext.AddDebugMessage($"{UiSymbols.Skip} cppProjections: false → skipping cppwinrt + headers/libs/runtimes (JS-only workspace).");
                         }
 
-                        // Collect winmd inputs and run cppwinrt
+                        // Collect winmd inputs (unconditional: JS bindings need the lockfile too).
                         taskContext.UpdateSubStatus("Searching for .winmd metadata");
                         var winmds = packageLayoutService.FindWinmds(nugetCacheDir, usedVersions).ToList();
                         taskContext.AddDebugMessage($"{UiSymbols.Search} Found {winmds.Count} .winmd");
                         if (winmds.Count == 0)
                         {
-                            return (2, "No .winmd files found for C++/WinRT projection.");
+                            return (2, "No .winmd files found in installed SDK packages.");
                         }
 
-                        // Persist the lockfile so subsequent `node jsbindings add`
-                        // can skip re-globbing / re-fetching nuspecs. Hash source
-                        // must match what lands in winapp.yaml (SDK_PACKAGES-filtered
-                        // for fresh init, config.Packages for restore).
+                        // Persist the lockfile so the JS bindings step can skip re-globbing
+                        // / re-fetching nuspecs. Hash source must match what lands in
+                        // winapp.yaml (SDK_PACKAGES-filtered for fresh init, config.Packages for restore).
                         var yamlHash = (options.RequireExistingConfig && config?.Packages.Count > 0)
                             ? YamlPackagesHasher.Compute(config.Packages)
                             : YamlPackagesHasher.ComputeFromVersions(usedVersions
@@ -633,10 +603,13 @@ internal partial class WorkspaceSetupService(
                         await winmdsLockfileService.WriteAsync(
                             localWinappDir, usedVersions, winmds, nugetCacheDir, yamlHash, cancellationToken);
 
-                        // Run cppwinrt
-                        taskContext.UpdateSubStatus("Generating C++/WinRT projections");
-                        await cppWinrtService.RunWithRspAsync(cppWinrtExe, winmds, includeOut, localWinappDir, taskContext, cancellationToken: cancellationToken);
-                        taskContext.AddDebugMessage($"{UiSymbols.Check} C++/WinRT headers generated → {includeOut}");
+                        if (generateCppProjections)
+                        {
+                            // Run cppwinrt
+                            taskContext.UpdateSubStatus("Generating C++/WinRT projections");
+                            await cppWinrtService.RunWithRspAsync(cppWinrtExe!, winmds, includeOut, localWinappDir, taskContext, cancellationToken: cancellationToken);
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} C++/WinRT headers generated → {includeOut}");
+                        }
 
                         partialResult = await taskContext.AddSubTaskAsync("Setting up tools", async (taskContext, cancellationToken) =>
                         {
@@ -671,7 +644,9 @@ internal partial class WorkspaceSetupService(
                             return partialResult;
                         }
 
-                        return (0, "SDK and Windows App SDK packages downloaded and C++ headers generated in [underline].winapp[/]");
+                        return (0, generateCppProjections
+                            ? "SDK and Windows App SDK packages downloaded and C++ headers generated in [underline].winapp[/]"
+                            : "SDK and Windows App SDK packages downloaded in [underline].winapp[/] (cppProjections: false → C++ headers skipped)");
                     }, cancellationToken);
 
                     if (partialResult.Item1 != 0)
@@ -766,8 +741,9 @@ internal partial class WorkspaceSetupService(
                         // Setup: Save winapp.yaml with used versions
                         var finalConfig = new WinappConfig
                         {
-                            // Preserve JsBindings so the persisted yaml round-trips.
+                            // Preserve JsBindings + CppProjections so the persisted yaml round-trips.
                             JsBindings = config?.JsBindings,
+                            CppProjections = config?.CppProjections ?? true,
                         };
                         // only from SDK_PACKAGES
                         var versionsToSave = usedVersions

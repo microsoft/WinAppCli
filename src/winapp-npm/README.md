@@ -40,10 +40,8 @@ npx winapp --help
 **Setup Commands:**
 
 - [`init`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#init) - Initialize project with Windows SDK and App SDK
-- [`restore`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#restore) - Restore packages and dependencies
+- [`restore`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#restore) - Restore packages and dependencies (also runs the bindings step when `jsBindings:` is declared in `winapp.yaml`)
 - [`update`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#update) - Update packages and dependencies to latest versions
-- [`node jsbindings add`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-jsbindings-add) - Add typed JS/TypeScript WinRT bindings to an existing workspace
-- [`node jsbindings generate`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-jsbindings-generate) - Re-run codegen against an existing `jsBindings:` block (no yaml mutation)
 
 **App Identity & Debugging:**
 

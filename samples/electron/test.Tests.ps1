@@ -110,15 +110,16 @@ Describe "Electron Sample" {
             } finally { Pop-Location }
         }
 
-        It "Should initialize winapp workspace with JS bindings (AI preset)" -Skip:$script:skip {
-            # `init --js-bindings-ai` is the fresh-project shortcut: it
-            # bootstraps the workspace AND runs codegen in one step, so we
-            # use it here in place of two separate calls (init + add). The
-            # AI preset is the narrowest (~7 winmds → ~65 .js, <5s on hot
-            # cache) and is the only ships-today preset.
+        It "Should initialize winapp workspace with JS bindings and C++ projections" -Skip:$script:skip {
+            # `init --use-defaults` invoked via the npm shim auto-picks "Both"
+            # at the bindings prompt (C++ projections + JS/TS bindings) and
+            # runs codegen in one step. No yaml flag is needed; the prompt
+            # only fires when WINAPP_CLI_CALLER=nodejs-package (set by the
+            # `npx winapp` shim, which Invoke-WinappCommand resolves to here
+            # after Install-WinappNpmPackage).
             Push-Location $script:appDir
             try {
-                Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable --js-bindings-ai"
+                Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
             } finally { Pop-Location }
         }
 
@@ -129,20 +130,20 @@ Describe "Electron Sample" {
         }
 
         # ── JS bindings smoke (v2.x) ─────────────────────────────────────
-        # Verify the init --js-bindings-ai path produced the expected
-        # bindings output, lockfile, and runtime dep — and that the
-        # read-only `generate` re-run path still works against the
-        # already-mutated workspace.
+        # Verify the npm-caller init path produced the expected bindings
+        # output, lockfile, and runtime dep — and that re-running `restore`
+        # is idempotent (no winapp.yaml mutation).
 
         It "Should have generated bindings/winrt/ with the managed marker" -Skip:$script:skip {
             $bindingsDir = Join-Path $script:appDir "bindings\winrt"
             $bindingsDir | Should -Exist
             # Marker proves the staging-then-swap completed.
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist
-            # AI preset generates around 65 .js files; assert at least a
-            # handful to catch the "0 files generated" regression.
+            # Full WinAppSDK generates hundreds of .js files; assert a
+            # generous lower bound to catch the "0 files generated" regression
+            # without being brittle to upstream SDK changes.
             $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -ErrorAction SilentlyContinue).Count
-            $jsCount | Should -BeGreaterThan 10 -Because "AI preset should generate 60+ JS files"
+            $jsCount | Should -BeGreaterThan 50 -Because "Default jsBindings (full WinAppSDK) should generate many JS files"
         }
 
         It "Should inject @microsoft/dynwinrt as a runtime dep in package.json" -Skip:$script:skip {
@@ -151,11 +152,12 @@ Describe "Electron Sample" {
             $pkgPath = Join-Path $script:appDir "package.json"
             $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
             $pkg.dependencies.'@microsoft/dynwinrt' | Should -Not -BeNullOrEmpty `
-                -Because "init --js-bindings-ai must auto-inject the runtime dep"
+                -Because "init via npm shim with JS bindings must auto-inject the runtime dep"
         }
 
         It "Should write a winmds.lock.json under .winapp/" -Skip:$script:skip {
-            # Seeded by restore (during init); enables the add fast path.
+            # Seeded by restore (during init); diagnostic record of the
+            # winmd → package mapping at codegen time.
             $lockfilePath = Join-Path $script:appDir ".winapp\winmds.lock.json"
             $lockfilePath | Should -Exist
             $lockfile = Get-Content $lockfilePath -Raw | ConvertFrom-Json
@@ -163,22 +165,23 @@ Describe "Electron Sample" {
             $lockfile.packages | Should -Not -BeNullOrEmpty -Because "Lockfile should record discovered packages"
         }
 
-        It "Should re-run codegen via 'node jsbindings generate' without mutating winapp.yaml" -Skip:$script:skip {
-            # `generate` is the read-only regen path — it must not modify
-            # winapp.yaml. Capture the yaml hash before/after to prove it.
+        It "Should re-run codegen via 'winapp restore' without mutating winapp.yaml" -Skip:$script:skip {
+            # `restore` is the read-only re-run path against pinned yaml —
+            # it must not modify winapp.yaml. Capture the yaml hash
+            # before/after to prove it.
             $yamlPath = Join-Path $script:appDir "winapp.yaml"
             $bindingsDir = Join-Path $script:appDir "bindings\winrt"
             $hashBefore = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
 
             Push-Location $script:appDir
             try {
-                Invoke-WinappCommand -Arguments "node jsbindings generate"
+                Invoke-WinappCommand -Arguments "restore"
             } finally { Pop-Location }
 
             $hashAfter = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
-            $hashAfter | Should -Be $hashBefore -Because "generate must not mutate winapp.yaml"
+            $hashAfter | Should -Be $hashBefore -Because "restore must not mutate winapp.yaml"
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist `
-                -Because "generate should leave the managed marker in place after regen"
+                -Because "restore should leave the managed marker in place after regen"
         }
 
         It "Should create a C++ native addon" -Skip:$script:skip {

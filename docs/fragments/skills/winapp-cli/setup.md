@@ -49,19 +49,22 @@ winapp init --use-defaults --setup-sdks preview
 
 ### Add JS/TS bindings for Node / Electron apps (npm only)
 
-When invoked via the `@microsoft/winappcli` npm package, you can generate
-typed JS/TS bindings for WinRT APIs alongside the standard init:
+When invoked via the `@microsoft/winappcli` npm package (i.e. `npx winapp init`
+inside a Node / Electron project), `init` adds an interactive **bindings prompt**
+that asks whether to generate **C++ projections**, **JS/TS bindings**, or **Both**.
+Picking JS or Both wires a default `jsBindings:` block into `winapp.yaml` (covering
+the full Windows App SDK) and runs codegen as part of init:
 
 ```powershell
-# Initialize with the AI slice of the SDK pre-wired.
-npx winapp init --use-defaults --js-bindings-ai
+# Interactive — prompted to pick C++ / JS / Both.
+npx winapp init
 
-# Or layer bindings onto an already-initialized workspace.
-npx winapp node jsbindings add --ai
+# Non-interactive — auto-picks "Both" (C++ projections + JS/TS bindings).
+npx winapp init --use-defaults
 
 # After editing winapp.yaml jsBindings: by hand (or pulling a teammate's
 # winapp.yaml), regenerate bindings without re-prompting:
-npx winapp node jsbindings generate
+npx winapp restore
 ```
 
 Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is

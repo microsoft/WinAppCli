@@ -54,19 +54,22 @@ winapp init --use-defaults --setup-sdks preview
 
 ### Add JS/TS bindings for Node / Electron apps (npm only)
 
-When invoked via the `@microsoft/winappcli` npm package, you can generate
-typed JS/TS bindings for WinRT APIs alongside the standard init:
+When invoked via the `@microsoft/winappcli` npm package (i.e. `npx winapp init`
+inside a Node / Electron project), `init` adds an interactive **bindings prompt**
+that asks whether to generate **C++ projections**, **JS/TS bindings**, or **Both**.
+Picking JS or Both wires a default `jsBindings:` block into `winapp.yaml` (covering
+the full Windows App SDK) and runs codegen as part of init:
 
 ```powershell
-# Initialize with the AI slice of the SDK pre-wired.
-npx winapp init --use-defaults --js-bindings-ai
+# Interactive — prompted to pick C++ / JS / Both.
+npx winapp init
 
-# Or layer bindings onto an already-initialized workspace.
-npx winapp node jsbindings add --ai
+# Non-interactive — auto-picks "Both" (C++ projections + JS/TS bindings).
+npx winapp init --use-defaults
 
 # After editing winapp.yaml jsBindings: by hand (or pulling a teammate's
 # winapp.yaml), regenerate bindings without re-prompting:
-npx winapp node jsbindings generate
+npx winapp restore
 ```
 
 Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is
@@ -178,7 +181,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. When invoked via the @microsoft/winappcli npm package (npx winapp init), additionally asks whether to generate C++ projections, JS/TS bindings, or both. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -193,10 +196,6 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 | `--config-dir` | Directory to read/store configuration (default: current directory) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
-| `--js-bindings` | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the @microsoft/winappcli npm package (npx winapp init --js-bindings). | (none) |
-| `--js-bindings-ai` | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. | (none) |
-| `--js-bindings-lang` | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. | (none) |
-| `--js-bindings-output` | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
 | `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
@@ -254,42 +253,6 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |
 | `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
 | `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |
-
-### `winapp node jsbindings add`
-
-Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings add).
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<base-directory>` | No | Base/root directory for the winapp workspace (default: current directory) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--ai` | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. | (none) |
-| `--config-dir` | Directory containing winapp.yaml (default: base-directory) | (none) |
-| `--force` | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). | (none) |
-| `--output` | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. | (none) |
-| `--use-defaults` | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. | (none) |
-
-### `winapp node jsbindings generate`
-
-Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the @microsoft/winappcli npm package (npx winapp node jsbindings generate).
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<base-directory>` | No | Base/root directory for the winapp workspace (default: current directory) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--config-dir` | Directory containing winapp.yaml (default: base-directory) | (none) |
 
 ### `winapp unregister`
 

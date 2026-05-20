@@ -6,7 +6,8 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-// Single owner of the JS-bindings pipeline; used by both init/restore and add.
+// Single owner of the JS-bindings pipeline; invoked from init/restore Step 5.5
+// when winapp.yaml declares a jsBindings: block.
 internal interface IJsBindingsWorkspaceService
 {
     // discover → partition → resolve user winmds → codegen → ensure runtime dep.
@@ -17,18 +18,9 @@ internal interface IJsBindingsWorkspaceService
 
     // Inject @microsoft/dynwinrt into package.json as a production dep, then
     // print a package-manager-aware install hint. Called early in init when
-    // --js-bindings is set so users can `npm install` while codegen runs.
+    // the npm-caller prompt opted into JS bindings so users can `npm install`
+    // while codegen runs.
     void EnsureRuntimeDependencyAndPrintHint(DirectoryInfo workspaceDirectory);
-
-    // Top-level `node jsbindings add` flow: load winapp.yaml, prompt about
-    // existing block, splice-save, invoke RunAsync, cleanup old output dir.
-    // Returns the exit code suitable for the System.CommandLine handler.
-    Task<int> AddAsync(AddJsBindingsOptions options, CancellationToken cancellationToken = default);
-
-    // Top-level `node jsbindings generate` flow: read existing jsBindings:
-    // block from winapp.yaml without mutation, then run codegen. Errors if
-    // no jsBindings: block exists.
-    Task<int> GenerateAsync(GenerateJsBindingsOptions options, CancellationToken cancellationToken = default);
 }
 
 // Inputs to IJsBindingsWorkspaceService.RunAsync.
@@ -40,8 +32,9 @@ internal sealed class JsBindingsOrchestrationContext
     public required DirectoryInfo LocalWinappDir { get; init; }
     public required DirectoryInfo NugetCacheDir { get; init; }
 
-    // (name → version) incl. transitive deps. null on the add path — derived
-    // from lockfile / transitive expansion.
+    // (name → version) incl. transitive deps. Populated by the init / restore
+    // flow before invoking RunAsync. Null forces the lockfile fast-path or
+    // live transitive expansion (used by tests and future external callers).
     public IReadOnlyDictionary<string, string>? UsedVersions { get; init; }
 
     public bool EnsureRuntimeDependency { get; init; } = true;

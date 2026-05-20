@@ -42,7 +42,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P`). Type **Wi
 | **WinApp: Run SDK Tool** | Run Windows SDK tools (`makeappx`, `signtool`, `mt`, `makepri`) with custom arguments. |
 | **WinApp: Get WinApp Path** | Show paths to installed SDK components. |
 
-> **Note:** This extension exposes the native winapp CLI commands listed above. Node.js–specific subcommands provided by the [`@microsoft/winappcli` npm package](https://www.npmjs.com/package/@microsoft/winappcli) (`winapp node create-addon`, `winapp node jsbindings …`, etc.) are intentionally not surfaced in the Command Palette — install and use the npm package directly for those workflows.
+> **Note:** This extension exposes the native winapp CLI commands listed above. Node.js–specific subcommands provided by the [`@microsoft/winappcli` npm package](https://www.npmjs.com/package/@microsoft/winappcli) (`winapp node create-addon`, etc.) are intentionally not surfaced in the Command Palette — install and use the npm package directly for those workflows.
 
 ### Integrated Debugging
 

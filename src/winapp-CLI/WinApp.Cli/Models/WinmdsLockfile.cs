@@ -5,7 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace WinApp.Cli.Models;
 
-// Lockfile written by `winapp restore`, consumed by `node jsbindings add`. Optional.
+// Lockfile written by `winapp restore`, consumed by the JS bindings step on
+// subsequent `winapp restore` runs to keep codegen stable. Optional.
 internal sealed class WinmdsLockfile
 {
     // Current schema version. Bump on breaking shape changes.
@@ -20,8 +21,8 @@ internal sealed class WinmdsLockfile
     // NuGet global packages dir at write time. Diagnostic-only.
     public string? NugetCacheDir { get; set; }
 
-    // SHA-256 of the yaml packages: block. node jsbindings add
-    // treats the lockfile as stale on mismatch.
+    // SHA-256 of the yaml packages: block. The JS bindings step treats the
+    // lockfile as stale on mismatch and re-discovers winmds from the cache.
     public string? YamlPackagesHash { get; set; }
 
     // One entry per resolved package (direct + transitive).

@@ -18,42 +18,12 @@ internal class WorkspaceSetupOptions
     public bool ForceLatestBuildTools { get; set; }
     public bool ConfigOnly { get; set; }
 
-    // Enable JS/TS bindings generation in Step 5.5 of setup.
+    // Enable JS/TS bindings generation in Step 5.5 of setup. Populated by the
+    // npm-caller prompt in WorkspaceSetupService; no CLI flag exposes this.
     public bool AddJsBindings { get; set; }
 
-    // CLI override for jsBindings.output.
-    public string? JsBindingsOutputOverride { get; set; }
-
-    // CLI override for jsBindings.lang.
-    public string? JsBindingsLangOverride { get; set; }
-
-    // Preset names from JsBindingsPresets — unioned into jsBindings.packages.
-    public IReadOnlyList<string>? JsBindingsPresets { get; set; }
-}
-
-// Params for AddJsBindingsAsync.
-internal class AddJsBindingsOptions
-{
-    public required DirectoryInfo BaseDirectory { get; set; }
-    public required DirectoryInfo ConfigDir { get; set; }
-
-    // CLI override for jsBindings.output.
-    public string? Output { get; set; }
-
-    // Preset names from JsBindingsPresets.
-    public IReadOnlyList<string>? Presets { get; set; }
-
-    // Patch an existing jsBindings: block without prompting.
-    public bool Force { get; set; }
-
-    // Preserve an existing jsBindings: block and exit 0 without prompting.
-    // Mutually exclusive with Force.
-    public bool UseDefaults { get; set; }
-}
-
-// Params for the read-only `node jsbindings generate` flow.
-internal class GenerateJsBindingsOptions
-{
-    public required DirectoryInfo BaseDirectory { get; set; }
-    public required DirectoryInfo ConfigDir { get; set; }
+    // Skip cppwinrt headers/libs/runtimes/projection generation. Populated by the
+    // npm-caller prompt when the user picks "JS only" so pure-Node projects don't
+    // pay the ~130MB / ~20s C++ projection cost.
+    public bool SkipCppProjections { get; set; }
 }

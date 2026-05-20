@@ -363,14 +363,9 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
-  'node jsbindings add': 'nodeJsbindingsAdd', // canonical camelCase
-  'node jsbindings generate': 'nodeJsbindingsGenerate',
 };
 
-const IFACE_NAME_OVERRIDES = {
-  'node jsbindings add': 'NodeJsbindingsAddOptions',
-  'node jsbindings generate': 'NodeJsbindingsGenerateOptions',
-};
+const IFACE_NAME_OVERRIDES = {};
 
 function getFunctionName(cmdPath) {
   const key = cmdPath.join(' ');

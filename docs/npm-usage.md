@@ -1,4 +1,6 @@
-<!-- mslearn: true -->
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -187,7 +189,7 @@ function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
 
 ### `init()`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. When invoked via the \@microsoft/winappcli npm package (npx winapp init), additionally asks whether to generate C++ projections, JS/TS bindings, or both. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 ```typescript
 function init(options?: InitOptions): Promise<WinappResult>
@@ -201,10 +203,6 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
-| `jsBindings` | `boolean \| undefined` | No | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp init --js-bindings). |
-| `jsBindingsAi` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. |
-| `jsBindingsLang` | `string \| undefined` | No | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. |
-| `jsBindingsOutput` | `string \| undefined` | No | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
@@ -274,48 +272,6 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `nodeJsbindingsAdd()`
-
-Add a jsBindings: block to winapp.yaml and run codegen. Requires winapp.yaml (run 'winapp init' first). Never modifies the packages: section or installs SDK packages — codegen runs against the workspace's already-restored packages. Refuses to clobber an existing jsBindings: block unless --force is passed. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings add).
-
-```typescript
-function nodeJsbindingsAdd(options?: NodeJsbindingsAddOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
-| `ai` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. |
-| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
-| `force` | `boolean \| undefined` | No | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). |
-| `output` | `string \| undefined` | No | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
-### `nodeJsbindingsGenerate()`
-
-Re-run dynwinrt-codegen against the existing jsBindings: block in winapp.yaml. Does NOT modify the yaml — for that, use 'node jsbindings add'. Errors if no jsBindings: block is declared. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp node jsbindings generate).
-
-```typescript
-function nodeJsbindingsGenerate(options?: NodeJsbindingsGenerateOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
-| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1212,10 +1168,6 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
-| `jsBindings` | `boolean \| undefined` | No | Generate JS/TS bindings via dynwinrt-codegen on top of the standard init flow. Adds a 'jsBindings:' block to winapp.yaml so the binding generator runs as part of init/restore. Only available when invoked via the \@microsoft/winappcli npm package (npx winapp init --js-bindings). |
-| `jsBindingsAi` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK. Implies --js-bindings (no need to pass it separately). For a custom slice that no preset covers, edit winapp.yaml and write your own packages: list under jsBindings. Known presets: ai. |
-| `jsBindingsLang` | `string \| undefined` | No | Override the JS bindings language. Currently only 'js' is supported (which emits both .js and .d.ts). Reserved for forward-compat; see --js-bindings-output for activation rules. |
-| `jsBindingsOutput` | `string \| undefined` | No | Override the output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Only takes effect together with --js-bindings on a fresh init; ignored on re-init when winapp.yaml already declares jsBindings:. |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
@@ -1258,30 +1210,6 @@ type ManifestTemplates = "packaged" | "sparse"
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `NodeJsbindingsAddOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
-| `ai` | `boolean \| undefined` | No | Generate bindings for the 'ai' slice of the SDK only. For a custom slice that no preset covers, edit winapp.yaml's jsBindings.packages after adding. Known presets: ai. |
-| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
-| `force` | `boolean \| undefined` | No | Patch an existing jsBindings: block without prompting. Overwrites only output and (when a preset like --ai is supplied) the packages list; all other fields are preserved. Without --force the command refuses to clobber a pre-existing block (interactive: prompts; non-interactive: errors). |
-| `output` | `string \| undefined` | No | Output directory for generated JS/TS bindings (relative to workspace, default 'bindings/winrt'). Persisted to winapp.yaml's jsBindings.output field. |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt. When jsBindings: already exists in winapp.yaml, preserve it and exit 0 (idempotent). Use --force instead if you want the existing block patched non-interactively. |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `NodeJsbindingsGenerateOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace (default: current directory) |
-| `configDir` | `string \| undefined` | No | Directory containing winapp.yaml (default: base-directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

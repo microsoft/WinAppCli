@@ -25,25 +25,24 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- `node jsbindings add` — generates typed JS/TypeScript WinRT wrappers via dynwinrt (no native build required)
+- An interactive bindings prompt during `npx winapp init` that offers **C++ projections**, **JS/TS bindings** (typed JS/TypeScript WinRT wrappers via dynwinrt, no native build required), or **Both**
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults --js-bindings-ai   # init + generate typed AI bindings in bindings/winrt/
-# (or, if you already initialized the workspace:)
-npx winapp node jsbindings add --ai               # layer JS bindings onto an existing workspace
+npx winapp init --use-defaults                    # init + generate full Windows App SDK JS bindings AND C++ projections (default: Both)
+# (interactive: omit --use-defaults to pick C++ / JS / Both at the prompt)
 npx winapp node create-addon --template cs        # create a C# native addon (for what dynwinrt can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
 
-The `--js-bindings*` flags (and the `node jsbindings add` sub-command) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The winget / standalone install will reject these surfaces with a clear error.
+JS/TS bindings (the `jsBindings:` block in `winapp.yaml`) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The bindings prompt does not appear when running the standalone winget CLI.
 
 #### Choosing between jsBindings and a native addon
 
 The decision is almost entirely about the **shape of the API**, not preference.
 
-**Default: if the API is WinRT (ships in a `.winmd`), use `node jsbindings add`.** That covers nearly everything an Electron app actually calls on Windows — `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, Storage, AI inference like `TextRecognizer` / `LanguageModel`), most of `Windows.*`, and all of `Microsoft.WindowsAppSDK.AI`. dynwinrt's [own scope statement](https://github.com/microsoft/dynwinrt#scope) sums it up as "non-UI WinRT APIs ... headless services from the Windows SDK and WinAppSDK".
+**Default: if the API is WinRT (ships in a `.winmd`), pick JS bindings at the `npx winapp init` prompt.** That covers nearly everything an Electron app actually calls on Windows — `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, Storage, AI inference like `TextRecognizer` / `LanguageModel`), most of `Windows.*`, and all of `Microsoft.WindowsAppSDK.AI`. dynwinrt's [own scope statement](https://github.com/microsoft/dynwinrt#scope) sums it up as "non-UI WinRT APIs ... headless services from the Windows SDK and WinAppSDK".
 
 **Fall back to `node create-addon` when one of these is true:**
 
@@ -56,7 +55,7 @@ The decision is almost entirely about the **shape of the API**, not preference.
 It's normal to mix both in one app: jsBindings for the non-UI WinRT surface, a small C# or C++ addon for the one or two Win32 / non-WinRT calls that don't fit.
 
 Additional Electron guides:
-- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `jsBindings:` yaml schema, presets, per-package classification, lockfile
+- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `jsBindings:` yaml schema, per-package classification, lockfile
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

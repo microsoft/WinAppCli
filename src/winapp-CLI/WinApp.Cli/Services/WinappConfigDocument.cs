@@ -177,6 +177,21 @@ internal sealed class WinappConfigDocument
                     currentName = null;
                     continue;
                 }
+                // Top-level scalar: cppProjections: <bool>. Default true; only
+                // written by `winapp init` when the npm caller picks "JS only".
+                if (TryReadScalar(t, "cppProjections:", out var cppProjValue))
+                {
+                    if (TryParseBool(cppProjValue, out var b))
+                    {
+                        cfg.CppProjections = b;
+                    }
+                    section = Section.None;
+                    currentName = null;
+                    jsList = JsListMode.None;
+                    currentExtra = null;
+                    inClassesList = false;
+                    continue;
+                }
                 // Accept `jsBindings:` followed by inline comment / trailing
                 // whitespace — matches SpliceJsBindingsBlock's detection so
                 // Load() and the splice can never disagree on whether the
@@ -406,6 +421,29 @@ internal sealed class WinappConfigDocument
         return false;
     }
 
+    // YAML-style boolean tolerance: true/false/yes/no/on/off (case-insensitive).
+    internal static bool TryParseBool(string value, out bool result)
+    {
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "true":
+            case "yes":
+            case "on":
+            case "1":
+                result = true;
+                return true;
+            case "false":
+            case "no":
+            case "off":
+            case "0":
+                result = false;
+                return true;
+            default:
+                result = false;
+                return false;
+        }
+    }
+
     // Trims surrounding whitespace, strips an unquoted trailing `# comment`,
     // then strips a single pair of matching surrounding quotes. Mirrors what
     // a YAML parser would do for plain / single- / double-quoted scalars
@@ -542,6 +580,14 @@ internal sealed class WinappConfigDocument
         {
             sb.AppendLine($"  - name: {QuoteScalar(p.Name)}");
             sb.AppendLine($"    version: {QuoteScalar(p.Version)}");
+        }
+
+        // Only emit cppProjections when it diverges from the default (true) so
+        // existing yamls stay clean and round-trip unchanged.
+        if (!cfg.CppProjections)
+        {
+            sb.AppendLine();
+            sb.AppendLine("cppProjections: false");
         }
 
         if (cfg.JsBindings is { } js)
