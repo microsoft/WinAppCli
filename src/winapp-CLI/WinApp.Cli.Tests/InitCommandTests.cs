@@ -202,11 +202,12 @@ public class InitCommandBindingsPromptTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_NpmCallerOnDotNetProject_RejectedWithActionableError()
+    public async Task InitCommand_NpmCallerOnDotNetProject_SilentlyFallsBackToCppOnly()
     {
-        // .NET projects can't host JS bindings; the npm-caller prompt path
-        // tries to enable them via --use-defaults → Both, so the .NET guard
-        // must surface a clear error rather than silently producing junk yaml.
+        // .NET projects can't host JS bindings; rather than asking a question
+        // with only one valid answer (and tripping the .NET guard when
+        // --use-defaults → Both), the prompt path silently downgrades to
+        // CppOnly so dotnet sample tests / CI succeed without intervention.
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
         var csprojPath = Path.Combine(_tempDirectory.FullName, "Sample.csproj");
         await File.WriteAllTextAsync(csprojPath,
@@ -218,11 +219,62 @@ public class InitCommandBindingsPromptTests : BaseCommandTests
             + "</Project>\n");
 
         var initCommand = GetRequiredService<InitCommand>();
-        var args = new[] { _tempDirectory.FullName, "--use-defaults" };
+        var args = new[] { _tempDirectory.FullName, "--use-defaults", "--config-only" };
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(0, exitCode,
+            ".NET project + npm caller + --use-defaults must succeed (silently downgraded to CppOnly).");
+        var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
+        Assert.IsFalse(
+            combined.Contains("JS/TS bindings are not supported on .NET", StringComparison.OrdinalIgnoreCase),
+            $".NET projects must not surface the JS-bindings rejection error — the prompt silently picks CppOnly. Combined output: {combined}");
+        // winapp.yaml may or may not be written depending on the SDK install
+        // mode chosen for .NET projects (which is typically None — .NET pulls
+        // SDK via NuGet). The key invariant is that, if one is written, it
+        // must NOT contain a jsBindings block.
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        if (File.Exists(configPath))
+        {
+            var configContent = await File.ReadAllTextAsync(configPath);
+            Assert.IsFalse(configContent.Contains("jsBindings:"),
+                ".NET project must not gain a jsBindings block — the prompt path silently picks CppOnly.");
+        }
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NpmCallerOnDotNetProjectWithHandEditedJsBindings_RejectedWithActionableError()
+    {
+        // Defense-in-depth: if a user manually adds a jsBindings: block to a
+        // .NET project's winapp.yaml, the .NET guard must still fire with an
+        // actionable message rather than letting codegen produce junk.
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", "nodejs-package");
+        var csprojPath = Path.Combine(_tempDirectory.FullName, "Sample.csproj");
+        await File.WriteAllTextAsync(csprojPath,
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+            + "  <PropertyGroup>\n"
+            + "    <OutputType>Exe</OutputType>\n"
+            + "    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>\n"
+            + "  </PropertyGroup>\n"
+            + "</Project>\n");
+        var existing = """
+            packages:
+              - name: Microsoft.WindowsAppSDK
+                version: 1.8.39
+              - name: Microsoft.Windows.SDK.BuildTools
+                version: 10.0.26100.5040
+            jsBindings:
+              output: bindings/winrt
+              lang: js
+            """;
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        await File.WriteAllTextAsync(configPath, existing);
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--use-defaults" };
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
         Assert.AreEqual(1, exitCode,
-            "JS bindings on a .NET project must exit 1 (codegen target is Node/native, not .NET).");
+            "Hand-edited jsBindings: on a .NET project must be rejected by the .NET guard.");
         var combined = ConsoleStdErr.ToString() + ConsoleStdOut.ToString() + TestAnsiConsole.Output;
         Assert.IsTrue(
             combined.Contains(".NET", StringComparison.OrdinalIgnoreCase)

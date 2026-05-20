@@ -112,20 +112,21 @@ internal partial class WorkspaceSetupService
         // and options.SkipCppProjections so the rest of the flow knows what
         // to generate. No-op when not running via the npm shim, or when an
         // existing yaml already declares jsBindings:.
-        var bindingsKind = await AskBindingsKindAsync(options, config, cancellationToken);
+        var bindingsKind = await AskBindingsKindAsync(options, config, isDotNetProject, cancellationToken);
         options.AddJsBindings = bindingsKind is BindingsKind.JsOnly or BindingsKind.Both;
         options.SkipCppProjections = bindingsKind == BindingsKind.JsOnly;
 
         // JS/TS bindings target Node/Electron hosts via dynwinrt; .NET projects
         // already have first-class WinRT projections through CsWinRT and the
-        // codegen does not produce a .NET-consumable surface. Reject early
-        // rather than silently writing a jsBindings: block that would fail
-        // at codegen time.
+        // codegen does not produce a .NET-consumable surface. AskBindingsKindAsync
+        // already silently downgrades .NET projects to CppOnly, so this guard only
+        // catches the case where an existing yaml has a hand-edited `jsBindings:`
+        // block on a .NET project.
         if (options.AddJsBindings && isDotNetProject)
         {
             logger.LogError(
                 "{UISymbol} JS/TS bindings are not supported on .NET projects — the codegen targets Node/Electron via dynwinrt, and .NET projects already get WinRT via CsWinRT. " +
-                "Re-run from a non-.NET project, or omit JS bindings at the prompt.",
+                "Remove the `jsBindings:` block from winapp.yaml, or re-run from a non-.NET project.",
                 UiSymbols.Error);
             return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }

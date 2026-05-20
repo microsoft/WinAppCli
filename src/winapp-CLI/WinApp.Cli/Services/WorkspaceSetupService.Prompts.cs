@@ -250,7 +250,9 @@ internal partial class WorkspaceSetupService
     // workspace: C++ projections, JS/TS bindings, or both. Defaults to Both
     // under --use-defaults. Returns CppOnly (the historical default) for
     // non-npm callers so winget / standalone-CLI users see no behavior change.
-    private async Task<BindingsKind> AskBindingsKindAsync(WorkspaceSetupOptions options, WinappConfig? existingConfig, CancellationToken cancellationToken)
+    // .NET projects also silently get CppOnly — they can't consume dynwinrt
+    // bindings anyway, so asking would only offer one valid answer.
+    private async Task<BindingsKind> AskBindingsKindAsync(WorkspaceSetupOptions options, WinappConfig? existingConfig, bool isDotNetProject, CancellationToken cancellationToken)
     {
         // Restore (winapp restore) never re-prompts: it respects whatever the
         // existing yaml already declares.
@@ -268,10 +270,21 @@ internal partial class WorkspaceSetupService
 
         // Existing yaml that already declares jsBindings: — don't change the
         // user's earlier choice. Map it back to a kind so callers can still
-        // gate on AddJsBindings / SkipCppProjections.
+        // gate on AddJsBindings / SkipCppProjections. The .NET guard in
+        // SetupWorkspaceAsync will reject this combination with an actionable
+        // message; don't pre-empt it here.
         if (existingConfig?.JsBindings is not null)
         {
             return BindingsKindFromConfig(existingConfig);
+        }
+
+        // .NET projects can't consume dynwinrt bindings — skip the prompt
+        // entirely rather than asking a question with only one valid answer
+        // (and rather than tripping the .NET guard when --use-defaults sets
+        // the default to Both).
+        if (isDotNetProject)
+        {
+            return BindingsKind.CppOnly;
         }
 
         // Non-interactive: default to Both so `npx winapp init --use-defaults`
