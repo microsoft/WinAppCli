@@ -13,12 +13,20 @@
     Exit with error code if tests fail (default: true, stops build on test failures)
 .PARAMETER SkipNpm
     Skip npm package creation
+.PARAMETER SkipVsc
+    Skip VS Code extension packaging
 .PARAMETER SkipNuGet
     Skip NuGet package creation (BuildTools.WinApp)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
     Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
+.PARAMETER SkipAll
+    Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
+.PARAMETER OnlyDocs
+    Skip NuGet, MSIX, npm, and tests (builds the CLI and generates docs). Alias: DocsOnly
+.PARAMETER OnlyTests
+    Skip NuGet, MSIX, docs, and npm package creation (builds the CLI and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
 .EXAMPLE
@@ -28,9 +36,21 @@
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipNpm
 .EXAMPLE
+    .\scripts\build-cli.ps1 -SkipVsc
+.EXAMPLE
     .\scripts\build-cli.ps1 -SkipNuGet
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipMsix
+.EXAMPLE
+    .\scripts\build-cli.ps1 -SkipAll
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyDocs
+.EXAMPLE
+    .\scripts\build-cli.ps1 -DocsOnly
+.EXAMPLE
+    .\scripts\build-cli.ps1 -OnlyTests
+.EXAMPLE
+    .\scripts\build-cli.ps1 -TestsOnly
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
 #>
@@ -40,11 +60,43 @@ param(
     [switch]$SkipTests = $false,
     [switch]$FailOnTestFailure = $true,
     [switch]$SkipNpm = $false,
+    [switch]$SkipVsc = $false,
     [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
+    [switch]$SkipAll = $false,
+    [Alias("DocsOnly")]
+    [switch]$OnlyDocs = $false,
+    [Alias("TestsOnly")]
+    [switch]$OnlyTests = $false,
     [switch]$Stable = $false
 )
+
+# Validate compound flag usage
+$CompoundFlagsCount = @($SkipAll, $OnlyDocs, $OnlyTests) | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count
+if ($CompoundFlagsCount -gt 1) {
+    Write-Error "Only one of -SkipAll, -OnlyDocs/-DocsOnly, or -OnlyTests/-TestsOnly can be specified."
+    exit 1
+}
+
+# Apply compound skip flags
+if ($SkipAll) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+    $SkipDocs = $true
+} elseif ($OnlyDocs) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipTests = $true
+} elseif ($OnlyTests) {
+    $SkipNuGet = $true
+    $SkipMsix = $true
+    $SkipNpm = $true
+    $SkipDocs = $true
+}
 
 # Ensure we're running from the project root
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
@@ -167,7 +219,7 @@ try
     }
 
     # Step 4: Build Node CLI so E2E tests that invoke node cli.js can run
-    if (-not $SkipNpm) {
+    if ((-not $SkipNpm) -or (-not $SkipTests)) {
         Write-Host "[BUILD] Building Node CLI (for tests)..." -ForegroundColor Blue
         Push-Location (Join-Path $ProjectRoot "src\winapp-npm")
         try {
@@ -288,7 +340,26 @@ try
         Write-Host "[NPM] Skipping npm package creation (use -SkipNpm:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 8: Create NuGet packages (optional)
+    # Step 8: Create VS Code extension package (optional)
+    if (-not $SkipVsc) {
+        Write-Host ""
+        Write-Host "[VSC] Creating VS Code extension package..." -ForegroundColor Blue
+    
+        $PackageVscScript = Join-Path $PSScriptRoot "package-vsc.ps1"
+
+        & $PackageVscScript -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "VS Code extension packaging failed, but continuing..."
+        } else {
+            Write-Host "[VSC] VS Code extension packaged successfully!" -ForegroundColor Green
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[VSC] Skipping VS Code extension packaging (use -SkipVsc:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Step 9: Create NuGet packages (optional)
     if (-not $SkipNuGet) {
         Write-Host ""
         Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
@@ -301,6 +372,34 @@ try
             Write-Warning "NuGet packages creation failed, but continuing..."
         } else {
             Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+
+            # Run NuGet Pester tests (gate matrix + dual-pack layout parity).
+            # Skipped if -SkipTests was passed.
+            if (-not $SkipTests) {
+                $NuGetTestsPath = Join-Path $ProjectRoot "src\winapp-NuGet\tests\NuGet.Tests.ps1"
+                if (Test-Path $NuGetTestsPath) {
+                    $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
+                    if ($pesterMod) {
+                        Write-Host "[TEST] Running NuGet Pester tests..." -ForegroundColor Blue
+                        $pesterConfig = New-PesterConfiguration
+                        $pesterConfig.Run.Path = $NuGetTestsPath
+                        $pesterConfig.Run.Exit = $false
+                        $pesterConfig.Output.Verbosity = 'Normal'
+                        $pesterResult = Invoke-Pester -Configuration $pesterConfig
+                        if ($pesterResult.FailedCount -gt 0) {
+                            if ($FailOnTestFailure) {
+                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed"
+                            } else {
+                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failure(s) — continuing"
+                            }
+                        } else {
+                            Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
+                        }
+                    } else {
+                        Write-Warning "Pester 5.x not installed — skipping NuGet Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
+                    }
+                }
+            }
         }
     } else {
         Write-Host ""

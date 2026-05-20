@@ -27,7 +27,7 @@ internal interface IUiAutomationService
     Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct);
     Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct);
     Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct);
-    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct);
+    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
     Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct);
     Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct);

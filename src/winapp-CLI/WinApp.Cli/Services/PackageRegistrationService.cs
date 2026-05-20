@@ -14,9 +14,10 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal sealed class PackageRegistrationService(ILogger<PackageRegistrationService> logger) : IPackageRegistrationService
 {
-    // HRESULT 0x80073CFB = ERROR_PACKAGE_NOT_REGISTERED_FOR_SIDELOAD (developer mode not enabled)
     // HRESULT 0x800704EC = ERROR_ACCESS_DISABLED_BY_POLICY (group policy blocks sideloading)
-    private const int ERROR_PACKAGE_NOT_REGISTERED_FOR_SIDELOAD = unchecked((int)0x80073CFB);
+    // Note: 0x80073CFB ("Reinstallation of the package was blocked") is intentionally NOT
+    // treated as a developer-mode error — it more commonly indicates a conflicting installed
+    // package (e.g., a previously installed signed MSIX with the same identity).
     private const int ERROR_ACCESS_DISABLED_BY_POLICY = unchecked((int)0x800704EC);
 
     /// <inheritdoc />
@@ -40,18 +41,29 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
 
             if (!result.IsRegistered)
             {
-                var errorText = result.ErrorText ?? "Unknown error";
-                throw new InvalidOperationException(
-                    $"Failed to register package: {errorText} (0x{result.ExtendedErrorCode?.HResult:X8})");
+                throw BuildRegistrationException(
+                    "Failed to register package",
+                    result.ErrorText,
+                    result.ExtendedErrorCode?.HResult,
+                    packageIdentityName: TryReadIdentityName(fullPath));
             }
 
             logger.LogDebug("Package registered from loose layout: {ManifestPath}", manifestPath);
         }
-        catch (Exception ex) when (IsDeveloperModeError(ex))
+        catch (Exception ex) when (IsSideloadPolicyError(ex))
         {
             throw new InvalidOperationException(
-                "Windows Developer Mode is required to register MSIX packages from loose files. " +
-                "Open Settings > System > For Developers and enable Developer Mode.", ex);
+                "Sideloading is blocked by Group Policy on this machine. " +
+                "Contact your IT administrator to allow trusted app sideloading.", ex);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+        {
+            throw BuildRegistrationException(
+                "Failed to register package",
+                ex.Message,
+                ex.HResult,
+                packageIdentityName: TryReadIdentityName(fullPath),
+                inner: ex);
         }
     }
 
@@ -91,18 +103,29 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
 
             if (!result.IsRegistered)
             {
-                var errorText = result.ErrorText ?? "Unknown error";
-                throw new InvalidOperationException(
-                    $"Failed to register sparse package: {errorText} (0x{result.ExtendedErrorCode?.HResult:X8})");
+                throw BuildRegistrationException(
+                    "Failed to register sparse package",
+                    result.ErrorText,
+                    result.ExtendedErrorCode?.HResult,
+                    packageIdentityName: TryReadIdentityName(fullManifestPath));
             }
 
             logger.LogDebug("Sparse package registered: {ManifestPath} (external: {ExternalLocation})", manifestPath, externalLocation);
         }
-        catch (Exception ex) when (IsDeveloperModeError(ex))
+        catch (Exception ex) when (IsSideloadPolicyError(ex))
         {
             throw new InvalidOperationException(
-                "Windows Developer Mode is required to register MSIX packages from loose files. " +
-                "Open Settings > System > For Developers and enable Developer Mode.", ex);
+                "Sideloading is blocked by Group Policy on this machine. " +
+                "Contact your IT administrator to allow trusted app sideloading.", ex);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+        {
+            throw BuildRegistrationException(
+                "Failed to register sparse package",
+                ex.Message,
+                ex.HResult,
+                packageIdentityName: TryReadIdentityName(fullManifestPath),
+                inner: ex);
         }
     }
 
@@ -141,6 +164,25 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         }
 
         return true;
+    }
+
+    /// <inheritdoc />
+    public async Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    {
+        var pm = new PackageManager();
+
+        logger.LogDebug("Removing package: {PackageFullName} (preserveAppData={PreserveAppData})", packageFullName, preserveAppData);
+
+        var removalOptions = preserveAppData
+            ? RemovalOptions.PreserveApplicationData
+            : RemovalOptions.None;
+
+        var result = await pm.RemovePackageAsync(packageFullName, removalOptions).AsTask(cancellationToken);
+
+        if (!string.IsNullOrEmpty(result.ErrorText))
+        {
+            logger.LogWarning("Warning removing package {PackageFullName}: {Error}", packageFullName, result.ErrorText);
+        }
     }
 
     /// <inheritdoc />
@@ -226,9 +268,70 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         return results;
     }
 
-    private static bool IsDeveloperModeError(Exception ex)
+    internal static bool IsSideloadPolicyError(Exception ex)
     {
-        return ex.HResult == ERROR_PACKAGE_NOT_REGISTERED_FOR_SIDELOAD
-            || ex.HResult == ERROR_ACCESS_DISABLED_BY_POLICY;
+        return ex.HResult == ERROR_ACCESS_DISABLED_BY_POLICY;
+    }
+
+    // HRESULT 0x80073CFB — most commonly raised when a package with the same identity is
+    // already installed (e.g., via a signed MSIX) and cannot be re-registered as dev-mode
+    // loose files. Officially: "Reinstallation of the package was blocked."
+    internal const int ERROR_INSTALL_PACKAGE_ALREADY_EXISTS = unchecked((int)0x80073CFB);
+
+    /// <summary>
+    /// Builds a user-facing exception describing a failed package registration.
+    /// When the HRESULT indicates a duplicate-identity conflict (0x80073CFB) and a
+    /// <paramref name="packageIdentityName"/> is supplied, the hint embeds the actual
+    /// identity so the user can copy/paste the remediation command directly.
+    /// </summary>
+    internal static InvalidOperationException BuildRegistrationException(
+        string prefix,
+        string? errorText,
+        int? hresult,
+        string? packageIdentityName = null,
+        Exception? inner = null)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(prefix).Append(": ");
+        sb.Append(string.IsNullOrEmpty(errorText) ? "Unknown error" : errorText);
+        if (hresult.HasValue)
+        {
+            sb.Append(" (0x").Append(hresult.Value.ToString("X8")).Append(')');
+        }
+
+        if (hresult == ERROR_INSTALL_PACKAGE_ALREADY_EXISTS)
+        {
+            var identityToken = string.IsNullOrWhiteSpace(packageIdentityName)
+                ? "<PackageName>"
+                : packageIdentityName;
+
+            sb.AppendLine();
+            sb.Append(
+                "Hint: a package with the same identity may already be installed " +
+                "(e.g., from a signed MSIX). Try removing it first:");
+            sb.AppendLine();
+            sb.Append("  Get-AppxPackage ").Append(identityToken).Append(" | Remove-AppxPackage");
+        }
+
+        return inner is null
+            ? new InvalidOperationException(sb.ToString())
+            : new InvalidOperationException(sb.ToString(), inner);
+    }
+
+    /// <summary>
+    /// Best-effort read of the AppxManifest Identity/@Name attribute. Returns null on any
+    /// I/O or parse failure; callers should treat null as "identity unknown" and fall back
+    /// to a generic placeholder.
+    /// </summary>
+    private static string? TryReadIdentityName(string manifestPath)
+    {
+        try
+        {
+            return AppxManifestDocument.Load(manifestPath).IdentityName;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

@@ -35,7 +35,7 @@ internal class PackageCommand : Command, IShortDescription
         InputFolderArgument.AcceptExistingOnly();
         OutputOption = new Option<FileInfo>("--output")
         {
-            Description = "Output msix file name for the generated package (defaults to <name>.msix)",
+            Description = "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
         };
 
         NameOption = new Option<string?>("--name")

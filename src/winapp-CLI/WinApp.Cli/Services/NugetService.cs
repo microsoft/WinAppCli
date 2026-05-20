@@ -165,9 +165,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Dependency resolution failures are non-fatal; the main package is installed
+            // Dependency resolution failures are non-fatal; the main package is installed.
+            // Log so transitive dependency issues are visible in verbose/debug output.
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Dependency resolution for {package} {version}: {ex.Message}");
         }
     }
 
@@ -221,7 +223,9 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
 
     /// <summary>
     /// Parses a NuGet version range and extracts the minimum version.
-    /// Handles: "1.0.0", "[1.0.0]", "[1.0.0, )", "(1.0.0, 2.0.0)", etc.
+    /// Handles: "1.0.0", "[1.0.0]", "[1.0.0, )", "(1.0.0, 2.0.0)", and the
+    /// bracket-stripped form "1.0.0, 2.0.0" (which can happen when callers
+    /// pre-clean brackets without splitting on the range separator).
     /// </summary>
     internal static string ParseMinimumVersion(string versionRange)
     {
@@ -230,18 +234,12 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             return string.Empty;
         }
 
-        var trimmed = versionRange.Trim();
+        // Strip brackets/parens (no-op if none are present)
+        var trimmed = versionRange.Trim().TrimStart('[', '(').TrimEnd(']', ')');
 
-        // Simple version (no brackets)
-        if (!trimmed.Contains('[') && !trimmed.Contains('('))
-        {
-            return trimmed;
-        }
-
-        // Strip brackets/parens
-        trimmed = trimmed.TrimStart('[', '(').TrimEnd(']', ')');
-
-        // Take the lower bound (before comma if present)
+        // Take the lower bound (before comma if present). Always check for a comma —
+        // a NuGet range with brackets stripped (e.g. "1.0.0, 2.0.0") still needs
+        // splitting; otherwise we'd treat the whole thing as a literal version.
         var commaIdx = trimmed.IndexOf(',');
         if (commaIdx >= 0)
         {

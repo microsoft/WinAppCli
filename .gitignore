@@ -155,6 +155,8 @@ obj/
 *.sln.docstates
 # VS Code
 .vscode/
+# Allow .vscode config for the VS Code extension project
+!src/winapp-VSC/.vscode/
 # Visual Studio
 .vs/
 # NuGet packages

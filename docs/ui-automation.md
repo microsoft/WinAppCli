@@ -1,3 +1,6 @@
+<!-- mslearn: true -->
+<!-- ms.topic: reference -->
+<!-- description: Inspect and interact with running Windows application UIs from the command line using winapp CLI UI automation commands. -->
 # UI Automation
 
 Inspect and interact with running Windows applications from the command line.
@@ -6,12 +9,8 @@ Used by AI agents and developers for UI testing, debugging, and automation.
 ## Overview
 
 `winapp ui` provides commands for inspecting and interacting with Windows app UIs.
-Two modes are available, auto-detected per session:
-
-- **UIA mode** — Works with any Windows app (WPF, WinForms, Win32, Electron, WinUI 3).
-  Uses Windows UI Automation. Safe by design — no global input injection.
-- **DevTools mode** — For WinUI 3 apps with the DevTools assembly. Provides full XAML tree
-  access, property writing, input simulation, hot-reload, and more. (Future)
+Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, Win32, Electron, and WinUI 3.
+Most commands drive the app through UIA patterns (no input injection); `ui click` is the exception and uses real mouse simulation for controls that don't support `InvokePattern`.
 
 ## Quick Start
 
@@ -107,15 +106,14 @@ Slugs are shell-safe (no special characters), unique, and can be used directly a
 
 Elements with no name or AutomationId show only prefix + hash (e.g., `pn-c8a3`).
 
-### Index disambiguation (`[N]`)
+### Disambiguating multiple matches
 
-When using legacy selectors that match multiple elements, append `[N]` (zero-based) to pick a specific one. Slugs from inspect output are already unique and don't need indexing.
+Slugs from `inspect`/`search` output are unique, but can change across layout changes - use them over plain type names or text when multiple matches. When a selector is ambiguous, the CLI prints all matches with their slugs so you can pick the right one and re-run with that slug.
 
 ```bash
 winapp ui search Button -a myapp            # shows: btn-ok-a1b2 "OK", btn-cancel-c3d4 "Cancel"
 winapp ui invoke btn-ok-a1b2 -a myapp       # invoke using slug (preferred)
-winapp ui invoke "Button[0]" -a myapp       # or use legacy selector with index
-winapp ui invoke "Button[1]" -a myapp       # invokes the second Button ("Cancel")
+winapp ui invoke btn-cancel-c3d4 -a myapp   # invoke the other Button by its slug
 ```
 
 ### Plain text search
@@ -223,25 +221,22 @@ winapp ui get-property cmb-combobox-d5e6 -p ExpandCollapseState -a myapp  # expa
 ```
 
 ### screenshot
-Capture a window or element as PNG. When multiple windows exist (e.g., app + open dialog), captures each to a separate file.
+Capture a window or element as PNG. When multiple windows exist (e.g., app + open dialog), they are composited into a single PNG with each window stitched in.
 ```bash
 winapp ui screenshot -a notepad                     # saves screenshot.png in cwd
 winapp ui screenshot -a notepad --output my.png     # custom filename
 winapp ui screenshot -a notepad --json              # returns file path as JSON
 winapp ui screenshot -w 131906                      # target specific HWND (+ its dialogs)
 winapp ui screenshot txt-searchbox-e5f6 -a myapp          # crop to element bounds
-winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays)
+winapp ui screenshot -a myapp --capture-screen      # capture from screen (includes popups/overlays; foregrounds window)
+winapp ui screenshot -a myapp --focus               # bring window to foreground first, then capture (default WGC path)
 ```
 
-When dialogs or popups are open, each window is captured separately:
-```
-⚠  2 windows detected. Capturing each separately.
-  ✓ screenshot.png — HWND 133306: "*hello - Notepad" (window, 1476x1167)
-  ✓ screenshot.3213334-dialog.png — HWND 3213334: "Open" (dialog, 1248x834, owner: HWND 133306)
-```
+When dialogs or popups are open, all windows are composited into one PNG so you can see the full UI state in a single image.
 
-Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays.
-The window is brought to the foreground automatically before capture.
+The default capture path uses **Windows.Graphics.Capture (WGC)**, reading the actual DWM-composited surface — preserving rounded corners, transparency, and working even while the window is occluded by other windows. If WGC is unavailable (older Windows builds) the CLI falls back to **PrintWindow**.
+
+Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays that aren't owned by the target window. `--capture-screen` reads from the screen DC and brings the window to the foreground first. Use `--focus` if you just want to foreground the window without switching capture modes (e.g., to ensure the screenshot matches what the user is currently looking at).
 
 ### invoke
 Programmatically activate an element (click button, toggle checkbox, expand combo box).
@@ -299,6 +294,7 @@ winapp ui wait-for btn-submit-7a90 -a myapp --timeout 5000             # wait fo
 winapp ui wait-for CounterDisplay -a myapp --value "5" --timeout 5000  # wait for element value (smart fallback)
 winapp ui wait-for lbl-status -a myapp --property Name --value "Done" --timeout 5000  # wait for specific property
 winapp ui wait-for btn-submit-a1b2 --gone -a myapp --timeout 2000      # wait for element to disappear
+winapp ui wait-for lbl-status -a myapp --value "Done" --contains       # substring match instead of exact equality
 ```
 
 ### scroll
@@ -354,10 +350,9 @@ winapp ui list-windows                                      # all windows (no fi
 | "Selector matched N elements" | Ambiguous legacy selector | Use slugs from `inspect` output, or append `[0]`, `[1]` to legacy selectors |
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` or `search` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | Use `inspect` on the element to find an invokable child |
-| "Pipe not ready" | DevTools NuGet but UseWinAppTools() not called | Add `window.UseWinAppTools()` to startup |
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
-| Popup/dropdown not in screenshot | PrintWindow doesn't capture overlays | Use `--capture-screen` flag |
+| Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
 
 ## Common Patterns
 
@@ -467,14 +462,24 @@ winapp ui wait-for "Dialog Title" -a $pid --gone -t 5000
 
 ### Assert with JSON output
 Use `--json` with PowerShell or jq for more complex assertions:
+
+> **Exit-code contract for `search` and `wait-for` in `--json` mode:** when no element matches
+> (`search`) or the wait times out (`wait-for`), the command writes a fully parseable result envelope
+> to **stdout** (`{ "matchCount": 0, ... }` or `{ "found": false, "timedOut": true, ... }`) and
+> returns **exit code 1**. Stderr is empty in `--json` mode (logger output is suppressed).
+> Branch on the envelope fields, or on `$LASTEXITCODE`, depending on which is more ergonomic.
+
 ```powershell
 # Assert: search found exactly one match
 $result = winapp ui search "Submit" -a $pid --json | ConvertFrom-Json
 if ($result.matchCount -ne 1) { throw "Expected 1 Submit button, found $($result.matchCount)" }
 
 # Assert: element has expected properties
+# inspect --json returns { windows: [{ hwnd, title, elements: [...] }] };
+# each window's elements[] is the nested tree (children rendered via .children).
 $tree = winapp ui inspect "Counter Display" -a $pid --json | ConvertFrom-Json
-if ($tree.elements[0].name -ne "Count: 3") { throw "Counter value wrong: $($tree.elements[0].name)" }
+$counter = $tree.windows[0].elements[0]
+if ($counter.name -ne "Count: 3") { throw "Counter value wrong: $($counter.name)" }
 ```
 
 ### Full smoke test example
@@ -487,7 +492,7 @@ winapp ui wait-for "Main Page" -a $app.ProcessId -t 30000
 
 # Interact and assert
 winapp ui invoke "Add Item" -a $app.ProcessId
-winapp ui set-value "Item Name" -a $app.ProcessId --text "Test Item"
+winapp ui set-value "Item Name" "Test Item" -a $app.ProcessId
 winapp ui invoke "Save" -a $app.ProcessId
 winapp ui wait-for "Test Item" -a $app.ProcessId -t 5000              # assert item appeared in list
 winapp ui wait-for "Save" -a $app.ProcessId --gone -t 3000            # assert save dialog closed

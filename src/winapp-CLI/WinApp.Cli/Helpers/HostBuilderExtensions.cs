@@ -45,6 +45,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton(AnsiConsole.Console)
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
+            .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
@@ -94,7 +95,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
-                .UseCommandHandler<NewCommand, NewCommand.Handler>();
+                .UseCommandHandler<NewCommand, NewCommand.Handler>()
+                .ConfigureCommand<CompleteCommand>();
     }
 
     public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)

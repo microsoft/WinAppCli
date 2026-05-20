@@ -167,7 +167,10 @@ internal class WorkspaceSetupService(
         {
             if (options.SdkInstallMode == SdkInstallMode.None)
             {
-                logger.LogDebug("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+                // The "why we're skipping" message is emitted by AskSdkInstallModeAsync (interactive
+                // choice, --setup-sdks none) or — for .NET — by the early-exit when the project
+                // already references WinAppSDK. Don't repeat a generic / potentially-misleading
+                // "by user choice" line here (#464).
                 logger.LogInformation("Configuration processed (SDK installation skipped)");
             }
             else
@@ -203,7 +206,10 @@ internal class WorkspaceSetupService(
         }
         else if (options.SdkInstallMode == SdkInstallMode.None)
         {
-            logger.LogInformation("{UISymbol} SDK installation skipped by user choice", UiSymbols.Skip);
+            // For .NET projects: AskSdkInstallModeAsync already logged the actual reason we're
+            // skipping (auto-skipped because WinAppSDK is already referenced, or the user picked
+            // "Do not setup", or --setup-sdks=none was passed). Don't append a misleading
+            // "by user choice" line on top of that (#464).
         }
 
         // Prompt to install the WinApp CLI package before entering the live display context
@@ -334,6 +340,7 @@ internal class WorkspaceSetupService(
                     partialResult = await taskContext.AddSubTaskAsync("Adding NuGet packages to project", async (taskContext, cancellationToken) =>
                     {
                         usedVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        var failedPackages = new List<string>();
 
                         // When SdkInstallMode is None, still use Stable versions for build tools packages
                         var versionQueryMode = sdkInstallMode == SdkInstallMode.None ? SdkInstallMode.Stable : sdkInstallMode;
@@ -402,7 +409,21 @@ internal class WorkspaceSetupService(
                                 {
                                     return (1, $"Failed to add {packageName} package reference");
                                 }
+                                failedPackages.Add(packageName);
                             }
+                        }
+
+                        if (failedPackages.Count > 0)
+                        {
+                            var failedList = string.Join(", ", failedPackages);
+                            if (usedVersions.Count > 0)
+                            {
+                                return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/], but failed to add: {failedList}");
+                            }
+
+                            // Only optional package failures reach this point. Required package failures
+                            // already return non-zero in the catch block above, so do not abort init here.
+                            return (0, $"Failed to add optional NuGet packages: {failedList}");
                         }
 
                         return (0, $"NuGet packages added to [underline]{csprojFile.Name}[/]");
@@ -646,6 +667,15 @@ internal class WorkspaceSetupService(
                     await SetupManifestSubTaskAsync(options, shouldGenerateManifest, manifestGenerationInfo, taskContext, cancellationToken);
                 }
 
+                // Add generated assets as Content items so MSIX tooling includes them in the package layout
+                if (isDotNetProject && csprojFile != null && shouldGenerateManifest)
+                {
+                    if (await dotNetService.EnsureAssetContentItemsAsync(csprojFile, cancellationToken))
+                    {
+                        taskContext.AddDebugMessage($"{UiSymbols.Check} Added asset Content items to .csproj");
+                    }
+                }
+
                 // Save configuration (native/C++ projects only — .NET uses .csproj PackageReferences)
                 if (!isDotNetProject && !options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && usedVersions != null)
                 {
@@ -813,9 +843,13 @@ internal class WorkspaceSetupService(
         // Step 1: Handle configuration requirements
         if (options.RequireExistingConfig && !configService.Exists())
         {
-            logger.LogInformation("winapp.yaml not found in {ConfigDir}", options.ConfigDir);
-            logger.LogInformation("Run 'winapp init' to initialize a new workspace or navigate to a directory with winapp.yaml");
-            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            // Non-.NET project with no winapp.yaml — nothing to restore.
+            // (.NET projects without yaml are handled earlier in SetupWorkspaceAsync.)
+            // This is a no-op rather than an error: a project that doesn't declare
+            // SDK package versions in winapp.yaml has nothing for restore to do.
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
         }
 
         // Step 2: Load or prepare configuration
@@ -1011,24 +1045,42 @@ internal class WorkspaceSetupService(
         // For init (not restore), prompt for SDK installation choice if not specified
         if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null)
         {
-            // If the .NET project already references WinAppSDK, skip the prompt and default to None
-            if (isDotNetProject && csprojFile != null && await dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, cancellationToken))
+            // If the .NET project already references WinAppSDK, skip the prompt and default to None.
+            // This call may take a while on a fresh machine because `dotnet list package` triggers
+            // an implicit restore — surface a spinner so the user knows we're doing something (#463).
+            if (isDotNetProject && csprojFile != null)
             {
-                options.SdkInstallMode = SdkInstallMode.None;
-                logger.LogDebug("{UISymbol} Project already references {PackageName}, skipping SDK setup", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
-                return;
+                var alreadyReferencesWinAppSdk = await RunWithStatusAsync(
+                    "Detecting project SDK references...",
+                    ct => dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, ct),
+                    cancellationToken);
+                if (alreadyReferencesWinAppSdk)
+                {
+                    options.SdkInstallMode = SdkInstallMode.None;
+                    logger.LogInformation("{UISymbol} Project already references {PackageName}; skipping Windows App SDK setup.", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
+                    return;
+                }
             }
             // Determine which packages to show versions for
             var packages = isDotNetProject
                 ? [BuildToolsService.WINAPP_SDK_PACKAGE]
                 : new[] { BuildToolsService.CPP_SDK_PACKAGE, BuildToolsService.WINAPP_SDK_PACKAGE };
 
-            // Fetch versions for all modes in parallel (failures are non-fatal)
+            // Fetch versions for all modes in parallel (failures are non-fatal). On a fresh machine
+            // these NuGet feed calls can take many seconds; show a spinner so the prompt doesn't
+            // appear to hang (#463).
             var modes = new[] { SdkInstallMode.Stable, SdkInstallMode.Preview, SdkInstallMode.Experimental };
-            var versionTasks = modes
-                .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, cancellationToken))))
-                .ToList();
-            await Task.WhenAll(versionTasks.Select(v => v.Task));
+            var versionTasks = await RunWithStatusAsync(
+                "Fetching latest SDK versions...",
+                async ct =>
+                {
+                    var tasks = modes
+                        .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, ct))))
+                        .ToList();
+                    await Task.WhenAll(tasks.Select(v => v.Task));
+                    return tasks;
+                },
+                cancellationToken);
 
             // Build a lookup: (mode) → version label
             var versionsByMode = modes.ToDictionary(
@@ -1391,6 +1443,32 @@ internal class WorkspaceSetupService(
     {
         var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
         return msixDir.Exists ? msixDir : null;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> while showing a Spectre.Console spinner with <paramref name="message"/>.
+    /// In non-interactive contexts (redirected output, no Information logging), falls back to a single
+    /// log line so the user still sees what's happening (#463).
+    /// </summary>
+    private async Task<T> RunWithStatusAsync<T>(string message, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    {
+        if (Environment.UserInteractive
+            && !Console.IsOutputRedirected
+            && logger.IsEnabled(LogLevel.Information)
+            && ansiConsole.Profile.Capabilities.Interactive)
+        {
+            T result = default!;
+            await ansiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync(message, async _ =>
+                {
+                    result = await work(cancellationToken);
+                });
+            return result;
+        }
+
+        logger.LogInformation("{Message}", message);
+        return await work(cancellationToken);
     }
 
     /// <summary>

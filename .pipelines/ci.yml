@@ -3,6 +3,9 @@ trigger:
     include:
       - main
       - dev/**
+  tags:
+    exclude:
+      - '*'
 pr: none
 
 resources:

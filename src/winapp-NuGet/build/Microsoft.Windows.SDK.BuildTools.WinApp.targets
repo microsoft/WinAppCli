@@ -35,15 +35,101 @@
     <WinAppLooseLayoutPath Condition="'$(WinAppLooseLayoutPath)' == ''">$(OutputPath)AppX\</WinAppLooseLayoutPath>
     
     <!--
+      When EnableMsixTooling is true and Package.appxmanifest doesn't exist but
+      appxmanifest.xml does, promote it so the MSIX SDK processes it (placeholder
+      resolution, PRI generation, .appxrecipe, etc.).
+    -->
+    <_WinAppPromoteManifest Condition="'$(EnableMsixTooling)' == 'true' And !Exists('$(MSBuildProjectDirectory)\Package.appxmanifest') And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">true</_WinAppPromoteManifest>
+    
+    <!--
       Path to the AppxManifest.xml file.
       Auto-detected from output directory first, then project directory.
+      Checks all supported manifest filenames: Package.appxmanifest (VS convention), AppxManifest.xml (MSBuild output),
+      and appxmanifest.xml (winapp convention).
       This is set here (in targets) because $(OutputPath) is not available in props.
+
+      Output-directory locations are checked first because frameworks like MAUI
+      generate the manifest at build time based on platform / msbuild props, so
+      the only manifest that exists is in $(OutputPath). Project-directory
+      locations cover the standard winapp / VS conventions where the manifest
+      is authored in source.
     -->
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
-    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
     <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+    <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
   </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Master gate: _WinAppRunSupportActive
+    
+    Computed once here so every target / item-group below can read a single
+    property instead of repeating a long condition. This also makes it safe
+    to ship these targets via buildTransitive/ — they are inert by default
+    in any project that is not a packaged Windows app.
+    
+    Discriminators:
+      - EnableWinAppRunSupport: master opt-out switch (default true).
+      - WindowsPackageType != 'None': consumer hasn't explicitly opted out
+        of MSIX packaging. (WindowsAppSDK convention.)
+      - OutputType != 'Library': excludes class libraries. We deliberately
+        do NOT require OutputType == 'WinExe' because samples/dotnet-app
+        is OutputType=Exe (a packaged console app activated via execution
+        alias). 'Exe' must remain supported.
+      - TargetPlatformIdentifier == 'windows': in multi-targeted projects
+        (e.g., MAUI net*-android;net*-ios;net*-windows10.0.19041.0), this
+        target file may be evaluated for non-Windows TFMs too. The non-
+        Windows TFMs must build cleanly with no winapp activity. We prefer
+        the explicitly-set $(TargetPlatformIdentifier) when present and
+        fall back to deriving it from $(TargetFramework).
+      - A manifest exists at $(WinAppManifestPath). After the auto-detection
+        block above runs, this property points at the first existing manifest
+        across all supported output- and project-directory locations, OR at
+        whatever path the consumer set explicitly. Frameworks like MAUI
+        generate the manifest into $(OutputPath) based on platform / msbuild
+        props, so we deliberately accept output-dir paths here — without that,
+        MAUI head apps consuming this package transitively would never have
+        the gate activate. The other discriminators above (WindowsPackageType,
+        OutputType, TPI) already prevent activation in projects that aren't
+        intended to be packaged Windows apps, so a stale output-dir manifest
+        from a prior build only matters in a project that is otherwise still
+        a packaged Windows app — in which case re-activating the gate is the
+        correct behavior.
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <!--
+      Prefer the explicitly-set $(TargetPlatformIdentifier) when present
+      (some non-SDK-style projects set it directly), falling back to
+      deriving it from $(TargetFramework) for standard SDK-style TFMs
+      like net8.0-windows10.0.19041.0.
+    -->
+    <_WinAppEffectiveTargetPlatformIdentifier Condition="'$(TargetPlatformIdentifier)' != ''">$(TargetPlatformIdentifier)</_WinAppEffectiveTargetPlatformIdentifier>
+    <_WinAppEffectiveTargetPlatformIdentifier Condition="'$(_WinAppEffectiveTargetPlatformIdentifier)' == ''">$([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))</_WinAppEffectiveTargetPlatformIdentifier>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_WinAppRunSupportActive Condition="
+        '$(EnableWinAppRunSupport)' == 'true'
+        And '$(WindowsPackageType)' != 'None'
+        And '$(OutputType)' != 'Library'
+        And '$(_WinAppEffectiveTargetPlatformIdentifier)' == 'windows'
+        And '$(WinAppManifestPath)' != ''
+        And Exists('$(WinAppManifestPath)')">true</_WinAppRunSupportActive>
+    <_WinAppRunSupportActive Condition="'$(_WinAppRunSupportActive)' == ''">false</_WinAppRunSupportActive>
+  </PropertyGroup>
+
+  <!--
+    When EnableMsixTooling is true and the user has appxmanifest.xml (instead of
+    Package.appxmanifest), promote it to an AppxManifest item so the MSIX SDK
+    processes it — placeholder resolution, PRI generation, .appxrecipe, etc.
+  -->
+  <ItemGroup Condition="'$(_WinAppPromoteManifest)' == 'true' And '$(_WinAppRunSupportActive)' == 'true'">
+    <AppxManifest Include="$(MSBuildProjectDirectory)\appxmanifest.xml" />
+  </ItemGroup>
 
   <!--
     Design-time build support:
@@ -52,7 +138,7 @@
     Also, there is a bug in C# DevKit where generated files in obj are not included during design-time builds, so we need to explicitly include them here.
     https://github.com/microsoft/vscode-dotnettools/issues/1018
   -->
-  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true'">
+  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' AND '$(UseWinUI)' == 'true' AND '$(_WinAppRunSupportActive)' == 'true'">
     <Compile Include="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\**\*.cs">
       <AutoGen>True</AutoGen>
       <Visible>False</Visible>
@@ -62,12 +148,33 @@
   <!--
     Temporary: Include this for non-WinUI projects as well, to ensure appxmanifest is included 
     in the build output for the CLI to find to be able to run the app. We can remove this once we have a better solution for non-WinUI projects.
+    Excluded when the manifest is promoted to AppxManifest (to avoid dual item-group conflict).
   -->
-  <ItemGroup Condition="'$(UseWinUI)' != 'true'">
+  <ItemGroup Condition="'$(UseWinUI)' != 'true' And '$(_WinAppPromoteManifest)' != 'true' And '$(_WinAppRunSupportActive)' == 'true'">
     <Content Condition="Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')" Include="$(MSBuildProjectDirectory)\appxmanifest.xml">  
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!--
+    ============================================================================
+    _WinAppResolveManifestPath Target
+    
+    When appxmanifest.xml is promoted to AppxManifest, the MSIX SDK generates
+    AppxManifest.xml in the output directory during build. This target re-resolves
+    WinAppManifestPath to point to the generated file (which has build metadata,
+    resolved placeholders, etc.) instead of the raw source file.
+    ============================================================================
+  -->
+  <Target Name="_WinAppResolveManifestPath"
+          AfterTargets="Build"
+          BeforeTargets="_WinAppValidateRunSupport;_WinAppBuildRunArgs"
+          Condition="'$(_WinAppRunSupportActive)' == 'true' And '$(_WinAppPromoteManifest)' == 'true'">
+    <PropertyGroup Condition="Exists('$(OutputPath)AppxManifest.xml')">
+      <WinAppManifestPath>$(OutputPath)AppxManifest.xml</WinAppManifestPath>
+    </PropertyGroup>
+    <Message Text="[WinAppRunSupport] Resolved promoted manifest to: $(WinAppManifestPath)" Importance="normal" />
+  </Target>
 
   <!--
     ============================================================================
@@ -77,14 +184,16 @@
     ============================================================================
   -->
   <Target Name="_WinAppValidateRunSupport"
-          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+          Condition="'$(_WinAppRunSupportActive)' == 'true'">
     <Message Text="[WinAppRunSupport] Manifest: $(WinAppManifestPath)" Importance="normal" />
     <Error Condition="!Exists('$(WinAppCliPath)')"
            Text="[WinAppRunSupport] WinAppCLI tool not found at '$(WinAppCliPath)'. The NuGet package may be corrupted." />
     
     <!-- Validate manifest exists -->
     <Error Condition="'$(WinAppManifestPath)' != '' And !Exists('$(WinAppManifestPath)')"
-           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure appxmanifest.xml exists in your project directory." />
+           Text="[WinAppRunSupport] AppxManifest not found at '$(WinAppManifestPath)'. Ensure Package.appxmanifest or appxmanifest.xml exists at the resolved manifest path, in your project directory, or in the build output directory, as applicable." />
+    <Error Condition="'$(WinAppManifestPath)' == ''"
+           Text="[WinAppRunSupport] No AppxManifest found. Ensure Package.appxmanifest or appxmanifest.xml exists in your project or build output directory. Run 'winapp init' to generate one." />
     
     <Message Text="[WinAppRunSupport] Using CLI: $(WinAppCliPath)" Importance="normal" />
     <Message Text="[WinAppRunSupport] Loose layout path: $(WinAppLooseLayoutPath)" Importance="normal" />
@@ -100,7 +209,7 @@
   -->
   <Target Name="_WinAppBuildRunArgs"
           DependsOnTargets="_WinAppValidateRunSupport"
-          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+          Condition="'$(_WinAppRunSupportActive)' == 'true'">
     <PropertyGroup>
       <!-- Remove trailing backslash from paths to avoid escaping the closing quote -->
       <_WinAppManifestPathArg>$(WinAppManifestPath.TrimEnd('\'))</_WinAppManifestPathArg>
@@ -130,7 +239,7 @@
   -->
   <Target Name="RunPackagedApp"
           DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout"
-          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+          Condition="'$(_WinAppRunSupportActive)' == 'true'">
     
     <Message Text="[WinAppRunSupport] Launching packaged application..." Importance="high" />
     <Message Text="[WinAppRunSupport] Command: &quot;$(WinAppCliPath)&quot; $(_WinAppRunArgs)" Importance="normal" />
@@ -169,7 +278,7 @@
     ============================================================================
   -->
   <Target Name="_WinAppCopyContentToLooseLayout"
-          Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
+          Condition="'$(_WinAppRunSupportActive)' == 'true'"
           DependsOnTargets="AssignTargetPaths">
 
     <MakeDir Directories="$(WinAppLooseLayoutPath)" />
@@ -208,20 +317,18 @@
   -->
   <Target Name="_WinAppPrepareRunArguments"
           BeforeTargets="ComputeRunArguments"
-          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout">
+          DependsOnTargets="_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout"
+          Condition="'$(_WinAppRunSupportActive)' == 'true'">
     
-    <PropertyGroup Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'">
+    <PropertyGroup>
       <RunCommand>$(WinAppCliPath)</RunCommand>
       <RunArguments>$(_WinAppRunArgs)</RunArguments>
       <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
     </PropertyGroup>
     
-    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
-             Text="[WinAppRunSupport] Intercepted 'dotnet run' for packaged app" Importance="high" />
-    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
-             Text="[WinAppRunSupport] RunCommand: $(RunCommand)" Importance="normal" />
-    <Message Condition="'$(EnableWinAppRunSupport)' == 'true' And '$(WindowsPackageType)' != 'None'"
-             Text="[WinAppRunSupport] RunArguments: $(RunArguments)" Importance="normal" />
+    <Message Text="[WinAppRunSupport] Intercepted 'dotnet run' for packaged app" Importance="high" />
+    <Message Text="[WinAppRunSupport] RunCommand: $(RunCommand)" Importance="normal" />
+    <Message Text="[WinAppRunSupport] RunArguments: $(RunArguments)" Importance="normal" />
   </Target>
 
   <!--
@@ -233,11 +340,17 @@
   -->
   <Target Name="WinAppRunSupportInfo">
     <Message Text="=== WinApp Run Support Information ===" Importance="high" />
+    <Message Text="_WinAppRunSupportActive: $(_WinAppRunSupportActive)" Importance="high" />
     <Message Text="EnableWinAppRunSupport: $(EnableWinAppRunSupport)" Importance="high" />
     <Message Text="WindowsPackageType: $(WindowsPackageType)" Importance="high" />
+    <Message Text="OutputType: $(OutputType)" Importance="high" />
+    <Message Text="TargetFramework: $(TargetFramework)" Importance="high" />
+    <Message Text="TargetPlatformIdentifier (raw): $(TargetPlatformIdentifier)" Importance="high" />
+    <Message Text="_WinAppEffectiveTargetPlatformIdentifier (used by gate): $(_WinAppEffectiveTargetPlatformIdentifier)" Importance="high" />
     <Message Text="WinAppCliPath: $(WinAppCliPath)" Importance="high" />
     <Message Text="WinAppCliArch: $(WinAppCliArch)" Importance="high" />
     <Message Text="WinAppManifestPath: $(WinAppManifestPath)" Importance="high" />
+    <Message Text="_WinAppManifestPathUserSet: $(_WinAppManifestPathUserSet)" Importance="high" />
     <Message Text="WinAppLooseLayoutPath: $(WinAppLooseLayoutPath)" Importance="high" />
     <Message Text="======================================" Importance="high" />
   </Target>

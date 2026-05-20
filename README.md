@@ -17,6 +17,9 @@
   <a href="https://www.npmjs.com/package/@microsoft/winappcli">
     <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM">
   </a>
+  <a href="https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinApp">
+    <img src="https://img.shields.io/nuget/v/Microsoft.Windows.SDK.BuildTools.WinApp?style=for-the-badge&logo=nuget&label=NuGet&color=004880" alt="NuGet">
+  </a>
   <a href="https://github.com/microsoft/WinAppCli/releases/latest">
     <img src="https://img.shields.io/github/v/release/microsoft/WinAppCli?style=for-the-badge&logo=github&label=Latest%20Release&color=8ab4f8" alt="Latest Release">
   </a>
@@ -107,7 +110,7 @@ Checkout our getting started guides for step by step instructions of how to setu
     <img src="https://img.shields.io/badge/C++-Get%20Started-00599C?style=for-the-badge&logo=cplusplus&logoColor=white" alt="Get Started with C++">
   </a>
     <br />
-  <a href="/docs/electron-get-started.md">
+  <a href="/docs/guides/electron/index.md">
     <img src="https://img.shields.io/badge/Electron-Get%20Started-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Get Started with Electron">
   </a>
     <br />
@@ -163,6 +166,7 @@ Download the latest CI build artifacts directly (no GitHub login required):
 | [**npm Package**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/npm-package.zip) | `@microsoft/winappcli` .tgz package |
 | [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | MSIX installer bundle (self-signed) |
 | [**NuGet Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/nuget-packages.zip) | NuGet .nupkg packages |
+| [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip) | Pre-release `.vsix` for VS Code |
 
 <details>
 <summary>Download links not working?</summary>
@@ -245,6 +249,15 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
+## 🧩 VS Code Extension
+
+The **WinApp VS Code Extension** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
+
+> [!IMPORTANT]
+> The extension is not yet available in the VS Code Marketplace. Download the latest prerelease: [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip)
+
+For setup, configuration, and troubleshooting details, see the [VS Code Extension README](./src/winapp-VSC/README.md).
+
 ## 🤖 Using with AI Coding Agents
 
 AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
@@ -274,11 +287,21 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm, and NuGet, from the repo root
+# Build the CLI and package for npm, VS Code extension, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 
 The binaries and packages will be placed in the `artifacts` folder
+
+### Reviewing your changes before pushing
+
+Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
+Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
+files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
+skill fans out parallel sub-agents covering security, correctness, CLI UX,
+alternative-solution check, test coverage, docs/samples sync, packaging
+impact, and a multi-model cross-check, then prints a consolidated finding
+list to stdout.
 
 ## Trademarks
 

@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.2.2
+ * Source schema version: 0.3.2
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -172,7 +172,7 @@ export interface CreateDebugIdentityOptions extends CommonOptions {
 }
 
 /**
- * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
+ * Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
  */
 export async function createDebugIdentity(options: CreateDebugIdentityOptions = {}): Promise<WinappResult> {
   const args: string[] = ['create-debug-identity'];
@@ -256,7 +256,7 @@ export interface InitOptions extends CommonOptions {
 }
 
 /**
- * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+ * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
@@ -415,7 +415,7 @@ export interface PackageOptions extends CommonOptions {
   manifest?: string;
   /** Package name (default: from manifest) */
   name?: string;
-  /** Output msix file name for the generated package (defaults to <name>.msix) */
+  /** Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) */
   output?: string;
   /** Publisher name for certificate generation */
   publisher?: string;
@@ -473,7 +473,9 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 export interface RunOptions extends CommonOptions {
   /** Input folder containing the app to run */
   inputFolder: string;
-  /** Command-line arguments to pass to the application */
+  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
+  appArgs?: string;
+  /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
@@ -481,6 +483,8 @@ export interface RunOptions extends CommonOptions {
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
+  /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
+  executable?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
@@ -503,10 +507,12 @@ export interface RunOptions extends CommonOptions {
 export async function run(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
+  if (options.appArgs) args.push(options.appArgs);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
+  if (options.executable) args.push('--executable', options.executable);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noLaunch) args.push('--no-launch');
@@ -824,8 +830,10 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
   captureScreen?: boolean;
+  /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
+  focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Save output to file path (e.g., screenshot) */
@@ -842,6 +850,7 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
+  if (options.focus) args.push('--focus');
   if (options.json) args.push('--json');
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -982,7 +991,7 @@ export interface UiStatusOptions extends CommonOptions {
 }
 
 /**
- * Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+ * Connect to a target app and display connection info.
  */
 export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'status'];

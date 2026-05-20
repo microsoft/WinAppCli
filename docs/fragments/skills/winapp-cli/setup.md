@@ -25,7 +25,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
+**`Package.appxmanifest`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 
@@ -73,7 +73,7 @@ winapp init --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
-- `appxmanifest.xml` — package identity and capabilities
+- `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
@@ -110,7 +110,10 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 winapp run ./bin/Debug
 
 # Launch with custom manifest and pass arguments to the app
-winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
+
+# Pass arguments after -- to avoid escaping (equivalent to --args)
+winapp run ./bin/Debug -- --my-flag value
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
@@ -121,6 +124,7 @@ winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
+
 
 #### Choosing between `run` and `create-debug-identity`
 
@@ -143,7 +147,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## Recommended workflow
 
 1. **Create or initialize** — `winapp new winui -n MyApp` for new WinUI projects, or `winapp init --use-defaults` to add Windows support to an existing project
-2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
+2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
 5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
@@ -151,12 +155,12 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## Tips
 
 - Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts
-- If you only need `appxmanifest.xml` without SDK setup, use `winapp manifest generate` instead of `init`
+- If you only need `Package.appxmanifest` without SDK setup, use `winapp manifest generate` instead of `init`
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
 ## Related skills
-- After setup, see `winapp-manifest` to customize your `appxmanifest.xml`
+- After setup, see `winapp-manifest` to customize your `Package.appxmanifest`
 - Ready to package? See `winapp-package` to create an MSIX installer
 - Need a certificate? See `winapp-signing` for certificate generation
 - Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart

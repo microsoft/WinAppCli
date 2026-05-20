@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.2.2",
+  "version": "0.3.2",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -364,7 +364,7 @@
       }
     },
     "create-debug-identity": {
-      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.",
+      "description": "Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.",
       "hidden": false,
       "arguments": {
         "entrypoint": {
@@ -626,7 +626,7 @@
       }
     },
     "init": {
-      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
+      "description": "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.",
       "hidden": false,
       "arguments": {
         "base-directory": {
@@ -1274,7 +1274,7 @@
           "recursive": false
         },
         "--output": {
-          "description": "Output msix file name for the generated package (defaults to <name>.msix)",
+          "description": "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
@@ -1434,11 +1434,21 @@
             "minimum": 1,
             "maximum": 1
           }
+        },
+        "app-args": {
+          "description": "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
+          "order": 1,
+          "hidden": true,
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0
+          }
         }
       },
       "options": {
         "--args": {
-          "description": "Command-line arguments to pass to the application",
+          "description": "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value).",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
@@ -1483,6 +1493,21 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--executable": {
+          "description": "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder.",
+          "hidden": false,
+          "aliases": [
+            "--exe"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -1744,7 +1769,7 @@
       }
     },
     "ui": {
-      "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Auto-detects DevTools mode for WinUI 3 apps with the WinApp NuGet. Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
+      "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
       "hidden": false,
       "subcommands": {
         "click": {
@@ -2603,7 +2628,20 @@
               "recursive": false
             },
             "--capture-screen": {
-              "description": "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first.",
+              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--focus": {
+              "description": "Bring the target window to the foreground before capture. Already implied by --capture-screen.",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -3117,7 +3155,7 @@
           }
         },
         "status": {
-          "description": "Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.",
+          "description": "Connect to a target app and display connection info.",
           "hidden": false,
           "options": {
             "--app": {

@@ -1,3 +1,6 @@
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -124,7 +127,7 @@ function certInstall(options: CertInstallOptions): Promise<WinappResult>
 
 ### `createDebugIdentity()`
 
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
+Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
 
 ```typescript
 function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<WinappResult>
@@ -186,7 +189,7 @@ function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
 
 ### `init()`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 ```typescript
 function init(options?: InitOptions): Promise<WinappResult>
@@ -316,7 +319,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
+| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -357,10 +360,12 @@ function run(options: RunOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -617,7 +622,8 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -716,7 +722,7 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 
 ### `uiStatus()`
 
-Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+Connect to a target app and display connection info.
 
 ```typescript
 function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
@@ -821,7 +827,7 @@ function execWithBuildTools(command: string, options?: ExecSyncOptions): string 
 
 ### `addMsixIdentityToExe()`
 
-Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
+Adds package identity information from a Package.appxmanifest or appxmanifest.xml file to an executable's embedded manifest
 
 ```typescript
 function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undefined, options?: MsixIdentityOptions): Promise<MsixIdentityResult>
@@ -832,7 +838,7 @@ function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undef
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `exePath` | `string` | Yes | Path to the executable file |
-| `appxManifestPath` | `string \| undefined` | No | Path to the appxmanifest.xml file containing package identity data |
+| `appxManifestPath` | `string \| undefined` | No | Path to the Package.appxmanifest or appxmanifest.xml file containing package identity data |
 | `options` | `MsixIdentityOptions` | No | Optional configuration |
 
 ---
@@ -927,7 +933,7 @@ npx winapp node create-addon --template cs --name MyCsAddon
 
 ### `node add-electron-debug-identity`
 
-Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires an `appxmanifest.xml` (create one with `winapp init` or `winapp manifest generate`).
+Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires a `Package.appxmanifest` (create one with `winapp init` or `winapp manifest generate`).
 
 ```bash
 npx winapp node add-electron-debug-identity [options]
@@ -937,7 +943,7 @@ npx winapp node add-electron-debug-identity [options]
 
 | Flag | Description |
 |------|-------------|
-| `--manifest <path>` | Path to custom `appxmanifest.xml` (default: `appxmanifest.xml` in current directory) |
+| `--manifest <path>` | Path to custom `Package.appxmanifest` (default: `Package.appxmanifest` in current directory) |
 | `--no-install` | Do not install the package after creation |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` suffix |
 | `--verbose` | Enable verbose output |
@@ -948,7 +954,7 @@ npx winapp node add-electron-debug-identity [options]
 
 ```bash
 npx winapp node add-electron-debug-identity
-npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+npx winapp node add-electron-debug-identity --manifest ./custom/Package.appxmanifest
 ```
 
 ---
@@ -1255,7 +1261,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
+| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -1278,10 +1284,12 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -1430,7 +1438,8 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |

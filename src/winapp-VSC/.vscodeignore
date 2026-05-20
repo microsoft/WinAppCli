@@ -1,0 +1,15 @@
+.vscode/**
+.vscode-test/**
+src/**
+bin/**
+!bin/**/*.exe
+out/**
+node_modules/**
+.gitignore
+eslint.config.mjs
+esbuild.mjs
+tsconfig.json
+package-lock.json
+**/*.ts
+**/*.map
+**/*.backup

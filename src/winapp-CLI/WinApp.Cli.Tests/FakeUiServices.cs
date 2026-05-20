@@ -38,7 +38,7 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
         => Task.FromResult(ScreenshotResult);
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
@@ -56,8 +56,10 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
         => Task.CompletedTask;
 
+    public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
+
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
-        => Task.FromResult<UiElement?>(new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" });
+        => Task.FromResult(FocusedResult);
 
     public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
         => Task.FromResult<string?>("fake text content");

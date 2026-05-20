@@ -26,7 +26,6 @@ internal class UiCommand : Command, IShortDescription
         UiListWindowsCommand listWindowsCommand,
         UiGetFocusedCommand getFocusedCommand)
         : base("ui", "Inspect and interact with any running Windows app using UI Automation (UIA). " +
-               "Auto-detects DevTools mode for WinUI 3 apps with the WinApp NuGet. " +
                "Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.")
     {
         Subcommands.Add(statusCommand);

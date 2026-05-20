@@ -32,8 +32,8 @@ internal class UiListWindowsCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
 
             try
             {
@@ -120,12 +120,14 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 var fgHwnd = (nint)Windows.Win32.PInvoke.GetForegroundWindow();
                 foreach (var w in windows)
                 {
-                    var procName = GetProcessNameSafe(w.Pid);
+                    var procName = Markup.Escape(GetProcessNameSafe(w.Pid));
                     var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                    var label = Markup.Escape(info.Label);
+                    var className = Markup.Escape(info.ClassName);
                     var fg = w.Hwnd == fgHwnd ? ", [green]foreground[/]" : "";
                     var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-                    ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({info.Label}, {info.Width}x{info.Height}{fg}{owner}) [[{info.ClassName}]] ({procName}, PID {w.Pid})[/]");
+                    ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({label}, {info.Width}x{info.Height}{fg}{owner}) [[{className}]] ({procName}, PID {w.Pid})[/]");
                 }
 
                 logger.LogInformation("Found {Count} windows", windows.Count);
@@ -133,7 +135,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

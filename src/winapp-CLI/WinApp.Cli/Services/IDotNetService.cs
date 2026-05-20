@@ -121,4 +121,14 @@ internal interface IDotNetService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if any comments were added, false if all packages already had comments or were not found.</returns>
     Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the .csproj contains a <c>&lt;Content Include="Assets\**\*" /&gt;</c> item so that
+    /// generated visual assets (StoreLogo, AppList, etc.) are included in the MSIX package layout.
+    /// Without this, non-WinUI projects exclude the assets from the .build.appxrecipe.
+    /// </summary>
+    /// <param name="csprojPath">The project file to update.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if the .csproj was modified, false if it already had asset content items.</returns>
+    Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
 }

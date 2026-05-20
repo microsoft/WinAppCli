@@ -285,7 +285,7 @@ Assert-WinappJsonField "list-windows" -WinappArgs @("ui", "list-windows", "-a", 
 Assert-WinappJsonField "status" -WinappArgs @("ui", "status", "-a", "$appPid", "--json") -Field "processName" -Expected "winui-app"
 
 # --- inspect (JSON) ---
-Assert-WinappJsonField "inspect --json" -WinappArgs @("ui", "inspect", "-a", "$appPid", "--json", "-d", "8") -Field "elements.0.type" -Expected "Window"
+Assert-WinappJsonField "inspect --json" -WinappArgs @("ui", "inspect", "-a", "$appPid", "--json", "-d", "8") -Field "windows.0.elements.0.type" -Expected "Window"
 
 # --- inspect interactive (exit code) ---
 Assert-WinappSuccess "inspect --interactive" -WinappArgs @("ui", "inspect", "-a", "$appPid", "-i")
@@ -355,6 +355,10 @@ Assert-WinappSuccess "wait-for: counter after click" -WinappArgs @("ui", "wait-f
 $ssScreen = Join-Path $ScreenshotDir "05-capture-screen.png"
 Assert-WinappSuccess "screenshot --capture-screen" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssScreen, "--capture-screen")
 
+# --- screenshot --focus (exercises new WGC + foreground path) ---
+$ssFocus = Join-Path $ScreenshotDir "06-focus.png"
+Assert-WinappSuccess "screenshot --focus" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssFocus, "--focus")
+
 # --- wait-for: element exists ---
 Assert-WinappSuccess "wait-for: element exists" -WinappArgs @("ui", "wait-for", "Submit Button", "-a", "$appPid", "-t", "3000")
 
@@ -363,10 +367,12 @@ $jsonResult = Invoke-Winapp @("ui", "inspect", "-a", "$appPid", "--json", "-d", 
 if ($jsonResult.ExitCode -eq 0) {
     try {
         $parsed = $jsonResult.Output | ConvertFrom-Json
-        if ($parsed.elements.Count -gt 0) {
-            Write-TestPass "inspect --json structure" "$($parsed.elements.Count) elements"
+        $totalElements = 0
+        foreach ($w in $parsed.windows) { $totalElements += $w.elementCount }
+        if ($parsed.windows.Count -gt 0 -and $totalElements -gt 0) {
+            Write-TestPass "inspect --json structure" "$($parsed.windows.Count) window(s), $totalElements element(s)"
         } else {
-            Write-TestFail "inspect --json structure" "No elements in JSON"
+            Write-TestFail "inspect --json structure" "No windows/elements in JSON"
         }
     } catch {
         Write-TestFail "inspect --json structure" "Invalid JSON: $_"
@@ -388,6 +394,7 @@ Assert-ScreenshotValid "screenshot: 02-after-counter.png" $ssCounter
 Assert-ScreenshotValid "screenshot: 03-after-input.png" $ssInput
 Assert-ScreenshotValid "screenshot: 04-after-submit.png" $ssSubmit
 Assert-ScreenshotValid "screenshot: 05-capture-screen.png" $ssScreen
+Assert-ScreenshotValid "screenshot: 06-focus.png" $ssFocus
 
 # ============================================================================
 # Summary

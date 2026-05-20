@@ -1,7 +1,7 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.2.2
+version: 0.3.2
 ---
 ## When to use
 
@@ -30,7 +30,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
+**`Package.appxmanifest`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 
@@ -78,7 +78,7 @@ winapp init --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
-- `appxmanifest.xml` — package identity and capabilities
+- `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
@@ -115,7 +115,10 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 winapp run ./bin/Debug
 
 # Launch with custom manifest and pass arguments to the app
-winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
+
+# Pass arguments after -- to avoid escaping (equivalent to --args)
+winapp run ./bin/Debug -- --my-flag value
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
@@ -126,6 +129,7 @@ winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
+
 
 #### Choosing between `run` and `create-debug-identity`
 
@@ -148,7 +152,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## Recommended workflow
 
 1. **Create or initialize** — `winapp new winui -n MyApp` for new WinUI projects, or `winapp init --use-defaults` to add Windows support to an existing project
-2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
+2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
 5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
@@ -156,12 +160,12 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## Tips
 
 - Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts
-- If you only need `appxmanifest.xml` without SDK setup, use `winapp manifest generate` instead of `init`
+- If you only need `Package.appxmanifest` without SDK setup, use `winapp manifest generate` instead of `init`
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
 ## Related skills
-- After setup, see `winapp-manifest` to customize your `appxmanifest.xml`
+- After setup, see `winapp-manifest` to customize your `Package.appxmanifest`
 - Ready to package? See `winapp-package` to create an MSIX installer
 - Need a certificate? See `winapp-signing` for certificate generation
 - Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
@@ -179,7 +183,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -233,15 +237,17 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `<input-folder>` | Yes | Input folder containing the app to run |
+| `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--args` | Command-line arguments to pass to the application | (none) |
+| `--args` | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). | (none) |
 | `--clean` | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. | (none) |
 | `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. | (none) |
 | `--detach` | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). | (none) |
+| `--executable` | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |

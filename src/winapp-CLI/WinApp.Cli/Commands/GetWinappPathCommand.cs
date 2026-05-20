@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using WinApp.Cli.Helpers;
@@ -28,7 +29,7 @@ internal class GetWinappPathCommand : Command, IShortDescription
         Options.Add(GlobalOption);
     }
 
-    public class Handler(IWinappDirectoryService winappDirectoryService, ILogger<GetWinappPathCommand> logger) : AsynchronousCommandLineAction
+    public class Handler(IWinappDirectoryService winappDirectoryService, IAnsiConsole console, ILogger<GetWinappPathCommand> logger) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -50,6 +51,21 @@ internal class GetWinappPathCommand : Command, IShortDescription
                     // Get the local .winapp directory
                     winappDir = winappDirectoryService.GetLocalWinappDirectory();
                     directoryType = "Local";
+
+                    // Fall back to the global cache (which is also where 'winapp install' would
+                    // put packages without a local .winapp) and warn the user. See #475.
+                    if (!winappDir.Exists)
+                    {
+                        var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
+                        // Write the warning to stderr so stdout stays script-friendly
+                        // (callers do `path = $(winapp get-winapp-path)`). Going through
+                        // ILogger.LogWarning would route via the static AnsiConsole and
+                        // pollute stdout (TextWriterLogger only sends >= Error to stderr).
+                        parseResult.InvocationConfiguration.Error.WriteLine(
+                            $"{UiSymbols.Warning} No local .winapp directory found; falling back to the global cache at {globalDir.FullName}.");
+                        winappDir = globalDir;
+                        directoryType = "Global (fallback)";
+                    }
                 }
 
                 // For global directories, check if they exist
@@ -60,8 +76,10 @@ internal class GetWinappPathCommand : Command, IShortDescription
                     return Task.FromResult(1);
                 }
 
-                // Output just the path for easy consumption by scripts
-                logger.LogInformation("{WinappDir}", winappDir);
+                // Output just the path for easy consumption by scripts. Use IAnsiConsole
+                // directly (rather than ILogger) so the path lands cleanly on stdout without
+                // any logger formatting and so tests can capture it via TestAnsiConsole.
+                console.WriteLine(winappDir.FullName);
 
                 var status = winappDir.Exists ? "exists" : "does not exist";
                 logger.LogDebug("{UISymbol} {DirectoryType} .winapp directory: {WinappDir} ({Status})", UiSymbols.Folder, directoryType, winappDir, status);

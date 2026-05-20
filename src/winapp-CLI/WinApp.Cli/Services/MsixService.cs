@@ -147,7 +147,7 @@ internal partial class MsixService(
                 // Try to auto-infer by finding .exe files in the input folder root
                 var exeFiles = inputFolder.Exists
                     ? inputFolder.GetFiles("*.exe", SearchOption.TopDirectoryOnly)
-                        .Where(f => !string.Equals(f.Name, "createdump.exe", StringComparison.OrdinalIgnoreCase))
+                        .Where(f => !IsRuntimeToolExecutable(f.Name))
                         .ToArray()
                     : [];
 
@@ -298,8 +298,8 @@ internal partial class MsixService(
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
-        // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
-        // 3. Check for appxmanifest.xml or package.appxmanifest in current directory
+        // 2. Check for Package.appxmanifest or appxmanifest.xml in input folder
+        // 3. Check for Package.appxmanifest or appxmanifest.xml in current directory
         FileInfo resolvedManifestPath;
         if (manifestPath != null)
         {
@@ -318,7 +318,7 @@ internal partial class MsixService(
             }
             else
             {
-                throw new FileNotFoundException($"Manifest file not found. Searched for appxmanifest.xml and package.appxmanifest in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
+                throw new FileNotFoundException($"Manifest file not found. Searched for Package.appxmanifest, then appxmanifest.xml in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
             }
         }
 
@@ -469,12 +469,21 @@ internal partial class MsixService(
             var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
                 .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
+            // Pre-extract all file references from the manifest once (used by both
+            // MrtAssetHelper for images and CopyManifestReferencedFiles for non-image files)
+            var allManifestReferences = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
             // If manifest is outside input folder, copy its referenced assets into the staging directory
             if (manifestIsOutsideInputFolder)
             {
                 var externalAssets = MrtAssetHelper.GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
                 MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
+
+            // Copy any non-image files referenced in the manifest that are missing from
+            // staging. This handles files like manifest.json or other extension-referenced
+            // resources that aren't discovered by the image-asset extractor.
+            CopyManifestReferencedFiles(allManifestReferences, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext, cancellationToken);
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
@@ -677,10 +686,106 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Searches for appxmanifest.xml in the project by looking for .winapp directory in parent directories
+    /// Copies files referenced in the manifest that are missing from the staging directory.
+    /// Resolves file paths relative to the manifest directory first, then the input folder.
+    /// This ensures non-image referenced files (e.g., manifest.json) are included in the package.
+    /// </summary>
+    private static void CopyManifestReferencedFiles(
+        HashSet<string> referencedFiles,
+        DirectoryInfo manifestDir,
+        DirectoryInfo inputFolder,
+        DirectoryInfo stagingDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        if (referencedFiles.Count == 0)
+        {
+            return;
+        }
+
+        int copied = 0;
+
+        foreach (var relativePath in referencedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var stagingPath = Path.GetFullPath(Path.Combine(stagingDir.FullName, relativePath));
+            var stagingRoot = Path.GetFullPath(stagingDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            // Verify the destination stays within the staging directory
+            if (!stagingPath.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file with path escape: {relativePath}");
+                continue;
+            }
+
+            if (File.Exists(stagingPath))
+            {
+                continue;
+            }
+
+            // Try manifest directory first, then input folder
+            FileInfo? sourceFile = null;
+            var manifestRelative = new FileInfo(Path.Combine(manifestDir.FullName, relativePath));
+            var inputRelative = new FileInfo(Path.Combine(inputFolder.FullName, relativePath));
+
+            if (manifestRelative.Exists)
+            {
+                sourceFile = manifestRelative;
+            }
+            else if (inputRelative.Exists)
+            {
+                sourceFile = inputRelative;
+            }
+
+            if (sourceFile == null)
+            {
+                continue;
+            }
+
+            // Security: verify the resolved source path stays within the allowed roots.
+            // This prevents symlinks/junctions from escaping the project directory.
+            var resolvedSourcePath = Path.GetFullPath(sourceFile.FullName);
+            var manifestRoot = Path.GetFullPath(manifestDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var inputRoot = Path.GetFullPath(inputFolder.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (!resolvedSourcePath.StartsWith(manifestRoot, StringComparison.OrdinalIgnoreCase) &&
+                !resolvedSourcePath.StartsWith(inputRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file outside project root: {relativePath}");
+                continue;
+            }
+
+            // Reject reparse points (symlinks/junctions) that could redirect to arbitrary locations
+            var sourceAttributes = File.GetAttributes(sourceFile.FullName);
+            if (sourceAttributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced symlink/junction: {relativePath}");
+                continue;
+            }
+
+            var destDir = Path.GetDirectoryName(stagingPath);
+            if (destDir != null)
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            sourceFile.CopyTo(stagingPath, overwrite: true);
+            copied++;
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied manifest-referenced file: {relativePath}");
+        }
+
+        if (copied > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Manifest-referenced files: {copied} copied to staging");
+        }
+    }
+
+    /// <summary>
+    /// Searches for a manifest file in the start directory and walks up parent directories until one is found.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
-    /// <returns>Path to the project's appxmanifest.xml file, or null if not found</returns>
+    /// <returns>Path to the first manifest found (preferring Package.appxmanifest over appxmanifest.xml), or null if not found.</returns>
     public static FileInfo? FindProjectManifest(ICurrentDirectoryProvider currentDirectoryProvider, DirectoryInfo? startDirectory = null)
     {
         var directory = startDirectory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
@@ -697,6 +802,16 @@ internal partial class MsixService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true if the given file name belongs to a .NET runtime tool that should be
+    /// excluded when auto-detecting the application executable.
+    /// </summary>
+    internal static bool IsRuntimeToolExecutable(string fileName)
+    {
+        return string.Equals(fileName, "createdump.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, "apphost.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
