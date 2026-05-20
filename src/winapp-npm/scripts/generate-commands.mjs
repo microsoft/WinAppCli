@@ -135,7 +135,7 @@ function isBoolFlag(opt) {
 const PASSTHROUGH_COMMANDS = {
   tool: { propName: 'toolArgs', description: "Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix'].", separator: ' -- ' },
   store: { propName: 'storeArgs', description: 'Arguments to pass through to the Microsoft Store Developer CLI.', separator: '' },
-  new: { propName: 'dotnetNewArgs', description: 'Additional arguments to pass to dotnet new (forwarded after --).' , separator: ' -- ' },
+  new: { propName: 'dotnetNewArgs', description: 'Additional arguments to pass to dotnet new (forwarded after --).', separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
