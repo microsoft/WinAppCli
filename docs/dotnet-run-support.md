@@ -190,13 +190,11 @@ The CLI always re-registers when:
 - More than one package with the same identity name is installed.
 - `--clean` was passed (force fresh state).
 
-At default verbosity you will see a short status line whenever the skip path is taken:
+At default verbosity the skip path is silent — `winapp run` / `dotnet run` output
+looks the same as before this optimization existed, so existing scripts and UX
+are unchanged.
 
-```text
-Reusing existing registration (manifest unchanged)
-```
-
-To see the full rationale, run the CLI directly with `--verbose`:
+To confirm the skip path was taken, run the CLI with `--verbose`:
 
 ```powershell
 winapp run --verbose

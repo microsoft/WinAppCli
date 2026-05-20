@@ -52,12 +52,9 @@ internal partial class MsixService
             return null;
         }
 
-        // Default verbosity: short, neutral message so users running `winapp run`
-        // (or `dotnet run`) can tell the difference between a real re-register
-        // and a fast-path skip without needing --verbose.
-        taskContext.AddStatusMessage($"{UiSymbols.Check} Reusing existing registration (manifest unchanged)");
-
-        // Verbose: include the path and the rationale.
+        // Keep the skip path silent at default verbosity so `winapp run` / `dotnet run`
+        // output is unchanged from before issue #537. Surface the rationale only under
+        // --verbose for diagnostics.
         taskContext.AddDebugMessage(
             $"{UiSymbols.Check} Package already registered with identical manifest at " +
             $"{outputAppXDirectory.FullName} — skipping re-registration to preserve capability consent");
