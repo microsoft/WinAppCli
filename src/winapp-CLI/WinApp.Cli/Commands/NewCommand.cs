@@ -70,7 +70,9 @@ internal class NewCommand : Command, IShortDescription
             var projectFile = parseResult.GetValue(ProjectOption);
             var extraArgs = parseResult.UnmatchedTokens.ToList();
 
-            var isInteractive = Environment.UserInteractive && !Console.IsOutputRedirected;
+            var isInteractive = !parseResult.GetValue(WinAppRootCommand.QuietOption)
+                && Environment.UserInteractive
+                && !Console.IsOutputRedirected;
 
             // Detect context: are we in a project directory?
             var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
@@ -81,29 +83,24 @@ internal class NewCommand : Command, IShortDescription
                 isInProjectDir = true;
             }
 
-            // Phase 1: Load templates (simple spinner, no residual output)
+            // Phase 1: Load templates
             IReadOnlyList<TemplateInfo>? allTemplates = null;
             try
             {
-                var spinnerTask = Task.Run(async () =>
-                {
-                    await templateService.EnsureAllProvidersAsync(cancellationToken);
-                    return await templateService.GetAvailableTemplatesAsync(cancellationToken);
-                }, cancellationToken);
-
                 if (isInteractive)
                 {
-                    var spinnerChars = new[] { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
-                    int i = 0;
-                    while (!spinnerTask.IsCompleted)
-                    {
-                        Console.Write($"\r\x1b[33m{spinnerChars[i++ % spinnerChars.Length]}\x1b[0m Loading templates...");
-                        await Task.WhenAny(spinnerTask, Task.Delay(100, cancellationToken));
-                    }
-                    Console.Write("\r\x1b[2K");
+                    allTemplates = await ansiConsole.Status()
+                        .StartAsync("Loading templates...", async _ =>
+                        {
+                            await templateService.EnsureAllProvidersAsync(cancellationToken);
+                            return await templateService.GetAvailableTemplatesAsync(cancellationToken);
+                        });
                 }
-
-                allTemplates = await spinnerTask;
+                else
+                {
+                    await templateService.EnsureAllProvidersAsync(cancellationToken);
+                    allTemplates = await templateService.GetAvailableTemplatesAsync(cancellationToken);
+                }
             }
             catch (Exception ex)
             {

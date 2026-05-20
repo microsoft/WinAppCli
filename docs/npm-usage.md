@@ -290,6 +290,7 @@ function newCommand(options?: NewOptions): Promise<WinappResult>
 | `name` | `string \| undefined` | No | Name for the created project or item |
 | `output` | `string \| undefined` | No | Output directory for the created project |
 | `project` | `string \| undefined` | No | Target .csproj file (for item templates). Auto-detected if omitted. |
+| `dotnetNewArgs` | `string[] \| undefined` | No | Additional arguments to pass to dotnet new (forwarded after --). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1237,6 +1238,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `name` | `string \| undefined` | No | Name for the created project or item |
 | `output` | `string \| undefined` | No | Output directory for the created project |
 | `project` | `string \| undefined` | No | Target .csproj file (for item templates). Auto-detected if omitted. |
+| `dotnetNewArgs` | `string[] \| undefined` | No | Additional arguments to pass to dotnet new (forwarded after --). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

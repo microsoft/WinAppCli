@@ -373,6 +373,8 @@ export interface NewOptions extends CommonOptions {
   output?: string;
   /** Target .csproj file (for item templates). Auto-detected if omitted. */
   project?: string;
+  /** Additional arguments to pass to dotnet new (forwarded after --). */
+  dotnetNewArgs?: string[];
 }
 
 /**
@@ -384,7 +386,12 @@ export async function newCommand(options: NewOptions = {}): Promise<WinappResult
   if (options.name) args.push('--name', options.name);
   if (options.output) args.push('--output', options.output);
   if (options.project) args.push('--project', options.project);
-  return execCommand(args, options);
+  pushCommon(args, options);
+  if (options.dotnetNewArgs && options.dotnetNewArgs.length > 0) {
+    args.push('--', ...options.dotnetNewArgs);
+  }
+  const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(options));
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
 // ---------------------------------------------------------------------------
@@ -569,10 +576,12 @@ export interface ToolOptions extends CommonOptions {
  */
 export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   const args: string[] = ['tool'];
+  pushCommon(args, options);
   if (options.toolArgs && options.toolArgs.length > 0) {
     args.push('--', ...options.toolArgs);
   }
-  return execCommand(args, options);
+  const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(options));
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
 // ---------------------------------------------------------------------------

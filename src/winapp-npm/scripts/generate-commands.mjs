@@ -135,6 +135,7 @@ function isBoolFlag(opt) {
 const PASSTHROUGH_COMMANDS = {
   tool: { propName: 'toolArgs', description: "Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix'].", separator: ' -- ' },
   store: { propName: 'storeArgs', description: 'Arguments to pass through to the Microsoft Store Developer CLI.', separator: '' },
+  new: { propName: 'dotnetNewArgs', description: 'Additional arguments to pass to dotnet new (forwarded after --).' , separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
@@ -335,15 +336,20 @@ function generate(schema) {
     // Passthrough args
     if (passthrough) {
       if (passthrough.separator === ' -- ') {
+        // Push common flags BEFORE -- so they're handled by winapp CLI, not forwarded to the inner tool
+        L('  pushCommon(args, options);');
         L(`  if (options.${passthrough.propName} && options.${passthrough.propName}.length > 0) {`);
         L(`    args.push('--', ...options.${passthrough.propName});`);
         L('  }');
+        L('  const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(options));');
+        L('  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };');
       } else {
         L(`  if (options.${passthrough.propName}) args.push(...options.${passthrough.propName});`);
+        L('  return execCommand(args, options);');
       }
+    } else {
+      L('  return execCommand(args, options);');
     }
-
-    L('  return execCommand(args, options);');
     L('}');
   }
 

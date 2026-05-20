@@ -104,7 +104,9 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
             }
         }
 
-        var workingDir = outputDir ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+        var workingDir = outputDir
+            ?? projectFile?.Directory
+            ?? new DirectoryInfo(Directory.GetCurrentDirectory());
         if (!workingDir.Exists)
         {
             workingDir = workingDir.Parent ?? new DirectoryInfo(Directory.GetCurrentDirectory());
@@ -136,7 +138,7 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
             return null;
         }
 
-        // Parse version from filename and sort semantically
+        // Parse version from filename and sort semantically, preferring stable over prerelease
         // Filename format: Microsoft.WindowsAppSDK.WinUI.CSharp.Templates.0.0.3-alpha.nupkg
         return matchingFiles
             .Select(f =>
@@ -144,10 +146,12 @@ internal class DotNetTemplateProvider(IDotNetService dotNetService) : ITemplateP
                 var fileName = Path.GetFileNameWithoutExtension(f);
                 var versionStr = fileName[prefix.Length..];
                 var parsed = Version.TryParse(versionStr.Split('-')[0], out var version);
-                return (Path: f, Version: parsed ? version! : new Version(0, 0, 0), Raw: versionStr);
+                var isPrerelease = versionStr.Contains('-');
+                return (Path: f, Version: parsed ? version! : new Version(0, 0, 0), IsPrerelease: isPrerelease, Raw: versionStr);
             })
             .OrderByDescending(x => x.Version)
-            .ThenByDescending(x => x.Raw) // Pre-release tie-breaker
+            .ThenBy(x => x.IsPrerelease ? 1 : 0) // stable (false=0) before prerelease (true=1) for same numeric version
+            .ThenByDescending(x => x.Raw) // lexicographic ordering among prereleases
             .Select(x => x.Path)
             .FirstOrDefault();
     }
