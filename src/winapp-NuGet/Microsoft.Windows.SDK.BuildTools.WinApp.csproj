@@ -24,7 +24,13 @@
     
     <!-- Package as a tools package -->
     <IsTool>false</IsTool>
-    <DevelopmentDependency>true</DevelopmentDependency>
+    <!--
+      DevelopmentDependency is intentionally NOT set. NuGet would otherwise
+      mark this package as PrivateAssets="all" by default in consuming projects,
+      which would block the buildTransitive flow from this package being
+      re-exported by an intermediate library (e.g. a MAUI library wrapping
+      our run support).
+    -->
     <NoPackageAnalysis>true</NoPackageAnalysis>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     
@@ -39,9 +45,17 @@
     <None Include="icon.png" Pack="true" PackagePath="" />
   </ItemGroup>
 
-  <!-- Include MSBuild targets and props files -->
+  <!--
+    Include MSBuild targets and props files.
+    Pack to BOTH build/ and buildTransitive/ so the targets reach the head
+    project whether the package is referenced directly or transitively
+    through an intermediate library. WindowsAppSDK uses the same dual-pack
+    pattern. The targets are heavily gated on $(_WinAppRunSupportActive)
+    so they remain inert in any project that is not a packaged Windows app.
+  -->
   <ItemGroup>
     <None Include="build\**\*" Pack="true" PackagePath="build" />
+    <None Include="build\**\*" Pack="true" PackagePath="buildTransitive" />
   </ItemGroup>
 
   <!-- Include tools (CLI binaries) - these will be copied by the build script -->
