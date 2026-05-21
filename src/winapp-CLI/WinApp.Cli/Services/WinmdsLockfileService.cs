@@ -9,7 +9,7 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-// UTF-8 (no BOM) indented JSON, LF endings. Atomic writes via tmp + File.Move.
+// UTF-8 (no BOM) indented JSON, LF endings. Atomic writes via PathSafety.AtomicWriteAllTextAsync.
 internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logger) : IWinmdsLockfileService
 {
     public const string LockfileName = "winmds.lock.json";
@@ -41,7 +41,6 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         string? yamlPackagesHash = null,
         CancellationToken cancellationToken = default)
     {
-        string? tempPath = null;
         try
         {
             var path = GetLockfilePath(winappDir);
@@ -58,18 +57,15 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
 
             winappDir.Create();
             var lockfile = BuildLockfile(usedVersions, discoveredWinmds, nugetCacheDir, yamlPackagesHash);
-
-            // Atomic write via tmp + rename; guid suffix avoids concurrent
-            // writers colliding on staging.
-            tempPath = $"{path.FullName}.tmp.{Guid.NewGuid():N}";
             var json = JsonSerializer.Serialize(lockfile, WinmdsLockfileJsonContext.Default.WinmdsLockfile);
-            await File.WriteAllTextAsync(
-                tempPath,
+
+            // Atomic write via the shared PathSafety helper — single source
+            // of truth for staging + fsync + rename semantics.
+            await PathSafety.AtomicWriteAllTextAsync(
+                path.FullName,
                 json + "\n",
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 cancellationToken);
-            File.Move(tempPath, path.FullName, overwrite: true);
-            tempPath = null;
 
             logger.LogDebug(
                 "Wrote winmds lockfile ({PackageCount} packages, {WinmdCount} winmds) → {LockfilePath}",
@@ -79,15 +75,6 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         {
             // Lockfile is an optimization, not a correctness requirement.
             logger.LogDebug(ex, "Failed to write winmds lockfile (continuing without)");
-        }
-        finally
-        {
-            // Clean up staging if Move never ran.
-            if (tempPath is not null)
-            {
-                try { File.Delete(tempPath); }
-                catch { /* ignore — leaked tmp file is harmless */ }
-            }
         }
     }
 

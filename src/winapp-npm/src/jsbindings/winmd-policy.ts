@@ -98,10 +98,63 @@ export interface WinmdPartition {
   skipped: string[];
 }
 
-// Partition a list of winmd paths by category. `emitScope` (when provided)
-// demotes out-of-scope emit packages to refOnly so codegen still sees their
-// metadata for cross-package type resolution. Skip/refOnly classifications
-// take precedence over scope.
+/** Tuple shape: one entry per NuGet package, with its name and the winmds inside it. */
+export interface PackageWinmds {
+  name: string;
+  winmds: readonly string[];
+}
+
+/**
+ * Partition a list of `{name, winmds[]}` tuples by category, using the
+ * package name directly (no path extraction needed — the lockfile already
+ * groups winmds by package on the writer side).
+ *
+ * `emitScope` (when provided) demotes out-of-scope emit packages to refOnly
+ * so codegen still sees their metadata for cross-package type resolution.
+ * Skip/refOnly classifications take precedence over scope.
+ *
+ * Prefer this overload over `partitionByPackageCategory(string[], …)` when
+ * the source data is the lockfile — see orchestrator.ts.
+ */
+export function partitionPackageWinmds(
+  packages: readonly PackageWinmds[],
+  options?: {
+    overrides?: PackageCategoryOverrides;
+    emitScope?: readonly string[];
+  }
+): WinmdPartition {
+  const overrides = options?.overrides;
+  const scope = lowercaseSet(options?.emitScope);
+
+  const emit: string[] = [];
+  const refOnly: string[] = [];
+  const skipped: string[] = [];
+
+  for (const pkg of packages) {
+    if (!pkg || !pkg.name || !pkg.winmds || pkg.winmds.length === 0) {
+      continue;
+    }
+    let cat: WinmdPackageCategory = classifyPackage(pkg.name, overrides);
+    if (scope && cat === 'emit' && !scope.has(pkg.name.toLowerCase())) {
+      cat = 'refOnly';
+    }
+    const bucket = cat === 'skip' ? skipped : cat === 'refOnly' ? refOnly : emit;
+    for (const w of pkg.winmds) {
+      bucket.push(w);
+    }
+  }
+
+  return { emit, refOnly, skipped };
+}
+
+// Partition a flat list of winmd paths by category. Falls back to
+// `extractPackageIdFromPath` for each entry — needed for loose user-supplied
+// `additionalWinmds` / `additionalRefs` that don't carry their package
+// identity. For lockfile-sourced winmds, use `partitionPackageWinmds` instead.
+//
+// `emitScope` (when provided) demotes out-of-scope emit packages to refOnly
+// so codegen still sees their metadata for cross-package type resolution.
+// Skip/refOnly classifications take precedence over scope.
 export function partitionByPackageCategory(
   winmds: readonly string[],
   options?: {

@@ -7,6 +7,8 @@ export const WINAPP_CLI_CALLER_VALUE = 'nodejs-package';
 
 export interface CallWinappCliOptions {
   exitOnError?: boolean;
+  /** Working directory for the spawned process (defaults to process.cwd()). */
+  cwd?: string;
 }
 
 export interface CallWinappCliResult {
@@ -49,13 +51,13 @@ export function getWinappCliPath(): string {
  * Always captures output and returns it along with the exit code
  */
 export async function callWinappCli(args: string[], options: CallWinappCliOptions = {}): Promise<CallWinappCliResult> {
-  const { exitOnError = false } = options;
+  const { exitOnError = false, cwd = process.cwd() } = options;
   const winappCliPath = getWinappCliPath();
 
   return new Promise((resolve, reject) => {
     const child = spawn(winappCliPath, args, {
       stdio: 'inherit',
-      cwd: process.cwd(),
+      cwd,
       shell: false,
       env: {
         ...process.env,

@@ -190,6 +190,69 @@ $extraProps  </PropertyGroup>
             Get-GateValue -CaseName 'plain-net8' -TargetFramework 'net8.0' -OutputType 'Exe' -ProjectDirManifest $true | Should -Be 'false'
         }
     }
+
+    Context "Build-time gate re-evaluation - MAUI-style manifest generated during Build" {
+        # Regression guard for H1: when no manifest exists at parse time (e.g. MAUI
+        # generates one into $(OutputPath) at Build time), the parse-time gate
+        # freezes as `false`. `_WinAppResolveManifestPath` runs AfterTargets="Build"
+        # and must re-resolve $(WinAppManifestPath) AND recompute $(_WinAppRunSupportActive)
+        # so downstream targets (`_WinAppValidateRunSupport`, `_WinAppBuildRunArgs`,
+        # `_WinAppPrepareRunArguments`) see the live answer.
+        It "Re-activates the gate after Build generates a manifest into `$(OutputPath)" {
+            $caseName = 'maui-build-time-mfst'
+            $dir = Join-Path $script:tempRoot $caseName
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+
+            # Need at least one .cs file so the SDK's Build target actually
+            # has work to do (otherwise it short-circuits and AfterTargets="Build"
+            # targets never fire).
+            Set-Content -Path (Join-Path $dir "Program.cs") -Value "class P { static void Main(){} }"
+
+            $csproj = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <OutputPath>bin\</OutputPath>
+  </PropertyGroup>
+  <Import Project="$($script:propsPath)" />
+  <Import Project="$($script:targetsPath)" />
+
+  <!--
+    Simulate a MAUI-style framework that generates the manifest into
+    `$(OutputPath)` during Build (after the SDK targets run, before our
+    `_WinAppResolveManifestPath` AfterTargets="Build" target fires).
+  -->
+  <Target Name="_TestGenerateManifest" AfterTargets="CoreBuild" BeforeTargets="_WinAppResolveManifestPath">
+    <MakeDir Directories="`$(OutputPath)" />
+    <WriteLinesToFile File="`$(OutputPath)AppxManifest.xml" Lines="&lt;x/&gt;" Overwrite="true" />
+  </Target>
+
+  <!--
+    Run after _WinAppResolveManifestPath has had a chance to re-evaluate.
+    Dump the live property value to a sentinel file so the test can read it
+    without parsing MSBuild console output.
+  -->
+  <Target Name="_TestDumpGateValue" AfterTargets="_WinAppResolveManifestPath">
+    <WriteLinesToFile File="gate-value.txt" Lines="`$(_WinAppRunSupportActive)" Overwrite="true" />
+  </Target>
+</Project>
+"@
+            Set-Content -Path (Join-Path $dir "test.csproj") -Value $csproj
+
+            Push-Location $dir
+            try {
+                & dotnet build (Join-Path $dir "test.csproj") -nologo 2>&1 | Out-Null
+            } finally {
+                Pop-Location
+            }
+
+            $gateFile = Join-Path $dir "gate-value.txt"
+            $gateFile | Should -Exist -Because "_TestDumpGateValue must have fired after _WinAppResolveManifestPath"
+            (Get-Content $gateFile -Raw).Trim() | Should -Be 'true' `
+                -Because "_WinAppResolveManifestPath must re-activate the gate once Build has produced the manifest"
+        }
+    }
 }
 
 Describe "Microsoft.Windows.SDK.BuildTools.WinApp package layout" -Skip:$script:skip {

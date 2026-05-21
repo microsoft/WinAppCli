@@ -7,18 +7,20 @@
 //
 // Ported from C# `UserPackageJsonService.cs`. Key invariants:
 //   * Refuse to write through reparse-point ancestors (symlinks / junctions)
-//     — same protection the native side enforced via PathSafety.
+//     — same protection the native side enforced via PathSafety. Provided
+//     transitively by `package-json-doc.ts`.
 //   * Preserve unrelated keys exactly. Insert "dependencies" right after
 //     "version" when creating the block from scratch.
 //   * Atomic write via sibling tmp + fs.renameSync (Windows: same-volume rename
-//     is atomic; fall back to copy+unlink if the rename fails).
+//     is atomic; fall back to copy+unlink if the rename fails). Provided by
+//     `package-json-doc.atomicWriteFile`.
 //   * Don't auto-promote a dev→prod dep — the user pinned it under dev for a
 //     reason; report `PresentInDevDependencies` instead.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { hasReparsePointOnPath } from './path-safety';
+import { readPackageJsonDoc, mutatePackageJsonDoc } from './package-json-doc';
 
 export type RuntimeDependencyOutcome = 'added' | 'alreadyPresent' | 'presentInDevDependencies' | 'noPackageJson';
 
@@ -40,40 +42,14 @@ export function ensureRuntimeDependency(
     throw new Error('version must not be empty');
   }
 
-  const packageJsonPath = path.join(workspaceDir, 'package.json');
-
-  // Refuse to follow reparse points / UNC ancestors BEFORE probing existence.
-  if (hasReparsePointOnPath(packageJsonPath, workspaceDir)) {
-    throw new Error(
-      `Refusing to rewrite '${packageJsonPath}': the file or one of its ` +
-        'ancestors is a symbolic link / reparse point. Resolve the link ' +
-        'and re-run, or add the runtime dependency manually.'
-    );
-  }
-
-  if (!fs.existsSync(packageJsonPath)) {
+  // Single round-trip: readPackageJsonDoc enforces the path-safety guard and
+  // returns null when package.json is missing.
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
     return { outcome: 'noPackageJson' };
   }
 
-  let original: string;
-  try {
-    original = fs.readFileSync(packageJsonPath, 'utf8');
-  } catch (err) {
-    throw new Error(`Failed to read ${packageJsonPath}: ${(err as Error).message}`, { cause: err });
-  }
-
-  let root: unknown;
-  try {
-    root = JSON.parse(original);
-  } catch (err) {
-    throw new Error(`Failed to parse ${packageJsonPath}: ${(err as Error).message}`, { cause: err });
-  }
-
-  if (!root || typeof root !== 'object' || Array.isArray(root)) {
-    throw new Error(`${packageJsonPath} root is not a JSON object.`);
-  }
-
-  const obj = root as Record<string, unknown>;
+  const obj = doc.parsed;
   const deps = obj.dependencies;
   if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
     if (packageName in (deps as Record<string, unknown>)) {
@@ -88,14 +64,12 @@ export function ensureRuntimeDependency(
     }
   }
 
-  // Add to dependencies; insert the block right after "version" when creating it.
-  const rebuilt = insertOrUpdateDependency(obj, packageName, version);
+  // Mutate + atomic write through the shared helper. mutatePackageJsonDoc
+  // re-reads the file to avoid TOCTOU windows; it also re-runs the safety
+  // guard so a race that swaps in a reparse point between read and write is
+  // still refused.
+  mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
 
-  // npm/yarn/pnpm conventionally use 2-space indent + trailing newline.
-  const serialized = JSON.stringify(rebuilt, null, 2);
-  const final = original.endsWith('\n') && !serialized.endsWith('\n') ? serialized + '\n' : serialized;
-
-  atomicWriteFile(packageJsonPath, final);
   return { outcome: 'added', pinnedVersion: version };
 }
 
@@ -127,46 +101,6 @@ function insertOrUpdateDependency(
     rebuilt.dependencies = newDeps;
   }
   return rebuilt;
-}
-
-function atomicWriteFile(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  const tmpName = `${path.basename(filePath)}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-  const tmpPath = path.join(dir, tmpName);
-  let staged = false;
-  try {
-    fs.writeFileSync(tmpPath, content, { encoding: 'utf8' });
-    staged = true;
-    // Windows: same-volume rename is atomic. fs.renameSync overwrites the target.
-    fs.renameSync(tmpPath, filePath);
-    staged = false;
-  } catch (err) {
-    // Fallback for the rare cross-volume case (or AV / sharing-violation
-    // races): copy+unlink. Not atomic, but better than leaving the file
-    // mid-write.
-    if (staged) {
-      try {
-        fs.copyFileSync(tmpPath, filePath);
-        try {
-          fs.unlinkSync(tmpPath);
-        } catch {
-          /* leaked tmp is harmless */
-        }
-        return;
-      } catch (fallbackErr) {
-        try {
-          fs.unlinkSync(tmpPath);
-        } catch {
-          /* ignore */
-        }
-        throw new Error(
-          `Failed to write ${filePath}: ${(fallbackErr as Error).message} (after rename error: ${(err as Error).message})`,
-          { cause: fallbackErr }
-        );
-      }
-    }
-    throw new Error(`Failed to write ${filePath}: ${(err as Error).message}`, { cause: err });
-  }
 }
 
 // Resolves the pinned `@microsoft/dynwinrt` version by reading the winapp-npm

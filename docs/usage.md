@@ -166,7 +166,7 @@ JS/TS bindings are configured by declaring a `"winapp": { "jsBindings": {...} }`
 | Want to … | Command |
 |---|---|
 | Bootstrap a fresh workspace with bindings | `npx winapp init` (answer **Y** at the prompt; default is **Y**) |
-| Add JS bindings to an existing workspace | Edit `package.json` to add `"winapp": { "jsBindings": {} }` (the empty object opts in with full-SDK defaults), then run `npx winapp restore` |
+| Add JS bindings to an existing workspace | `npx winapp node generate-bindings` — adds a default `"winapp": { "jsBindings": {} }` block (full-SDK scope) on first use, then generates from the cached winmd lockfile. Requires a prior `winapp restore`. |
 | Re-run codegen after editing `winapp.jsBindings` (fast path) | `npx winapp node generate-bindings` |
 | Re-run codegen as part of full restore (also handles NuGet + cppwinrt) | `npx winapp restore` |
 

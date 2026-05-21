@@ -35,7 +35,14 @@ npm install                        # picks up the @microsoft/dynwinrt runtime de
 
 ### Path B — Existing project (layer bindings on)
 
-If `winapp.yaml` already exists and you want to add JS bindings, edit `package.json` to add the `winapp.jsBindings` namespace. The empty form covers the full Windows App SDK:
+If `winapp.yaml` already exists and you want to add JS bindings, run `generate-bindings`. The first invocation adds a default `winapp.jsBindings` namespace to `package.json` (covering the full Windows App SDK) and then generates immediately from the winmd lockfile written by your last `winapp restore`:
+
+```bash
+npx winapp node generate-bindings
+npm install                        # picks up the @microsoft/dynwinrt runtime dep
+```
+
+If you want to customize the scope before the first generation, you can still edit `package.json` directly — the empty form covers the full Windows App SDK:
 
 ```jsonc
 // package.json
@@ -46,12 +53,7 @@ If `winapp.yaml` already exists and you want to add JS bindings, edit `package.j
 }
 ```
 
-Then run `restore` — it will pick up the new namespace, run codegen, and inject the `@microsoft/dynwinrt` runtime dep into `package.json`:
-
-```bash
-npx winapp restore
-npm install
-```
+…and then run `npx winapp node generate-bindings` (or `npx winapp restore` if you also need to refresh NuGet packages / the winmd lockfile).
 
 ### What you get
 

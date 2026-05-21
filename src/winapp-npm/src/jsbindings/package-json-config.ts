@@ -16,11 +16,8 @@
 //     (init, restore, package, ...) is identical regardless of whether the
 //     user opted into JS bindings.
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
 import { JsBindingsExtraType } from './additional-winmds';
+import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
 
 export interface JsBindingsConfig {
   // Target language. Currently 'js' (default) or 'py'.
@@ -64,39 +61,96 @@ export interface ReadJsBindingsResult {
   jsBindings: JsBindingsConfig | null;
 }
 
-const PACKAGE_JSON = 'package.json';
-
 /**
  * Read package.json from the workspace and return any
  * `"winapp": { "jsBindings": {...} }` namespace it declares.
  *
- * Missing file → `{ packageJsonExists: false, jsBindings: null }`.
+ * Missing file (or unsafe workspace path) → `{ packageJsonExists: false, jsBindings: null }`.
  * Present file, no `winapp.jsBindings` → `{ packageJsonExists: true, jsBindings: null }`.
  * Malformed JSON propagates as an exception so callers can surface a clear
  * error rather than silently treating the workspace as un-configured.
  */
 export function readJsBindingsConfig(workspaceDir: string): ReadJsBindingsResult {
-  const filePath = path.join(workspaceDir, PACKAGE_JSON);
-  if (!fs.existsSync(filePath)) {
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
     return { packageJsonExists: false, jsBindings: null };
   }
-  const raw = fs.readFileSync(filePath, 'utf8');
-  const parsed = JSON.parse(raw);
-  const ns = parsed && typeof parsed === 'object' ? parsed.winapp : undefined;
-  const block = ns && typeof ns === 'object' ? ns.jsBindings : undefined;
+  const ns = doc.parsed.winapp;
+  const block =
+    ns && typeof ns === 'object' && !Array.isArray(ns) ? (ns as Record<string, unknown>).jsBindings : undefined;
   if (!block || typeof block !== 'object') {
     return { packageJsonExists: true, jsBindings: null };
   }
   return { packageJsonExists: true, jsBindings: coerceConfig(block) };
 }
 
-/** Convenience: returns true when package.json declares `winapp.jsBindings`. */
+/**
+ * Convenience: returns true when package.json declares `winapp.jsBindings`.
+ * Propagates JSON parse errors (does NOT swallow them) — a malformed
+ * package.json should fail the command with the actual parse error rather
+ * than silently skip codegen. Callers should `try` around this if they need
+ * to handle malformed input gracefully.
+ */
 export function hasJsBindings(workspaceDir: string): boolean {
-  try {
-    return readJsBindingsConfig(workspaceDir).jsBindings !== null;
-  } catch {
-    return false;
+  return readJsBindingsConfig(workspaceDir).jsBindings !== null;
+}
+
+/**
+ * Outcome of {@link ensureJsBindingsBlock}.
+ *   * `added`     — namespace was missing; default block written.
+ *   * `reset`     — namespace existed but caller asked to overwrite it with defaults.
+ *   * `unchanged` — namespace existed and caller did not request a reset.
+ */
+export type EnsureJsBindingsOutcome = 'added' | 'reset' | 'unchanged';
+
+export interface EnsureJsBindingsOptions {
+  /**
+   * When true, overwrite an existing `winapp.jsBindings` block with the
+   * default config. Use this when the user explicitly opted in again
+   * (e.g. re-running `winapp init` and answering Yes after previously
+   * customizing the block) — we never silently overwrite otherwise.
+   */
+  reset?: boolean;
+  /** Suppress the informational banner printed to stdout. */
+  quiet?: boolean;
+}
+
+/**
+ * Make sure the workspace's package.json declares the
+ * `winapp.jsBindings` namespace, then return what we did.
+ *
+ * Shared by `winapp init` (after a "yes" answer) and
+ * `winapp node generate-bindings` (so the command works without making
+ * the user hand-edit JSON before invoking it). NOT called from
+ * `winapp restore` — restore must remain a passive "respect existing
+ * declarations" operation and never silently add config the user did
+ * not request.
+ *
+ * Requires package.json to exist; callers should fail with a clear
+ * "this is not an npm project" error first when it does not.
+ */
+export function ensureJsBindingsBlock(
+  workspaceDir: string,
+  opts: EnsureJsBindingsOptions = {}
+): EnsureJsBindingsOutcome {
+  const current = readJsBindingsConfig(workspaceDir);
+  if (!current.jsBindings) {
+    writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
+    if (!opts.quiet) {
+      console.log(
+        'ℹ️  Added "winapp.jsBindings" to package.json. ' + 'Edit it to customize package scope, extraTypes, etc.'
+      );
+    }
+    return 'added';
   }
+  if (opts.reset) {
+    writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
+    if (!opts.quiet) {
+      console.log('ℹ️  Reset "winapp.jsBindings" in package.json to defaults.');
+    }
+    return 'reset';
+  }
+  return 'unchanged';
 }
 
 /**
@@ -104,9 +158,10 @@ export function hasJsBindings(workspaceDir: string): boolean {
  * package.json.
  *
  * Behaviour:
- *   * Preserves the existing 2-space indent + trailing newline. We do not
- *     pull in `prettier` for this single edit — JSON.stringify gives us a
- *     stable canonical layout and `package.json` is the only file we own.
+ *   * Preserves the existing 2-space indent + trailing newline (via
+ *     `mutatePackageJsonDoc`). We do not pull in `prettier` for this single
+ *     edit — JSON.stringify gives us a stable canonical layout and
+ *     `package.json` is the only file we own.
  *   * Atomic: writes to a sibling temp file, fsyncs, then renames over the
  *     real file so a half-written package.json is never visible.
  *   * Inserts the `"winapp"` key at the end of the top-level object when it
@@ -115,29 +170,23 @@ export function hasJsBindings(workspaceDir: string): boolean {
  *   * Throws when package.json is missing or malformed; callers should
  *     ensure the file exists (e.g. by suggesting `npm init -y`) before
  *     writing.
+ *   * Throws when the workspace path is UNC or has a reparse-point ancestor.
  */
 export function writeJsBindingsConfig(workspaceDir: string, config: JsBindingsConfig): void {
-  const filePath = path.join(workspaceDir, PACKAGE_JSON);
-  if (!fs.existsSync(filePath)) {
+  if (!packageJsonExists(workspaceDir)) {
     throw new Error(
       `package.json not found in ${workspaceDir}. ` +
         'Run `npm init -y` (or equivalent) before adding JS bindings configuration.'
     );
   }
-  const raw = fs.readFileSync(filePath, 'utf8');
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`Unexpected JSON shape in ${filePath}: top-level value must be an object.`);
-  }
-
-  const existingNs = parsed.winapp && typeof parsed.winapp === 'object' ? parsed.winapp : {};
-  parsed.winapp = { ...existingNs, jsBindings: serializeConfig(config) };
-
-  const eol = detectEol(raw);
-  const trailing = raw.endsWith('\n') ? eol : '';
-  const serialized = JSON.stringify(parsed, null, 2).replace(/\n/g, eol) + trailing;
-
-  atomicWriteFileSync(filePath, serialized);
+  mutatePackageJsonDoc(workspaceDir, (parsed) => {
+    const existingNs = parsed.winapp;
+    const ns =
+      existingNs && typeof existingNs === 'object' && !Array.isArray(existingNs)
+        ? (existingNs as Record<string, unknown>)
+        : {};
+    parsed.winapp = { ...ns, jsBindings: serializeConfig(config) };
+  });
 }
 
 /**
@@ -232,44 +281,6 @@ function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   };
 }
 
-function detectEol(content: string): string {
-  // Match the file's predominant line ending so we don't accidentally
-  // rewrite CRLF → LF (or vice versa) on Windows checkouts.
-  return content.includes('\r\n') ? '\r\n' : '\n';
-}
-
-function atomicWriteFileSync(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  let cleanup = true;
-  try {
-    const fd = fs.openSync(tmp, 'w');
-    try {
-      fs.writeFileSync(fd, content);
-      try {
-        fs.fsyncSync(fd);
-      } catch {
-        // fsync isn't supported on every platform (e.g. some FUSE mounts on
-        // CI); the rename itself is enough for atomicity on POSIX and NTFS.
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(tmp, filePath);
-    cleanup = false;
-  } finally {
-    if (cleanup) {
-      try {
-        fs.unlinkSync(tmp);
-      } catch {
-        // best-effort temp cleanup
-      }
-    }
-  }
-}
-
 // Re-exported so callers don't have to know whether the implementation lives
 // in this module or elsewhere.
-export const PACKAGE_JSON_FILENAME = PACKAGE_JSON;
-// Hint: os.EOL is intentionally unused — we prefer the file's existing EOL.
-void os;
+export { PACKAGE_JSON_FILENAME } from './package-json-doc';

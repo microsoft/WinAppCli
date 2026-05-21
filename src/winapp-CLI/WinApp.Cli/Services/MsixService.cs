@@ -815,23 +815,18 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Checks a single directory for a manifest file (Package.appxmanifest or appxmanifest.xml).
+    /// Checks a single directory for a manifest file. Delegates to
+    /// <see cref="ManifestHelper.FindManifest"/> so the probe order is
+    /// driven by one source of truth — keeping <c>winapp run</c> /
+    /// <c>create-debug-identity</c> in lock-step with every other site
+    /// that locates manifests (<c>cert generate</c>, the build NuGet
+    /// targets, etc.). Returns <see langword="null"/> when no manifest
+    /// file is present so callers can branch on "found vs. not".
     /// </summary>
     internal static FileInfo? FindManifestInDirectory(DirectoryInfo directory)
     {
-        var packageManifest = new FileInfo(Path.Combine(directory.FullName, "Package.appxmanifest"));
-        if (packageManifest.Exists)
-        {
-            return packageManifest;
-        }
-
-        var appxManifest = new FileInfo(Path.Combine(directory.FullName, "appxmanifest.xml"));
-        if (appxManifest.Exists)
-        {
-            return appxManifest;
-        }
-
-        return null;
+        var found = ManifestHelper.FindManifest(directory.FullName);
+        return found.Exists ? found : null;
     }
 
     /// <summary>

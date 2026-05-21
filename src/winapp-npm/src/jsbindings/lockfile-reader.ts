@@ -12,6 +12,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { assertSafeWorkspaceFile, isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
 // Schema bumped to 3 when the npm wrapper took over JS bindings: schema 2
 // embedded a `category` field that is now strictly an npm-side computation.
@@ -32,8 +33,12 @@ export interface WinmdsLockfile {
   packages: WinmdsLockfilePackage[];
 }
 
-export function getLockfilePath(winappDir: string): string {
-  return path.join(winappDir, LOCKFILE_NAME);
+/**
+ * Lockfile lives at `<workspaceDir>/.winapp/winmds.lock.json`. Exposed so
+ * `cli.ts` can `existsSync`-probe without re-reading or parsing the file.
+ */
+export function getLockfilePath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.winapp', LOCKFILE_NAME);
 }
 
 export interface ReadLockfileResult {
@@ -42,12 +47,28 @@ export interface ReadLockfileResult {
   reason?: string;
 }
 
-// Reads + parses the lockfile, validating the schema version. Returns null
-// when the file is missing, unreadable, malformed, or schema-mismatched —
-// callers should treat any null as "trigger live discovery / ask the user
-// to rerun restore".
-export function tryReadLockfile(winappDir: string): ReadLockfileResult {
-  const filePath = getLockfilePath(winappDir);
+/**
+ * Read + parse the workspace's lockfile, validating schema version and the
+ * containment of every `winmds[]` path entry against the recorded
+ * `nuget_cache_dir`. Returns null when the file is missing, unreadable,
+ * malformed, or schema-mismatched — callers should treat any null as "trigger
+ * live discovery / ask the user to rerun restore".
+ *
+ * The path-safety guard is wired in so a hostile `.winapp/` (e.g. a junction
+ * pointing at another user's profile) is refused before we even open the
+ * lockfile. Matches the native side's `IsLockfilePathUnsafe()`.
+ */
+export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
+  const winappDir = path.join(workspaceDir, '.winapp');
+  const filePath = getLockfilePath(workspaceDir);
+
+  // Refuse to follow reparse points / UNC ancestors BEFORE probing existence.
+  try {
+    assertSafeWorkspaceFile(workspaceDir, filePath, LOCKFILE_NAME);
+  } catch (err) {
+    return { lockfile: null, reason: (err as Error).message };
+  }
+
   if (!fs.existsSync(filePath)) {
     return { lockfile: null };
   }
@@ -80,8 +101,10 @@ export function tryReadLockfile(winappDir: string): ReadLockfileResult {
   }
 
   const obj = parsed as Record<string, unknown>;
-  // Native writes `schemaVersion`; tolerate the legacy `schema` key just in case.
-  const schemaRaw = obj.schemaVersion ?? obj.schema;
+  // Native writes JsonKnownNamingPolicy.SnakeCaseLower (see WinmdsLockfile.cs),
+  // so the on-disk keys are snake_case. We tolerate camelCase as a legacy/test
+  // fallback for any older lockfiles or hand-authored test fixtures.
+  const schemaRaw = obj.schema ?? obj.schemaVersion;
   const schemaVersion =
     typeof schemaRaw === 'number' ? schemaRaw : typeof schemaRaw === 'string' ? Number(schemaRaw) : Number.NaN;
 
@@ -102,6 +125,32 @@ export function tryReadLockfile(winappDir: string): ReadLockfileResult {
     };
   }
 
+  const generatedAt =
+    typeof obj.generated_at === 'string'
+      ? obj.generated_at
+      : typeof obj.generatedAt === 'string'
+        ? obj.generatedAt
+        : undefined;
+  const nugetCacheDir =
+    typeof obj.nuget_cache_dir === 'string'
+      ? obj.nuget_cache_dir
+      : typeof obj.nugetCacheDir === 'string'
+        ? obj.nugetCacheDir
+        : undefined;
+  const yamlPackagesHash =
+    typeof obj.yaml_packages_hash === 'string'
+      ? obj.yaml_packages_hash
+      : typeof obj.yamlPackagesHash === 'string'
+        ? obj.yamlPackagesHash
+        : undefined;
+
+  // Each winmd path must be a real file under the recorded NuGet cache —
+  // anything else (UNC, reparse-backed, or escaped via `..`) gets dropped
+  // with a logged reason. Without `nuget_cache_dir` we have no boundary,
+  // so we only enforce the UNC/empty checks and rely on the codegen to
+  // surface absolute-path requirements.
+  const cacheBoundary = nugetCacheDir ? path.resolve(nugetCacheDir).replace(/[\\/]+$/, '') : null;
+  const droppedPaths: string[] = [];
   const packages: WinmdsLockfilePackage[] = [];
   for (const entry of packagesRaw) {
     if (!entry || typeof entry !== 'object') {
@@ -113,15 +162,59 @@ export function tryReadLockfile(winappDir: string): ReadLockfileResult {
     if (!name || !version) {
       continue;
     }
-    const winmdsArr = Array.isArray(e.winmds) ? e.winmds.filter((w): w is string => typeof w === 'string') : [];
+    const rawWinmds = Array.isArray(e.winmds) ? e.winmds.filter((w): w is string => typeof w === 'string') : [];
+    const winmdsArr: string[] = [];
+    for (const w of rawWinmds) {
+      if (!w || !w.trim() || isNetworkPath(w)) {
+        droppedPaths.push(w);
+        continue;
+      }
+      if (cacheBoundary) {
+        const resolved = path.resolve(w);
+        const prefix = cacheBoundary + path.sep;
+        const inside = resolved.length >= prefix.length && resolved.toLowerCase().startsWith(prefix.toLowerCase());
+        if (!inside) {
+          droppedPaths.push(w);
+          continue;
+        }
+        if (hasReparsePointOnPath(resolved, cacheBoundary)) {
+          droppedPaths.push(w);
+          continue;
+        }
+      }
+      winmdsArr.push(w);
+    }
     packages.push({ name, version, winmds: winmdsArr });
+  }
+
+  if (droppedPaths.length > 0) {
+    // Surface the count + first few paths so a corrupted / tampered lockfile
+    // produces an actionable signal rather than silently emitting nothing.
+    const head = droppedPaths.slice(0, 3).join(', ');
+    const suffix = droppedPaths.length > 3 ? ` (+${droppedPaths.length - 3} more)` : '';
+    return {
+      lockfile: null,
+      reason:
+        `Lockfile ${filePath} contains ${droppedPaths.length} winmd path(s) outside the recorded ` +
+        `nuget_cache_dir or via UNC / reparse points: ${head}${suffix}. ` +
+        'Re-run `winapp restore` to regenerate from a trusted NuGet cache.',
+    };
+  }
+
+  // Verify .winapp/ itself wasn't swapped between the existsSync probe and
+  // returning — best-effort secondary check; if this fails we report the same
+  // safety reason rather than a half-loaded lockfile.
+  try {
+    assertSafeWorkspaceFile(workspaceDir, winappDir, '.winapp');
+  } catch (err) {
+    return { lockfile: null, reason: (err as Error).message };
   }
 
   const lockfile: WinmdsLockfile = {
     schemaVersion,
-    generatedAt: typeof obj.generatedAt === 'string' ? obj.generatedAt : undefined,
-    nugetCacheDir: typeof obj.nugetCacheDir === 'string' ? obj.nugetCacheDir : undefined,
-    yamlPackagesHash: typeof obj.yamlPackagesHash === 'string' ? obj.yamlPackagesHash : undefined,
+    generatedAt,
+    nugetCacheDir,
+    yamlPackagesHash,
     packages,
   };
   return { lockfile };

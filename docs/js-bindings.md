@@ -375,7 +375,7 @@ In addition, `winapp restore` writes `.winapp/winmds.lock.json` — a human-read
 | `winapp` refuses to write into the output directory | The output directory is non-empty and lacks a `.dynwinrt-managed` marker — winapp won't wipe it because it might contain hand-written code. Either point `output` somewhere else, or delete the directory yourself if you're sure. |
 | Imports from `@microsoft/dynwinrt` fail at app runtime | Make sure you ran your package manager's install command after `init` / `restore` (so the auto-injected production dep actually downloads). The CLI prints the right command for your PM in the output. |
 | Vendor winmd not found | `additionalWinmds` / `additionalRefs` paths are workspace-relative or absolute. Missing files print a warning and are skipped (so a stale entry doesn't break a working restore) — re-check the path. |
-| Want bindings but already ran `init` without them | Edit `package.json`, add `"winapp": { "jsBindings": {} }`, then run `npx winapp restore`. |
+| Want bindings but already ran `init` without them | Run `npx winapp node generate-bindings` — it adds the default `"winapp": { "jsBindings": {} }` block on first use and generates immediately. (Requires a prior `winapp restore` so the winmd lockfile exists.) |
 | `package.json not found` when adding bindings | Run `npm init -y` (or your package manager's equivalent) first so the file exists, then re-run `npx winapp init`. |
 
 ---

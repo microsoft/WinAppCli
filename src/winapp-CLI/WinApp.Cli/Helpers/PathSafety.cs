@@ -235,4 +235,54 @@ internal static class PathSafety
             throw;
         }
     }
+
+    // Async variant of <see cref="AtomicWriteAllText"/>. Same staging /
+    // flush-to-disk / rename semantics, but the write itself is async so
+    // callers in the workspace setup pipeline don't block on disk IO.
+    // Supports cancellation while staging (cleanup still runs).
+    public static async Task AtomicWriteAllTextAsync(
+        string path,
+        string contents,
+        System.Text.Encoding encoding,
+        CancellationToken cancellationToken = default)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(dir))
+        {
+            dir = Directory.GetCurrentDirectory();
+        }
+        var tmp = Path.Combine(dir, Path.GetFileName(path) + ".tmp-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var fs = new FileStream(
+                tmp,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                useAsync: true))
+            await using (var sw = new StreamWriter(fs, encoding))
+            {
+                await sw.WriteAsync(contents.AsMemory(), cancellationToken);
+                await sw.FlushAsync(cancellationToken);
+                fs.Flush(flushToDisk: true);
+            }
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tmp))
+                {
+                    File.Delete(tmp);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; surface original error.
+            }
+            throw;
+        }
+    }
 }

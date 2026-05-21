@@ -29,7 +29,7 @@ Does the project already have an appxmanifest.xml?
    ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder is missing?
    │  └─ winapp restore
    ├─ Want to add typed JS/TypeScript WinRT bindings to an existing workspace?
-   │  └─ Edit package.json to add `"winapp": { "jsBindings": {} }`, then run `npx winapp restore`
+   │  └─ npx winapp node generate-bindings  (adds default `"winapp": { "jsBindings": {} }` to package.json on first use, then generates. Requires a prior `winapp restore` so the winmd lockfile exists.)
    ├─ Want to check for newer SDK versions?
    │  └─ winapp update
    ├─ Only need an appxmanifest.xml (no SDKs, no cert, no config)?
@@ -107,7 +107,7 @@ Want to inspect or interact with a running app's UI?
 **When to use:** Inside a Node / Electron project after `npx winapp init`.
 **How to enable:**
 - **Fresh init via npm shim** (`npx winapp init`) shows an interactive yes/no prompt — `Add JS/TypeScript bindings to this project? [Y/n]:`. Press Enter (or pass `--use-defaults`) to opt in; the wrapper writes a default `"winapp": { "jsBindings": {} }` namespace (covering the full Windows App SDK) into `package.json`. C++ projections are always generated regardless of the answer.
-- **Existing workspace:** edit `package.json` to add `"winapp": { "jsBindings": {} }` (the empty object opts in with full-SDK defaults). Then run `npx winapp restore` — it re-runs codegen against the existing config without modifying it.
+- **Existing workspace:** run `npx winapp node generate-bindings`. It adds a default `"winapp": { "jsBindings": {} }` namespace to `package.json` (covering the full Windows App SDK) on first use, then immediately generates against the cached winmd lockfile. Requires a prior `winapp restore` so the lockfile exists; if not, the command tells you to run `winapp restore` first.
 - **Re-run codegen** after editing `winapp.jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand: `npx winapp node generate-bindings` is the fast path — it reuses the cached `.winapp/winmds.lock.json` and skips the NuGet download / cppwinrt header regen that `winapp restore` does. Use `npx winapp restore` instead when you changed `winapp.yaml` (packages, sdkVersion, etc.) so the lockfile is refreshed first.
 **Notes:** npm-only — the interactive prompt only fires when invoked through `npx winapp …`. Standalone winget / installer builds do not generate JS bindings. Codegen always auto-injects `@microsoft/dynwinrt` as a production dep into `package.json`. See [JS bindings docs](https://github.com/microsoft/winappcli/blob/main/docs/js-bindings.md) for the full `winapp.jsBindings` schema.
 
@@ -229,7 +229,7 @@ Want to inspect or interact with a running app's UI?
 
 ### Electron
 - **Setup:** `winapp init --use-defaults` → choose your Windows API access path:
-  - **JS bindings (easiest, npm-only):** at the `npx winapp init` prompt answer **Y** (the default — or pass `--use-defaults`). On an existing workspace, add `"winapp": { "jsBindings": {} }` to `package.json` and run `npx winapp restore`. Generates typed `bindings/*.{js,d.ts}` for the full Windows App SDK surface, callable directly from your main/renderer process via dynwinrt. No native build step.
+  - **JS bindings (easiest, npm-only):** at the `npx winapp init` prompt answer **Y** (the default — or pass `--use-defaults`). On an existing workspace, run `npx winapp node generate-bindings` (adds the default `winapp.jsBindings` block on first use, then generates immediately from the cached winmd lockfile). Generates typed `bindings/*.{js,d.ts}` for the full Windows App SDK surface, callable directly from your main/renderer process via dynwinrt. No native build step.
   - **Native addons:** `winapp node create-addon --template cs` (or `--template cpp`) for C#/C++ addons when you need full WinRT access or stateful native services.
   - Then: `winapp node add-electron-debug-identity` to enable identity-required APIs.
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`

@@ -107,3 +107,77 @@ function isReparseSegment(p: string): boolean {
   }
   return stat.isSymbolicLink();
 }
+
+/**
+ * Throw if `filePath` (or any segment from `workspaceDir` down to it) is a
+ * reparse point or UNC path. Single chokepoint for every file we read or
+ * write inside the user's workspace (`package.json`, `winapp.yaml`,
+ * `.winapp/winmds.lock.json`, codegen output). Mirrors the native side's
+ * `IsLockfilePathUnsafe()` / `PathSafety.AssertSafeWrite`.
+ *
+ * `label` is woven into the error message so the user can tell which file
+ * tripped the guard (`'package.json'`, `'winmds.lock.json'`, …).
+ */
+export function assertSafeWorkspaceFile(workspaceDir: string, filePath: string, label: string): void {
+  if (isNetworkPath(workspaceDir) || isNetworkPath(filePath)) {
+    throw new Error(
+      `Refusing to access ${label} at '${filePath}': workspace or target path is a UNC / network path. ` +
+        'Use a local drive-letter path.'
+    );
+  }
+  if (hasReparsePointOnPath(filePath, workspaceDir)) {
+    throw new Error(
+      `Refusing to access ${label} at '${filePath}': the file or one of its ` +
+        `ancestors below '${workspaceDir}' is a reparse point (symlink / junction) ` +
+        'or the file is outside the workspace. Resolve the link and re-run.'
+    );
+  }
+}
+
+/**
+ * Stricter variant for directories that the wrapper will RECURSIVELY DELETE
+ * before each run (e.g. dynwinrt-codegen output). Requires:
+ *   * `outputDir` is strictly *inside* the workspace (not equal to it);
+ *   * neither end of the path is UNC / network;
+ *   * no segment from workspace down to outputDir is a reparse point;
+ *   * if `outputDir` already exists, it is itself not a reparse point.
+ *
+ * Throws a labelled error on any violation. Returns the resolved absolute
+ * path on success.
+ */
+export function assertSafeWorkspaceOutputDir(workspaceDir: string, outputDir: string, label: string): string {
+  if (!outputDir || !outputDir.trim()) {
+    throw new Error(`${label} must not be empty.`);
+  }
+  if (isNetworkPath(workspaceDir) || isNetworkPath(outputDir)) {
+    throw new Error(
+      `Refusing to use ${label} at '${outputDir}': workspace or output path is a UNC / network path. ` +
+        'Use a local drive-letter path.'
+    );
+  }
+
+  const resolvedOutput = path.isAbsolute(outputDir) ? path.resolve(outputDir) : path.resolve(workspaceDir, outputDir);
+  const resolvedWorkspace = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
+  const prefix = resolvedWorkspace + path.sep;
+  const insideWorkspace =
+    resolvedOutput.length > prefix.length && resolvedOutput.toLowerCase().startsWith(prefix.toLowerCase());
+
+  if (!insideWorkspace) {
+    throw new Error(
+      `${label} ('${outputDir}') resolves to '${resolvedOutput}' which is outside the workspace ` +
+        `('${resolvedWorkspace}'). The directory is wiped before each run, so it must be a ` +
+        "path strictly inside the workspace. Use a relative path like 'bindings' or an absolute path " +
+        'that descends from the workspace root.'
+    );
+  }
+
+  if (hasReparsePointOnPath(resolvedOutput, resolvedWorkspace)) {
+    throw new Error(
+      `${label} ('${outputDir}') resolves through a reparse point under '${resolvedWorkspace}'. ` +
+        'Reparse points (symlinks / junctions) are rejected because the wipe could follow them ' +
+        'outside the workspace. Move the output to a regular subdirectory.'
+    );
+  }
+
+  return resolvedOutput;
+}

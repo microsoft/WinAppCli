@@ -23,6 +23,7 @@ import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { JsBindingsConfig } from './package-json-config';
 import { JsBindingsExtraType } from './additional-winmds';
+import { assertSafeWorkspaceOutputDir, isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
 // Marker written into the output dir after a successful run; its presence
 // authorises the next run to wipe the dir.
@@ -101,71 +102,12 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
 // ---- output dir resolution + safety ---------------------------------------
 
 export function resolveOutputDir(workspaceDir: string, output: string): string {
+  // Single source of truth for "this directory will be wiped before each
+  // codegen run" safety policy: must be UNC-free, strictly inside the
+  // workspace, and reparse-point-free along the entire path. Mirrors
+  // PathSafety guards on the native side.
   const out = output && output.trim() ? output : 'bindings';
-  const resolved = path.isAbsolute(out) ? path.resolve(out) : path.resolve(workspaceDir, out);
-  const workspaceFull = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
-  const prefix = workspaceFull + path.sep;
-  const inside = resolved.length > prefix.length && resolved.toLowerCase().startsWith(prefix.toLowerCase());
-  if (!inside) {
-    throw new Error(
-      `jsBindings.output ('${output}') resolves to '${resolved}' which is outside the workspace ('${workspaceFull}'). ` +
-        'The output directory is wiped before each codegen run, so it must be a path strictly ' +
-        "inside the workspace. Use a relative path like 'bindings' or an absolute path " +
-        'that descends from the workspace root.'
-    );
-  }
-
-  // Reject reparse-point ancestors so the recursive delete can't follow a
-  // junction outside the workspace.
-  let probe = resolved;
-  for (;;) {
-    if (fs.existsSync(probe)) {
-      try {
-        const stat = fs.lstatSync(probe);
-        if (stat.isSymbolicLink()) {
-          throw new Error(
-            `jsBindings.output ('${output}') resolves through a reparse point at '${probe}'. ` +
-              'Reparse points (symlinks / junctions) are rejected because they could redirect ' +
-              'the output wipe outside the workspace. Move the output to a regular subdirectory ' +
-              'of the workspace.'
-          );
-        }
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-          throw err;
-        }
-      }
-    }
-    const trimmed = probe.replace(/[\\/]+$/, '');
-    if (trimmed.toLowerCase() === workspaceFull.toLowerCase()) {
-      break;
-    }
-    const parent = path.dirname(probe);
-    if (parent === probe || parent.length < workspaceFull.length) {
-      break;
-    }
-    probe = parent;
-    // Stop walking once we've reached or passed the workspace root.
-    if (probe.replace(/[\\/]+$/, '').toLowerCase() === workspaceFull.toLowerCase()) {
-      // Check the workspace itself once.
-      try {
-        if (fs.existsSync(probe) && fs.lstatSync(probe).isSymbolicLink()) {
-          throw new Error(
-            `Workspace directory '${probe}' is a reparse point. Refusing to use it as a codegen boundary.`
-          );
-        }
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-          throw err;
-        }
-      }
-      break;
-    }
-  }
-
-  return resolved;
+  return assertSafeWorkspaceOutputDir(workspaceDir, out, 'jsBindings.output');
 }
 
 /** Throws when outputDir contains files we didn't generate. Empty / missing OK. */
@@ -448,31 +390,42 @@ interface CodegenInvocation {
   prefixArgs: string[];
 }
 
-// Locate dynwinrt-codegen by walking up from the wrapper install dir looking
-// for node_modules/@microsoft/dynwinrt-codegen. Workspace-local installs are
-// not trusted (a cloned repo could substitute a malicious codegen).
+// Locate dynwinrt-codegen. Preferred resolution order:
+//   1. `require.resolve('@microsoft/dynwinrt-codegen/package.json')` anchored
+//      at the wrapper directory — this is the canonical Node module-resolver,
+//      so it works with hoisted node_modules (npm / yarn-classic),
+//      pnpm-default's symlinked layout, and yarn-Berry PnP.
+//   2. Physical node_modules walk — defensive fallback for the rare case
+//      where the wrapper is loaded via something that breaks
+//      `require.resolve` (e.g., custom bundler with frozen paths).
+//
+// Workspace-local installs are still preferred (a wrapper installed under
+// the user's workspace co-locates the codegen there), and we only trust
+// `cli.js` at a real on-disk path that we can lstat — so PnP's virtual
+// `.zip!/` paths are converted to an unzipped on-disk location by Node
+// itself before we read them.
 export function resolveCodegenInvocation(): CodegenInvocation {
   const wrapperDir = tryGetWrapperDir();
   const arch = resolveArchSubdir();
 
+  const pkgDirs = resolveCodegenPackageDirs(wrapperDir);
   let lastChecked: string | null = null;
-  for (let probe: string | null = wrapperDir; probe; probe = parentOrNull(probe)) {
-    const pkgDir = path.join(probe, 'node_modules', '@microsoft', 'dynwinrt-codegen');
-    if (!fs.existsSync(pkgDir)) {
-      continue;
-    }
-
+  for (const pkgDir of pkgDirs) {
     // Priority 1: pre-built .exe (no Node startup needed).
     const exePath = path.join(pkgDir, 'bin', arch, 'dynwinrt-codegen.exe');
     if (fs.existsSync(exePath)) {
       return { executable: exePath, prefixArgs: [] };
     }
 
-    // Priority 2: cli.js via node.exe — defensive fallback. Reject .bat/.cmd
-    // because they dispatch through cmd.exe and would re-parse user-derived args.
+    // Priority 2: cli.js via node — defensive fallback. Prefer the current
+    // wrapper's own interpreter (`process.execPath`) over PATH lookup so a
+    // poisoned PATH (UNC entry, reparse junction, attacker-controlled dir)
+    // can't substitute a hostile node.exe for cli.js execution. We still
+    // walk PATH as a last resort for the unusual case where the wrapper is
+    // launched from a non-node interpreter (e.g. an `.exe` shim).
     const cliJs = path.join(pkgDir, 'cli.js');
     if (fs.existsSync(cliJs)) {
-      const nodePath = resolveNativeNodeOnPath();
+      const nodePath = resolveTrustedNodeInterpreter();
       if (!nodePath) {
         throw new Error(
           `The codegen at '${cliJs}' requires a native Node.js executable (node.exe) on PATH. ` +
@@ -493,19 +446,73 @@ export function resolveCodegenInvocation(): CodegenInvocation {
       `(expected 'bin/${arch}/dynwinrt-codegen.exe' or 'cli.js'). ` +
       'The npm package may be corrupt; reinstall it.\n\n'
     : `Searched ${CODEGEN_PACKAGE_NAME} from the wrapper install${wrapperHint} — ` +
-      'no node_modules/@microsoft/dynwinrt-codegen found.\n\n';
+      `no ${CODEGEN_PACKAGE_NAME} resolvable via Node module resolution.\n\n`;
 
   throw new Error(
     partialHint +
-      'To enable JS bindings, install via npm or yarn classic:\n' +
+      'To enable JS bindings, install via your package manager:\n' +
       '  npm i -D @microsoft/winappcli\n' +
       `(bundles ${CODEGEN_PACKAGE_NAME} as a transitive dependency.)\n\n` +
-      'Non-hoisting layouts (pnpm default, yarn-Berry PnP) are not supported: the\n' +
-      'codegen binary must live next to the winapp launcher so winapp can verify\n' +
-      "it ships the binary it's spawning. For pnpm, set 'node-linker=hoisted' in\n" +
-      ".npmrc; for yarn-Berry, set 'nodeLinker: node-modules' in .yarnrc.yml.\n\n" +
+      'pnpm and yarn (classic / Berry / PnP) are supported via Node module resolution.\n\n' +
       'See https://github.com/microsoft/WinAppCli#electron--nodejs for setup details.'
   );
+}
+
+/**
+ * Build the list of candidate `@microsoft/dynwinrt-codegen` package
+ * directories. Iterates lazily so we stop as soon as the first match has
+ * been fully validated by the caller.
+ *
+ * Order:
+ *   * Anchored `require.resolve` from the wrapper dir. Honors all linkers
+ *     (hoisted, isolated, PnP) because it goes through Node's own resolver.
+ *   * Physical `node_modules/@microsoft/dynwinrt-codegen` walk from the
+ *     wrapper dir upward — same as the legacy behaviour, kept as a safety
+ *     net for bundled / patched layouts where `require.resolve` is stubbed.
+ */
+function* resolveCodegenPackageDirs(wrapperDir: string | null): Generator<string> {
+  const seen = new Set<string>();
+
+  const yieldUnique = function* (dir: string | null): Generator<string> {
+    if (!dir) return;
+    const key = dir.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    yield dir;
+  };
+
+  // Strategy 1: Node module resolution (PnP / pnpm / npm / yarn-classic).
+  yield* yieldUnique(resolveViaRequireResolve(wrapperDir));
+
+  // Strategy 2: physical node_modules walk from the wrapper dir upward.
+  for (let probe: string | null = wrapperDir; probe; probe = parentOrNull(probe)) {
+    const pkgDir = path.join(probe, 'node_modules', '@microsoft', 'dynwinrt-codegen');
+    if (fs.existsSync(pkgDir)) {
+      yield* yieldUnique(pkgDir);
+    }
+  }
+}
+
+function resolveViaRequireResolve(wrapperDir: string | null): string | null {
+  const searchPaths: string[] = [];
+  if (wrapperDir) searchPaths.push(wrapperDir);
+  // Always include the wrapper module's own directory so global installs
+  // (`npm i -g @microsoft/winappcli`) still resolve the bundled codegen.
+  searchPaths.push(__dirname);
+
+  try {
+    const pkgJson = require.resolve(`${CODEGEN_PACKAGE_NAME}/package.json`, { paths: searchPaths });
+    // pkgJson should be a real on-disk file path. PnP can return virtual
+    // paths inside `.zip!/`; reject those by requiring the parent dir to
+    // exist on disk.
+    const pkgDir = path.dirname(pkgJson);
+    if (fs.existsSync(pkgDir)) {
+      return pkgDir;
+    }
+  } catch {
+    // Not resolvable from any anchor — fall through to the physical walk.
+  }
+  return null;
 }
 
 function parentOrNull(dir: string): string | null {
@@ -546,8 +553,61 @@ function resolveArchSubdir(): string {
   return os.arch() === 'arm64' ? 'arm64' : 'x64';
 }
 
+// Locate a trusted node.exe to run `cli.js`. Priority:
+//   1. `process.execPath` — the interpreter currently executing this wrapper.
+//      That's the same node we just used to load this very module, so its
+//      provenance is implicitly trusted (the npm package manager picked it).
+//      We still verify it is a `.exe` / `.com` and that no segment of the
+//      path is a reparse point / UNC — defends against `npm` being launched
+//      via a junction into a hostile share.
+//   2. PATH walk — fallback for the rare case where the wrapper is bundled
+//      into an `.exe` shim and `process.execPath` doesn't point at a Node
+//      interpreter. Each PATH candidate must pass the same safety gate.
+//
+// Rejects `.bat` / `.cmd` because those dispatch through `cmd.exe` and would
+// re-parse user-derived args.
+function resolveTrustedNodeInterpreter(): string | null {
+  const execPath = process.execPath;
+  if (execPath && isAcceptableNodeExe(execPath)) {
+    return execPath;
+  }
+  return resolveNativeNodeOnPath();
+}
+
+function isAcceptableNodeExe(candidate: string): boolean {
+  if (!candidate) {
+    return false;
+  }
+  // UNC / network paths: reject. Workspace-style reparse-point walk needs a
+  // boundary; for arbitrary system paths (`C:\Program Files\nodejs\…`) we
+  // anchor on the candidate's drive root so the entire path is scanned for
+  // reparse junctions.
+  if (isNetworkPath(candidate)) {
+    return false;
+  }
+  const ext = path.extname(candidate).toLowerCase();
+  if (ext !== '.exe' && ext !== '.com') {
+    return false;
+  }
+  let resolved: string;
+  try {
+    resolved = path.resolve(candidate);
+  } catch {
+    return false;
+  }
+  if (!fs.existsSync(resolved)) {
+    return false;
+  }
+  const driveRoot = path.parse(resolved).root.replace(/[\\/]+$/, '');
+  if (driveRoot && hasReparsePointOnPath(resolved, driveRoot)) {
+    return false;
+  }
+  return true;
+}
+
 // Walk PATH looking for node.exe / node.com. Rejects relative PATH entries,
-// drops CWD-equivalent entries, and only accepts native .exe/.com (no .bat/.cmd).
+// drops CWD-equivalent entries, refuses UNC / reparse-backed candidates,
+// and only accepts native .exe/.com (no .bat/.cmd).
 function resolveNativeNodeOnPath(): string | null {
   const command = 'node';
   const pathEnv = process.env.PATH ?? '';
@@ -565,6 +625,9 @@ function resolveNativeNodeOnPath(): string | null {
     if (!dir || dir === '.' || !path.isAbsolute(dir)) {
       continue;
     }
+    if (isNetworkPath(dir)) {
+      continue;
+    }
     let resolvedDir: string;
     try {
       resolvedDir = path.resolve(dir);
@@ -576,16 +639,13 @@ function resolveNativeNodeOnPath(): string | null {
     }
     for (const ext of ['.exe', '.com']) {
       const candidate = path.join(resolvedDir, command + ext);
-      if (fs.existsSync(candidate)) {
+      if (fs.existsSync(candidate) && isAcceptableNodeExe(candidate)) {
         return candidate;
       }
     }
     const bare = path.join(resolvedDir, command);
-    if (fs.existsSync(bare)) {
-      const ext = path.extname(bare).toLowerCase();
-      if (ext === '.exe' || ext === '.com') {
-        return bare;
-      }
+    if (fs.existsSync(bare) && isAcceptableNodeExe(bare)) {
+      return bare;
     }
   }
   return null;

@@ -85,19 +85,15 @@
         Windows TFMs must build cleanly with no winapp activity. We prefer
         the explicitly-set $(TargetPlatformIdentifier) when present and
         fall back to deriving it from $(TargetFramework).
-      - A manifest exists at $(WinAppManifestPath). After the auto-detection
-        block above runs, this property points at the first existing manifest
-        across all supported output- and project-directory locations, OR at
-        whatever path the consumer set explicitly. Frameworks like MAUI
-        generate the manifest into $(OutputPath) based on platform / msbuild
-        props, so we deliberately accept output-dir paths here — without that,
-        MAUI head apps consuming this package transitively would never have
-        the gate activate. The other discriminators above (WindowsPackageType,
-        OutputType, TPI) already prevent activation in projects that aren't
-        intended to be packaged Windows apps, so a stale output-dir manifest
-        from a prior build only matters in a project that is otherwise still
-        a packaged Windows app — in which case re-activating the gate is the
-        correct behavior.
+      - $(WinAppManifestPath) is non-empty AND exists. Manifest existence
+        IS checked here at parse time so that build-time outputs (.appxrecipe,
+        manifest promotion, Content copy) get the gate right when the
+        manifest is already on disk. For build-time-generated manifests
+        (e.g. MAUI generates into $(OutputPath), or the MSIX SDK rewrites
+        promoted manifests during Build), the parse-time check evaluates
+        false; `_WinAppResolveManifestPath` re-evaluates this gate after
+        Build runs so `dotnet run` / `_WinAppValidateRunSupport` /
+        `_WinAppBuildRunArgs` see the live answer.
     ============================================================================
   -->
   <PropertyGroup>
@@ -112,11 +108,21 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <_WinAppRunSupportActive Condition="
+    <!--
+      Project-shape gate: everything *except* manifest existence. Lives in
+      its own property so `_WinAppResolveManifestPath` can compose it with
+      a fresh Exists() check at build-time without restating the discriminator
+      list.
+    -->
+    <_WinAppRunSupportShapeMatches Condition="
         '$(EnableWinAppRunSupport)' == 'true'
         And '$(WindowsPackageType)' != 'None'
         And '$(OutputType)' != 'Library'
-        And '$(_WinAppEffectiveTargetPlatformIdentifier)' == 'windows'
+        And '$(_WinAppEffectiveTargetPlatformIdentifier)' == 'windows'">true</_WinAppRunSupportShapeMatches>
+    <_WinAppRunSupportShapeMatches Condition="'$(_WinAppRunSupportShapeMatches)' == ''">false</_WinAppRunSupportShapeMatches>
+
+    <_WinAppRunSupportActive Condition="
+        '$(_WinAppRunSupportShapeMatches)' == 'true'
         And '$(WinAppManifestPath)' != ''
         And Exists('$(WinAppManifestPath)')">true</_WinAppRunSupportActive>
     <_WinAppRunSupportActive Condition="'$(_WinAppRunSupportActive)' == ''">false</_WinAppRunSupportActive>
@@ -160,20 +166,71 @@
     ============================================================================
     _WinAppResolveManifestPath Target
     
-    When appxmanifest.xml is promoted to AppxManifest, the MSIX SDK generates
-    AppxManifest.xml in the output directory during build. This target re-resolves
-    WinAppManifestPath to point to the generated file (which has build metadata,
-    resolved placeholders, etc.) instead of the raw source file.
+    Re-resolves $(WinAppManifestPath) and re-evaluates the master gate
+    $(_WinAppRunSupportActive) AFTER Build has run. The parse-time gate
+    can only see files that exist on disk before Build executes, which
+    is wrong for two scenarios this package needs to support:
+    
+      1. appxmanifest.xml is promoted to AppxManifest and the MSIX SDK
+         generates the final $(OutputPath)AppxManifest.xml during Build
+         (placeholder resolution, PRI metadata, .appxrecipe stitching).
+      2. Frameworks like MAUI generate the manifest into $(OutputPath)
+         from platform/msbuild props at Build time — the source tree
+         contains no manifest at all.
+    
+    For either case the parse-time auto-detection block can't have set
+    $(WinAppManifestPath), and even when it did the file may not exist
+    yet. This target re-runs the output-dir lookup with a fresh
+    `Exists(...)` and then re-derives $(_WinAppRunSupportActive) so every
+    downstream target (`_WinAppValidateRunSupport`, `_WinAppBuildRunArgs`,
+    `_WinAppPrepareRunArguments`, …) sees the live answer.
+    
+    Gated only on $(_WinAppRunSupportShapeMatches) — i.e. the project
+    discriminators (EnableWinAppRunSupport, WindowsPackageType, OutputType,
+    TPI) — and never on the parse-time master gate. That avoids the
+    chicken-and-egg where the parse-time gate freezes as false because
+    Build hasn't generated the manifest yet, which in turn skips this
+    target, which is the only thing that could unfreeze the gate.
     ============================================================================
   -->
   <Target Name="_WinAppResolveManifestPath"
           AfterTargets="Build"
-          BeforeTargets="_WinAppValidateRunSupport;_WinAppBuildRunArgs"
-          Condition="'$(_WinAppRunSupportActive)' == 'true' And '$(_WinAppPromoteManifest)' == 'true'">
-    <PropertyGroup Condition="Exists('$(OutputPath)AppxManifest.xml')">
+          BeforeTargets="_WinAppValidateRunSupport;_WinAppBuildRunArgs;_WinAppCopyContentToLooseLayout;_WinAppPrepareRunArguments"
+          Condition="'$(_WinAppRunSupportShapeMatches)' == 'true'">
+    <!--
+      Re-probe the output-directory and project-directory manifest
+      locations now that Build has run. Same precedence as the parse-time
+      auto-detection block at the top of this file. Each guarded by
+      `'$(WinAppManifestPath)' == ''` so an explicitly-set value (or one
+      already resolved upstream) wins.
+    -->
+    <PropertyGroup>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)AppxManifest.xml')">$(OutputPath)AppxManifest.xml</WinAppManifestPath>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)Package.appxmanifest')">$(OutputPath)Package.appxmanifest</WinAppManifestPath>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(OutputPath)appxmanifest.xml')">$(OutputPath)appxmanifest.xml</WinAppManifestPath>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\AppxManifest.xml')">$(MSBuildProjectDirectory)\AppxManifest.xml</WinAppManifestPath>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">$(MSBuildProjectDirectory)\Package.appxmanifest</WinAppManifestPath>
+      <WinAppManifestPath Condition="'$(WinAppManifestPath)' == '' And Exists('$(MSBuildProjectDirectory)\appxmanifest.xml')">$(MSBuildProjectDirectory)\appxmanifest.xml</WinAppManifestPath>
+    </PropertyGroup>
+    <!--
+      When appxmanifest.xml was promoted, prefer the MSIX-SDK-generated
+      output-dir copy (has placeholders resolved) over the source one.
+      Mirrors the previous behavior of this target before the gate split.
+    -->
+    <PropertyGroup Condition="'$(_WinAppPromoteManifest)' == 'true' And Exists('$(OutputPath)AppxManifest.xml')">
       <WinAppManifestPath>$(OutputPath)AppxManifest.xml</WinAppManifestPath>
     </PropertyGroup>
-    <Message Text="[WinAppRunSupport] Resolved promoted manifest to: $(WinAppManifestPath)" Importance="normal" />
+
+    <!-- Recompute the master gate with the (possibly new) manifest path. -->
+    <PropertyGroup>
+      <_WinAppRunSupportActive Condition="
+          '$(_WinAppRunSupportShapeMatches)' == 'true'
+          And '$(WinAppManifestPath)' != ''
+          And Exists('$(WinAppManifestPath)')">true</_WinAppRunSupportActive>
+      <_WinAppRunSupportActive Condition="'$(_WinAppRunSupportActive)' == ''">false</_WinAppRunSupportActive>
+    </PropertyGroup>
+
+    <Message Text="[WinAppRunSupport] Resolved manifest to: $(WinAppManifestPath)" Importance="normal" Condition="'$(WinAppManifestPath)' != ''" />
   </Target>
 
   <!--
@@ -341,6 +398,7 @@
   <Target Name="WinAppRunSupportInfo">
     <Message Text="=== WinApp Run Support Information ===" Importance="high" />
     <Message Text="_WinAppRunSupportActive: $(_WinAppRunSupportActive)" Importance="high" />
+    <Message Text="_WinAppRunSupportShapeMatches: $(_WinAppRunSupportShapeMatches)" Importance="high" />
     <Message Text="EnableWinAppRunSupport: $(EnableWinAppRunSupport)" Importance="high" />
     <Message Text="WindowsPackageType: $(WindowsPackageType)" Importance="high" />
     <Message Text="OutputType: $(OutputType)" Importance="high" />

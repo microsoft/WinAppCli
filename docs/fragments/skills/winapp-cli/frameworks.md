@@ -30,8 +30,8 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults                    # init + generate full Windows App SDK JS bindings AND C++ projections (default: Both)
-# (interactive: omit --use-defaults to pick C++ / JS / Both at the prompt)
+npx winapp init --use-defaults                    # init + JS bindings (yes) + C++ projections (always)
+# (interactive: omit --use-defaults to get a Yes/No prompt for JS bindings; default is Yes)
 npx winapp node create-addon --template cs        # create a C# native addon (for what dynwinrt can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```

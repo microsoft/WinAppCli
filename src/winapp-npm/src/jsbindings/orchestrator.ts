@@ -19,12 +19,13 @@
 import * as path from 'path';
 import { readJsBindingsConfig, JsBindingsConfig } from './package-json-config';
 import { tryReadLockfile } from './lockfile-reader';
-import { partitionByPackageCategory } from './winmd-policy';
+import { partitionPackageWinmds } from './winmd-policy';
 import { resolveAdditionalWinmds } from './additional-winmds';
 import { runCodegen } from './codegen-runner';
 import { ensureRuntimeDependency, formatRuntimeDependencyHint, getDynWinrtVersionPin } from './runtime-dep-injector';
 import { detectPackageManager } from './package-manager-detector';
 import { startSpinner, Spinner } from './spinner';
+import { computeYamlPackagesHash, readWinappYamlPackages } from './yaml-packages-hash';
 
 export const RUNTIME_PACKAGE_NAME = '@microsoft/dynwinrt';
 
@@ -40,12 +41,26 @@ export interface OrchestratorResult {
 
 export interface OrchestratorOptions {
   workspaceDir: string;
+  /**
+   * Explicit `winapp.yaml` path the native CLI used (resolved from `--config-dir`
+   * by the caller via {@link resolveYamlPath}). Defaults to
+   * `<workspaceDir>/winapp.yaml` for backward-compat; pass it explicitly
+   * whenever the user supplied `--config-dir` so the staleness check
+   * compares against the same file native hashed into the lockfile.
+   */
+  yamlPath?: string;
   /** Override for the npm wrapper's pinned dynwinrt version (used in tests). */
   versionOverride?: string;
   /** Sink for per-line progress (stdout/stderr from codegen). Defaults to console. */
   log?: (line: string) => void;
   /** Forward to codegen-runner. False (default) suppresses per-file noise. */
   verbose?: boolean;
+  /**
+   * Suppress all non-essential progress / hint output. Errors and warnings
+   * still go through `log`; the spinner, `🔨` fallback, and runtime-dep hint
+   * are skipped. Used by `--quiet` on the wrapper.
+   */
+  quiet?: boolean;
 }
 
 export async function runJsBindingsPipeline(options: OrchestratorOptions): Promise<OrchestratorResult> {
@@ -68,17 +83,42 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   }
   const config = pkgResult.jsBindings;
 
-  // 2. Read lockfile.
-  const winappDir = path.join(workspaceDir, '.winapp');
-  const lockResult = tryReadLockfile(winappDir);
+  // 2. Read lockfile (workspace-scoped: lives at <workspace>/.winapp/winmds.lock.json).
+  const lockResult = tryReadLockfile(workspaceDir);
   if (!lockResult.lockfile) {
     return {
       outcome: lockResult.reason?.includes('schema mismatch') ? 'lockfileStale' : 'lockfileMissing',
       message:
-        lockResult.reason ?? `No ${path.join(winappDir, 'winmds.lock.json')} found. Run \`winapp restore\` first.`,
+        lockResult.reason ??
+        `No ${path.join(workspaceDir, '.winapp', 'winmds.lock.json')} found. ` +
+          'This file is written by `winapp restore`. Run `winapp restore` once ' +
+          '(or re-run it after upgrading from an older winapp version) to build the ' +
+          'winmd inventory, then retry.',
     };
   }
   const lockfile = lockResult.lockfile;
+
+  // 2a. Compare the lockfile's recorded `yaml_packages_hash` against a fresh
+  //     hash of `winapp.yaml`. If the user edited the SDK pins without
+  //     re-running `winapp restore`, the lockfile's winmd inventory is for
+  //     the OLD packages — emitting JS bindings now would generate against
+  //     stale types. Surface as `lockfileStale` so the cli.ts caller prints
+  //     the actionable `winapp restore` hint.
+  if (lockfile.yamlPackagesHash) {
+    const currentPackages = readWinappYamlPackages(workspaceDir, options.yamlPath);
+    if (currentPackages) {
+      const currentHash = computeYamlPackagesHash(currentPackages);
+      if (currentHash !== lockfile.yamlPackagesHash) {
+        return {
+          outcome: 'lockfileStale',
+          message:
+            `winapp.yaml \`packages:\` has changed since the last \`winapp restore\` ` +
+            `(lockfile hash ${lockfile.yamlPackagesHash.slice(0, 12)}…, current ${currentHash.slice(0, 12)}…). ` +
+            'Run `winapp restore` to refresh the winmd inventory before generating bindings.',
+        };
+      }
+    }
+  }
 
   // 3. Resolve user-supplied additional winmds (each independently).
   const userEmit = resolveAdditionalWinmds(config.additionalWinmds, workspaceDir, 'additionalWinmds');
@@ -87,20 +127,15 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     log(w);
   }
 
-  // 4. Partition NuGet winmds by category. Per-package overrides from config.
-  const flatWinmds: string[] = [];
-  for (const pkg of lockfile.packages) {
-    for (const w of pkg.winmds) {
-      flatWinmds.push(w);
-    }
-  }
-  const partition = partitionByPackageCategory(flatWinmds, {
+  // 4. Partition NuGet winmds by category, using the lockfile's per-package
+  //    grouping directly (no path-extraction guesswork). Per-package overrides
+  //    from config are layered on top of the built-in skip / ref-only lists.
+  const partition = partitionPackageWinmds(lockfile.packages, {
     overrides: {
       skip: config.skipPackages,
       refOnly: config.refOnlyPackages,
       emit: config.emitPackages,
     },
-    nugetCacheRoot: lockfile.nugetCacheDir,
     emitScope: config.packages.length > 0 ? config.packages : undefined,
   });
 
@@ -126,11 +161,11 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     `Generating JS bindings from ${emitWinmds.length} winmd${emitWinmds.length === 1 ? '' : 's'}` +
     (refWinmds.length > 0 ? ` (+${refWinmds.length} ref)` : '') +
     `...`;
-  const useSpinner = !options.log && !options.verbose;
+  const useSpinner = !options.log && !options.verbose && !options.quiet;
   let spinner: Spinner | null = null;
   if (useSpinner) {
     spinner = startSpinner(progressText);
-  } else {
+  } else if (!options.quiet) {
     log(`🔨 ${progressText}`);
   }
 
@@ -160,8 +195,11 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         ensureResult.pinnedVersion,
         pm.installCommand
       );
-      log(hint.message);
+      if (!options.quiet) {
+        log(hint.message);
+      }
     } catch (err) {
+      // Warnings always surface, even in --quiet, so users still see real failures.
       log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
     }
   }
