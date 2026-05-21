@@ -10,8 +10,6 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class WinmdsLockfileServiceTests
 {
-    private static readonly string[] _arr00 = ["Microsoft.WindowsAppSDK.AI"];
-
     public TestContext TestContext { get; set; } = null!;
 
     private DirectoryInfo _temp = null!;
@@ -58,10 +56,11 @@ public class WinmdsLockfileServiceTests
         var path = _svc.GetLockfilePath(winapp);
         Assert.IsTrue(path.Exists, "Lockfile must be written under .winapp/.");
         var json = await File.ReadAllTextAsync(path.FullName);
-        StringAssert.Contains(json, "\"schema\": 2");
+        StringAssert.Contains(json, "\"schema\": 3");
         StringAssert.Contains(json, "\"generated_at\"");
         StringAssert.Contains(json, "Microsoft.WindowsAppSDK.AI");
-        StringAssert.Contains(json, "\"category\": \"emit\"");
+        Assert.IsFalse(json.Contains("\"category\""),
+            "v3 lockfile must NOT emit a `category` field — that classification is owned by the @microsoft/winapp npm wrapper now.");
         Assert.IsTrue(json.Contains('\n'), "Output must be indented (multiple lines).");
         var bytes = await File.ReadAllBytesAsync(path.FullName);
         Assert.IsFalse(
@@ -70,12 +69,12 @@ public class WinmdsLockfileServiceTests
     }
 
     [TestMethod]
-    public async Task RoundTrip_PreservesPackageVersionsAndCategories()
+    public async Task RoundTrip_PreservesPackageVersionsAndWinmds()
     {
         var winapp = _temp.CreateSubdirectory("winapp");
         var cache = _temp.CreateSubdirectory("packages");
 
-        // Build a realistic mix: emit + ref-only + skip + a package with zero winmds.
+        // Realistic mix including a package with zero winmds (the umbrella).
         var aiWinmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
         var ieWinmd = MakeFile(cache, "microsoft.windowsappsdk.interactiveexperiences", "1.8.0", "metadata", "10.0.18362.0", "Microsoft.UI.winmd");
         var winuiWinmd = MakeFile(cache, "microsoft.windowsappsdk.winui", "1.8.0", "metadata", "Microsoft.UI.Xaml.winmd");
@@ -91,26 +90,22 @@ public class WinmdsLockfileServiceTests
 
         var lockfile = await _svc.TryReadAsync(winapp, default);
         Assert.IsNotNull(lockfile);
-        Assert.AreEqual(2, lockfile.Schema);
+        Assert.AreEqual(3, lockfile.Schema);
         Assert.AreEqual(4, lockfile.Packages.Count);
 
         // Packages are sorted alphabetically (case-insensitive) by name.
         var ai = lockfile.Packages.Single(p => p.Name == "Microsoft.WindowsAppSDK.AI");
         Assert.AreEqual("1.8.39", ai.Version);
-        Assert.AreEqual("emit", ai.Category);
         Assert.AreEqual(1, ai.Winmds.Count);
         Assert.IsTrue(ai.Winmds[0].EndsWith("Microsoft.Windows.AI.winmd", StringComparison.OrdinalIgnoreCase));
 
         var ie = lockfile.Packages.Single(p => p.Name == "Microsoft.WindowsAppSDK.InteractiveExperiences");
-        Assert.AreEqual("refOnly", ie.Category);
         Assert.AreEqual(1, ie.Winmds.Count);
 
         var winui = lockfile.Packages.Single(p => p.Name == "Microsoft.WindowsAppSDK.WinUI");
-        Assert.AreEqual("skip", winui.Category);
         Assert.AreEqual(1, winui.Winmds.Count);
 
         var umbrella = lockfile.Packages.Single(p => p.Name == "Microsoft.WindowsAppSDK");
-        Assert.AreEqual("emit", umbrella.Category);
         Assert.AreEqual(0, umbrella.Winmds.Count, "Umbrella package has no winmd files; lockfile records it for completeness.");
     }
 
@@ -161,61 +156,6 @@ public class WinmdsLockfileServiceTests
             "Vendor winmd outside the NuGet cache must not get attached to any package.");
     }
 
-    [TestMethod]
-    public void BuildLockfile_PartitionFromLockfile_AppliesScopeAsEmitFilter_DemotesUnscopedToRefOnly()
-    {
-        // scope narrows EMIT, not codegen visibility — unscoped Emit
-        // packages must end up RefOnly for cross-package type resolution.
-        var cache = _temp.CreateSubdirectory("packages");
-        var aiWinmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
-        var fdnWinmd = MakeFile(cache, "microsoft.windowsappsdk.foundation", "1.8.0", "metadata", "Microsoft.Windows.Foundation.winmd");
-
-        var lockfile = WinmdsLockfileService.BuildLockfile(
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Microsoft.WindowsAppSDK.AI"] = "1.8.39",
-                ["Microsoft.WindowsAppSDK.Foundation"] = "1.8.0",
-            },
-            new[] { aiWinmd, fdnWinmd },
-            cache);
-
-        var (emit, refOnly, skipped) = JsBindingsWorkspaceService.PartitionFromLockfile(
-            lockfile, _arr00);
-
-        Assert.AreEqual(1, emit.Count, "Only the scoped AI package emits.");
-        Assert.IsTrue(emit[0].FullName.EndsWith("Microsoft.Windows.AI.winmd", StringComparison.OrdinalIgnoreCase));
-        Assert.AreEqual(1, refOnly.Count,
-            "Unscoped Foundation package MUST be preserved as RefOnly (it provides types AI references). "
-            + "An earlier implementation dropped the package entirely → broken codegen.");
-        Assert.IsTrue(refOnly[0].FullName.EndsWith("Microsoft.Windows.Foundation.winmd", StringComparison.OrdinalIgnoreCase));
-        Assert.AreEqual(0, skipped);
-    }
-
-    [TestMethod]
-    public void PartitionFromLockfile_NullScope_ReturnsAllPackages()
-    {
-        var cache = _temp.CreateSubdirectory("packages");
-        var aiWinmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
-        var winuiWinmd = MakeFile(cache, "microsoft.windowsappsdk.winui", "1.8.0", "metadata", "Microsoft.UI.Xaml.winmd");
-        var ieWinmd = MakeFile(cache, "microsoft.windowsappsdk.interactiveexperiences", "1.8.0", "metadata", "Microsoft.UI.winmd");
-
-        var lockfile = WinmdsLockfileService.BuildLockfile(
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Microsoft.WindowsAppSDK.AI"] = "1.8.39",
-                ["Microsoft.WindowsAppSDK.WinUI"] = "1.8.0",
-                ["Microsoft.WindowsAppSDK.InteractiveExperiences"] = "1.8.0",
-            },
-            new[] { aiWinmd, winuiWinmd, ieWinmd },
-            cache);
-
-        var (emit, refOnly, skipped) = JsBindingsWorkspaceService.PartitionFromLockfile(lockfile, null);
-
-        Assert.AreEqual(1, emit.Count);
-        Assert.AreEqual(1, refOnly.Count);
-        Assert.AreEqual(1, skipped, "WinUI package contributes 1 to the skipped count.");
-    }
-
     // -------------------------------------------------------------------------
     // v2.3 — yaml hash, atomic write, schema-bump back-compat
     // -------------------------------------------------------------------------
@@ -241,15 +181,18 @@ public class WinmdsLockfileServiceTests
     }
 
     [TestMethod]
-    public async Task TryReadAsync_Schema1Lockfile_ReturnsNull()
+    public async Task TryReadAsync_OlderSchemaVersions_ReturnNull()
     {
-        // pre-v2.3 lockfiles use schema=1; readers treat them as missing
-        // so the slow path rebuilds.
-        var path = _svc.GetLockfilePath(_temp);
-        await File.WriteAllTextAsync(path.FullName, "{\"schema\": 1, \"packages\": []}");
-
-        var result = await _svc.TryReadAsync(_temp, default);
-        Assert.IsNull(result, "Schema 1 lockfiles must be ignored after the v2.3 schema bump.");
+        // Pre-v3 lockfiles (schema 1 or 2) used a Category field that was
+        // computed by native; v3 readers must ignore them so the npm wrapper
+        // can force a fresh restore that omits that field.
+        foreach (var oldSchema in new[] { 1, 2 })
+        {
+            var path = _svc.GetLockfilePath(_temp);
+            await File.WriteAllTextAsync(path.FullName, $"{{\"schema\": {oldSchema}, \"packages\": []}}");
+            var result = await _svc.TryReadAsync(_temp, default);
+            Assert.IsNull(result, $"Schema {oldSchema} lockfiles must be ignored after the v3 schema bump.");
+        }
     }
 
     [TestMethod]
@@ -274,76 +217,6 @@ public class WinmdsLockfileServiceTests
         Assert.IsFalse(
             entries.Any(n => n.StartsWith("winmds.lock.json.tmp", StringComparison.Ordinal)),
             $"No tmp staging file should remain after a successful write. Found: {string.Join(", ", entries)}");
-    }
-
-    [TestMethod]
-    public void PartitionFromLockfile_UncWinmdPaths_DroppedForBothEmitAndRefOnly()
-    {
-        // A tampered lockfile smuggling UNC paths must drop them for both
-        // emit and ref-only — any FileInfo() probe would SMB-handshake.
-        var cache = _temp.CreateSubdirectory("packages");
-        var legitEmit = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd");
-        var legitRef = MakeFile(cache, "microsoft.windowsappsdk.foundation", "1.8.0", "metadata", "Microsoft.Windows.Foundation.winmd");
-
-        // Hand-build the lockfile (BuildLockfile would reject paths outside
-        // the cache). RFC 2606 `.invalid` TLD never resolves.
-        var lockfile = new WinmdsLockfile
-        {
-            Schema = WinmdsLockfile.CurrentSchema,
-            GeneratedAt = DateTimeOffset.UtcNow.ToString("O"),
-            NugetCacheDir = cache.FullName,
-            YamlPackagesHash = "h",
-            Packages = new List<WinmdsLockfilePackage>
-            {
-                new WinmdsLockfilePackage
-                {
-                    Name = "Microsoft.WindowsAppSDK.AI",
-                    Version = "1.8.39",
-                    Category = "emit",
-                    Winmds = new List<string>
-                    {
-                        legitEmit.FullName,
-                        @"\\nonexistent-attacker.invalid\share\evil.emit.winmd",
-                    },
-                },
-                new WinmdsLockfilePackage
-                {
-                    Name = "Microsoft.WindowsAppSDK.Foundation",
-                    Version = "1.8.0",
-                    // Default category is Emit but no scope → demoted to RefOnly.
-                    Category = "emit",
-                    Winmds = new List<string>
-                    {
-                        legitRef.FullName,
-                        @"\\nonexistent-attacker.invalid\share\evil.ref.winmd",
-                    },
-                },
-            },
-        };
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var (emit, refOnly, _) = JsBindingsWorkspaceService.PartitionFromLockfile(
-            lockfile, _arr00);
-        sw.Stop();
-
-        Assert.IsTrue(sw.ElapsedMilliseconds < 2_000,
-            $"PartitionFromLockfile must drop UNC paths before any FileInfo probe "
-            + $"(took {sw.ElapsedMilliseconds}ms; >1s suggests SMB negotiation).");
-
-        Assert.AreEqual(1, emit.Count, "Only the legit emit winmd survives.");
-        Assert.IsTrue(
-            emit[0].FullName.EndsWith("Microsoft.Windows.AI.winmd", StringComparison.OrdinalIgnoreCase),
-            $"Emit must keep the legit local path. Got: {string.Join(", ", emit.Select(f => f.FullName))}");
-        Assert.IsFalse(
-            emit.Any(f => f.FullName.Contains("nonexistent-attacker.invalid", StringComparison.OrdinalIgnoreCase)),
-            "Emit MUST drop the UNC entry.");
-
-        Assert.AreEqual(1, refOnly.Count, "Only the legit ref-only winmd survives.");
-        Assert.IsTrue(
-            refOnly[0].FullName.EndsWith("Microsoft.Windows.Foundation.winmd", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(
-            refOnly.Any(f => f.FullName.Contains("nonexistent-attacker.invalid", StringComparison.OrdinalIgnoreCase)),
-            "RefOnly MUST drop the UNC entry.");
     }
 
     private static FileInfo MakeFile(DirectoryInfo cache, params string[] segments)
@@ -405,7 +278,7 @@ public class WinmdsLockfileServiceTests
         // way a read could succeed is by traversing the junction.
         var lockfilePath = Path.Combine(realDir.FullName, "winmds.lock.json");
         await File.WriteAllTextAsync(lockfilePath, """
-            { "schema": 2, "generated_at": "2025-01-01T00:00:00Z", "entries": [] }
+            { "schema": 3, "generated_at": "2025-01-01T00:00:00Z", "packages": [] }
             """);
 
         var winappJunction = Path.Combine(_temp.FullName, ".winapp");

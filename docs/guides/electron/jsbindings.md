@@ -17,19 +17,16 @@ You have two paths depending on whether your Electron app already has a `winapp.
 
 ### Path A — Fresh project (init with bindings prompt)
 
-When you run `npx winapp init` for the first time, the CLI shows an interactive **bindings prompt** asking whether to generate **C++ projections**, **JS/TS bindings**, or **Both**:
+When you run `npx winapp init` for the first time, the CLI shows an interactive yes/no prompt asking whether to add JS bindings on top of the standard C++ projection workspace:
 
 ```bash
 npx winapp init
-# > Bindings to generate:
-#     C++ projections
-#     JS/TS bindings
-#   ❯ Both                         (default)
+# > Add JS/TypeScript bindings to this project? [Y/n]:
 ```
 
-Pick **JS/TS bindings** for a pure Node/Electron project (skips cppwinrt headers/libs — saves ~130 MB and ~20 s), or **Both** to keep both surfaces available. `init` then installs the WinAppSDK packages, writes a `winapp.yaml` containing a default `jsBindings:` block (covering the full Windows App SDK), and runs the codegen.
+Press **Enter** (default Yes) to opt in. `init` installs the WinAppSDK packages, generates the C++ projections (always), adds a default `"winapp": { "jsBindings": {} }` namespace to `package.json` (covering the full Windows App SDK), and runs the codegen.
 
-For a scripted / CI install, `--use-defaults` auto-picks **Both** without prompting:
+For a scripted / CI install, `--use-defaults` auto-opts in without prompting:
 
 ```bash
 npx winapp init --use-defaults
@@ -38,22 +35,18 @@ npm install                        # picks up the @microsoft/dynwinrt runtime de
 
 ### Path B — Existing project (layer bindings on)
 
-If `winapp.yaml` already exists and you want to add JS bindings, edit the yaml and add a `jsBindings:` block. The empty form covers the full Windows App SDK:
+If `winapp.yaml` already exists and you want to add JS bindings, edit `package.json` to add the `winapp.jsBindings` namespace. The empty form covers the full Windows App SDK:
 
-```yaml
-# winapp.yaml
-jsBindings: {}
+```jsonc
+// package.json
+{
+  "winapp": {
+    "jsBindings": {}
+  }
+}
 ```
 
-If you want JS bindings without cppwinrt projections, also set `cppProjections: false` at the top level:
-
-```yaml
-# winapp.yaml
-cppProjections: false
-jsBindings: {}
-```
-
-Then run `restore` — it will pick up the new block, run codegen, and inject the `@microsoft/dynwinrt` runtime dep into `package.json`:
+Then run `restore` — it will pick up the new namespace, run codegen, and inject the `@microsoft/dynwinrt` runtime dep into `package.json`:
 
 ```bash
 npx winapp restore
@@ -62,10 +55,10 @@ npm install
 
 ### What you get
 
-Both paths produce a `bindings/winrt/` directory next to your sources:
+Both paths produce a `bindings/` directory next to your sources:
 
 ```
-bindings/winrt/
+bindings/
 ├── index.js                                          # entry — re-exports every emitted class
 ├── index.d.ts                                        # TS bundle
 ├── Microsoft.Windows.Vision.TextRecognizer.js
@@ -75,14 +68,14 @@ bindings/winrt/
 └── …                                                 # one pair of files per emitted class
 ```
 
-To put them somewhere else, set `jsBindings.output:` in `winapp.yaml` (e.g. `output: src/generated/winrt`) and re-run `restore`.
+To put them somewhere else, set `output` inside `winapp.jsBindings` in `package.json` (e.g. `"output": "src/generated/winrt"`) and re-run `restore`.
 
 > [!NOTE]
 > If you need to slice generation by NuGet package, add your own `.winmd`, or cherry-pick a few classes from a giant vendor SDK, see the recipes in [JS / TypeScript bindings for WinRT](../../js-bindings.md). This guide sticks to the simplest default-scope flow.
 
 ## Step 2: Call a WinRT API from your Electron code
 
-Import from the generated `index.js` — you don't need to know which file inside `bindings/winrt/` a class lives in. Here's an OCR (text recognition) flow as it would run in your Electron main process. We use `TextRecognizer` rather than `LanguageModel` because it doesn't require a Limited Access Feature token, so you can run this end-to-end on any Copilot+ PC without applying for access:
+Import from the generated `index.js` — you don't need to know which file inside `bindings/` a class lives in. Here's an OCR (text recognition) flow as it would run in your Electron main process. We use `TextRecognizer` rather than `LanguageModel` because it doesn't require a Limited Access Feature token, so you can run this end-to-end on any Copilot+ PC without applying for access:
 
 ```js
 // src/index.js (Electron main)
@@ -90,7 +83,7 @@ const path = require('path');
 const {
   TextRecognizer,
   AIFeatureReadyState,
-} = require('./bindings/winrt/index.js');
+} = require('./bindings/index.js');
 
 async function recognizeText(imagePath) {
   // First-run model download (one time per user) — cheap no-op once cached.
@@ -116,7 +109,7 @@ async function recognizeText(imagePath) {
 // lines.forEach(l => console.log(`(${l.x}, ${l.y}): ${l.text}`));
 ```
 
-For the full text-generation (Phi Silica `LanguageModel`) flow — which also lives in the same `bindings/winrt/` output — see the [Windows AI APIs reference](https://learn.microsoft.com/windows/ai/apis/). That surface requires a [Limited Access Feature token](https://learn.microsoft.com/windows/apps/develop/limited-access-features) before `LanguageModel.createAsync()` will succeed.
+For the full text-generation (Phi Silica `LanguageModel`) flow — which also lives in the same `bindings/` output — see the [Windows AI APIs reference](https://learn.microsoft.com/windows/ai/apis/). That surface requires a [Limited Access Feature token](https://learn.microsoft.com/windows/apps/develop/limited-access-features) before `LanguageModel.createAsync()` will succeed.
 
 A few conventions to remember:
 
@@ -145,17 +138,17 @@ Now start the app:
 npm start
 ```
 
-The first call to a WinRT method imported from `bindings/winrt/` will load `@microsoft/dynwinrt`, resolve the `.winmd` metadata, and invoke the COM method via libffi — all transparent to your code.
+The first call to a WinRT method imported from `bindings/` will load `@microsoft/dynwinrt`, resolve the `.winmd` metadata, and invoke the COM method via libffi — all transparent to your code.
 
 ## Step 4 (optional): Regenerate after a metadata change
 
-The generated `bindings/winrt/` files are committed-or-gitignored at your discretion (treat them like `package-lock.json` — generated, but stable enough to commit if you want diff visibility). Regenerate whenever:
+The generated `bindings/` files are committed-or-gitignored at your discretion (treat them like `package-lock.json` — generated, but stable enough to commit if you want diff visibility). Regenerate whenever:
 
 - You bump a WinAppSDK / WinRT package version in `winapp.yaml`
-- You add or remove entries in `jsBindings.packages:` / `additionalWinmds:` / `extraTypes:`
+- You add or remove entries in `winapp.jsBindings.packages` / `additionalWinmds` / `extraTypes` (in `package.json`)
 - The codegen itself is upgraded (`npm update @microsoft/dynwinrt-codegen`)
 
-In all cases, re-run `restore` — it picks up the current `winapp.yaml` (no yaml mutation) and re-runs codegen:
+In all cases, re-run `restore` — it picks up the current `winapp.yaml` and `package.json` (neither file is mutated) and re-runs codegen:
 
 ```bash
 npx winapp restore
@@ -163,11 +156,11 @@ npx winapp restore
 
 ## Troubleshooting
 
-**`Cannot find module './bindings/winrt'`**
-The generator hasn't produced output yet. Re-run `npx winapp restore` and verify `bindings/winrt/index.js` exists.
+**`Cannot find module './bindings'`**
+The generator hasn't produced output yet. Re-run `npx winapp restore` and verify `bindings/index.js` exists.
 
 **`MissingMethodException` / `Type not registered`**
-A class your code imports is in a `.winmd` that isn't on the codegen's input. Check the `packages:` list (or `additionalWinmds:`) in `winapp.yaml` — empty/omitted `jsBindings.packages` means "all installed packages participate", but if you've curated the list make sure the relevant package is there.
+A class your code imports is in a `.winmd` that isn't on the codegen's input. Check the `packages` list (or `additionalWinmds`) inside `winapp.jsBindings` in `package.json` — empty/omitted `packages` means "all installed packages participate", but if you've curated the list make sure the relevant package is there.
 
 **`HRESULT 0x8007XXXX` at call time**
 The metadata was emitted but the OS implementation isn't available — usually a missing OS feature (e.g., a Windows AI API on a non-Copilot+ PC) or missing capability declaration in `Package.appxmanifest`. The exception message preserves the WinRT error string from the COM layer.
@@ -177,7 +170,7 @@ Make sure `@microsoft/dynwinrt` is in your runtime `dependencies` (not just `dev
 
 ## Next steps
 
-- **Reference** — [JS / TypeScript bindings for WinRT (`jsBindings`)](../../js-bindings.md) for the full `winapp.yaml` schema and advanced recipes (slice by package, cherry-pick types, ship a vendor `.winmd`).
+- **Reference** — [JS / TypeScript bindings for WinRT (`winapp.jsBindings`)](../../js-bindings.md) for the full `package.json` schema and advanced recipes (slice by package, cherry-pick types, ship a vendor `.winmd`).
 - **CLI** — [`npx winapp init` reference](../../usage.md#init) and [`npx winapp restore` reference](../../usage.md#restore).
 - **Runtime** — [`@microsoft/dynwinrt` on GitHub](https://github.com/microsoft/dynwinrt) for the libffi-based runtime that powers the generated bindings.
 - **Package & ship** — [Packaging Your App](packaging.md) once you're ready to produce an MSIX for distribution.

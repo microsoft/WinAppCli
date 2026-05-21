@@ -13,7 +13,4 @@ internal interface IConfigService
 
     // Full save. Drops comments / unknown fields.
     void Save(WinappConfig cfg);
-
-    // Splice only the jsBindings: block; preserves rest of yaml.
-    void SaveJsBindingsOnly(WinappConfig cfg);
 }

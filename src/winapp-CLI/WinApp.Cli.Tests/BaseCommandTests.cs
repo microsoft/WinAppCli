@@ -52,7 +52,6 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
             ConfigureServices(services)
             // Override services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(_tempDirectory.FullName))
-            .AddSingleton<INpmWrapperVersionProvider>(new FakeNpmWrapperVersionProvider())
             .AddSingleton<IAnsiConsole>(TestAnsiConsole)
             .AddLogging(b =>
             {
@@ -182,13 +181,5 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
-    }
-
-    // Stub INpmWrapperVersionProvider for tests so they don't try
-    // to walk up from the test runner exe path looking for the npm wrapper.
-    private sealed class FakeNpmWrapperVersionProvider : INpmWrapperVersionProvider
-    {
-        public string DynWinrtVersion => "0.0.0-test";
-        public string DynWinrtCodegenVersion => "0.0.0-test";
     }
 }

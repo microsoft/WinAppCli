@@ -17,13 +17,4 @@ internal class WorkspaceSetupOptions
     public bool RequireExistingConfig { get; set; }
     public bool ForceLatestBuildTools { get; set; }
     public bool ConfigOnly { get; set; }
-
-    // Enable JS/TS bindings generation in Step 5.5 of setup. Populated by the
-    // npm-caller prompt in WorkspaceSetupService; no CLI flag exposes this.
-    public bool AddJsBindings { get; set; }
-
-    // Skip cppwinrt headers/libs/runtimes/projection generation. Populated by the
-    // npm-caller prompt when the user picks "JS only" so pure-Node projects don't
-    // pay the ~130MB / ~20s C++ projection cost.
-    public bool SkipCppProjections { get; set; }
 }

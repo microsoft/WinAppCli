@@ -29,7 +29,7 @@ Does the project already have an appxmanifest.xml?
    ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder is missing?
    │  └─ winapp restore
    ├─ Want to add typed JS/TypeScript WinRT bindings to an existing workspace?
-   │  └─ Edit winapp.yaml to add `jsBindings: {}`, then run `npx winapp restore`
+   │  └─ Edit package.json to add `"winapp": { "jsBindings": {} }`, then run `npx winapp restore`
    ├─ Want to check for newer SDK versions?
    │  └─ winapp update
    ├─ Only need an appxmanifest.xml (no SDKs, no cert, no config)?
@@ -92,8 +92,8 @@ Want to inspect or interact with a running app's UI?
 **Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
 
 ### `winapp restore [base-directory]`
-**Purpose:** Reinstall SDK packages from existing config without changing versions. Also re-runs JS/TS binding codegen when `winapp.yaml` declares a `jsBindings:` block.
-**When to use:** After cloning a repo that has `winapp.yaml`, when the `.winapp/` folder is missing/corrupted, or after editing the `jsBindings:` block by hand.
+**Purpose:** Reinstall SDK packages from existing config without changing versions. Also re-runs JS/TS binding codegen when `package.json` declares a `"winapp.jsBindings"` namespace.
+**When to use:** After cloning a repo that has `winapp.yaml`, when the `.winapp/` folder is missing/corrupted, or after editing the `winapp.jsBindings` namespace in `package.json` by hand.
 **Requires:** `winapp.yaml`
 
 ### `winapp update`
@@ -106,10 +106,10 @@ Want to inspect or interact with a running app's UI?
 **Purpose:** Generate typed JS/TS WinRT bindings (via `@microsoft/dynwinrt-codegen`) so Node / Electron apps can call WinRT APIs directly without a native build step.
 **When to use:** Inside a Node / Electron project after `npx winapp init`.
 **How to enable:**
-- **Fresh init via npm shim** (`npx winapp init`) shows an interactive prompt offering **C++ projections**, **JS/TS bindings**, or **Both** (default with `--use-defaults`: Both). Pick JS/Both to wire `jsBindings: {}` (covering the full Windows App SDK) into `winapp.yaml`.
-- **Existing workspace:** edit `winapp.yaml` to add a `jsBindings:` block (e.g. `jsBindings: {}` for full SDK; add `cppProjections: false` at the top level to skip cppwinrt). Then run `npx winapp restore` — it re-runs codegen against the existing yaml without modifying it.
-- **Re-run codegen** after editing `jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand: `npx winapp restore`.
-**Notes:** npm-only — the interactive prompt only fires when invoked through `npx winapp …`. Standalone winget / installer builds do not generate JS bindings. Codegen always auto-injects `@microsoft/dynwinrt` as a production dep into `package.json`. See [JS bindings docs](https://github.com/microsoft/winappcli/blob/main/docs/js-bindings.md) for the full `jsBindings:` schema.
+- **Fresh init via npm shim** (`npx winapp init`) shows an interactive yes/no prompt — `Add JS/TypeScript bindings to this project? [Y/n]:`. Press Enter (or pass `--use-defaults`) to opt in; the wrapper writes a default `"winapp": { "jsBindings": {} }` namespace (covering the full Windows App SDK) into `package.json`. C++ projections are always generated regardless of the answer.
+- **Existing workspace:** edit `package.json` to add `"winapp": { "jsBindings": {} }` (the empty object opts in with full-SDK defaults). Then run `npx winapp restore` — it re-runs codegen against the existing config without modifying it.
+- **Re-run codegen** after editing `winapp.jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand: `npx winapp restore`.
+**Notes:** npm-only — the interactive prompt only fires when invoked through `npx winapp …`. Standalone winget / installer builds do not generate JS bindings. Codegen always auto-injects `@microsoft/dynwinrt` as a production dep into `package.json`. See [JS bindings docs](https://github.com/microsoft/winappcli/blob/main/docs/js-bindings.md) for the full `winapp.jsBindings` schema.
 
 ### `winapp package <input-folder>` (alias: `winapp pack`)
 **Purpose:** Create an MSIX installer from a built app.
@@ -229,7 +229,7 @@ Want to inspect or interact with a running app's UI?
 
 ### Electron
 - **Setup:** `winapp init --use-defaults` → choose your Windows API access path:
-  - **JS bindings (easiest, npm-only):** at the `npx winapp init` prompt pick "JS/TS bindings" or "Both" (or pass `--use-defaults` to auto-pick Both). On an existing workspace, add `jsBindings: {}` to `winapp.yaml` and run `npx winapp restore`. Generates typed `bindings/winrt/*.{js,d.ts}` for the full Windows App SDK surface, callable directly from your main/renderer process via dynwinrt. No native build step.
+  - **JS bindings (easiest, npm-only):** at the `npx winapp init` prompt answer **Y** (the default — or pass `--use-defaults`). On an existing workspace, add `"winapp": { "jsBindings": {} }` to `package.json` and run `npx winapp restore`. Generates typed `bindings/*.{js,d.ts}` for the full Windows App SDK surface, callable directly from your main/renderer process via dynwinrt. No native build step.
   - **Native addons:** `winapp node create-addon --template cs` (or `--template cpp`) for C#/C++ addons when you need full WinRT access or stateful native services.
   - Then: `winapp node add-electron-debug-identity` to enable identity-required APIs.
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`

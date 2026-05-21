@@ -4,14 +4,32 @@ import { generateCppAddonFiles } from './cpp-addon-utils';
 import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { askBindingsKind, parseSetupSdksArg } from './jsbindings/init-prompt';
+import {
+  readJsBindingsConfig,
+  writeJsBindingsConfig,
+  defaultJsBindingsConfig,
+  hasJsBindings,
+} from './jsbindings/package-json-config';
+import { runJsBindingsPipeline } from './jsbindings/orchestrator';
+import { getLockfilePath, LOCKFILE_NAME } from './jsbindings/lockfile-reader';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // CLI name - change this to rebrand the tool
 const CLI_NAME = 'winapp';
 
 // Commands that should be handled by Node.js (everything else goes to winapp-cli)
 const NODE_ONLY_COMMANDS = new Set(['node']);
+
+// Commands the npm wrapper intercepts to add pre-/post-native hooks
+// (currently: JS bindings prompt + orchestration).
+const INTERCEPTED_COMMANDS = new Set(['init', 'restore']);
+
+// argv flags that mean "skip every interactive wrapper hook" (help / completions
+// / version are routed straight to the native CLI without prompting).
+const HELP_FLAGS = new Set(['--help', '-h', '-?', '/?']);
 
 interface ParsedArgs {
   help?: boolean;
@@ -65,6 +83,30 @@ export async function main(): Promise<void> {
       return;
     }
 
+    // Intercept init/restore so we can run the JS bindings pre-/post-hooks
+    // around the native command. Help / completion flags bypass the hook.
+    //
+    // Fast-path: `init --setup-sdks none` has no JS bindings to wire up
+    // (the dynwinrt codegen needs SDK winmds to compile against), so we
+    // pass it straight through to the native CLI. This preserves the
+    // pre-wrapper UX exactly — no extra yaml read, no informational log
+    // line, no behaviour change. Users who want to refresh existing JS
+    // bindings should run `winapp restore` (which is still intercepted).
+    if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
+      if (command === 'init') {
+        if (parseSetupSdksArg(commandArgs) === 'none') {
+          await callWinappCli(args, { exitOnError: true });
+          return;
+        }
+        await handleInit(commandArgs);
+        return;
+      }
+      if (command === 'restore') {
+        await handleRestore(commandArgs);
+        return;
+      }
+    }
+
     // Route everything else to winapp-cli
     await callWinappCli(args, { exitOnError: true });
   } catch (error) {
@@ -86,7 +128,12 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
 
 // Node.js wrapper-only commands that should appear in completions
 const NODE_WRAPPER_COMMANDS = ['node'];
-const NODE_SUBCOMMANDS = ['create-addon', 'add-electron-debug-identity', 'clear-electron-debug-identity'];
+const NODE_SUBCOMMANDS = [
+  'create-addon',
+  'add-electron-debug-identity',
+  'clear-electron-debug-identity',
+  'generate-bindings',
+];
 
 /**
  * Handle completion requests by forwarding to the native CLI and augmenting
@@ -206,12 +253,14 @@ async function showCombinedHelp(): Promise<void> {
   console.log('  node create-addon         Generate native addon files for Electron');
   console.log('  node add-electron-debug-identity  Add package identity to Electron debug process');
   console.log('  node clear-electron-debug-identity  Remove package identity from Electron debug process');
+  console.log('  node generate-bindings    Regenerate JS/TypeScript bindings from package.json + cached winmds');
   console.log('');
   console.log('Examples:');
   console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
   console.log(`  ${CLI_NAME} node create-addon --template cs --name myAddon`);
   console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
   console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
+  console.log(`  ${CLI_NAME} node generate-bindings`);
 }
 
 async function showVersion(): Promise<void> {
@@ -270,6 +319,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('  create-addon                   Generate native addon files for Electron');
     console.log('  add-electron-debug-identity    Add package identity to Electron debug process');
     console.log('  clear-electron-debug-identity  Remove package identity from Electron debug process');
+    console.log('  generate-bindings              Regenerate JS/TypeScript bindings (no NuGet/cppwinrt restore)');
     console.log('');
     console.log('Examples:');
     console.log(`  ${CLI_NAME} node create-addon --help`);
@@ -277,6 +327,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log(`  ${CLI_NAME} node create-addon --name myCsAddon --template cs`);
     console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
     console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
+    console.log(`  ${CLI_NAME} node generate-bindings`);
     console.log('');
     console.log(`Use "${CLI_NAME} node <subcommand> --help" for detailed help on each subcommand.`);
     return;
@@ -296,6 +347,10 @@ async function handleNode(args: string[]): Promise<void> {
 
     case 'clear-electron-debug-identity':
       await handleClearElectronDebugIdentity(subcommandArgs);
+      break;
+
+    case 'generate-bindings':
+      await handleGenerateBindings(subcommandArgs);
       break;
 
     default:
@@ -501,6 +556,195 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
     }
   } catch (error) {
     logErrorAndExit(error);
+  }
+}
+
+/**
+ * `node generate-bindings`: regenerate JS/TypeScript bindings without re-running
+ * the heavy native restore (no NuGet download, no cppwinrt headers, no manifest /
+ * cert work). Re-reads `winapp.jsBindings` from package.json and the cached
+ * `.winapp/winmds.lock.json` written by the last `winapp restore`, then runs
+ * dynwinrt-codegen. Intended for fast iteration after editing the `winapp.jsBindings`
+ * block (packages scope, extraTypes, skip/refOnly/emit overrides).
+ *
+ * Pre-checks fail fast with an actionable hint when a prerequisite is missing.
+ */
+async function handleGenerateBindings(args: string[]): Promise<void> {
+  const options = parseArgs(args, {
+    verbose: false,
+  });
+
+  if (options.help) {
+    console.log(`Usage: ${CLI_NAME} node generate-bindings [options]`);
+    console.log('');
+    console.log('Regenerate JS/TypeScript bindings from package.json + cached winmds');
+    console.log('');
+    console.log('This command will:');
+    console.log('  1. Read `winapp.jsBindings` from package.json');
+    console.log('  2. Read the cached winmd inventory from .winapp/winmds.lock.json');
+    console.log('  3. Run dynwinrt-codegen into the configured output directory');
+    console.log('  4. Ensure @microsoft/dynwinrt is listed in package.json dependencies');
+    console.log('');
+    console.log('It does NOT re-run the native restore. If you changed `winapp.yaml`');
+    console.log('(packages, sdkVersion, etc.) run `winapp restore` first to refresh');
+    console.log('the lockfile, then re-run this command.');
+    console.log('');
+    console.log('Options:');
+    console.log('  --verbose             Enable verbose codegen output (default: false)');
+    console.log('  --help                Show this help');
+    console.log('');
+    console.log('Examples:');
+    console.log(`  ${CLI_NAME} node generate-bindings`);
+    console.log(`  ${CLI_NAME} node generate-bindings --verbose`);
+    return;
+  }
+
+  const workspaceDir = process.cwd();
+
+  // 1. Must be an npm/Node project — winapp.jsBindings lives in package.json.
+  if (!fs.existsSync(path.join(workspaceDir, 'package.json'))) {
+    console.error('❌ No package.json found in this directory.');
+    console.error('   This command only applies to npm/Node projects.');
+    console.error('   Run `npm init -y` first, then `winapp init` to configure JS bindings.');
+    process.exit(1);
+  }
+
+  // 2. JS bindings must be configured.
+  if (!hasJsBindings(workspaceDir)) {
+    console.error('❌ No "winapp.jsBindings" section in package.json.');
+    console.error('   Run `winapp init` to configure JS bindings.');
+    process.exit(1);
+  }
+
+  // 3. Lockfile from a prior `winapp restore` must be present. (Schema-mismatch
+  //    cases get the orchestrator's more detailed message via `lockfileStale`.)
+  const lockfilePath = getLockfilePath(path.join(workspaceDir, '.winapp'));
+  if (!fs.existsSync(lockfilePath)) {
+    console.error(`❌ No .winapp/${LOCKFILE_NAME} found.`);
+    console.error('   Run `winapp restore` first to fetch SDK packages and build the winmd inventory.');
+    process.exit(1);
+  }
+
+  // 4. Hand off to the shared pipeline. Outcomes are translated to ✅ / ❌ /⚠️
+  //    by runJsBindingsOrchestrator.
+  await runJsBindingsOrchestrator(workspaceDir, options.verbose as boolean);
+}
+
+/**
+ * `init` intercept: ask the JS bindings prompt, run native init, then (when
+ * the user wants JS bindings) write the `"winapp.jsBindings"` namespace to
+ * package.json, re-run restore so the lockfile is fresh, and orchestrate
+ * dynwinrt-codegen.
+ *
+ * The native CLI itself has no awareness of JS bindings — every flag, every
+ * code path is identical regardless of the user's choice here.
+ */
+async function handleInit(args: string[]): Promise<void> {
+  const workspaceDir = process.cwd();
+
+  // Re-running init on a configured workspace? Infer the choice rather than
+  // re-prompt so we never silently drop the user's prior customizations.
+  const existingJsBindings = hasJsBindings(workspaceDir);
+
+  let outcome;
+  try {
+    outcome = await askBindingsKind({
+      workspaceDir,
+      argv: args,
+      isInit: true,
+      existingJsBindings,
+    });
+  } catch (err) {
+    logErrorAndExit(err);
+  }
+
+  if (outcome.silentReason) {
+    console.log(`ℹ️  ${outcome.silentReason}`);
+  }
+
+  // Native init always runs with the user's literal argv (no flag injection
+  // and no JS-bindings-aware overrides).
+  await callWinappCli(['init', ...args], { exitOnError: true });
+
+  // User opted out — nothing more to do.
+  if (outcome.kind === 'no') {
+    return;
+  }
+
+  // Persist the default jsBindings block to package.json so subsequent
+  // `winapp restore` runs pick it up. Skip when package.json is missing so
+  // we don't fail an init that already succeeded — surface a clear hint.
+  try {
+    if (!fs.existsSync(path.join(workspaceDir, 'package.json'))) {
+      console.warn(
+        '⚠️  package.json not found in this workspace. ' +
+          'Run `npm init -y` (or equivalent) and then `npx winapp restore` to enable JS bindings.'
+      );
+      return;
+    }
+    const refreshed = readJsBindingsConfig(workspaceDir);
+    const wantsOverwrite = outcome.overwriteExistingConfig === true;
+    if (!refreshed.jsBindings) {
+      writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
+      console.log(
+        'ℹ️  Added "winapp.jsBindings" to package.json. ' + 'Edit it to customize package scope, extraTypes, etc.'
+      );
+    } else if (wantsOverwrite) {
+      writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
+      console.log('ℹ️  Reset "winapp.jsBindings" in package.json to defaults.');
+    }
+  } catch (err) {
+    console.error(`Failed to update package.json: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  // Trigger a restore now (writes the winmd lockfile) and run the orchestrator.
+  await callWinappCli(['restore'], { exitOnError: true });
+  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args));
+}
+
+/**
+ * `restore` intercept: run native restore unconditionally, then orchestrate
+ * dynwinrt-codegen iff package.json declares `winapp.jsBindings`.
+ */
+async function handleRestore(args: string[]): Promise<void> {
+  const workspaceDir = process.cwd();
+
+  await callWinappCli(['restore', ...args], { exitOnError: true });
+
+  if (!hasJsBindings(workspaceDir)) {
+    return;
+  }
+  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args));
+}
+
+/** Detect `--verbose` / `-v` (anywhere in argv) for opting into noisy codegen logs. */
+function isVerbose(args: string[]): boolean {
+  return args.includes('--verbose') || args.includes('-v');
+}
+
+/** Runs the JS bindings pipeline and translates outcomes into exit codes. */
+async function runJsBindingsOrchestrator(workspaceDir: string, verbose: boolean = false): Promise<void> {
+  try {
+    const result = await runJsBindingsPipeline({ workspaceDir, verbose });
+    switch (result.outcome) {
+      case 'completed':
+        console.log(`✅ ${result.message}`);
+        return;
+      case 'noJsBindings':
+        // Silent — caller already vetted that jsBindings is configured.
+        return;
+      case 'lockfileMissing':
+      case 'lockfileStale':
+        console.error(`❌ ${result.message}`);
+        process.exit(1);
+        break;
+      case 'noWinmdsToEmit':
+        console.warn(`⚠️ ${result.message}`);
+        return;
+    }
+  } catch (err) {
+    logErrorAndExit(err);
   }
 }
 

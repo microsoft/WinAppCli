@@ -55,50 +55,6 @@ internal sealed class ConfigService : IConfigService
         ConfigPath.Refresh();
     }
 
-    public void SaveJsBindingsOnly(WinappConfig cfg)
-    {
-        GuardConfigPath();
-        string yaml;
-        if (ConfigPath.Exists)
-        {
-            string existing;
-            try
-            {
-                existing = File.ReadAllText(ConfigPath.FullName);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    $"Could not read existing winapp.yaml at {ConfigPath.FullName} to splice "
-                    + "jsBindings while preserving comments. Close any editor/process that may "
-                    + "be holding the file open, then retry. "
-                    + $"Underlying error: {ex.Message}", ex);
-            }
-
-            try
-            {
-                yaml = new WinappConfigDocument(cfg).SpliceJsBindingsInto(existing);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    $"Could not splice jsBindings: block into winapp.yaml at {ConfigPath.FullName} "
-                    + "without losing comments or unknown fields. The file's structure may be "
-                    + "malformed; fix it manually or remove the jsBindings: block and re-run. "
-                    + $"Underlying error: {ex.Message}", ex);
-            }
-        }
-        else
-        {
-            yaml = new WinappConfigDocument(cfg).Render();
-        }
-        // Atomic write (temp + rename) so a crash mid-write can't leave
-        // winapp.yaml truncated. Pairs with reparse-point refusal above to
-        // make the path safe end-to-end.
-        PathSafety.AtomicWriteAllText(ConfigPath.FullName, yaml, Utf8NoBom);
-        ConfigPath.Refresh();
-    }
-
     // Refuse to read or rewrite winapp.yaml if the file (or any directory
     // between it and its config-dir) is a symlink/junction — a malicious
     // workspace could otherwise redirect the I/O at an arbitrary file on

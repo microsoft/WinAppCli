@@ -7,8 +7,8 @@ using WinApp.Cli.Helpers;
 namespace WinApp.Cli.Tests;
 
 // Direct tests for the shared PathSafety helper. Pre-r3 the helper was
-// only covered indirectly (through ConfigService / UserPackageJsonService /
-// WinmdDiscovery), which made it easy for the helper to drift: e.g. the
+// only covered indirectly (through ConfigService / WinmdsLockfileService),
+// which made it easy for the helper to drift: e.g. the
 // pre-r3 implementation used FileInfo.Exists internally, which probes the
 // filesystem before the reparse-point flag check — defeating the helper's
 // stated purpose. These tests pin the API directly so future edits can't
@@ -136,7 +136,7 @@ public class PathSafetyTests
     [TestMethod]
     public void HasReparsePointOnPath_MissingLeaf_IsAllowed()
     {
-        // Callers (e.g. ConfigService.SaveJsBindingsOnly) check the path
+        // Callers (e.g. ConfigService.Save) check the path
         // BEFORE creating the file — a missing leaf must not be rejected.
         var leaf = Path.Combine(_tempDir.FullName, "not-yet-written.yaml");
         Assert.IsFalse(File.Exists(leaf));

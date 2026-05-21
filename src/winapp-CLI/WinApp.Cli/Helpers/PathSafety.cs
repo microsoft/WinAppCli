@@ -6,8 +6,7 @@ using System.IO;
 namespace WinApp.Cli.Helpers;
 
 // Shared filesystem-safety helpers. Centralizing the reparse-point /
-// containment check keeps callers (ConfigService, UserPackageJsonService,
-// JsBindingsWorkspaceService.WinmdDiscovery, WinmdsLockfileService)
+// containment check keeps callers (ConfigService, WinmdsLockfileService)
 // consistent — every "write into the user's workspace" site needs the
 // same guard, and we don't want one to drift behind the others.
 internal static class PathSafety
@@ -114,8 +113,7 @@ internal static class PathSafety
 
     // True for UNC / network paths (`\\server\share`, `\\?\UNC\…`,
     // `\\.\UNC\…`). Local DOS device paths (`\\?\C:\…`) are not network.
-    // Centralized here so the reparse-point guard and JsBindings winmd
-    // discovery cannot drift apart — both share the same definition of
+    // Centralized here so every caller shares the same definition of
     // "a path that would trigger an SMB probe / NTLM leak".
     public static bool IsNetworkPath(string path)
     {

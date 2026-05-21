@@ -111,12 +111,13 @@ Describe "Electron Sample" {
         }
 
         It "Should initialize winapp workspace with JS bindings and C++ projections" -Skip:$script:skip {
-            # `init --use-defaults` invoked via the npm shim auto-picks "Both"
-            # at the bindings prompt (C++ projections + JS/TS bindings) and
-            # runs codegen in one step. No yaml flag is needed; the prompt
-            # only fires when WINAPP_CLI_CALLER=nodejs-package (set by the
-            # `npx winapp` shim, which Invoke-WinappCommand resolves to here
-            # after Install-WinappNpmPackage).
+            # `init --use-defaults` invoked via the npm shim auto-answers Yes
+            # at the bindings prompt (Add JS/TypeScript bindings? [Y/n]) and
+            # runs codegen in one step. C++ projections always run. The
+            # prompt only fires when WINAPP_CLI_CALLER=nodejs-package (set by
+            # the `npx winapp` shim, which Invoke-WinappCommand resolves to
+            # here after Install-WinappNpmPackage). Selecting Yes writes
+            # `"winapp": { "jsBindings": {} }` into package.json.
             Push-Location $script:appDir
             try {
                 Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
@@ -132,10 +133,10 @@ Describe "Electron Sample" {
         # ── JS bindings smoke (v2.x) ─────────────────────────────────────
         # Verify the npm-caller init path produced the expected bindings
         # output, lockfile, and runtime dep — and that re-running `restore`
-        # is idempotent (no winapp.yaml mutation).
+        # is idempotent (no winapp.yaml or package.json mutation).
 
-        It "Should have generated bindings/winrt/ with the managed marker" -Skip:$script:skip {
-            $bindingsDir = Join-Path $script:appDir "bindings\winrt"
+        It "Should have generated bindings/ with the managed marker" -Skip:$script:skip {
+            $bindingsDir = Join-Path $script:appDir "bindings"
             $bindingsDir | Should -Exist
             # Marker proves the staging-then-swap completed.
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist
@@ -165,21 +166,25 @@ Describe "Electron Sample" {
             $lockfile.packages | Should -Not -BeNullOrEmpty -Because "Lockfile should record discovered packages"
         }
 
-        It "Should re-run codegen via 'winapp restore' without mutating winapp.yaml" -Skip:$script:skip {
-            # `restore` is the read-only re-run path against pinned yaml —
-            # it must not modify winapp.yaml. Capture the yaml hash
-            # before/after to prove it.
+        It "Should re-run codegen via 'winapp restore' without mutating winapp.yaml or jsBindings" -Skip:$script:skip {
+            # `restore` is the read-only re-run path — it must not modify
+            # winapp.yaml or the winapp.jsBindings namespace in package.json.
+            # Capture both hashes before/after to prove it.
             $yamlPath = Join-Path $script:appDir "winapp.yaml"
-            $bindingsDir = Join-Path $script:appDir "bindings\winrt"
-            $hashBefore = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
+            $pkgPath = Join-Path $script:appDir "package.json"
+            $bindingsDir = Join-Path $script:appDir "bindings"
+            $yamlHashBefore = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
+            $pkgHashBefore = (Get-FileHash -Path $pkgPath -Algorithm SHA256).Hash
 
             Push-Location $script:appDir
             try {
                 Invoke-WinappCommand -Arguments "restore"
             } finally { Pop-Location }
 
-            $hashAfter = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
-            $hashAfter | Should -Be $hashBefore -Because "restore must not mutate winapp.yaml"
+            $yamlHashAfter = (Get-FileHash -Path $yamlPath -Algorithm SHA256).Hash
+            $pkgHashAfter = (Get-FileHash -Path $pkgPath -Algorithm SHA256).Hash
+            $yamlHashAfter | Should -Be $yamlHashBefore -Because "restore must not mutate winapp.yaml"
+            $pkgHashAfter | Should -Be $pkgHashBefore -Because "restore must not mutate package.json (including winapp.jsBindings)"
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist `
                 -Because "restore should leave the managed marker in place after regen"
         }

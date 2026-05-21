@@ -55,24 +55,25 @@ winapp init --use-defaults --setup-sdks preview
 ### Add JS/TS bindings for Node / Electron apps (npm only)
 
 When invoked via the `@microsoft/winappcli` npm package (i.e. `npx winapp init`
-inside a Node / Electron project), `init` adds an interactive **bindings prompt**
-that asks whether to generate **C++ projections**, **JS/TS bindings**, or **Both**.
-Picking JS or Both wires a default `jsBindings:` block into `winapp.yaml` (covering
-the full Windows App SDK) and runs codegen as part of init:
+inside a Node / Electron project), `init` adds an interactive yes/no **bindings
+prompt** — `Add JS/TypeScript bindings to this project? [Y/n]:`. Answering Yes
+(the default) wires a default `"winapp": { "jsBindings": {} }` namespace into
+`package.json` (covering the full Windows App SDK) and runs codegen as part of
+init. C++ projections are always generated regardless of the answer.
 
 ```powershell
-# Interactive — prompted to pick C++ / JS / Both.
+# Interactive — prompted with the yes/no question.
 npx winapp init
 
-# Non-interactive — auto-picks "Both" (C++ projections + JS/TS bindings).
+# Non-interactive — auto-answers Yes (opts in to JS bindings).
 npx winapp init --use-defaults
 
-# After editing winapp.yaml jsBindings: by hand (or pulling a teammate's
-# winapp.yaml), regenerate bindings without re-prompting:
+# After editing winapp.jsBindings in package.json by hand (or pulling a
+# teammate's package.json), regenerate bindings without re-prompting:
 npx winapp restore
 ```
 
-Generated files land under `bindings/winrt/` and `@microsoft/dynwinrt` is
+Generated files land under `bindings/` and `@microsoft/dynwinrt` is
 added to your `package.json` dependencies so production installs include it.
 
 After `init`, your project will contain:
@@ -181,7 +182,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. When invoked via the @microsoft/winappcli npm package (npx winapp init), additionally asks whether to generate C++ projections, JS/TS bindings, or both. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->

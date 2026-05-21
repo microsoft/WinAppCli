@@ -30,7 +30,7 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- An interactive bindings prompt during `npx winapp init` that offers **C++ projections**, **JS/TS bindings** (typed JS/TypeScript WinRT wrappers via dynwinrt, no native build required), or **Both**
+- An interactive yes/no bindings prompt during `npx winapp init` — `Add JS/TypeScript bindings to this project? [Y/n]:` — that opts your project into typed JS/TypeScript WinRT wrappers via dynwinrt (no native build required)
 
 Quick start:
 ```powershell
@@ -41,7 +41,7 @@ npx winapp node create-addon --template cs        # create a C# native addon (fo
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
 
-JS/TS bindings (the `jsBindings:` block in `winapp.yaml`) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The bindings prompt does not appear when running the standalone winget CLI.
+JS/TS bindings (the `"winapp": { "jsBindings": {...} }` namespace in `package.json`) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The bindings prompt does not appear when running the standalone winget CLI.
 
 #### Choosing between jsBindings and a native addon
 
@@ -60,7 +60,7 @@ The decision is almost entirely about the **shape of the API**, not preference.
 It's normal to mix both in one app: jsBindings for the non-UI WinRT surface, a small C# or C++ addon for the one or two Win32 / non-WinRT calls that don't fit.
 
 Additional Electron guides:
-- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `jsBindings:` yaml schema, per-package classification, lockfile
+- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `winapp.jsBindings` JSON schema, per-package classification, lockfile
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

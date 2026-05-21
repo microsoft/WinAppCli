@@ -40,7 +40,7 @@ Next, choose how to call Windows APIs from your Electron app:
 
 #### Option A: [JS/TypeScript bindings via dynwinrt](../../js-bindings.md) ✨ *new*
 
-The simplest path — typed JS/TypeScript wrappers generated from `.winmd` metadata, no native build step required from your Electron project. When you run `npx winapp init`, the interactive bindings prompt offers **C++**, **JS/TS**, or **Both**; pick JS or Both and `bindings/winrt/` is dropped next to your sources. You `import { ChatClient } from './bindings/winrt'` and call WinRT directly. Bindings are typed at compile time but use `dynwinrt`'s libffi runtime to invoke methods at runtime, so no MSBuild / `node-gyp` step is involved.
+The simplest path — typed JS/TypeScript wrappers generated from `.winmd` metadata, no native build step required from your Electron project. When you run `npx winapp init`, you'll be asked `Add JS/TypeScript bindings to this project? [Y/n]:` — answer **Y** (or pass `--use-defaults`) and a `bindings/` directory is dropped next to your sources. You `import { ChatClient } from './bindings'` and call WinRT directly. Bindings are typed at compile time but use `dynwinrt`'s libffi runtime to invoke methods at runtime, so no MSBuild / `node-gyp` step is involved.
 
 [Add JS bindings →](../../js-bindings.md)
 

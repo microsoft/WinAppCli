@@ -5,12 +5,23 @@ using System.Text.Json.Serialization;
 
 namespace WinApp.Cli.Models;
 
-// Lockfile written by `winapp restore`, consumed by the JS bindings step on
-// subsequent `winapp restore` runs to keep codegen stable. Optional.
+// Lockfile written by `winapp restore`, consumed by the npm wrapper's
+// JS-bindings orchestrator on subsequent runs to keep codegen stable.
+// Optional — the wrapper can recover by re-running `winapp restore`.
+//
+// The native CLI emits ONLY this generic NuGet winmd inventory (no
+// jsBindings classification: emit/refOnly/skip is computed entirely on
+// the npm side from package id heuristics + user overrides).
 internal sealed class WinmdsLockfile
 {
     // Current schema version. Bump on breaking shape changes.
-    public const int CurrentSchema = 2;
+    //
+    // v3 (this version): dropped `category` from WinmdsLockfilePackage —
+    // classification moved out of native into the npm wrapper. Readers
+    // built against v2 will ignore the missing field and default-init to
+    // "emit", which silently mislabels skip/refOnly packages; that's the
+    // breakage the version bump protects against.
+    public const int CurrentSchema = 3;
 
     // Schema version this file was produced with.
     public int Schema { get; set; } = CurrentSchema;
@@ -37,9 +48,6 @@ internal sealed class WinmdsLockfilePackage
 
     // Resolved version.
     public string Version { get; set; } = string.Empty;
-
-    // emit / refOnly / skip.
-    public string Category { get; set; } = "emit";
 
     // Absolute paths of every .winmd found for this package.
     public List<string> Winmds { get; set; } = new();

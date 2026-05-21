@@ -144,8 +144,10 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         }
     }
 
-    // Bucket winmds by package, classify. Paths off the NuGet cache layout
-    // are dropped.
+    // Bucket winmds by package. Paths off the NuGet cache layout are dropped.
+    // Classification (emit/refOnly/skip) is intentionally NOT recorded — that
+    // policy lives in the npm wrapper so changing it doesn't force a native
+    // CLI rebuild + redeploy.
     internal static WinmdsLockfile BuildLockfile(
         IReadOnlyDictionary<string, string> usedVersions,
         IReadOnlyList<FileInfo> discoveredWinmds,
@@ -157,7 +159,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         var winmdsByPackage = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var w in discoveredWinmds)
         {
-            var pkgIdLc = JsBindingsPresets.ExtractPackageIdFromPath(w.FullName, nugetCacheDir.FullName);
+            var pkgIdLc = ExtractPackageIdFromPath(w.FullName, nugetCacheDir.FullName);
             if (pkgIdLc is null)
             {
                 continue;
@@ -175,17 +177,10 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         {
             var pkgIdLc = name.ToLowerInvariant();
             winmdsByPackage.TryGetValue(pkgIdLc, out var winmds);
-            var category = JsBindingsPresets.ClassifyPackage(name) switch
-            {
-                WinmdPackageCategory.Skip => "skip",
-                WinmdPackageCategory.RefOnly => "refOnly",
-                _ => "emit",
-            };
             packages.Add(new WinmdsLockfilePackage
             {
                 Name = name,
                 Version = version,
-                Category = category,
                 Winmds = winmds is null
                     ? new List<string>()
                     : winmds.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -203,5 +198,22 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
             YamlPackagesHash = yamlPackagesHash,
             Packages = packages,
         };
+    }
+
+    // NuGet cache layout: `<cache>/<package-id-lowercased>/<version>/...`.
+    // Returns the lowercased package id segment, or null if the file isn't
+    // under the cache (e.g. a user-supplied `additionalWinmds` path).
+    private static string? ExtractPackageIdFromPath(string winmdFullPath, string nugetCacheDir)
+    {
+        var normCache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(nugetCacheDir));
+        var normWinmd = Path.GetFullPath(winmdFullPath);
+        if (!normWinmd.StartsWith(normCache + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !normWinmd.StartsWith(normCache + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        var rel = normWinmd.Substring(normCache.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var firstSep = rel.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
+        return firstSep <= 0 ? null : rel.Substring(0, firstSep).ToLowerInvariant();
     }
 }
