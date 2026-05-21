@@ -1183,6 +1183,8 @@ public class MsixServiceTests
             null!,
             null!,
             null!,
+            null!,
+            null!,
             NullLogger<MsixService>.Instance,
             new CurrentDirectoryProvider(_tempDir.FullName));
     }
@@ -1427,6 +1429,7 @@ public class MsixServiceTests
         return new MsixService(
             null!, null!, null!, null!, null!, null!, null!, null!, null!, null!,
             prs,
+            null!, null!,
             NullLogger<MsixService>.Instance,
             new CurrentDirectoryProvider(cwd));
     }

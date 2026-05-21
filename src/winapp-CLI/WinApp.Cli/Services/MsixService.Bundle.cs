@@ -1,0 +1,388 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Text;
+using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
+
+namespace WinApp.Cli.Services;
+
+internal partial class MsixService
+{
+    public async Task<CreateMsixBundleResult> CreateMsixBundleAsync(
+        DirectoryInfo[] inputFolders,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        string? packageName = null,
+        bool skipPri = false,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        FileInfo? manifestPath = null,
+        bool selfContained = false,
+        string? executable = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Stage intermediates under a short-path temp dir to avoid MAX_PATH issues
+        var guidSuffix = Guid.NewGuid().ToString("N")[..8];
+        var bundleTempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), "winapp", $"b-{guidSuffix}"));
+        bundleTempDir.Create();
+
+        try
+        {
+            // --- Step 1: Detect architecture per folder ---
+            var sliceInfos = new List<(DirectoryInfo Folder, string Arch, string? ExePath)>();
+
+            for (int i = 0; i < inputFolders.Length; i++)
+            {
+                var folder = inputFolders[i];
+                var exePath = ResolveExecutableForFolder(folder, executable, taskContext);
+
+                if (exePath == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot detect architecture for '{folder.FullName}': no executable found. " +
+                        (executable != null ? $"The specified --executable '{executable}' was not found in this folder." : "Provide --executable or ensure the manifest references an executable that exists in each input folder."));
+                }
+
+                var detectedArch = PeHelper.DetectPeArchitecture(exePath);
+                if (detectedArch == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot detect architecture from '{exePath}': unrecognized PE format or not a valid executable.");
+                }
+
+                taskContext.AddDebugMessage($"[{i + 1}/{inputFolders.Length}] {folder.Name} → {detectedArch}");
+                sliceInfos.Add((folder, detectedArch, exePath));
+            }
+
+            var detectedArchitectures = sliceInfos.Select(s => s.Arch).ToList();
+
+            // --- Step 2: Resolve manifest per folder and finalize ---
+            var finalizedManifests = new List<(string Content, AppxManifestDocument Doc)>();
+            var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+
+            for (int i = 0; i < sliceInfos.Count; i++)
+            {
+                var (folder, arch, exePath) = sliceInfos[i];
+
+                // Resolve manifest for this slice
+                string manifestContent;
+                FileInfo resolvedManifestPath;
+
+                if (manifestPath != null)
+                {
+                    resolvedManifestPath = manifestPath;
+                }
+                else
+                {
+                    var resolved = FindManifestInDirectory(folder)
+                        ?? FindManifestInDirectory(new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()));
+
+                    if (resolved == null)
+                    {
+                        throw new FileNotFoundException(
+                            $"Manifest file not found for '{folder.FullName}'. Searched for Package.appxmanifest, then appxmanifest.xml in: input folder, current directory. Use --manifest to specify explicitly.");
+                    }
+                    resolvedManifestPath = resolved;
+                }
+
+                manifestContent = await File.ReadAllTextAsync(resolvedManifestPath.FullName, Encoding.UTF8, cancellationToken);
+                manifestContent = ResolveManifestPlaceholders(manifestContent, executable, folder, taskContext);
+                manifestContent = await ResolveResourceLanguageXGenerateAsync(manifestContent, folder, taskContext, cancellationToken);
+
+                // Update manifest (deps, build metadata, arch detection)
+                (manifestContent, _) = await UpdateAppxManifestContentAsync(
+                    manifestContent, null, null, exePath,
+                    sparse: false, selfContained: selfContained, dotNetPackageList,
+                    taskContext, cancellationToken);
+
+                // Force-stamp the detected architecture (overrides whatever UpdateAppxManifestContentAsync detected)
+                var doc = AppxManifestDocument.Parse(manifestContent);
+                doc.IdentityProcessorArchitecture = arch;
+                manifestContent = doc.ToXml();
+                doc = AppxManifestDocument.Parse(manifestContent);
+
+                finalizedManifests.Add((manifestContent, doc));
+            }
+
+            // --- Step 3: Cross-slice validation (BEFORE packing) ---
+            var manifests = finalizedManifests.Select(m => m.Doc).ToList();
+            var folders = sliceInfos.Select(s => s.Folder).ToList();
+
+            var validationErrors = bundleValidationService.Validate(manifests, detectedArchitectures, folders);
+            if (validationErrors.Count > 0)
+            {
+                var errorBuilder = new StringBuilder();
+                errorBuilder.AppendLine("Bundle validation failed. The following inconsistencies were found across slices:");
+                errorBuilder.AppendLine();
+                foreach (var error in validationErrors)
+                {
+                    errorBuilder.AppendLine($"  {error.Field}: {error.Message}");
+                    foreach (var sliceValue in error.SliceValues)
+                    {
+                        errorBuilder.AppendLine($"    • {sliceValue}");
+                    }
+                    errorBuilder.AppendLine();
+                }
+                throw new InvalidOperationException(errorBuilder.ToString());
+            }
+
+            taskContext.AddDebugMessage("Cross-slice validation passed.");
+
+            // --- Step 4: Resolve identity for output naming ---
+            var referenceDoc = finalizedManifests[0].Doc;
+            var finalPackageName = packageName ?? referenceDoc.IdentityName ?? "Package";
+            finalPackageName = ManifestService.CleanPackageName(finalPackageName);
+            var extractedVersion = referenceDoc.IdentityVersion;
+            var extractedPublisher = publisher ?? referenceDoc.IdentityPublisher;
+
+            // Compose output filename: <Name>_<Version>_<arch1>_<arch2>.msixbundle (arches sorted)
+            var sortedArches = detectedArchitectures.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
+            var archSuffix = string.Join("_", sortedArches);
+
+            var defaultBundleFileName = !string.IsNullOrWhiteSpace(extractedVersion)
+                ? $"{finalPackageName}_{extractedVersion}_{archSuffix}.msixbundle"
+                : $"{finalPackageName}_{archSuffix}.msixbundle";
+
+            FileInfo outputBundlePath;
+            DirectoryInfo outputFolder;
+            if (outputPath == null)
+            {
+                outputFolder = currentDirectoryProvider.GetCurrentDirectoryInfo();
+                outputBundlePath = new FileInfo(Path.Combine(outputFolder.FullName, defaultBundleFileName));
+            }
+            else
+            {
+                var ext = Path.GetExtension(outputPath.Name);
+                if (string.Equals(ext, ".msixbundle", StringComparison.OrdinalIgnoreCase))
+                {
+                    outputBundlePath = new FileInfo(outputPath.FullName);
+                    outputFolder = outputBundlePath.Directory!;
+                }
+                else
+                {
+                    // Treat as directory (preserve existing semantics)
+                    outputFolder = new DirectoryInfo(outputPath.FullName);
+                    outputBundlePath = new FileInfo(Path.Combine(outputPath.FullName, defaultBundleFileName));
+                }
+            }
+
+            if (!outputFolder.Exists)
+            {
+                outputFolder.Create();
+            }
+
+            // --- Step 5: Pack each slice serially ---
+            var intermediateFiles = new List<FileInfo>();
+            var sliceResults = new List<BundleSliceInfo>();
+
+            for (int i = 0; i < sliceInfos.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var (folder, arch, exePath) = sliceInfos[i];
+                var (manifestContent, _) = finalizedManifests[i];
+
+                taskContext.AddStatusMessage($"[{i + 1}/{sliceInfos.Count}] Packing {arch}...");
+
+                // Each intermediate .msix goes into the bundle temp dir
+                var intermediateMsixName = $"{finalPackageName}_{arch}.msix";
+                var intermediateMsixPath = new FileInfo(Path.Combine(bundleTempDir.FullName, intermediateMsixName));
+
+                await PackSingleFolderToMsixAsync(
+                    folder, manifestContent, intermediateMsixPath,
+                    taskContext, selfContained, executable, arch,
+                    skipPri, dotNetPackageList, cancellationToken);
+
+                intermediateFiles.Add(intermediateMsixPath);
+                sliceResults.Add(new BundleSliceInfo(folder, arch, intermediateMsixPath));
+            }
+
+            // --- Step 6: Create the bundle ---
+            taskContext.AddStatusMessage("Creating bundle...");
+            await bundleService.CreateBundleAsync(intermediateFiles, outputBundlePath, taskContext, cancellationToken);
+
+            // --- Step 7: Sign if requested ---
+            if (autoSign)
+            {
+                var resolvedManifest = manifestPath ?? FindManifestInDirectory(inputFolders[0])
+                    ?? FindManifestInDirectory(new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()))
+                    ?? throw new FileNotFoundException("Cannot find manifest for publisher validation during signing.");
+
+                await SignMsixPackageAsync(outputFolder, certificatePassword, generateDevCert, installDevCert,
+                    finalPackageName, extractedPublisher, outputBundlePath, certificatePath,
+                    resolvedManifest, taskContext, cancellationToken);
+            }
+
+            return new CreateMsixBundleResult(outputBundlePath, autoSign, sliceResults);
+        }
+        finally
+        {
+            // Clean up bundle temp directory
+            try
+            {
+                if (bundleTempDir.Exists)
+                {
+                    bundleTempDir.Delete(recursive: true);
+                    taskContext.AddDebugMessage($"Cleaned up bundle temp directory: {bundleTempDir.FullName}");
+                }
+            }
+            catch
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up bundle temp directory: {bundleTempDir.FullName}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves the executable path for arch detection within a given folder.
+    /// If --executable is specified, uses that relative path. Otherwise, reads
+    /// the manifest's Application/@Executable for the folder.
+    /// </summary>
+    private string? ResolveExecutableForFolder(DirectoryInfo folder, string? executableOption, TaskContext taskContext)
+    {
+        if (executableOption != null)
+        {
+            var fullPath = Path.Combine(folder.FullName, executableOption);
+            return File.Exists(fullPath) ? fullPath : null;
+        }
+
+        // Auto-detect: find manifest and read Application/@Executable
+        var manifest = FindManifestInDirectory(folder)
+            ?? FindManifestInDirectory(new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()));
+
+        if (manifest != null)
+        {
+            try
+            {
+                var doc = AppxManifestDocument.Load(manifest.FullName);
+                var appExe = doc.ApplicationExecutable;
+                if (appExe != null)
+                {
+                    var fullPath = Path.Combine(folder.FullName, appExe);
+                    if (File.Exists(fullPath))
+                    {
+                        return fullPath;
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through to EXE scan
+            }
+        }
+
+        // Last resort: find first .exe in the folder root
+        var firstExe = folder.EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly).FirstOrDefault();
+        if (firstExe != null)
+        {
+            taskContext.AddDebugMessage($"Auto-detected executable: {firstExe.Name} in {folder.Name}");
+            return firstExe.FullName;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Packs a single folder into an unsigned .msix file. This is the core packing logic
+    /// extracted for reuse by both single-package and bundle workflows.
+    /// Does NOT sign, does NOT resolve the manifest, does NOT determine output naming.
+    /// </summary>
+    private async Task PackSingleFolderToMsixAsync(
+        DirectoryInfo inputFolder,
+        string manifestContent,
+        FileInfo outputMsixPath,
+        TaskContext taskContext,
+        bool selfContained,
+        string? executable,
+        string targetArch,
+        bool skipPri,
+        DotNetPackageListJson? dotNetPackageList,
+        CancellationToken cancellationToken)
+    {
+        // Create staging directory
+        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winapp-package-{Guid.NewGuid():N}"));
+        stagingDir.Create();
+
+        try
+        {
+            var manifestDoc = AppxManifestDocument.Parse(manifestContent);
+
+            // Check for MSBuild-generated manifest and recipe
+            var isMSBuildGenerated = manifestDoc.Document.Root?
+                .Element(AppxManifestDocument.BuildNs + "Metadata")?
+                .Elements(AppxManifestDocument.BuildNs + "Item")
+                .Any(e => string.Equals(e.Attribute("Name")?.Value, "makepri.exe", StringComparison.OrdinalIgnoreCase)) == true;
+
+            FileInfo? recipeFile = null;
+            if (isMSBuildGenerated)
+            {
+                recipeFile = inputFolder.EnumerateFiles("*.build.appxrecipe", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            }
+
+            if (recipeFile != null)
+            {
+                taskContext.AddDebugMessage($"Using appxrecipe for staging: {recipeFile.Name}");
+                await CopyFilesFromRecipeAsync(recipeFile, stagingDir, taskContext, cancellationToken);
+            }
+            else
+            {
+                CopyDirectoryRecursive(inputFolder, stagingDir);
+            }
+
+            // Write finalized manifest into staging
+            var updatedManifestPath = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
+            await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
+
+            // PRI generation
+            var existingPri = new FileInfo(Path.Combine(stagingDir.FullName, "resources.pri"));
+            if (!skipPri && !existingPri.Exists)
+            {
+                taskContext.AddDebugMessage("Generating PRI files...");
+                var stagingManifest = new FileInfo(Path.Combine(stagingDir.FullName, "appxmanifest.xml"));
+                var priExpandedFiles = MrtAssetHelper.GetExpandedManifestReferencedFiles(stagingManifest, taskContext);
+                var priResourceCandidates = priExpandedFiles.Select(file => file.RelativePath);
+                await priService.CreatePriConfigAsync(stagingDir, taskContext, precomputedPriResourceCandidates: priResourceCandidates, cancellationToken: cancellationToken);
+                await priService.GeneratePriFileAsync(stagingDir, taskContext, cancellationToken: cancellationToken);
+            }
+
+            // Self-contained runtime (arch-aware)
+            if (selfContained)
+            {
+                var applicationExecutable = manifestDoc.ApplicationExecutable;
+                FileInfo? executablePath = applicationExecutable != null ? new FileInfo(Path.Combine(stagingDir.FullName, applicationExecutable)) : null;
+
+                if (executablePath != null)
+                {
+                    taskContext.AddDebugMessage($"Preparing self-contained runtime for {targetArch}...");
+                    var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, dotNetPackageList, taskContext, cancellationToken);
+                    var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
+                    var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
+                    await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, dotNetPackageList, taskContext, cancellationToken);
+                }
+            }
+
+            // Pack
+            await CreateMsixPackageFromFolderAsync(stagingDir, outputMsixPath, taskContext, cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                if (stagingDir.Exists)
+                {
+                    stagingDir.Delete(recursive: true);
+                }
+            }
+            catch
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up staging directory: {stagingDir.FullName}");
+            }
+        }
+    }
+}

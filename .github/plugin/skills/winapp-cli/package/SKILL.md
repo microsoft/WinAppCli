@@ -111,6 +111,32 @@ winapp create-external-catalog "./bin/Release"
 winapp create-external-catalog "./bin/Release" --recursive --output ./catalog/CodeIntegrityExternal.cat
 ```
 
+### Bundling multiple architectures
+
+Create an MSIX bundle from multiple per-architecture build outputs:
+
+```powershell
+# Create unsigned bundle for Store submission (x64 + arm64)
+winapp package ./publish/x64 ./publish/arm64
+
+# Create signed bundle for sideloading
+winapp package ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+
+# Self-contained bundle with Windows App SDK runtime per arch
+winapp package ./publish/x64 ./publish/arm64 --self-contained --generate-cert
+```
+
+**How it works:** When multiple input folders are passed, `winapp package`:
+1. Detects the architecture of each folder's primary executable from its PE header
+2. Validates that all slices share the same Identity, Capabilities, and Dependencies
+3. Packs each folder into an intermediate unsigned `.msix`
+4. Bundles them into a single `.msixbundle` using `makeappx bundle`
+5. Signs only the bundle (not individual slices) — the signature covers all packages inside
+
+**Output:** `<Name>_<Version>_<arch1>_<arch2>.msixbundle` (architectures sorted alphabetically).
+
+**Store submission:** An unsigned bundle is valid for Store upload — Partner Center signs it with your reserved identity certificate. For sideloading, pass `--cert` or `--generate-cert`.
+
 This hashes executables in the specified directories so Windows trusts them when running with sparse package identity.
 
 ## CI/CD
@@ -167,7 +193,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | Yes | Input folder with package layout |
+| `<input-folder>` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->

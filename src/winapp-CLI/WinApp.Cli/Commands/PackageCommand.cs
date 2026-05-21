@@ -12,7 +12,7 @@ internal class PackageCommand : Command, IShortDescription
 {
     public string ShortDescription => "Create MSIX package";
 
-    public static Argument<DirectoryInfo> InputFolderArgument { get; }
+    public static Argument<DirectoryInfo[]> InputFolderArgument { get; }
     public static Option<FileInfo> OutputOption { get; }
     public static Option<string?> NameOption { get; }
     public static Option<bool> SkipPriOption { get; }
@@ -27,12 +27,11 @@ internal class PackageCommand : Command, IShortDescription
 
     static PackageCommand()
     {
-        InputFolderArgument = new Argument<DirectoryInfo>("input-folder")
+        InputFolderArgument = new Argument<DirectoryInfo[]>("input-folder")
         {
-            Description = "Input folder with package layout",
-            Arity = ArgumentArity.ExactlyOne
+            Description = "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
+            Arity = ArgumentArity.OneOrMore
         };
-        InputFolderArgument.AcceptExistingOnly();
         OutputOption = new Option<FileInfo>("--output")
         {
             Description = "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
@@ -106,7 +105,7 @@ internal class PackageCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
+            var inputFolders = parseResult.GetRequiredValue(InputFolderArgument);
             var output = parseResult.GetValue(OutputOption);
             var name = parseResult.GetValue(NameOption);
             var skipPri = parseResult.GetValue(SkipPriOption);
@@ -119,29 +118,99 @@ internal class PackageCommand : Command, IShortDescription
             var selfContained = parseResult.GetValue(SelfContainedOption);
             var executable = parseResult.GetValue(ExecutableOption);
 
-            return await statusService.ExecuteWithStatusAsync("Creating MSIX package...", async (taskContext, cancellationToken) =>
+            // Validate all input folders exist (report all missing at once)
+            var missingDirs = inputFolders.Where(d => !d.Exists).ToList();
+            if (missingDirs.Count > 0)
             {
-                try
+                var missingPaths = string.Join(Environment.NewLine, missingDirs.Select(d => $"  {d.FullName}"));
+                return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
                 {
-                    // Auto-sign if certificate is provided or if generate-cert is specified
-                    var autoSign = certPath != null || generateCert;
+                    return Task.FromResult((1, $"{UiSymbols.Error} Input folder(s) not found:{Environment.NewLine}{missingPaths}"));
+                }, cancellationToken);
+            }
 
-                    var result = await msixService.CreateMsixPackageAsync(inputFolder, output, taskContext, name, skipPri, autoSign, certPath, certPassword, generateCert, installCert, publisher, manifestPath, selfContained, executable, cancellationToken);
+            // Reject duplicate paths (normalize and compare)
+            var normalizedPaths = inputFolders.Select(d => Path.GetFullPath(d.FullName).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)).ToList();
+            var duplicates = normalizedPaths.GroupBy(p => p, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            if (duplicates.Count > 0)
+            {
+                var dupPaths = string.Join(Environment.NewLine, duplicates.Select(d => $"  {d}"));
+                return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                {
+                    return Task.FromResult((1, $"{UiSymbols.Error} Duplicate input folder(s):{Environment.NewLine}{dupPaths}"));
+                }, cancellationToken);
+            }
 
-                    taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.MsixPath}");
-                    if (result.Signed)
+            // Validate --output extension for bundle mode
+            if (inputFolders.Length > 1 && output != null)
+            {
+                var ext = Path.GetExtension(output.Name);
+                if (string.Equals(ext, ".msix", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
                     {
-                        taskContext.AddStatusMessage($"{UiSymbols.Lock} Package has been signed");
-                    }
+                        return Task.FromResult((1, $"{UiSymbols.Error} Cannot use .msix extension for --output when creating a bundle from multiple folders. Use .msixbundle or omit the extension."));
+                    }, cancellationToken);
+                }
+            }
 
-                    return (0, "MSIX package creation completed.");
-                }
-                catch (Exception ex)
+            if (inputFolders.Length == 1)
+            {
+                // Single folder: existing behavior unchanged
+                var inputFolder = inputFolders[0];
+                return await statusService.ExecuteWithStatusAsync("Creating MSIX package...", async (taskContext, cancellationToken) =>
                 {
-                    taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
-                    return (1, $"{UiSymbols.Error} Failed to create MSIX package: {ex.GetBaseException().Message}");
-                }
-            }, cancellationToken);
+                    try
+                    {
+                        var autoSign = certPath != null || generateCert;
+
+                        var result = await msixService.CreateMsixPackageAsync(inputFolder, output, taskContext, name, skipPri, autoSign, certPath, certPassword, generateCert, installCert, publisher, manifestPath, selfContained, executable, cancellationToken);
+
+                        taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {result.MsixPath}");
+                        if (result.Signed)
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Lock} Package has been signed");
+                        }
+
+                        return (0, "MSIX package creation completed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
+                        return (1, $"{UiSymbols.Error} Failed to create MSIX package: {ex.GetBaseException().Message}");
+                    }
+                }, cancellationToken);
+            }
+            else
+            {
+                // Multiple folders: create MSIX bundle
+                return await statusService.ExecuteWithStatusAsync("Creating MSIX bundle...", async (taskContext, cancellationToken) =>
+                {
+                    try
+                    {
+                        var autoSign = certPath != null || generateCert;
+
+                        var result = await msixService.CreateMsixBundleAsync(inputFolders, output, taskContext, name, skipPri, autoSign, certPath, certPassword, generateCert, installCert, publisher, manifestPath, selfContained, executable, cancellationToken);
+
+                        taskContext.AddStatusMessage($"{UiSymbols.Package} Bundle: {result.BundlePath}");
+                        if (result.Signed)
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Lock} Bundle has been signed");
+                        }
+                        else
+                        {
+                            taskContext.AddStatusMessage($"Bundle is unsigned. For Store submission, upload as-is. For sideload, run `winapp sign`.");
+                        }
+
+                        return (0, "MSIX bundle creation completed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
+                        return (1, $"{UiSymbols.Error} Failed to create MSIX bundle: {ex.GetBaseException().Message}");
+                    }
+                }, cancellationToken);
+            }
         }
     }
 }

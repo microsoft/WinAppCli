@@ -151,13 +151,15 @@ winapp update --setup-sdks experimental
 
 Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
 
+Pass multiple input folders to create an `.msixbundle` for multi-architecture distribution (see [Multi-architecture bundles](#multi-architecture-bundles) below).
+
 ```bash
-winapp pack <input-folder> [options]
+winapp pack <input-folder> [input-folder...] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the application files to package
+- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle.
 
 **Options:**
 
@@ -213,6 +215,23 @@ winapp pack ./dist --generate-cert --install-cert --self-contained
 # Package with explicit executable (resolves $targetnametoken$ in manifest)
 winapp pack ./dist --executable MyApp.exe
 ```
+
+#### Multi-architecture bundles
+
+When multiple input folders are passed, `winapp pack` creates an `.msixbundle` containing one `.msix` per architecture:
+
+```bash
+# Create unsigned bundle for Microsoft Store submission
+winapp pack ./publish/x64 ./publish/arm64
+
+# Create signed bundle for sideloading
+winapp pack ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+
+# Self-contained bundle
+winapp pack ./publish/x64 ./publish/arm64 --self-contained --generate-cert
+```
+
+The command auto-detects each folder's architecture from the primary executable's PE header, validates consistency across slices (Identity, Capabilities, Dependencies), and produces a `<Name>_<Version>_<arch1>_<arch2>.msixbundle`.
 
 ---
 
