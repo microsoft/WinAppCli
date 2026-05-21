@@ -93,6 +93,9 @@ winapp ui screenshot -a myapp --output page.png
 # Crop to element; capture with popups visible
 winapp ui screenshot txt-searchbox-e5f6 -a myapp --output search.png
 winapp ui screenshot -a myapp --capture-screen --output with-popups.png
+
+# Bring window to foreground first (matches what the user is currently seeing)
+winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
 ### Read element state
@@ -143,7 +146,8 @@ winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 - When multiple elements match text search, the error shows slugs for each — pick the right one
 - Use `get-property --property ToggleState` to verify checkbox/toggle state after invoke
 - `scroll` auto-finds the nearest scrollable parent
-- Use `--capture-screen` to capture popup overlays, dropdown menus, and flyouts
+- Use `--capture-screen` to capture popup overlays, dropdown menus, and flyouts (also brings the window to the foreground)
+- Use `--focus` to foreground the target window before capture without switching to screen-DC capture (default capture path uses Windows.Graphics.Capture and works while occluded)
 - Use `--hide-disabled` and `--hide-offscreen` to reduce noise
 
 ### Why `;` instead of `&&`
@@ -165,6 +169,17 @@ winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 ```
 Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
 
+## JSON output envelopes (v0.3.1+)
+
+The `--json` envelope for `ui inspect`, `ui get-focused`, `ui search`, and `ui wait-for` was reshaped in v0.3.1. Pre-0.3.1 parsers will silently break — most fields were renamed, removed, or moved into envelopes. Highlights:
+
+- `ui inspect --json` now nests elements under `windows[].elements[]` (was a flat `elements[]`).
+- `ui get-focused --json` always emits an envelope — `{ "hasFocus": false }` or `{ "hasFocus": true, "element": {...} }` (was bare `null`).
+- `ui search --json` / `ui wait-for --json` may include an `invokableAncestor` field (element-shaped) on each match.
+- Per-element `id`, `parentSelector`, and `windowHandle` are **removed** — use `selector` as the public handle.
+
+Full schemas with examples: `references/ui-json-envelope.md`.
+
 ## Related skills
 - `winapp-setup` for adding Windows SDK to your project
 - `winapp-package` for packaging apps as MSIX
@@ -178,4 +193,4 @@ Note: The filename input in standard file dialogs typically has AutomationId `11
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
-| Popup not in screenshot | PrintWindow misses overlays | Use `--capture-screen` flag |
+| Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
