@@ -70,6 +70,11 @@ npx winapp init --use-defaults
 
 # After editing winapp.jsBindings in package.json by hand (or pulling a
 # teammate's package.json), regenerate bindings without re-prompting:
+# Fast path — reuses the cached lockfile, no NuGet / cppwinrt re-run.
+npx winapp node generate-bindings
+
+# Use the full restore instead if you also changed winapp.yaml (packages,
+# sdkVersion, ...) — it refreshes the lockfile before re-running codegen.
 npx winapp restore
 ```
 

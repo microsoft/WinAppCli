@@ -153,13 +153,19 @@ This is the right pattern when the vendor ships a 200 MB winmd and you only want
 
 ### 6. Re-run codegen after editing `package.json`
 
-Any time you edit the `winapp.jsBindings` namespace (add a package, swap to a different scope, add an `extraTypes` entry), re-run:
+Any time you edit the `winapp.jsBindings` namespace (add a package, swap to a different scope, add an `extraTypes` entry), re-run codegen. The fast path skips the NuGet download + cppwinrt header regen and only re-invokes `dynwinrt-codegen`:
+
+```bash
+npx winapp node generate-bindings
+```
+
+It reads the existing JSON without modifying it, replays the cached winmd inventory from `.winapp/winmds.lock.json`, and re-runs codegen — the output directory is replaced atomically (stage-then-swap; previous bindings are preserved on codegen failure).
+
+If you also changed `winapp.yaml` (`packages`, `sdkVersion`, …) the lockfile is stale, so run the full restore instead — it refreshes the lockfile **and** re-runs codegen in one step:
 
 ```bash
 npx winapp restore
 ```
-
-`restore` reads the existing JSON without modifying it, re-discovers winmds, and re-runs codegen — the output directory is replaced atomically (stage-then-swap; previous bindings are preserved on codegen failure).
 
 ---
 

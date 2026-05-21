@@ -148,9 +148,15 @@ The generated `bindings/` files are committed-or-gitignored at your discretion (
 - You add or remove entries in `winapp.jsBindings.packages` / `additionalWinmds` / `extraTypes` (in `package.json`)
 - The codegen itself is upgraded (`npm update @microsoft/dynwinrt-codegen`)
 
-In all cases, re-run `restore` — it picks up the current `winapp.yaml` and `package.json` (neither file is mutated) and re-runs codegen:
+In all cases, re-run codegen — it picks up the current `winapp.yaml` and `package.json` (neither file is mutated):
 
 ```bash
+# Fast path: only re-runs dynwinrt-codegen against the cached lockfile.
+# Use this after editing only `winapp.jsBindings` in package.json.
+npx winapp node generate-bindings
+
+# Full restore: also refreshes the lockfile (NuGet + cppwinrt headers).
+# Use this whenever you change `winapp.yaml` (packages, sdkVersion, ...).
 npx winapp restore
 ```
 

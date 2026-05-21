@@ -102,13 +102,13 @@ Want to inspect or interact with a running app's UI?
 **Key options:** `--setup-sdks stable|preview|experimental|none`
 **Requires:** `winapp.yaml`
 
-### JS/TS bindings (npm-only, via `init` + `restore`)
+### JS/TS bindings (npm-only, via `init` / `restore` / `node generate-bindings`)
 **Purpose:** Generate typed JS/TS WinRT bindings (via `@microsoft/dynwinrt-codegen`) so Node / Electron apps can call WinRT APIs directly without a native build step.
 **When to use:** Inside a Node / Electron project after `npx winapp init`.
 **How to enable:**
 - **Fresh init via npm shim** (`npx winapp init`) shows an interactive yes/no prompt — `Add JS/TypeScript bindings to this project? [Y/n]:`. Press Enter (or pass `--use-defaults`) to opt in; the wrapper writes a default `"winapp": { "jsBindings": {} }` namespace (covering the full Windows App SDK) into `package.json`. C++ projections are always generated regardless of the answer.
 - **Existing workspace:** edit `package.json` to add `"winapp": { "jsBindings": {} }` (the empty object opts in with full-SDK defaults). Then run `npx winapp restore` — it re-runs codegen against the existing config without modifying it.
-- **Re-run codegen** after editing `winapp.jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand: `npx winapp restore`.
+- **Re-run codegen** after editing `winapp.jsBindings.packages` / `extraTypes` / `additionalWinmds` by hand: `npx winapp node generate-bindings` is the fast path — it reuses the cached `.winapp/winmds.lock.json` and skips the NuGet download / cppwinrt header regen that `winapp restore` does. Use `npx winapp restore` instead when you changed `winapp.yaml` (packages, sdkVersion, etc.) so the lockfile is refreshed first.
 **Notes:** npm-only — the interactive prompt only fires when invoked through `npx winapp …`. Standalone winget / installer builds do not generate JS bindings. Codegen always auto-injects `@microsoft/dynwinrt` as a production dep into `package.json`. See [JS bindings docs](https://github.com/microsoft/winappcli/blob/main/docs/js-bindings.md) for the full `winapp.jsBindings` schema.
 
 ### `winapp package <input-folder>` (alias: `winapp pack`)

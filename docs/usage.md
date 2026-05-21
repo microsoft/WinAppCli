@@ -44,7 +44,7 @@ When invoked via the `@microsoft/winappcli` npm package (i.e. `npx winapp init` 
 Add JS/TypeScript bindings to this project? [Y/n]:
 ```
 
-Picking **Yes** writes a default `"winapp.jsBindings"` namespace to `package.json` and runs `dynwinrt-codegen` to emit JS/TS wrappers. C++ projections (cppwinrt headers/libs/runtimes) are generated either way — there is no "JS only" mode; the JS bindings are an addition on top of the standard native workspace. Subsequent `winapp restore` calls re-run codegen against the pinned packages.
+Picking **Yes** writes a default `"winapp.jsBindings"` namespace to `package.json` and runs `dynwinrt-codegen` to emit JS/TS wrappers. C++ projections (cppwinrt headers/libs/runtimes) are generated either way — there is no "JS only" mode; the JS bindings are an addition on top of the standard native workspace. Subsequent `winapp restore` calls re-run codegen against the pinned packages, or use `winapp node generate-bindings` for fast codegen-only re-runs after editing `winapp.jsBindings`.
 
 See the [JS bindings reference](js-bindings.md) for the full schema (`packages`, `skip`, `refOnly`, `extraTypes`, etc.) and the [Electron JS bindings guide](guides/electron/jsbindings.md) for the end-to-end workflow.
 
@@ -167,8 +167,10 @@ JS/TS bindings are configured by declaring a `"winapp": { "jsBindings": {...} }`
 |---|---|
 | Bootstrap a fresh workspace with bindings | `npx winapp init` (answer **Y** at the prompt; default is **Y**) |
 | Add JS bindings to an existing workspace | Edit `package.json` to add `"winapp": { "jsBindings": {} }` (the empty object opts in with full-SDK defaults), then run `npx winapp restore` |
-| Re-run codegen after editing `winapp.jsBindings` | `npx winapp restore` |
+| Re-run codegen after editing `winapp.jsBindings` (fast path) | `npx winapp node generate-bindings` |
 | Re-run codegen as part of full restore (also handles NuGet + cppwinrt) | `npx winapp restore` |
+
+> **Which one should I run?** `winapp node generate-bindings` only re-runs `dynwinrt-codegen` using the cached `.winapp/winmds.lock.json` — it's the right choice after editing only the `winapp.jsBindings` block in `package.json`. Use `winapp restore` whenever you change `winapp.yaml` (packages, sdkVersion, etc.) so the lockfile is refreshed first.
 
 **What runs during `restore` when `winapp.jsBindings` is declared:**
 
