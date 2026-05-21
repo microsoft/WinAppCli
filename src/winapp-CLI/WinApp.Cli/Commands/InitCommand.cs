@@ -50,7 +50,7 @@ internal class InitCommand : Command, IShortDescription
         };
         UseDefaults = new Option<bool>("--use-defaults", "--no-prompt")
         {
-            Description = "Do not prompt, and use default of all prompts"
+            Description = "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)"
         };
         ConfigOnlyOption = new Option<bool>("--config-only")
         {
@@ -113,9 +113,9 @@ internal class InitCommand : Command, IShortDescription
                 return 1;
             }
 
-            // If a nested project was selected and --config-dir was not explicitly set,
-            // move config-dir to the selected project directory so winapp.yaml is co-located
-            if (!configDirExplicit && selectedDirectory.FullName != baseDirectory.FullName)
+            // If --config-dir was not explicitly set, use the selected/init directory
+            // so winapp.yaml is co-located with the project
+            if (!configDirExplicit)
             {
                 configDir = selectedDirectory;
             }

@@ -262,20 +262,22 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         try
         {
             var doc = XDocument.Load(csprojFile.FullName);
-            var propertyGroups = doc.Descendants("PropertyGroup");
+            // Use LocalName to match elements regardless of XML namespace
+            // (SDK-style projects have no namespace; legacy .NET Framework projects use the MSBuild namespace)
+            var propertyGroups = doc.Descendants().Where(e => e.Name.LocalName == "PropertyGroup");
 
             string? outputType = null;
             bool? isTestProject = null;
 
             foreach (var pg in propertyGroups)
             {
-                var outputTypeEl = pg.Element("OutputType");
+                var outputTypeEl = pg.Elements().FirstOrDefault(e => e.Name.LocalName == "OutputType");
                 if (outputTypeEl != null)
                 {
                     outputType = outputTypeEl.Value.Trim();
                 }
 
-                var isTestEl = pg.Element("IsTestProject");
+                var isTestEl = pg.Elements().FirstOrDefault(e => e.Name.LocalName == "IsTestProject");
                 if (isTestEl != null)
                 {
                     isTestProject = string.Equals(isTestEl.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);

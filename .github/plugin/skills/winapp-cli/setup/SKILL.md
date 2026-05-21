@@ -44,13 +44,13 @@ You need an **existing app project** — `winapp init` does **not** create new p
 winapp init
 
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
-winapp init --use-defaults
+winapp init . --use-defaults
 
 # Skip SDK installation (just manifest + config)
-winapp init --use-defaults --setup-sdks none
+winapp init . --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
-winapp init --use-defaults --setup-sdks preview
+winapp init . --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
@@ -127,7 +127,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ## Recommended workflow
 
-1. **Initialize** — `winapp init --use-defaults` in your existing project
+1. **Initialize** — `winapp init . --use-defaults` in your existing project
 2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
@@ -171,12 +171,12 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--config-dir` | Directory to read/store configuration (default: current directory) | (none) |
+| `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-| `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
+| `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
 
 ### `winapp restore`
 

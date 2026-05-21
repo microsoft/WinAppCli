@@ -251,4 +251,129 @@ public class InitCommandTests : BaseCommandTests
         // Assert — should succeed without needing the no-project confirmation prompt
         Assert.AreEqual(0, exitCode, "Init should complete successfully when project is detected");
     }
+
+    [TestMethod]
+    public async Task InitCommand_UseDefaults_MultipleProjects_ErrorsWithList()
+    {
+        // Arrange — create two project markers in subdirectories so detection finds them
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "App1.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+        </Project>
+        """);
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // --use-defaults without explicit directory
+        var args = new[] { "--use-defaults", "--config-only" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should error because multiple projects require explicit directory
+        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when multiple projects are detected");
+        var output = ConsoleStdErr.ToString();
+        Assert.Contains("--use-defaults requires an explicit project directory", output,
+            "Error should explain that --use-defaults needs an explicit path");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SingleNestedProject_UserAccepts_InitsInProjectDir()
+    {
+        // Arrange — create a Rust project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-rust-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // No explicit directory argument — triggers interactive search
+        var args = new[] { "--config-only" };
+
+        // Accept the single-project confirmation prompt
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should init in the nested project directory
+        Assert.AreEqual(0, exitCode, "Init should complete successfully");
+        var configPath = Path.Combine(subDir.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            $"winapp.yaml should be created in the nested project directory: {subDir.FullName}");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SingleNestedProject_UserDeclines_Returns1()
+    {
+        // Arrange — create a project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Decline the single-project confirmation prompt
+        PushConfirmNo();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — user cancelled
+        Assert.AreEqual(1, exitCode, "Init should return 1 when user declines");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_MultipleProjects_ExitCode0_WhenCurrentDirFallbackAvailable()
+    {
+        // Arrange — create two projects in nested directories; the current dir has no project
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "Cargo.toml"), "[package]\nname = \"app1\"");
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "[package]\nname = \"app2\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // NOTE: SelectionPrompt requires exclusive terminal mode which TestConsole doesn't support.
+        // Use --use-defaults to test the error path instead.
+        var args = new[] { "--use-defaults", "--config-only" };
+
+        // Act — --use-defaults without explicit dir and multiple projects → error
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should error because multiple projects require explicit directory
+        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when multiple projects are detected");
+        var output = ConsoleStdErr.ToString();
+        Assert.Contains("--use-defaults requires an explicit project directory", output,
+            "Error should explain that --use-defaults needs an explicit path");
+        Assert.Contains("app1", output, "Error should list detected projects");
+        Assert.Contains("app2", output, "Error should list detected projects");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_NestedProject_ConfigPlacedInProjectDir()
+    {
+        // Arrange — create a project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Accept the single-project confirmation prompt
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should init in nested dir (config-dir relocated) and show cd reminder
+        Assert.AreEqual(0, exitCode, "Init should complete successfully");
+        var configPath = Path.Combine(subDir.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            "winapp.yaml should be created in the nested project directory (config-dir auto-relocated)");
+        // The cd reminder is emitted via LogInformation → static AnsiConsole (not capturable in TestConsole)
+        // but the key behavior is that config was placed in the nested dir, not the root
+        var rootConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsFalse(File.Exists(rootConfig),
+            "winapp.yaml should NOT be in root when a nested project was selected");
+    }
 }

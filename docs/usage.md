@@ -60,7 +60,7 @@ When `init` is run without a directory argument, it performs a breadth-first sea
 The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
 
 - If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
-- If `--use-defaults` is set, the search is skipped and `init` proceeds in the current directory (warning if no project is detected)
+- If `--use-defaults` is set without a directory argument, `init` searches for projects and errors with the list of detected projects — pass an explicit directory to use non-interactive mode (e.g., `winapp init . --use-defaults`)
 - If the current directory is a compatible project, `init` proceeds immediately
 - If exactly one project is found elsewhere, you're prompted to confirm
 - If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
@@ -99,7 +99,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ```bash
 # Re-run init to install SDKs - preserves existing files (manifest, etc.)
-winapp init --use-defaults --setup-sdks stable
+winapp init . --use-defaults --setup-sdks stable
 ```
 
 Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions.

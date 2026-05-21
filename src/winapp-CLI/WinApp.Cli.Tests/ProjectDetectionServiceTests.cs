@@ -489,6 +489,73 @@ public class ProjectDetectionServiceTests
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
             await _sut.DetectProjectsAsync(Root, 5, null, cts.Token));
     }
+
+    // --- Namespace-aware csproj parsing ---
+
+    [TestMethod]
+    public void DetectProject_Dotnet_LegacyNamespacedCsproj_Exe()
+    {
+        // Legacy .NET Framework projects use the MSBuild XML namespace
+        CreateFile("LegacyApp.csproj", """
+        <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result, "Should detect legacy namespaced .csproj with OutputType=Exe");
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_LegacyNamespacedCsproj_WinExe()
+    {
+        CreateFile("WpfApp.csproj", """
+        <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNotNull(result, "Should detect legacy namespaced .csproj with OutputType=WinExe");
+        Assert.AreEqual(DetectedProjectType.Dotnet, result.Type);
+    }
+
+    [TestMethod]
+    public void DetectProject_Dotnet_LegacyNamespacedCsproj_Library_Excluded()
+    {
+        CreateFile("MyLib.csproj", """
+        <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result, "Should not detect legacy namespaced library .csproj");
+    }
+
+    // --- Dot-prefix directory skipping ---
+
+    [TestMethod]
+    public async Task DetectProjects_BFS_SkipsDotPrefixedDirectories()
+    {
+        // Create a project inside a hidden (dot-prefixed) directory
+        CreateDir(".hidden");
+        CreateFile(Path.Combine(".hidden", "Cargo.toml"), "[package]");
+
+        // Create a visible project
+        CreateDir("visible");
+        CreateFile(Path.Combine("visible", "Cargo.toml"), "[package]");
+
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
+
+        Assert.AreEqual(1, results.Count, "Should only find the visible project");
+        Assert.AreEqual("visible", results[0].DisplayPath);
+    }
 }
 
 /// <summary>
