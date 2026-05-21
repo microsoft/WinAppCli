@@ -67,7 +67,7 @@ If you want to unregister your application and clean up any app data after launc
 winapp unregister
 ```
 
-For more details on how exactly the winapp CLI works with dotnet under the hood, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
+For more details on how exactly the WinApp CLI works with dotnet under the hood, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
 
 ### 3. Adding an execution alias for console applications (optional)
 
