@@ -2,7 +2,7 @@
 
 Package identity has often been a pain point for developers looking to build apps that integrate with Windows APIs. Many modern Windows features, like push notifications or the AI APIs, are gated behind package identity. For Windows apps that are unpackaged by default (like .NET console or WPF applications), this meant wrestling with package manifests, build configurations, and certs to bring your app up to speed. 
 
-With the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution. Inside the .NET ecosystem, WinApp supports .NET console, WPF, WinForms, and WinUI3 applications.
+With the [**WinApp CLI**](https://github.com/microsoft/winappCli), you can quickly tackle the problem of package identity, both in the context of local running and debugging, and for packaging applications as MSIX for distribution. WinApp is compatible with any .NET desktop framework.
 
 The WinApp CLI enables a whole host of development related features, but we'll be highlighting two key capabilities to start:
 
@@ -38,28 +38,27 @@ Once you have the winapp CLI installed, running your .NET app with identity is e
 ### 1. Initialize your project with winapp
 
 ```
-winapp init --use-defaults
+winapp init . --use-defaults
 ```
 
 The init command takes care of all the prerequisites for enabling identity:
 - Ensures the `TargetFramework` specified in your `.csproj` is targeting a compatible version of the Windows platform. This is required to properly enable access to Windows APIs.
-- Adds three package references to your `.csproj`:
-    - `Microsoft.WindowsAppSDK` This dependency is the Windows SDK itself, and grants access to Windows APIs.
-    - `Microsoft.Windows.SDK.BuildTools` Windows Build Tools are required for packaging and signing your application.
-    - `Microsoft.Windows.SDK.BuildTools.WinApp` This is the NuGet package for WinApp itself. This dependency enables seamless `dotnet run` usage via WinApp.
+- Adds two package references to your `.csproj`:
+    - `Microsoft.WindowsAppSDK` — This dependency is the Windows SDK itself, and grants access to Windows APIs.
+    - `Microsoft.Windows.SDK.BuildTools.WinApp` — This is the NuGet package for WinApp itself. This dependency enables seamless `dotnet run` usage via WinApp.
 - Generates both a `Package.appxmanifest` and required asset files, placed in an `Assets` directory. These files are required to grant package identity.
 
-If you want more control over the init experience, run without the `--use-defaults` flag. This will give you control over versioning, package and publisher name, and allow you to manage which dependencies are added to your project.
+If you want more control over the init experience, run without the `--use-defaults` flag. This will give you control over versioning, package and publisher name, and allow you to manage which dependencies are added to your project. Additionally, if you already have any of the prerequisites handled by the init command, WinApp will not overwrite them.
 
 ### 2. Debug with `dotnet run`
 
-Once your project has been initialized with winapp, you can run your app as you would normally:
+Once your project has been initialized with WinApp, you can run your app as you would normally:
 
 ```
 dotnet run
 ```
 
-This will launch your app with package identity, allowing you to easily add and test Windows features within your app.
+Because the WinApp NuGet package is referenced by your project, `dotnet run` will call on WinApp to run your application. This will launch your app with package identity, allowing you to easily add and test Windows features within your app.
 
 If you want to unregister your application and clean up any app data after launching with identity, run this command from the project root:
 
@@ -67,7 +66,39 @@ If you want to unregister your application and clean up any app data after launc
 winapp unregister
 ```
 
-For more details on how exactly the WinApp CLI works with dotnet under the hood, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
+Additionally, if you want to disable running as a packaged application, you can add this property to your `.csproj`:
+
+```xml
+<PropertyGroup>
+  <WindowsPackageType>None</WindowsPackageType>
+</PropertyGroup>
+```
+
+#### Passing arguments to WinApp
+
+To customize `run` behavior, you can pass arguments to WinApp by setting properties in your `.csproj`:
+
+```xml
+<PropertyGroup>
+  <!-- Specify a manifest path -->
+  <WinAppManifestPath>$(MSBuildProjectDirectory)\custom\Package.appxmanifest</WinAppManifestPath>
+
+  <!-- Pass arguments to the app on launch -->
+  <WinAppLaunchArgs>--debug --verbose</WinAppLaunchArgs>
+
+  <!-- Launch via execution alias (for console apps needing terminal I/O) -->
+  <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
+
+  <!-- Capture OutputDebugString + crash diagnostics -->
+  <WinAppRunDebugOutput>true</WinAppRunDebugOutput>
+
+  <!-- Register identity but don't launch (attach your own debugger) -->
+  <WinAppRunNoLaunch>true</WinAppRunNoLaunch>
+</PropertyGroup>
+```
+
+For more details on how exactly the WinApp CLI works with dotnet under the hood and for further guidance on customizing the run experience, check out the [`dotnet run` support docs](https://github.com/microsoft/winappCli/blob/main/docs/dotnet-run-support.md).
+
 
 ### 3. Adding an execution alias for console applications (optional)
 
@@ -99,6 +130,10 @@ dotnet build -c Release
 ```
 
 2. Package your application with the `pack` command, specifying your output directory. Run this command from your project root:
+
+```
+winapp pack .\bin\Release\net10.0-windows10.0.26100.0
+```
 
 The `pack` command will output a signed MSIX.
 
