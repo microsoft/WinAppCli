@@ -203,4 +203,148 @@ public class BundleValidationServiceTests
     }
 
     #endregion
+
+    #region PackageDependency Consistency
+
+    [TestMethod]
+    public void Validate_MismatchedPackageDependency_ReturnsError()
+    {
+        var xml1 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""x64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+    <PackageDependency Name=""Microsoft.VCLibs.140.00"" MinVersion=""14.0.30704.0"" Publisher=""CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+        var xml2 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""arm64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+    <PackageDependency Name=""Microsoft.VCLibs.140.00"" MinVersion=""14.0.33519.0"" Publisher=""CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+
+        var manifests = new[] { AppxManifestDocument.Parse(xml1), AppxManifestDocument.Parse(xml2) };
+        var arches = new[] { "x64", "arm64" };
+        var folders = new[] { CreateFolder("x64"), CreateFolder("arm64") };
+
+        var errors = _service.Validate(manifests, arches, folders);
+
+        Assert.IsTrue(errors.Any(e => e.Field == "Dependencies/PackageDependency"));
+    }
+
+    [TestMethod]
+    public void Validate_MatchingPackageDependencies_NoErrors()
+    {
+        var xml1 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""x64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+    <PackageDependency Name=""Microsoft.VCLibs.140.00"" MinVersion=""14.0.30704.0"" Publisher=""CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+        var xml2 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""arm64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+    <PackageDependency Name=""Microsoft.VCLibs.140.00"" MinVersion=""14.0.30704.0"" Publisher=""CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+
+        var manifests = new[] { AppxManifestDocument.Parse(xml1), AppxManifestDocument.Parse(xml2) };
+        var arches = new[] { "x64", "arm64" };
+        var folders = new[] { CreateFolder("x64"), CreateFolder("arm64") };
+
+        var errors = _service.Validate(manifests, arches, folders);
+
+        Assert.AreEqual(0, errors.Count);
+    }
+
+    #endregion
+
+    #region TargetDeviceFamily Consistency
+
+    [TestMethod]
+    public void Validate_MismatchedTargetDeviceFamily_ReturnsError()
+    {
+        var xml1 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""x64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+        var xml2 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""arm64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.22000.0"" MaxVersionTested=""10.0.22621.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+
+        var manifests = new[] { AppxManifestDocument.Parse(xml1), AppxManifestDocument.Parse(xml2) };
+        var arches = new[] { "x64", "arm64" };
+        var folders = new[] { CreateFolder("x64"), CreateFolder("arm64") };
+
+        var errors = _service.Validate(manifests, arches, folders);
+
+        Assert.IsTrue(errors.Any(e => e.Field == "Dependencies/TargetDeviceFamily"));
+    }
+
+    [TestMethod]
+    public void Validate_MatchingTargetDeviceFamily_NoErrors()
+    {
+        var xml1 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""x64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+        var xml2 = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""App"" Publisher=""CN=Test"" Version=""1.0.0.0"" ProcessorArchitecture=""arm64"" />
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Desktop"" MinVersion=""10.0.19041.0"" MaxVersionTested=""10.0.22621.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""a.exe"" EntryPoint=""Windows.FullTrustApplication"" />
+  </Applications>
+</Package>";
+
+        var manifests = new[] { AppxManifestDocument.Parse(xml1), AppxManifestDocument.Parse(xml2) };
+        var arches = new[] { "x64", "arm64" };
+        var folders = new[] { CreateFolder("x64"), CreateFolder("arm64") };
+
+        var errors = _service.Validate(manifests, arches, folders);
+
+        Assert.AreEqual(0, errors.Count);
+    }
+
+    #endregion
 }

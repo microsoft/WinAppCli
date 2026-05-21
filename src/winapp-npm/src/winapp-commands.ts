@@ -249,6 +249,8 @@ export interface InitOptions extends CommonOptions {
   ignoreConfig?: boolean;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
+  /** Search all directories, including commonly ignored ones like node_modules, bin, obj, etc. */
+  searchAll?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
   /** Do not prompt, and use default of all prompts */
@@ -265,6 +267,7 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.configOnly) args.push('--config-only');
   if (options.ignoreConfig) args.push('--ignore-config');
   if (options.noGitignore) args.push('--no-gitignore');
+  if (options.searchAll) args.push('--search-all');
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.useDefaults) args.push('--use-defaults');
   return execCommand(args, options);
@@ -794,10 +797,8 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
+  /** Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. */
   captureScreen?: boolean;
-  /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
-  focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Save output to file path (e.g., screenshot) */
@@ -814,7 +815,6 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
-  if (options.focus) args.push('--focus');
   if (options.json) args.push('--json');
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());

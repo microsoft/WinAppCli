@@ -63,7 +63,7 @@ internal partial class MsixService
             var detectedArchitectures = sliceInfos.Select(s => s.Arch).ToList();
 
             // --- Step 2: Resolve manifest per folder and finalize ---
-            var finalizedManifests = new List<(string Content, AppxManifestDocument Doc)>();
+            var finalizedManifests = new List<(string Content, AppxManifestDocument Doc, FileInfo ResolvedManifestPath)>();
             var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
             for (int i = 0; i < sliceInfos.Count; i++)
@@ -107,7 +107,7 @@ internal partial class MsixService
                 manifestContent = doc.ToXml();
                 doc = AppxManifestDocument.Parse(manifestContent);
 
-                finalizedManifests.Add((manifestContent, doc));
+                finalizedManifests.Add((manifestContent, doc, resolvedManifestPath));
             }
 
             // --- Step 3: Cross-slice validation (BEFORE packing) ---
@@ -186,7 +186,7 @@ internal partial class MsixService
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var (folder, arch, exePath) = sliceInfos[i];
-                var (manifestContent, _) = finalizedManifests[i];
+                var (manifestContent, _, sliceManifestPath) = finalizedManifests[i];
 
                 taskContext.AddStatusMessage($"[{i + 1}/{sliceInfos.Count}] Packing {arch}...");
 
@@ -195,7 +195,7 @@ internal partial class MsixService
                 var intermediateMsixPath = new FileInfo(Path.Combine(bundleTempDir.FullName, intermediateMsixName));
 
                 await PackSingleFolderToMsixAsync(
-                    folder, manifestContent, intermediateMsixPath,
+                    folder, manifestContent, sliceManifestPath, intermediateMsixPath,
                     taskContext, selfContained, executable, arch,
                     skipPri, dotNetPackageList, cancellationToken);
 
@@ -296,6 +296,7 @@ internal partial class MsixService
     private async Task PackSingleFolderToMsixAsync(
         DirectoryInfo inputFolder,
         string manifestContent,
+        FileInfo resolvedManifestPath,
         FileInfo outputMsixPath,
         TaskContext taskContext,
         bool selfContained,
@@ -339,6 +340,20 @@ internal partial class MsixService
             var updatedManifestPath = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
             await File.WriteAllTextAsync(updatedManifestPath, manifestContent, Encoding.UTF8, cancellationToken);
 
+            // Copy external manifest-referenced assets if manifest lives outside the input folder
+            var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
+                .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+
+            var allManifestReferences = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
+            if (manifestIsOutsideInputFolder)
+            {
+                var externalAssets = MrtAssetHelper.GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
+                MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
+            }
+
+            CopyManifestReferencedFiles(allManifestReferences, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext, cancellationToken);
+
             // PRI generation
             var existingPri = new FileInfo(Path.Combine(stagingDir.FullName, "resources.pri"));
             if (!skipPri && !existingPri.Exists)
@@ -360,7 +375,7 @@ internal partial class MsixService
                 if (executablePath != null)
                 {
                     taskContext.AddDebugMessage($"Preparing self-contained runtime for {targetArch}...");
-                    var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, dotNetPackageList, taskContext, cancellationToken);
+                    var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, dotNetPackageList, taskContext, cancellationToken, overrideArch: targetArch);
                     var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
                     var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
                     await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, dotNetPackageList, taskContext, cancellationToken);

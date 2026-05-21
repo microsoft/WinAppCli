@@ -10,7 +10,7 @@ namespace WinApp.Cli.Commands;
 
 internal class PackageCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Create MSIX package";
+    public string ShortDescription => "Create MSIX package or bundle";
 
     public static Argument<DirectoryInfo[]> InputFolderArgument { get; }
     public static Option<FileInfo> OutputOption { get; }
@@ -34,7 +34,7 @@ internal class PackageCommand : Command, IShortDescription
         };
         OutputOption = new Option<FileInfo>("--output")
         {
-            Description = "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
+            Description = "Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles.",
         };
 
         NameOption = new Option<string?>("--name")
@@ -150,6 +150,19 @@ internal class PackageCommand : Command, IShortDescription
                     return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
                     {
                         return Task.FromResult((1, $"{UiSymbols.Error} Cannot use .msix extension for --output when creating a bundle from multiple folders. Use .msixbundle or omit the extension."));
+                    }, cancellationToken);
+                }
+            }
+
+            // Validate --output extension for single-package mode
+            if (inputFolders.Length == 1 && output != null)
+            {
+                var ext = Path.GetExtension(output.Name);
+                if (string.Equals(ext, ".msixbundle", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                    {
+                        return Task.FromResult((1, $"{UiSymbols.Error} Cannot use .msixbundle extension for --output when creating a single package. Use .msix or omit the extension."));
                     }, cancellationToken);
                 }
             }
