@@ -57,7 +57,8 @@ internal class UpdateNotificationService(
             // Paranoia: discard cached versions that look like test artifacts (e.g., 99.0.0, 999.0.0)
             if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion, currentVersion))
             {
-                cache = cache with { LatestVersion = "", LastShownDate = "" };
+                logger.LogDebug("Discarded unreasonable cached update version {Version}", cache.LatestVersion);
+                cache = cache with { LastCheck = null, LatestVersion = "", LastShownDate = "" };
                 WriteCacheFile(cacheFile, cache);
             }
 
@@ -183,16 +184,34 @@ internal class UpdateNotificationService(
         NotificationConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
     }
 
-    internal static bool IsPreReleaseVersion(string version)
+    /// <summary>
+    /// Parses a SemVer-like version string into its core <see cref="Version"/> and optional prerelease suffix.
+    /// Handles v-prefix, build metadata (+...), and prerelease (-...) in a single pass.
+    /// </summary>
+    private static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
     {
-        // Strip build metadata (+...)
-        var plusIdx = version.IndexOf('+');
-        if (plusIdx >= 0)
+        coreVersion = new Version(0, 0);
+        prerelease = null;
+
+        if (value.StartsWith('v') || value.StartsWith('V'))
         {
-            version = version[..plusIdx];
+            value = value[1..];
         }
 
-        return version.Contains('-');
+        var plusIdx = value.IndexOf('+');
+        if (plusIdx >= 0)
+        {
+            value = value[..plusIdx];
+        }
+
+        var dashIdx = value.IndexOf('-');
+        if (dashIdx >= 0)
+        {
+            prerelease = value[(dashIdx + 1)..];
+            value = value[..dashIdx];
+        }
+
+        return Version.TryParse(value, out coreVersion!);
     }
 
     /// <summary>
@@ -201,14 +220,7 @@ internal class UpdateNotificationService(
     /// </summary>
     internal static string GetCoreVersion(string version)
     {
-        var plusIdx = version.IndexOf('+');
-        if (plusIdx >= 0)
-        {
-            version = version[..plusIdx];
-        }
-
-        var dashIdx = version.IndexOf('-');
-        return dashIdx >= 0 ? version[..dashIdx] : version;
+        return TryParseSemVer(version, out var core, out _) ? core.ToString() : version;
     }
 
     /// <summary>
@@ -217,51 +229,17 @@ internal class UpdateNotificationService(
     /// </summary>
     internal static bool IsUnreasonableVersion(string version, string currentVersion)
     {
-        if (!TryParseMajorVersion(version, out var cachedMajor)
-            || !TryParseMajorVersion(currentVersion, out var currentMajor))
+        if (!TryParseSemVer(version, out var cachedCore, out _)
+            || !TryParseSemVer(currentVersion, out var currentCore, out _))
         {
             return false;
         }
 
-        return cachedMajor > currentMajor + MaxReasonableFutureMajorDelta;
-    }
-
-    private static bool TryParseMajorVersion(string version, out int major)
-    {
-        var core = GetCoreVersion(version);
-        if (core.StartsWith('v') || core.StartsWith('V'))
-        {
-            core = core[1..];
-        }
-
-        var dotIdx = core.IndexOf('.');
-        var majorStr = dotIdx >= 0 ? core[..dotIdx] : core;
-        return int.TryParse(majorStr, out major);
+        return cachedCore.Major > currentCore.Major + MaxReasonableFutureMajorDelta;
     }
 
     internal static bool IsNewerVersion(string latest, string current)
     {
-        static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
-        {
-            coreVersion = new Version(0, 0);
-            prerelease = null;
-
-            var plusIdx = value.IndexOf('+');
-            if (plusIdx >= 0)
-            {
-                value = value[..plusIdx];
-            }
-
-            var dashIdx = value.IndexOf('-');
-            if (dashIdx >= 0)
-            {
-                prerelease = value[(dashIdx + 1)..];
-                value = value[..dashIdx];
-            }
-
-            return Version.TryParse(value, out coreVersion!);
-        }
-
         if (!TryParseSemVer(latest, out var latestCore, out var latestPre))
         {
             return false;

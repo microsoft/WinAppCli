@@ -446,42 +446,6 @@ public class UpdateNotificationServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void IsPreReleaseVersion_StableVersion_ReturnsFalse()
-    {
-        Assert.IsFalse(UpdateNotificationService.IsPreReleaseVersion("1.0.0"));
-    }
-
-    [TestMethod]
-    public void IsPreReleaseVersion_PreReleaseVersion_ReturnsTrue()
-    {
-        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("1.0.0-prerelease.73"));
-    }
-
-    [TestMethod]
-    public void IsPreReleaseVersion_BetaVersion_ReturnsTrue()
-    {
-        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("0.3.2-beta.1"));
-    }
-
-    [TestMethod]
-    public void IsPreReleaseVersion_WithBuildMetadata_ReturnsFalse()
-    {
-        Assert.IsFalse(UpdateNotificationService.IsPreReleaseVersion("1.0.0+build123"));
-    }
-
-    [TestMethod]
-    public void IsPreReleaseVersion_PreReleaseWithBuildMetadata_ReturnsTrue()
-    {
-        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("1.0.0-rc.1+build456"));
-    }
-
-    [TestMethod]
-    public void IsPreReleaseVersion_BranchPrereleaseLabel_ReturnsTrue()
-    {
-        Assert.IsTrue(UpdateNotificationService.IsPreReleaseVersion("0.3.2-dev-my-feature.42"));
-    }
-
-    [TestMethod]
     public void GetCoreVersion_StableVersion_ReturnsSame()
     {
         Assert.AreEqual("1.0.0", UpdateNotificationService.GetCoreVersion("1.0.0"));
@@ -596,8 +560,65 @@ public class UpdateNotificationServiceTests : BaseCommandTests
         var output = TestAnsiConsole.Output;
         Assert.IsFalse(output.Contains("available"), $"Should not notify for unreasonable version, got: {output}");
 
-        // Verify the cache was cleaned
+        // Verify the cache was fully cleaned (including LastCheck so refresh triggers immediately)
         var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFile));
         Assert.AreEqual("", cache.LatestVersion, "Unreasonable version should be cleared from cache");
+        Assert.AreEqual("", cache.LastShownDate, "LastShownDate should be cleared from cache");
+        Assert.IsNull(cache.LastCheck, "LastCheck should be null so background refresh triggers immediately");
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_UnparseableCached_ReturnsFalse()
+    {
+        // Corrupt/garbage cached versions should not be considered "unreasonable" — they just fail to parse
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("garbage", "1.0.0"));
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("", "1.0.0"));
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("1", "1.0.0"));
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("1.x", "1.0.0"));
+    }
+
+    [TestMethod]
+    public void IsUnreasonableVersion_UnparseableCurrent_ReturnsFalse()
+    {
+        // If the current version can't be parsed, don't flag anything as unreasonable
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("99.0.0", "garbage"));
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("99.0.0", ""));
+        Assert.IsFalse(UpdateNotificationService.IsUnreasonableVersion("99.0.0", "abc.def"));
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_GarbageCachedVersion_DoesNotNotifyOrThrow()
+    {
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        // A corrupt cache file should not crash or display a notification
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\ngarbage\n2020-01-01");
+
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify for garbage version, got: {output}");
+    }
+
+    [TestMethod]
+    public void CheckAndNotify_CurrentVersionProviderThrows_DoesNotCrashAndDoesNotNotify()
+    {
+        _concreteService.CurrentVersionProvider = () => throw new InvalidOperationException("Simulated failure");
+
+        var cacheDir = _testCacheDirectory.FullName;
+        var cacheFile = Path.Combine(cacheDir, ".update-check");
+        Directory.CreateDirectory(cacheDir);
+        File.WriteAllText(cacheFile, $"{DateTime.UtcNow:O}\n5.0.0\n2020-01-01");
+
+        // Should not throw — the outer try/catch should absorb it
+        _updateNotificationService.CheckAndNotify();
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("available"), $"Should not notify when provider throws, got: {output}");
+
+        // Cache should be unchanged (no mutation)
+        var cache = UpdateNotificationService.ReadCache(new FileInfo(cacheFile));
+        Assert.AreEqual("5.0.0", cache.LatestVersion, "Cache should not be mutated when provider throws");
     }
 }
