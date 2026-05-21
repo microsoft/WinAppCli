@@ -1,3 +1,6 @@
+# Test working directory
+test-wd/
+
 # Logs
 logs
 *.log
@@ -152,6 +155,8 @@ obj/
 *.sln.docstates
 # VS Code
 .vscode/
+# Allow .vscode config for the VS Code extension project
+!src/winapp-VSC/.vscode/
 # Visual Studio
 .vs/
 # NuGet packages
@@ -185,14 +190,14 @@ launchSettings.json
 # Local test artifacts for the vcpkg port test harness (ignore generated outputs only)
 build/
 
-# Ignore local winsdk workspace and per-project publish outputs
-.winsdk
+# Ignore local winapp workspace and per-project publish outputs
+.winapp
 src/**/bin/**/publish/
 
 # Ignore local portfile-cli-test outputs except for CMakeLists.txt
 src/**/portfile-cli-test/*
 !/src/**/portfile-cli-test/CMakeLists.txt
-/src/winsdk-vcpkg/vcpkg_sample/CMakeFiles
+/src/winapp-vcpkg/vcpkg_sample/CMakeFiles
 
 vcpkg_installed/
 
@@ -203,3 +208,13 @@ CMakeCache.txt
 # Development certificate
 devcert.pfx
 *.msix
+
+# GUI app package outputs
+/src/winapp-GUI/winapp-GUI/AppPackages
+/src/winapp-GUI/winapp-GUI/BundleArtifacts
+/src/winapp-GUI/winapp-GUI/Properties/PublishProfiles
+/src/winapp-GUI/winapp-GUI/winapp-GUI.csproj
+/src/winapp-NuGet/tools
+
+# Do not ignore the targets and props files in the build folder, which are needed for consuming the NuGet package
+!/src/winapp-NuGet/build/

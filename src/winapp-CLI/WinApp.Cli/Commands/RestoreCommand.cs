@@ -1,0 +1,56 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Commands;
+
+internal class RestoreCommand : Command, IShortDescription
+{
+    public string ShortDescription => "Restore packages and projections from winapp.yaml";
+
+    public static Argument<DirectoryInfo> BaseDirectoryArgument { get; }
+    public static Option<DirectoryInfo> ConfigDirOption { get; }
+    static RestoreCommand()
+    {
+        BaseDirectoryArgument = new Argument<DirectoryInfo>("base-directory")
+        {
+            Description = "Base/root directory for the winapp workspace",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        BaseDirectoryArgument.AcceptExistingOnly();
+
+        ConfigDirOption = new Option<DirectoryInfo>("--config-dir")
+        {
+            Description = "Directory to read configuration from (default: current directory)"
+        };
+        ConfigDirOption.AcceptExistingOnly();
+    }
+
+    public RestoreCommand() : base("restore", "Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.")
+    {
+        Arguments.Add(BaseDirectoryArgument);
+        Options.Add(ConfigDirOption);
+    }
+
+    public class Handler(IWorkspaceSetupService workspaceSetupService, ICurrentDirectoryProvider currentDirectoryProvider) : AsynchronousCommandLineAction
+    {
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var baseDirectory = parseResult.GetValue(BaseDirectoryArgument) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+            var configDir = parseResult.GetValue(ConfigDirOption) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            var options = new WorkspaceSetupOptions
+            {
+                BaseDirectory = baseDirectory,
+                ConfigDir = configDir,
+                RequireExistingConfig = true,
+                ForceLatestBuildTools = false // Will be determined from config
+            };
+
+            return await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);
+        }
+    }
+}

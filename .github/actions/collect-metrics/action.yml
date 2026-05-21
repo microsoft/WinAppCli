@@ -1,0 +1,143 @@
+name: Collect Build Metrics
+description: Measure artifact sizes, test results, and CLI startup time
+
+inputs:
+  solution-path:
+    description: Path to the .NET solution file
+    default: src/winapp-CLI/winapp.sln
+  artifacts-path:
+    description: Path to the artifacts directory
+    default: artifacts
+
+runs:
+  using: composite
+  steps:
+    - name: Measure artifact sizes
+      shell: pwsh
+      run: |
+        $artifacts = "${{ inputs.artifacts-path }}"
+        $sizes = @{}
+
+        # Sum all files excluding PDBs to get total CLI distribution size
+        $x64Files = Get-ChildItem "$artifacts/cli/win-x64" -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.pdb' }
+        $arm64Files = Get-ChildItem "$artifacts/cli/win-arm64" -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.pdb' }
+        $npmPkg = Get-ChildItem "$artifacts/*.tgz" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixX64 = Get-ChildItem "$artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msixArm64 = Get-ChildItem "$artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $nugetPkg = Get-ChildItem "$artifacts/nuget/*.nupkg" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $vsixPkg = Get-ChildItem "$artifacts/*.vsix" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if ($x64Files) { $sizes["cli-win-x64"] = ($x64Files | Measure-Object -Property Length -Sum).Sum }
+        if ($arm64Files) { $sizes["cli-win-arm64"] = ($arm64Files | Measure-Object -Property Length -Sum).Sum }
+        if ($npmPkg) { $sizes["npm-package"] = $npmPkg.Length }
+        if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
+        if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
+        if ($nugetPkg) { $sizes["nuget-package"] = $nugetPkg.Length }
+        if ($vsixPkg) { $sizes["vscode-extension"] = $vsixPkg.Length }
+
+        $sizes | ConvertTo-Json | Set-Content "$artifacts/binary-sizes.json"
+
+        Write-Host "Current artifact sizes:"
+        $sizes.GetEnumerator() | Sort-Object Key | ForEach-Object {
+          Write-Host "  $($_.Key): $([math]::Round($_.Value / 1MB, 2)) MB ($($_.Value) bytes)"
+        }
+
+    - name: Parse test results
+      shell: pwsh
+      run: |
+        $trxFiles = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/*.trx" -ErrorAction SilentlyContinue
+        $totalTests = 0; $passed = 0; $failed = 0; $skipped = 0; $durationMs = 0
+
+        foreach ($trx in $trxFiles) {
+          [xml]$xml = Get-Content $trx.FullName
+          $ns = @{ t = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010" }
+
+          $counters = $xml | Select-Xml "//t:ResultSummary/t:Counters" -Namespace $ns | Select-Object -First 1
+          if ($counters) {
+            $totalTests += [int]$counters.Node.total
+            $passed += [int]$counters.Node.passed
+            $failed += [int]$counters.Node.failed
+            $skipped += [int]$counters.Node.total - [int]$counters.Node.executed
+          }
+
+          $times = $xml | Select-Xml "//t:Times" -Namespace $ns | Select-Object -First 1
+          if ($times -and $times.Node.finish -and $times.Node.start) {
+            $start = [DateTime]::Parse($times.Node.start)
+            $finish = [DateTime]::Parse($times.Node.finish)
+            $durationMs += ($finish - $start).TotalMilliseconds
+          }
+        }
+
+        $testSummary = @{
+          total = $totalTests
+          passed = $passed
+          failed = $failed
+          skipped = $skipped
+          durationMs = [math]::Round($durationMs)
+        }
+
+        $testSummary | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/test-summary.json"
+
+        $durationSec = [math]::Round($durationMs / 1000, 1)
+        Write-Host "Tests: $totalTests total, $passed passed, $failed failed, $skipped skipped in ${durationSec}s"
+
+    - name: Parse coverage results
+      shell: pwsh
+      run: |
+        $coverageFile = Get-ChildItem "${{ inputs.artifacts-path }}/TestResults/*.cobertura.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $coverageFile) {
+          Write-Warning "No coverage.cobertura.xml found, skipping coverage metrics"
+          @{ lineCoverage = $null; branchCoverage = $null } | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/coverage-summary.json"
+          exit 0
+        }
+
+        [xml]$xml = Get-Content $coverageFile.FullName
+        $coverage = $xml.coverage
+
+        # Cobertura stores rates as 0.0-1.0 floats; convert to percentage
+        $lineRate = if ($coverage.'line-rate') { [double]$coverage.'line-rate' } else { 0 }
+        $branchRate = if ($coverage.'branch-rate') { [double]$coverage.'branch-rate' } else { 0 }
+        $linePct = [math]::Round($lineRate * 100, 1)
+        $branchPct = [math]::Round($branchRate * 100, 1)
+
+        $coverageSummary = @{
+          lineCoverage = $linePct
+          branchCoverage = $branchPct
+        }
+
+        $coverageSummary | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/coverage-summary.json"
+        Write-Host "Coverage: ${linePct}% lines, ${branchPct}% branches"
+
+    - name: Measure CLI startup time
+      shell: pwsh
+      run: |
+        $exe = "${{ inputs.artifacts-path }}/cli/win-x64/winapp.exe"
+        if (-not (Test-Path $exe)) {
+          Write-Warning "CLI binary not found, skipping startup benchmark"
+          @{ medianMs = 0; samples = @() } | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/startup-time.json"
+          exit 0
+        }
+
+        $times = @()
+        # Warm-up run (prime filesystem cache)
+        & $exe --version 2>&1 | Out-Null
+
+        # 5 timed runs
+        for ($i = 0; $i -lt 5; $i++) {
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          & $exe --version 2>&1 | Out-Null
+          $sw.Stop()
+          $times += $sw.ElapsedMilliseconds
+        }
+
+        $sorted = $times | Sort-Object
+        $median = $sorted[[math]::Floor($sorted.Count / 2)]
+
+        $startup = @{
+          medianMs = $median
+          samples = $times
+        }
+
+        $startup | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/startup-time.json"
+
+        Write-Host "CLI startup time (--version): ${median}ms median (samples: $($times -join ', ')ms)"

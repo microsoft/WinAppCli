@@ -1,0 +1,10 @@
+dist/
+bin/
+node_modules/
+*.exe
+*.pdb
+addon-template/
+cs-addon-template/
+
+# Auto-generated files
+src/winapp-commands.ts

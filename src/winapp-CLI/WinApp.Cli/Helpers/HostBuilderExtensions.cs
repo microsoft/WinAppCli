@@ -1,0 +1,128 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console;
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.Diagnostics.CodeAnalysis;
+using WinApp.Cli.Commands;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Helpers;
+
+internal static class StoreHostBuilderExtensions
+{
+    public static IServiceCollection ConfigureServices(this IServiceCollection services)
+    {
+        return services
+            .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(Directory.GetCurrentDirectory()))
+            .AddSingleton<IBuildToolsService, BuildToolsService>()
+            .AddSingleton<ICertificateService, CertificateService>()
+            .AddSingleton<IConfigService, ConfigService>()
+            .AddSingleton<ICppWinrtService, CppWinrtService>()
+            .AddSingleton<IDotNetService, DotNetService>()
+            .AddSingleton<IDevModeService, DevModeService>()
+            .AddSingleton<IDirectoryPackagesService, DirectoryPackagesService>()
+            .AddSingleton<IManifestTemplateService, ManifestTemplateService>()
+            .AddSingleton<IManifestService, ManifestService>()
+            .AddSingleton<IImageAssetService, ImageAssetService>()
+            .AddSingleton<IMsixService, MsixService>()
+            .AddSingleton<IPriService, PriService>()
+            .AddSingleton<INugetService, NugetService>()
+            .AddSingleton<IPackageInstallationService, PackageInstallationService>()
+            .AddSingleton<IPackageLayoutService, PackageLayoutService>()
+            .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
+            .AddSingleton<IWinmdService, WinmdService>()
+            .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
+            .AddSingleton<IGitignoreService, GitignoreService>()
+            .AddSingleton<IFirstRunService, FirstRunService>()
+            .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
+            .AddSingleton<IAppLauncherService, AppLauncherService>()
+            .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
+            .AddSingleton<IDebugOutputService, DebugOutputService>()
+            .AddSingleton<ICrashDumpService, CrashDumpService>()
+            .AddSingleton(AnsiConsole.Console)
+            .AddSingleton<IStatusService, StatusService>()
+            .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
+            .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
+            // UI Automation services
+            .AddSingleton<ISelectorService, SelectorService>()
+            .AddSingleton<IUiSessionService, UiSessionService>()
+            .AddSingleton<IUiAutomationService, UiAutomationService>();
+    }
+
+    public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
+    {
+        return serviceCollection
+                .UseCommandHandler<InitCommand, InitCommand.Handler>()
+                .ConfigureCommand<WinAppRootCommand>()
+                .UseCommandHandler<RestoreCommand, RestoreCommand.Handler>()
+                .UseCommandHandler<PackageCommand, PackageCommand.Handler>()
+                .ConfigureCommand<ManifestCommand>()
+                .UseCommandHandler<ManifestGenerateCommand, ManifestGenerateCommand.Handler>()
+                .UseCommandHandler<ManifestUpdateAssetsCommand, ManifestUpdateAssetsCommand.Handler>()
+                .UseCommandHandler<ManifestAddAliasCommand, ManifestAddAliasCommand.Handler>()
+                .UseCommandHandler<UpdateCommand, UpdateCommand.Handler>()
+                .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
+                .UseCommandHandler<RunCommand, RunCommand.Handler>()
+                .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
+                .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
+                .ConfigureCommand<CertCommand>()
+                .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
+                .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
+                .UseCommandHandler<CertInfoCommand, CertInfoCommand.Handler>()
+                .UseCommandHandler<SignCommand, SignCommand.Handler>()
+                .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
+                .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
+                .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>()
+                // UI Automation commands
+                .ConfigureCommand<UiCommand>()
+                .UseCommandHandler<UiStatusCommand, UiStatusCommand.Handler>()
+                .UseCommandHandler<UiInspectCommand, UiInspectCommand.Handler>()
+                .UseCommandHandler<UiSearchCommand, UiSearchCommand.Handler>()
+                .UseCommandHandler<UiGetPropertyCommand, UiGetPropertyCommand.Handler>()
+                .UseCommandHandler<UiGetValueCommand, UiGetValueCommand.Handler>()
+                .UseCommandHandler<UiScreenshotCommand, UiScreenshotCommand.Handler>()
+                .UseCommandHandler<UiInvokeCommand, UiInvokeCommand.Handler>()
+                .UseCommandHandler<UiClickCommand, UiClickCommand.Handler>()
+                .UseCommandHandler<UiSetValueCommand, UiSetValueCommand.Handler>()
+                .UseCommandHandler<UiFocusCommand, UiFocusCommand.Handler>()
+                .UseCommandHandler<UiScrollIntoViewCommand, UiScrollIntoViewCommand.Handler>()
+                .UseCommandHandler<UiScrollCommand, UiScrollCommand.Handler>()
+                .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
+                .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
+                .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                .ConfigureCommand<CompleteCommand>();
+    }
+
+    public static IServiceCollection UseCommandHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, bool addDefaultOptions = true)
+        where TCommand : Command, IShortDescription
+        where THandler : AsynchronousCommandLineAction
+    {
+        return services
+            .AddSingleton<THandler>()
+            .AddSingleton(sp =>
+            {
+                var command = ActivatorUtilities.CreateInstance<TCommand>(sp);
+                if (addDefaultOptions)
+                {
+                    command.Options.Add(WinAppRootCommand.VerboseOption);
+                    command.Options.Add(WinAppRootCommand.QuietOption);
+                }
+                command.SetAction((parseResult, ct) => sp.GetRequiredService<THandler>().InvokeAsync(parseResult, ct));
+                return command;
+            });
+    }
+
+    public static IServiceCollection ConfigureCommand<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TCommand>(this IServiceCollection services)
+        where TCommand : Command, IShortDescription
+    {
+        return services
+            .AddSingleton(sp =>
+            {
+                var command = ActivatorUtilities.CreateInstance<TCommand>(sp);
+                return command;
+            });
+    }
+}

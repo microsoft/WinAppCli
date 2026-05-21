@@ -1,0 +1,35 @@
+# Exclude debug symbols
+*.pdb
+
+# Exclude development/build artifacts
+src/
+obj/
+.vs/
+.vscode/
+
+# Exclude TypeScript source files (dist/ is included via package.json files field)
+*.ts
+tsconfig.json
+
+# Exclude git files
+.git*
+
+# Exclude temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Exclude test files (if we add any)
+test/
+tests/
+*.test.js
+*.test.ts
+
+# Exclude CI/build scripts that aren't needed for end users
+.github/
+*.yml
+*.yaml
+
+# Keep only the essential files for npm package
+# (package.json "files" field controls what gets included)

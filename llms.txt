@@ -1,0 +1,44 @@
+# winapp CLI
+
+> CLI for generating and managing appxmanifest.xml, image assets, certificates, Windows SDK projections, package identity, and MSIX packaging for any app framework targeting Windows.
+
+winapp helps developers add Windows-specific features (MSIX packaging, push notifications, native APIs) to apps built with any framework—Electron, Tauri, .NET, C++, Rust, or others. It handles the complexity of Windows app identity, code signing, and SDK integration.
+
+## AI Coding Agents
+
+- **Copilot CLI Plugin:** `copilot plugin install microsoft/WinAppCli`
+
+### Copilot Plugin Structure
+
+The plugin is at `.github/plugin/` and includes:
+
+- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/.github/plugin/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
+- **Skills** (auto-generated, in `.github/plugin/skills/winapp-cli/`):
+  - `setup/SKILL.md` — project init, restore, update
+  - `package/SKILL.md` — MSIX packaging
+  - `identity/SKILL.md` — debug identity and sparse packages
+  - `signing/SKILL.md` — certificates and code signing
+  - `manifest/SKILL.md` — appxmanifest.xml generation
+  - `troubleshoot/SKILL.md` — error diagnosis and SDK tools
+  - `frameworks/SKILL.md` — Electron, .NET, C++, Rust, Flutter, Tauri guidance
+  - `ui-automation/SKILL.md` — inspect, interact with, and screenshot running Windows app UIs
+
+## Docs
+
+- [CLI Schema](https://raw.githubusercontent.com/microsoft/WinAppCli/main/docs/cli-schema.json): Machine-readable JSON schema of all commands, options, and types
+- [Usage Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md): Full documentation for humans
+- [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md): `winapp run` vs `create-debug-identity`, IDE setup, and debugging workflows
+
+## Guides
+
+- [Electron Setup](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md): Setting up Electron apps with Windows features
+- [Electron Packaging](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md): Creating MSIX packages for Electron apps
+- [C++ Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md): Native C++ apps with Windows SDK
+- [.NET Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md): .NET apps with winapp
+- [Flutter Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/flutter.md): Flutter apps with package identity and MSIX
+- [Rust Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/rust.md): Rust apps with Windows features
+- [Tauri Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/tauri.md): Tauri apps with MSIX packaging
+
+## Optional
+
+- [AGENTS.md](https://github.com/microsoft/WinAppCli/blob/main/AGENTS.md): For AI assistants working on the winapp repo itself

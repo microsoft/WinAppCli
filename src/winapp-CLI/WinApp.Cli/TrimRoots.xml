@@ -1,0 +1,13 @@
+<linker>
+    <assembly fullname="WinApp.Cli">
+        <namespace fullname="WinApp.Cli.Telemetry" />
+    </assembly>
+    <assembly fullname="Microsoft.Windows.SDK.NET">
+        <type fullname="ABI.Windows.Graphics.Capture.GraphicsCaptureItem" preserve="all" />
+        <type fullname="ABI.Windows.Graphics.Capture.Direct3D11CaptureFramePool" preserve="all" />
+        <type fullname="ABI.Windows.Graphics.Capture.Direct3D11CaptureFrame" preserve="all" />
+        <type fullname="ABI.Windows.Graphics.Capture.GraphicsCaptureSession" preserve="all" />
+        <type fullname="ABI.Windows.Graphics.DirectX.Direct3D11.IDirect3DDevice" preserve="all" />
+        <type fullname="ABI.Windows.Graphics.DirectX.Direct3D11.IDirect3DSurface" preserve="all" />
+    </assembly>
+</linker>

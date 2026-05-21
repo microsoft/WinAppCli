@@ -1,0 +1,284 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+namespace WinApp.Cli.Services;
+
+internal sealed class PackageLayoutService : IPackageLayoutService
+{
+    private const string winPrefix = "win-";
+    private const string win10Prefix = "win10-";
+
+    /// <summary>
+    /// Resolves a package directory in the NuGet global cache using lowercase-id/version/ layout.
+    /// </summary>
+    private static DirectoryInfo GetPackageDir(DirectoryInfo nugetCacheDir, string packageName, string version)
+    {
+        return new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageName.ToLowerInvariant(), version));
+    }
+
+    /// <summary>
+    /// Enumerates all existing package directories from the usedVersions dictionary.
+    /// </summary>
+    private static IEnumerable<DirectoryInfo> EnumeratePackageDirs(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions)
+    {
+        foreach (var (packageName, version) in usedVersions)
+        {
+            var packageDir = GetPackageDir(nugetCacheDir, packageName, version);
+            if (packageDir.Exists)
+            {
+                yield return packageDir;
+            }
+        }
+    }
+
+    public void CopyIncludesFromPackages(DirectoryInfo nugetCacheDir, DirectoryInfo includeOut, Dictionary<string, string> usedVersions)
+    {
+        includeOut.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var includeDir in SafeEnumDirs(packageDir, "include", SearchOption.AllDirectories))
+            {
+                foreach (var file in SafeEnumFiles(includeDir, "*.*", SearchOption.TopDirectoryOnly))
+                {
+                    var target = Path.Combine(includeOut.FullName, file.Name);
+                    TryCopy(file, target);
+                }
+            }
+        }
+    }
+
+    public static void CopyLibs(DirectoryInfo nugetCacheDir, DirectoryInfo libOut, string arch, Dictionary<string, string> usedVersions)
+    {
+        libOut.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var libDir in SafeEnumDirs(packageDir, "lib", SearchOption.AllDirectories))
+            {
+                var archDir = new DirectoryInfo(Path.Combine(libDir.FullName, arch));
+                var nativeArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", arch));
+                var winArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win-{arch}"));
+                var win10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, $"win10-{arch}"));
+                var nativeWin10ArchDir = new DirectoryInfo(Path.Combine(libDir.FullName, "native", $"win10-{arch}"));
+
+                CopyTopFiles(archDir, "*.lib", libOut);
+                CopyTopFiles(nativeArchDir, "*.lib", libOut);
+                CopyTopFiles(winArchDir, "*.lib", libOut);
+                CopyTopFiles(win10ArchDir, "*.lib", libOut);
+                CopyTopFiles(nativeWin10ArchDir, "*.lib", libOut);
+            }
+        }
+    }
+
+    public static void CopyRuntimes(DirectoryInfo nugetCacheDir, DirectoryInfo binOut, string arch, Dictionary<string, string> usedVersions)
+    {
+        binOut.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var rtDir in SafeEnumDirs(packageDir, "runtimes", SearchOption.AllDirectories))
+            {
+                var native = new DirectoryInfo(Path.Combine(rtDir.FullName, $"win-{arch}", "native"));
+                CopyTopFiles(native, "*.*", binOut);
+            }
+        }
+    }
+
+    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions)
+    {
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Only search in package directories that were actually used
+        foreach (var (packageName, version) in usedVersions)
+        {
+            var packageDir = GetPackageDir(nugetCacheDir, packageName, version);
+            if (!packageDir.Exists)
+            {
+                continue;
+            }
+
+            // Search for metadata directories within this specific package
+            foreach (var metadataDir in SafeEnumDirs(packageDir, "metadata", SearchOption.AllDirectories))
+            {
+                foreach (var f in SafeEnumFiles(metadataDir, "*.winmd", SearchOption.TopDirectoryOnly))
+                {
+                    results.Add(f.FullName);
+                }
+
+                var v18362 = new DirectoryInfo(Path.Combine(metadataDir.FullName, "10.0.18362.0"));
+                foreach (var f in SafeEnumFiles(v18362, "*.winmd", SearchOption.TopDirectoryOnly))
+                {
+                    results.Add(f.FullName);
+                }
+            }
+
+            // Search for lib directories within this specific package
+            foreach (var libDir in SafeEnumDirs(packageDir, "lib", SearchOption.AllDirectories))
+            {
+                foreach (var f in SafeEnumFiles(libDir, "*.winmd", SearchOption.TopDirectoryOnly))
+                {
+                    results.Add(f.FullName);
+                }
+
+                var uap10 = new DirectoryInfo(Path.Combine(libDir.FullName, "uap10.0"));
+                foreach (var f in SafeEnumFiles(uap10, "*.winmd", SearchOption.TopDirectoryOnly))
+                {
+                    results.Add(f.FullName);
+                }
+
+                var uap18362 = new DirectoryInfo(Path.Combine(libDir.FullName, "uap10.0.18362"));
+                foreach (var f in SafeEnumFiles(uap18362, "*.winmd", SearchOption.TopDirectoryOnly))
+                {
+                    results.Add(f.FullName);
+                }
+            }
+
+            // Search for References directories within this specific package
+            foreach (var refDir in SafeEnumDirs(packageDir, "References", SearchOption.AllDirectories))
+            {
+                foreach (var f in SafeEnumFiles(refDir, "*.winmd", SearchOption.AllDirectories))
+                {
+                    results.Add(f.FullName);
+                }
+            }
+        }
+
+        return results.Select(f => new FileInfo(f));
+    }
+
+    private static IEnumerable<DirectoryInfo> SafeEnumDirs(DirectoryInfo root, string searchPattern, SearchOption option)
+    {
+        try { return root.EnumerateDirectories(searchPattern, option); }
+        catch { return []; }
+    }
+
+    private static IEnumerable<FileInfo> SafeEnumFiles(DirectoryInfo root, string searchPattern, SearchOption option)
+    {
+        try { return root.Exists ? root.EnumerateFiles(searchPattern, option) : []; }
+        catch { return []; }
+    }
+
+    private static void CopyTopFiles(DirectoryInfo fromDir, string pattern, DirectoryInfo toDir)
+    {
+        if (!fromDir.Exists)
+        {
+            return;
+        }
+
+        toDir.Create();
+        foreach (var f in fromDir.EnumerateFiles(pattern, SearchOption.TopDirectoryOnly))
+        {
+            var target = Path.Combine(toDir.FullName, f.Name);
+            TryCopy(f, target);
+        }
+    }
+
+    private static void TryCopy(FileInfo src, string dst)
+    {
+        try
+        {
+            src.CopyTo(dst, overwrite: true);
+        }
+        catch (IOException)
+        {
+            // Ignore to keep resilient.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Ignore and continue.
+        }
+    }
+
+    private static IEnumerable<DirectoryInfo> SafeEnumSubdirs(DirectoryInfo root)
+    {
+        try { return root.Exists ? root.EnumerateDirectories() : []; }
+        catch { return []; }
+    }
+
+    public void CopyLibsAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo libRoot, Dictionary<string, string> usedVersions)
+    {
+        libRoot.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var libDir in SafeEnumDirs(packageDir, "lib", SearchOption.AllDirectories))
+            {
+                foreach (var sub in SafeEnumSubdirs(libDir))
+                {
+                    var name = sub.Name;
+                    if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var arch = name[winPrefix.Length..];
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                        CopyTopFiles(sub, "*.lib", outDir);
+                    }
+                    else if (name.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var arch = name[win10Prefix.Length..];
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                        CopyTopFiles(sub, "*.lib", outDir);
+                    }
+                    else if (string.Equals(name, "native", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var d in SafeEnumSubdirs(sub))
+                        {
+                            var dn = d.Name;
+                            if (dn.StartsWith(win10Prefix, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var arch = dn[win10Prefix.Length..];
+                                var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, arch));
+                                CopyTopFiles(d, "*.lib", outDir);
+                            }
+                        }
+
+                        // Also check for direct arch folders under native
+                        foreach (var d in SafeEnumSubdirs(sub))
+                        {
+                            var dn = d.Name;
+                            // Check for direct architecture names (x86, x64, arm, arm64)
+                            if (IsValidArchitecture(dn))
+                            {
+                                var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, dn));
+                                CopyTopFiles(d, "*.lib", outDir);
+                            }
+                        }
+                    }
+
+                    // Handle direct architecture folders
+                    if (IsValidArchitecture(name))
+                    {
+                        var outDir = new DirectoryInfo(Path.Combine(libRoot.FullName, name));
+                        CopyTopFiles(sub, "*.lib", outDir);
+                    }
+                }
+            }
+        }
+    }
+
+    public void CopyRuntimesAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo binRoot, Dictionary<string, string> usedVersions)
+    {
+        binRoot.Create();
+        foreach (var packageDir in EnumeratePackageDirs(nugetCacheDir, usedVersions))
+        {
+            foreach (var rtDir in SafeEnumDirs(packageDir, "runtimes", SearchOption.AllDirectories))
+            {
+                foreach (var plat in SafeEnumSubdirs(rtDir))
+                {
+                    var name = plat.Name;
+                    if (name.StartsWith(winPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var arch = name[winPrefix.Length..];
+                        var native = new DirectoryInfo(Path.Combine(plat.FullName, "native"));
+                        var outDir = new DirectoryInfo(Path.Combine(binRoot.FullName, arch));
+                        CopyTopFiles(native, "*.*", outDir);
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsValidArchitecture(string name)
+    {
+        return string.Equals(name, "x86", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(name, "x64", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(name, "arm", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(name, "arm64", StringComparison.OrdinalIgnoreCase);
+    }
+}

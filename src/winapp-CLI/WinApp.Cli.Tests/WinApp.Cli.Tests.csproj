@@ -1,0 +1,37 @@
+﻿<Project Sdk="MSTest.Sdk/4.1.0">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Enable Code Analysis -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>Recommended</AnalysisMode>
+    
+    <!-- Suppress specific warnings -->
+    <!-- SYSLIB1045: inline Regex constructions in test assertions are throwaway literals
+         (used by StringAssert.DoesNotMatch); compile-time GeneratedRegex source-gen would
+         add zero value here and only bloat the test file. -->
+    <NoWarn>CA1852;CA1707;IDE1006;SYSLIB1045</NoWarn>
+    
+    <!-- Test discovery and execution -->
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!-- Exclude test app source files from compilation -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);TestApps\**\*</DefaultItemExcludes>
+
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinApp.Cli\WinApp.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

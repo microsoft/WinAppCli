@@ -1,7 +1,10 @@
-trigger:
+﻿trigger:
   branches:
     include:
       - rel/v*
+  tags:
+    exclude:
+      - '*'
 pr: none
 
 resources:
@@ -10,6 +13,26 @@ resources:
     type: git
     name: 1ESPipelineTemplates/1ESPipelineTemplates
     ref: refs/tags/release
+
+parameters:
+  - name: DoEsrp
+    displayName: Sign the binaries and package (DoEsrp)
+    type: boolean
+    default: true
+  - name: signingIdentity
+    type: object
+    default:
+      serviceName: $(SigningServiceName)
+      appId: $(SigningAppId)
+      tenantId: $(SigningTenantId)
+      akvName: $(SigningAKVName)
+      authCertName: $(SigningAuthCertName)
+      signCertName: $(SigningSignCertName)
+      signTTSCertName: $(SigningSignTTSCertName)
+  - name: GitHubReleaseAlreadyExists
+    displayName: GitHub Release already exists, skip uploading GitHub release (GitHubReleaseAlreadyExists)
+    type: boolean
+    default: false
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
@@ -31,9 +54,15 @@ extends:
         steps:
           - checkout: self
           - task: UseDotNet@2
-            displayName: Setup .NET 9
+            displayName: Setup .NET 10
             inputs:
-              version: 9.0.x
+              version: 10.0.x
+          - ${{ if eq(parameters.DoEsrp, 'true') }}:
+            - task: UseDotNet@2
+              displayName: Setup .NET 6.0 (For ESRP Task)
+              inputs:
+                packageType: runtime
+                version: 6.0.x
           - task: UseNode@1
             displayName: Setup Node.js 24
             inputs:
@@ -45,6 +74,488 @@ extends:
             displayName: Replace Stubbed Files
             inputs:
               filePath: '.pipelines/Unstub.ps1'
+              arguments: '-TelemetryProviderGuid "$(TelemetryProviderGuid)"' 
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'true'
+              DoEsrp: ${{ parameters.DoEsrp }}
+              signingIdentity: ${{ parameters.signingIdentity }}
+          - task: PowerShell@2
+            name: SetMeta
+            displayName: Export version
+            inputs:
+              targetType: inline
+              script: |
+                # Get version info
+                $versionJson = Get-Content "version.json" | ConvertFrom-Json
+                $baseVersion = $versionJson.version
+                $fullVersion = "$baseVersion"
+
+                Write-Host "Version: $fullVersion"
+
+                Write-Host "##vso[task.setvariable variable=version;isOutput=true]$fullVersion"
+          - task: PowerShell@2
+            displayName: "Generate Release Notes"
+            continueOnError: true
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+            inputs:
+              pwsh: true
+              filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
+              arguments: '-CurrentTag "v$(SetMeta.version)" -CurrentRef "$(Build.SourceVersion)" -OutputPath "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"'
+          - task: PowerShell@2
+            displayName: "Compose Full Release Body"
+            inputs:
+              pwsh: true
+              targetType: 'inline'
+              script: |
+                $outDir = "$(Build.ArtifactStagingDirectory)/release-notes"
+                if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+
+                $aiNotes = ""
+                $notesPath = "$outDir/release-notes.md"
+                if (Test-Path $notesPath) {
+                    $aiNotes = Get-Content $notesPath -Raw
+                }
+
+                $versionJson = Get-Content "version.json" | ConvertFrom-Json
+                $fullVersion = $versionJson.version
+
+                $lines = @(
+                    "## Installation Options"
+                    ""
+                    "### MSIX Installer (Recommended)"
+                    "1. Download ``winappcli_x64.msix`` for x64 or ``winappcli_arm64.msix`` for ARM64"
+                    "2. Double-click to install"
+                    "3. Automatically added to PATH"
+                    ""
+                    "### Standalone CLI Binaries"
+                    "1. Download ``winappcli-x64.zip`` for x64 or ``winappcli-arm64.zip`` for ARM64"
+                    "2. Extract to your desired location"
+                    "3. Add to PATH or run directly: ``winapp.exe``"
+                    ""
+                    "### NPM Package (for Electron or NodeJS)"
+                    "``````bash"
+                    "npm install microsoft-winappcli.tgz"
+                    "``````"
+                    ""
+                    "## What's Included"
+                    "- MSIX installer packages (x64 and ARM64)"
+                    "- Standalone CLI binaries (x64 and ARM64)"
+                    "- NPM package for NodeJS/Electron integration"
+                )
+                $installationNotes = $lines -join "`n"
+
+                $fullBody = "Version: ``$fullVersion```n"
+                $fullBody += "Commit: ``$(Build.SourceVersion)```n`n"
+                if ($aiNotes) {
+                    $fullBody += $aiNotes + "`n`n---`n`n"
+                }
+                $fullBody += $installationNotes
+
+                $fullBody | Set-Content "$outDir/full-release-notes.md" -Encoding UTF8 -NoNewline
+                Write-Host "Release body written ($($fullBody.Length) chars)"
+          - task: 1ES.PublishPipelineArtifact@1
+            displayName: Upload Artifact - Release Notes
+            inputs:
+              path: '$(Build.ArtifactStagingDirectory)/release-notes'
+              artifactName: release-notes
+
+    - stage: Release_GitHub
+      displayName: Create GitHub Release
+      dependsOn: Build
+      variables:
+        version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+      jobs:
+      - job: create_github_release
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: GitHub Release
+        templateContext:
+          type: releaseJob
+          isProduction: true
+          inputs:
+          - input: pipelineArtifact
+            artifactName: cli-binaries
+            targetPath: $(Pipeline.Workspace)/cli-binaries
+          - input: pipelineArtifact
+            artifactName: npm-package
+            targetPath: $(Pipeline.Workspace)/npm-package
+          - input: pipelineArtifact
+            artifactName: msix-packages
+            targetPath: $(Pipeline.Workspace)/msix-packages
+          - input: pipelineArtifact
+            artifactName: release-notes
+            targetPath: $(Pipeline.Workspace)/release-notes
+          - input: pipelineArtifact
+            artifactName: nuget-packages
+            targetPath: $(Pipeline.Workspace)/nuget-packages
+        steps:
+          - task: ArchiveFiles@2
+            displayName: Archive CLI binaries - x64
+            inputs:
+              rootFolderOrFile: $(Pipeline.Workspace)/cli-binaries/win-x64
+              includeRootFolder: false
+              archiveFile: $(Pipeline.Workspace)/winappcli-x64.zip
+
+          - task: ArchiveFiles@2
+            displayName: Archive CLI binaries - arm64
+            inputs:
+              rootFolderOrFile: $(Pipeline.Workspace)/cli-binaries/win-arm64
+              includeRootFolder: false
+              archiveFile: $(Pipeline.Workspace)/winappcli-arm64.zip
+          
+          - task: PowerShell@2
+            displayName: Rename files
+            inputs:
+              targetType: 'inline'
+              script: |
+                # Rename MSIX files, removing version in between underscores, keeping anything after the next underscore
+                Get-ChildItem "$(Pipeline.Workspace)/msix-packages/" -Filter "*.msix" | ForEach-Object {
+                  $newName = $_.Name -replace 'winappcli_(.+?)_(.+)', 'winappcli_$2'
+                  Rename-Item -Path $_.FullName -NewName $newName
+                }
+
+                # Rename NPM package to remove the version from the filename
+                Get-ChildItem "$(Pipeline.Workspace)/npm-package/" -Filter "*.tgz" | ForEach-Object {
+                  $newName = $_.Name -replace 'microsoft-winappcli-(.+?).tgz', 'microsoft-winappcli.tgz'
+                  Rename-Item -Path $_.FullName -NewName $newName
+                }
+
+                # Rename NuGet packages to remove the version from the filename
+                Get-ChildItem "$(Pipeline.Workspace)/nuget-packages/" -Filter "*.nupkg" | ForEach-Object {
+                  $newName = $_.Name -replace '\.(\d+\.\d+\.\d+.*)\.nupkg$', '.nupkg'
+                  Rename-Item -Path $_.FullName -NewName $newName
+                }
+
+          - ${{ if ne(parameters.GitHubReleaseAlreadyExists, 'true') }}:
+            - task: GitHubRelease@1
+              displayName: "Create GitHub Release"
+              inputs:
+                gitHubConnection: 'github-service-connection'
+                repositoryName: 'microsoft/winappcli'
+                action: 'create'
+                target: '$(Build.SourceVersion)'
+                tagSource: 'userSpecifiedTag'
+                tag: 'v$(version)'
+                title: 'Release v$(version)'
+                isPreRelease: true
+                assets: |
+                  $(Pipeline.Workspace)/winappcli-*.zip
+                  $(Pipeline.Workspace)/msix-packages/*.msix
+                  $(Pipeline.Workspace)/npm-package/*.tgz
+                  $(Pipeline.Workspace)/nuget-packages/*.nupkg
+                assetUploadMode: 'delete'
+                addChangeLog: false
+                releaseNotesSource: 'filePath'
+                releaseNotesFilePath: '$(Pipeline.Workspace)/release-notes/full-release-notes.md'
+
+    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+      - stage: Release_Npm
+        displayName: Create Npm Release
+        dependsOn: Release_GitHub
+        jobs:
+        - job: create_npm_release
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          displayName: NPM Release
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: npm-package
+              targetPath: $(Pipeline.Workspace)/npm-package
+          steps:
+            - task: PowerShell@2
+              displayName: "Echo debug info"
+              inputs:
+                targetType: 'inline'
+                script: |
+                  Write-Host "SigningServiceName: ${{ parameters.signingIdentity.serviceName }}"
+            - task: EsrpRelease@10
+              condition: always()
+              inputs:
+                ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
+                usemanagedidentity: false
+                keyvaultname: ${{ parameters.signingIdentity.akvName }}
+                authcertname: ${{ parameters.signingIdentity.authCertName }}
+                signcertname: ${{ parameters.signingIdentity.signCertName }}
+                clientid: ${{ parameters.signingIdentity.appId }}
+                intent: 'PackageDistribution'
+                contenttype: 'npm'
+                contentsource: 'Folder'
+                folderlocation: $(Pipeline.Workspace)/npm-package/
+                waitforreleasecompletion: true
+                owners: '$(EsrpOwnersEmail)'
+                approvers: '$(EsrpApproversEmail)'
+                serviceendpointurl: 'https://api.esrp.microsoft.com'
+                mainpublisher: 'ESRPRELPACMAN'
+                domaintenantid: ${{ parameters.signingIdentity.tenantId }}
+
+    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+      - stage: Release_NuGet
+        displayName: Publish the NuGet Release
+        dependsOn: Release_GitHub
+        jobs:
+        - job: create_nuget_release
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          displayName: NuGet Release
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: nuget-packages
+              targetPath: $(Pipeline.Workspace)/nuget-packages
+          steps:
+            - task: 1ES.PublishNuget@1
+              displayName: 'NuGet push to nuget.org'
+              inputs:
+                packagesToPush: '$(Pipeline.Workspace)/nuget-packages/*.nupkg'
+                packageParentPath: '$(Pipeline.Workspace)/nuget-packages'
+                nuGetFeedType: external
+                publishFeedCredentials: 'NuGet-WinAppCLI'
+
+    - stage: Release_WinGet
+      displayName: Create WinGet Release
+      dependsOn: [Build, Release_GitHub]
+      variables:
+        version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+      jobs:
+      - job: create_winget_release
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: WinGet Release
+        templateContext:
+          type: releaseJob
+          isProduction: true
+        steps:
+          - task: PowerShell@2
+            displayName: "Publish to WinGet"
+            env:
+              # PAT lasts 90 days, regenerate as needed and re-run if it failes due to authentication
+              WINGET_CREATE_GITHUB_TOKEN: $(GITHUB_TOKEN_2)
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+            inputs:
+              targetType: 'inline'
+              errorActionPreference: 'stop'
+              script: |
+                # Download and install C++ Runtime framework package
+                Write-Host "Installing VCLibs dependency..."
+                $vcLibsFile = "Microsoft.VCLibs.x64.14.00.Desktop.appx"
+                Invoke-WebRequest https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx -OutFile $vcLibsFile
+                Add-AppxPackage $vcLibsFile
+                
+                # Install gh
+                # TODO: Change this to get the latest version of gh
+                Write-Host "Installing gh..."
+                $tempDir = "$(Agent.TempDirectory)"
+                Write-Host "TempDir: $tempDir"
+                Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip" -OutFile "$tempdir\gh.zip"
+                Expand-Archive "$tempdir\gh.zip" -DestinationPath "$tempDir\gh"
+
+                # Download and install wingetcreate
+                Write-Host "Installing wingetcreate..."
+                $wingetCreateBundle = "wingetcreate.msixbundle"
+                Invoke-WebRequest https://aka.ms/wingetcreate/latest/msixbundle -OutFile $wingetCreateBundle
+                Add-AppxPackage $wingetCreateBundle
+
+                # WinGetCreate uses an existing fork of the microsoft/winget-pkgs repo to create the PR
+                # that updates the main repo.  This fork will be under the account attached to the token.
+                # We need to keep this fork up-to-date, otherwise the wingetcreate command will fail.
+                # See: https://github.com/microsoft/winget-create/issues/502
+                Write-Host "Syncing winget-pkgs fork..."
+                & "$tempDir\gh\bin\gh.exe" repo sync $(WingetPkgsFork) -b master
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to sync winget-pkgs fork. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Write-Host "Fork synced successfully."
+                
+                # Get the installer URLs from the GitHub release
+                $x64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_x64.msix"
+                $arm64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_arm64.msix"
+                
+                Write-Host "Submitting to WinGet..."
+                Write-Host "Version: $(version)"
+                Write-Host "x64 MSIX: $x64MsixUrl"
+                Write-Host "ARM64 MSIX: $arm64MsixUrl"
+                
+                # Submit to WinGet repository
+                wingetcreate update Microsoft.WinAppCli `
+                  --version $(version) `
+                  --urls $x64MsixUrl $arm64MsixUrl `
+                  --submit
+
+    - stage: Release_MSLearn
+      displayName: Update MS Learn Docs
+      dependsOn: [Build, Release_GitHub]
+      variables:
+        version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+      jobs:
+      - job: update_mslearn_docs
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: MS Learn Docs PR
+        templateContext:
+          type: releaseJob
+          isProduction: true
+        steps:
+          - task: PowerShell@2
+            displayName: "Create MS Learn Docs PR"
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              MSLEARN_DOCS_FORK: $(MSLearnDocsFork)
+            inputs:
+              targetType: 'inline'
+              pwsh: true
+              errorActionPreference: 'stop'
+              script: |
+                $version = "$(version)"
+                $docsRepoBase = "hub/apps/dev-tools/winapp-cli"
+                $docsUpstream = "MicrosoftDocs/windows-dev-docs-pr"
+                $branch = "winapp-cli/v$version"
+
+                # Validate docs fork from env var (not ADO macro expansion)
+                $docsFork = $env:MSLEARN_DOCS_FORK
+                if (-not $docsFork -or $docsFork -notmatch '^[\w-]+/[\w.-]+$') {
+                  Write-Error "Invalid or missing MSLearnDocsFork value: '$docsFork'. Expected format: 'owner/repo'."
+                  exit 1
+                }
+                $docsForkOwner = $docsFork.Split('/')[0]
+
+                # Install gh with integrity verification
+                Write-Host "Installing gh..."
+                $tempDir = "$(Agent.TempDirectory)"
+                $ghZipUrl = "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip"
+                $ghZipPath = "$tempDir\gh.zip"
+                $ghExpectedHash = "1324871424CB8CB3793914565026A8DA53B1A633FA05760597ABEF54B57FF12E"
+                Invoke-WebRequest -Uri $ghZipUrl -OutFile $ghZipPath
+                $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
+                if ($actualHash -ne $ghExpectedHash) {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $ghExpectedHash, Got: $actualHash"
+                  exit 1
+                }
+                Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
+                $ghExe = "$tempDir\gh\bin\gh.exe"
+
+                # Sync the fork with upstream
+                Write-Host "Syncing docs repo fork..."
+                & $ghExe repo sync $docsFork -b main
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to sync docs repo fork. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Write-Host "Fork synced successfully."
+
+                # Clone the fork
+                Write-Host "Cloning docs repo fork..."
+                $docsDir = "$tempDir\windows-dev-docs-pr"
+                & $ghExe repo clone $docsFork $docsDir -- --depth 1
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to clone docs repo. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Run the port script to generate MS Learn-ready docs
+                Write-Host "Running port script..."
+                $portOutput = "$tempDir\mslearn-docs"
+                & "$(System.DefaultWorkingDirectory)\scripts\port-mslearn-docs.ps1" `
+                  -OutputPath $portOutput `
+                  -Version $version
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Port script failed. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Clean target dir to remove stale files, then copy ported docs
+                Write-Host "Copying ported docs to docs repo..."
+                $targetDir = Join-Path $docsDir $docsRepoBase
+                if (Test-Path $targetDir) {
+                  Remove-Item "$targetDir\*" -Recurse -Force
+                } else {
+                  New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+                }
+                Copy-Item "$portOutput\*" $targetDir -Recurse -Force
+
+                # Create branch and commit
+                Write-Host "Creating branch and committing..."
+                Push-Location $docsDir
+                git config user.name "winapp-cli-bot"
+                git config user.email "winapp-cli-bot@users.noreply.github.com"
+                git checkout -B $branch
+                git add -A
+                git diff --cached --quiet
+                if ($LASTEXITCODE -eq 0) {
+                  Write-Host "No changes detected. Docs are already up to date."
+                  Pop-Location
+                  exit 0
+                }
+                git commit -m "Update winapp CLI docs to v$version"
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                git push --force-with-lease origin $branch
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to push branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Pop-Location
+
+                # Create PR (or update if one already exists for this branch)
+                Write-Host "Creating PR..."
+                $prTitle = "Update winapp CLI docs to v$version"
+                $prBody = @"
+                Automated update of winapp CLI documentation for v$version.
+
+                Changes generated by the winapp CLI release pipeline using ``port-mslearn-docs.ps1``.
+
+                Source: [microsoft/winappCli v$version](https://github.com/microsoft/WinAppCli/releases/tag/v$version)
+
+                Please review the changes and merge when ready.
+                "@
+
+                # Check if a PR already exists for this branch
+                $existingPr = & $ghExe pr list --repo $docsUpstream --head "${docsForkOwner}:${branch}" --json number --jq '.[0].number' 2>$null
+                if ($existingPr) {
+                  Write-Host "PR #$existingPr already exists. Updating..."
+                  & $ghExe pr edit $existingPr `
+                    --repo $docsUpstream `
+                    --title $prTitle `
+                    --body $prBody
+                } else {
+                  & $ghExe pr create `
+                    --repo $docsUpstream `
+                    --head "${docsForkOwner}:${branch}" `
+                    --base main `
+                    --title $prTitle `
+                    --body $prBody
+                }
+
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to create/update PR. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                Write-Host "PR created/updated successfully."

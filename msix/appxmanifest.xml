@@ -1,31 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<Package 
+<Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
-  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-  IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop6 uap10">
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap2 uap3 uap5 uap10 desktop desktop6 rescap">
 
   <Identity
-    Name="winsdk"
-    Publisher="CN=nikolame"
-    Version="1.0.0.0" 
+    Name="winapp"
+    Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+    Version="1.0.0.0"
     ProcessorArchitecture="x64"/>
 
   <Properties>
-    <DisplayName>Windows Development CLI (Dev Build)</DisplayName>
-    <PublisherDisplayName>nikolame</PublisherDisplayName>
+    <DisplayName>Windows App Development CLI</DisplayName>
+    <PublisherDisplayName>Microsoft Corporation</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26100.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19045.0" MaxVersionTested="10.0.26200.0" />
   </Dependencies>
 
   <Resources>
@@ -33,24 +32,24 @@
   </Resources>
 
   <Applications>
-    <Application Id="winsdk"
-      Executable="Winsdk.Cli.exe"
+    <Application Id="winapp"
+      Executable="winapp.exe"
       EntryPoint="Windows.FullTrustApplication"
+      uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL" >
       <uap:VisualElements
-        DisplayName="Windows Development CLI (Dev Build)"
+        DisplayName="Windows App Development CLI"
         Description="CLI for Windows development related tasks"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
+        Square44x44Logo="Assets\AppList.png"
         AppListEntry="none">
-        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
 
       <Extensions>
         <uap5:Extension Category="windows.appExecutionAlias">
           <uap5:AppExecutionAlias>
-            <uap5:ExecutionAlias Alias="winsdk.exe" />
+            <uap5:ExecutionAlias Alias="winapp.exe" />
           </uap5:AppExecutionAlias>
         </uap5:Extension>
       </Extensions>

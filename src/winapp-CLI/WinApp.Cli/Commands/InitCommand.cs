@@ -1,0 +1,97 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Commands;
+
+internal class InitCommand : Command, IShortDescription
+{
+    public string ShortDescription => "Initialize existing project with manifest and/or SDK packages";
+
+    public static Argument<DirectoryInfo> BaseDirectoryArgument { get; }
+    public static Option<DirectoryInfo> ConfigDirOption { get; }
+    public static Option<SdkInstallMode?> SetupSdksOption { get; }
+    public static Option<bool> IgnoreConfigOption { get; }
+    public static Option<bool> NoGitignoreOption { get; }
+    public static Option<bool> UseDefaults { get; }
+    public static Option<bool> ConfigOnlyOption { get; }
+
+    static InitCommand()
+    {
+        BaseDirectoryArgument = new Argument<DirectoryInfo>("base-directory")
+        {
+            Description = "Base/root directory for the winapp workspace, for consumption or installation.",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        BaseDirectoryArgument.AcceptExistingOnly();
+        ConfigDirOption = new Option<DirectoryInfo>("--config-dir")
+        {
+            Description = "Directory to read/store configuration (default: current directory)"
+        };
+        ConfigDirOption.AcceptExistingOnly();
+        SetupSdksOption = new Option<SdkInstallMode?>("--setup-sdks")
+        {
+            Description = "SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)",
+            HelpName = "stable|preview|experimental|none"
+        };
+        IgnoreConfigOption = new Option<bool>("--ignore-config", "--no-config")
+        {
+            Description = "Don't use configuration file for version management"
+        };
+        NoGitignoreOption = new Option<bool>("--no-gitignore")
+        {
+            Description = "Don't update .gitignore file"
+        };
+        UseDefaults = new Option<bool>("--use-defaults", "--no-prompt")
+        {
+            Description = "Do not prompt, and use default of all prompts"
+        };
+        ConfigOnlyOption = new Option<bool>("--config-only")
+        {
+            Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
+        };
+    }
+
+    public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.")
+    {
+        Arguments.Add(BaseDirectoryArgument);
+        Options.Add(ConfigDirOption);
+        Options.Add(SetupSdksOption);
+        Options.Add(IgnoreConfigOption);
+        Options.Add(NoGitignoreOption);
+        Options.Add(UseDefaults);
+        Options.Add(ConfigOnlyOption);
+    }
+
+    public class Handler(IWorkspaceSetupService workspaceSetupService, ICurrentDirectoryProvider currentDirectoryProvider) : AsynchronousCommandLineAction
+    {
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var baseDirectory = parseResult.GetValue(BaseDirectoryArgument);
+            var configDir = parseResult.GetValue(ConfigDirOption) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+            var setupSdks = parseResult.GetValue(SetupSdksOption);
+            var ignoreConfig = parseResult.GetValue(IgnoreConfigOption);
+            var noGitignore = parseResult.GetValue(NoGitignoreOption);
+            var useDefaults = parseResult.GetValue(UseDefaults);
+            var configOnly = parseResult.GetValue(ConfigOnlyOption);
+
+            var options = new WorkspaceSetupOptions
+            {
+                BaseDirectory = baseDirectory ?? currentDirectoryProvider.GetCurrentDirectoryInfo(),
+                ConfigDir = configDir,
+                SdkInstallMode = setupSdks,
+                IgnoreConfig = ignoreConfig,
+                NoGitignore = noGitignore,
+                UseDefaults = useDefaults,
+                RequireExistingConfig = false,
+                ForceLatestBuildTools = true,
+                ConfigOnly = configOnly
+            };
+
+            return await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);
+        }
+    }
+}

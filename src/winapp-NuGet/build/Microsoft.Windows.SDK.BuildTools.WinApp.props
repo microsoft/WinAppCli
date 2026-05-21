@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft.Windows.SDK.BuildTools.WinApp.props
+  
+  This file is imported early in the build process and sets up default properties
+  for packaged application support.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <!--
+      WinAppCLI tool path - set to the bundled CLI in the NuGet package.
+      The CLI is located in the tools folder, with architecture-specific subfolders.
+    -->
+    <WinAppCliToolsPath>$(MSBuildThisFileDirectory)..\tools\</WinAppCliToolsPath>
+    
+    <!-- 
+      Determine the correct architecture for the CLI tool.
+      Default to x64 if processor architecture is not ARM64.
+    -->
+    <WinAppCliArch Condition="'$(PROCESSOR_ARCHITECTURE)' == 'ARM64' Or '$(PROCESSOR_ARCHITEW6432)' == 'ARM64'">win-arm64</WinAppCliArch>
+    <WinAppCliArch Condition="'$(WinAppCliArch)' == ''">win-x64</WinAppCliArch>
+    
+    <!-- Full path to the winapp.exe CLI tool -->
+    <WinAppCliPath Condition="'$(WinAppCliPath)' == ''">$(WinAppCliToolsPath)$(WinAppCliArch)\winapp.exe</WinAppCliPath>
+    
+    <!--
+      Enable or disable the run support functionality.
+      Set to false in your project to disable this package's behavior.
+    -->
+    <EnableWinAppRunSupport Condition="'$(EnableWinAppRunSupport)' == ''">true</EnableWinAppRunSupport>
+    
+    <!--
+      Additional arguments to pass to the application on launch.
+    -->
+    <WinAppLaunchArgs Condition="'$(WinAppLaunchArgs)' == ''"></WinAppLaunchArgs>
+
+    <!--
+      When true, launch the app using its execution alias instead of AUMID activation.
+      The app runs in the current terminal with inherited stdin/stdout/stderr.
+      Requires a uap5:ExecutionAlias in the appxmanifest.xml.
+      Useful for console applications that need interactive terminal I/O.
+    -->
+    <WinAppRunUseExecutionAlias Condition="'$(WinAppRunUseExecutionAlias)' == ''">false</WinAppRunUseExecutionAlias>
+
+    <!--
+      When true, only register the package identity without launching the application.
+      Useful for CI/CD scenarios or when you want to launch the app separately.
+    -->
+    <WinAppRunNoLaunch Condition="'$(WinAppRunNoLaunch)' == ''">false</WinAppRunNoLaunch>
+
+    <!--
+      When true, capture OutputDebugString messages and
+      first-chance exceptions from the launched application. Only one debugger can
+      attach at a time, so Visual Studio or VS Code cannot debug simultaneously.
+      Use WinAppRunNoLaunch instead if you need to attach a different debugger.
+    -->
+    <WinAppRunDebugOutput Condition="'$(WinAppRunDebugOutput)' == ''">false</WinAppRunDebugOutput>
+  </PropertyGroup>
+
+</Project>

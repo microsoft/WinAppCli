@@ -9,8 +9,30 @@ on:
 
 permissions:
   contents: write  # Required for creating releases
+  pull-requests: write  # Required for binary size report comments
+  actions: write  # Required for deleting old metrics baseline cache
 
 jobs:
+  # Fast docs validation - runs in parallel with the main build to fail PRs early on doc drift
+  # Only builds the CLI binary (no tests, npm, or MSIX) so it completes much faster
+  validate-docs:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Build and publish CLI (x64 only)
+      run: dotnet publish src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-x64 --self-contained -o artifacts/cli/win-x64
+
+    - name: Validate CLI schema and agent skills
+      run: .\scripts\validate-llm-docs.ps1 -FailOnDrift
+
   build-and-package:
     runs-on: windows-latest
     steps:
@@ -22,7 +44,7 @@ jobs:
     - name: Install .NET Core
       uses: actions/setup-dotnet@v5
       with:
-        dotnet-version: 9.0.x
+        dotnet-version: 10.0.x
     
     - name: Setup Node.js
       uses: actions/setup-node@v5
@@ -30,100 +52,127 @@ jobs:
         node-version: '24'
     
     # Run the build script which handles building, testing, versioning, npm packaging, and MSIX bundling
+    # Skip doc generation in CI - we validate the committed docs separately to detect drift
     - name: Build, test, and package
       id: build
       run: |
-        .\scripts\build-cli.ps1
+        .\scripts\build-cli.ps1 -SkipDocs
         
         # Get version information for release tagging
         $versionJson = Get-Content "version.json" | ConvertFrom-Json
         $baseVersion = $versionJson.version
         $buildNumber = & ".\scripts\get-build-number.ps1"
-        $fullVersion = "$baseVersion-prerelease.$buildNumber"
+        
+        # Determine prerelease label based on current branch
+        $prereleaseLabel = & ".\scripts\get-prerelease-label.ps1"
+        $fullVersion = "$baseVersion-$prereleaseLabel.$buildNumber"
         
         # Export for use in subsequent steps
         echo "version=$fullVersion" >> $env:GITHUB_OUTPUT
         echo "base_version=$baseVersion" >> $env:GITHUB_OUTPUT
         echo "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
     
+    # Validate CLI schema and agent skills on push to main (warning only, not blocking)
+    - name: Validate CLI schema and agent skills
+      if: github.event_name != 'pull_request'
+      run: .\scripts\validate-llm-docs.ps1 -FailOnDrift:$false
+    
     # Upload all build artifacts
     - name: Upload test results
       if: ${{ !cancelled() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results
-        path: artifacts/TestResults/*.trx
+        path: artifacts/TestResults/
+        if-no-files-found: error
     
     - name: Upload CLI binaries
-      uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
       with:
         name: cli-binaries
         path: artifacts/cli/
+        if-no-files-found: error
     
     - name: Upload npm package
-      uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
       with:
         name: npm-package
         path: artifacts/*.tgz
-    
-    # - name: Upload MSIX bundle distribution
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: msix-bundle
-    #     path: artifacts/msix-bundle/
-    
-    # - name: Upload MSIX layout
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: msix-layout
-    #     path: artifacts/msix-layout/
-    
-    # Prepare release assets (only on push to main)
-    - name: Prepare Release Assets
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      run: |
-        $version = "${{ steps.build.outputs.version }}"
-        
-        # # Create a zip of the MSIX bundle distribution folder
-        # Compress-Archive -Path "artifacts\msix-bundle\*" -DestinationPath "artifacts\msix-$version.zip" -Force
-        # Write-Host "Created msix-$version.zip"
-        
-        # Create a zip of the CLI binaries (both x64 and arm64)
-        Compress-Archive -Path "artifacts\cli\*" -DestinationPath "artifacts\binaries-$version.zip" -Force
-        Write-Host "Created binaries-$version.zip"
-    
-    # Create GitHub pre-release (only on push to main)
-    - name: Create Pre-Release
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v2
+        if-no-files-found: error
+
+    - name: Upload MSIX packages
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
       with:
-        tag_name: v${{ steps.build.outputs.version }}
-        name: Pre-release v${{ steps.build.outputs.version }}
-        prerelease: true
-        generate_release_notes: true
-        body: |
-          🚀 **Automated Pre-release Build**
-          
-          Version: `${{ steps.build.outputs.version }}`
-          Base Version: `${{ steps.build.outputs.base_version }}`
-          Build Number: `${{ steps.build.outputs.build_number }}`
-          Commit: `${{ github.sha }}`
-          
-          ## Installation Options
-          
-          ### 📦 Standalone CLI Binaries
-          1. Download `binaries-${{ steps.build.outputs.version }}.zip`
-          2. Extract to your desired location
-          3. Add to PATH or run directly: `win-x64\Winsdk.Cli.exe` or `win-arm64\Winsdk.Cli.exe`
-          
-          ### 📚 NPM Package (for Electron or NodeJS)
-          ```bash
-          npm install microsoft-winsdk-${{ steps.build.outputs.version }}.tgz
-          ```
-          
-          ## What's Included
-          - ✅ Standalone CLI binaries (x64 and ARM64)
-          - ✅ NPM package for NodeJS/Electron integration
-        files: |
-          artifacts/binaries-*.zip
-          artifacts/*.tgz
+        name: msix-packages
+        path: artifacts/msix-packages/
+        if-no-files-found: error
+
+    - name: Upload NuGet packages
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: nuget-packages
+        path: artifacts/nuget/
+        if-no-files-found: error
+
+    - name: Upload VS Code extension
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: vscode-extension
+        path: artifacts/*.vsix
+        if-no-files-found: error
+
+    # --- Build quality metrics ---
+    - name: Collect build metrics
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/collect-metrics
+
+    - name: Report build metrics
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/report-metrics
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # NOTE: The "mark metrics comment as stale" job that used to live here
+  # has moved to .github/workflows/mark-metrics-stale.yml so it can run on
+  # `pull_request_target` and obtain write permissions for fork PRs.
+
+  # E2E test for winapp ui commands against WinUI 3 sample app
+  e2e-test-ui:
+    runs-on: windows-latest
+    needs: build-and-package
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Enable Windows Developer Mode
+      run: |
+        reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v "AllowDevelopmentWithoutDevLicense" /d 1 /f
+
+    - name: Setup .NET 10
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+
+    - name: Download CLI binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: cli-binaries
+        path: artifacts/cli
+
+    - name: Run WinUI UI E2E test
+      run: |
+        $platform = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+        .\scripts\test-e2e-winui-ui.ps1 -WinAppPath "artifacts/cli/win-$platform/winapp.exe"
+
+    - name: Upload screenshots
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ui-test-screenshots
+        path: artifacts/screenshots/
+        if-no-files-found: warn

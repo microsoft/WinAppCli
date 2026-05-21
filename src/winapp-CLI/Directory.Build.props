@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Copyright>Copyright (C) Microsoft Corporation and Contributors</Copyright>
+    <AssemblyCompany>Microsoft Corporation</AssemblyCompany>
+    <AssemblyCopyright>Copyright (C) Microsoft Corporation and Contributors</AssemblyCopyright>
+    <AssemblyProduct>WinAppCli</AssemblyProduct>
+    <Company>Microsoft Corporation</Company>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <PropertyGroup>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Configuration)=='Release'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ControlFlowGuard>Guard</ControlFlowGuard>
+  </PropertyGroup>
+</Project>

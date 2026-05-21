@@ -1,0 +1,111 @@
+name: Report Build Metrics
+description: Cache baseline metrics on main, stage current+baseline metrics for the post-metrics-comment workflow on PRs
+
+inputs:
+  github-token:
+    description: GitHub token used to delete the old baseline cache on main
+    required: true
+  artifacts-path:
+    description: Path to the artifacts directory containing metric JSON files
+    default: artifacts
+
+runs:
+  using: composite
+  steps:
+    # On PRs, restore baseline for comparison
+    - name: Restore metrics baseline
+      if: github.event_name == 'pull_request'
+      id: metrics-baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: metrics-baseline
+        key: build-metrics-baseline
+        restore-keys: |
+          build-metrics-main-
+
+    # On main, save current metrics as the baseline for future PRs
+    - name: Save metrics baseline
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path "metrics-baseline" -Force | Out-Null
+        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "metrics-baseline/sizes.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "metrics-baseline/tests.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "metrics-baseline/startup.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/coverage-summary.json" "metrics-baseline/coverage.json" -ErrorAction SilentlyContinue
+
+    # GitHub Actions caches are immutable — delete the old entry so we can save an updated one
+    - name: Delete old metrics baseline cache
+      if: github.ref == 'refs/heads/main'
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        $result = gh cache delete "build-metrics-baseline" --repo $env:GITHUB_REPOSITORY 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "Old baseline cache deleted"
+        } else {
+          Write-Host "No existing baseline cache to delete (expected on first run)"
+        }
+        exit 0
+
+    - name: Cache metrics baseline
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: metrics-baseline
+        key: build-metrics-baseline
+
+    # On PRs, package the current metrics + restored baseline + PR context
+    # into a single artifact. A separate `Post PR Metrics Comment` workflow
+    # (triggered by workflow_run) downloads this artifact and posts the
+    # comment. This split is required because PRs from forks don't grant
+    # GITHUB_TOKEN write access during the `pull_request` event, but
+    # workflow_run runs in the base repo and has full write permissions.
+    - name: Stage metrics data for comment workflow
+      if: github.event_name == 'pull_request'
+      shell: pwsh
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        $stage = "metrics-data"
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        # Current metrics (produced by collect-metrics)
+        Copy-Item "${{ inputs.artifacts-path }}/binary-sizes.json" "$stage/binary-sizes.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/test-summary.json" "$stage/test-summary.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/startup-time.json" "$stage/startup-time.json" -ErrorAction SilentlyContinue
+        Copy-Item "${{ inputs.artifacts-path }}/coverage-summary.json" "$stage/coverage-summary.json" -ErrorAction SilentlyContinue
+        # Baseline (restored by the cache step above; missing on first PR)
+        if (Test-Path "metrics-baseline") {
+          New-Item -ItemType Directory -Path "$stage/baseline" -Force | Out-Null
+          Copy-Item "metrics-baseline/*.json" "$stage/baseline/" -ErrorAction SilentlyContinue
+        }
+        # PR context (debug only — the post workflow re-derives PR identity from
+        # workflow_run metadata for security; never trusts these fields).
+        $ctx = @{
+          pr_number = [int]$env:PR_NUMBER
+          head_sha = $env:HEAD_SHA
+          run_id = [int64]$env:RUN_ID
+        }
+        $ctx | ConvertTo-Json | Set-Content "$stage/pr-context.json"
+        # Validate that core metric files are present before uploading. If
+        # collect-metrics ever regresses or paths change, we want the build
+        # to fail loudly here instead of publishing a mostly-empty report
+        # from the privileged post-metrics-comment workflow.
+        $required = @("binary-sizes.json", "test-summary.json")
+        $missing = $required | Where-Object { -not (Test-Path "$stage/$_") }
+        if ($missing) {
+          Write-Error "metrics staging is missing required file(s): $($missing -join ', '). Did collect-metrics run successfully?"
+          exit 1
+        }
+
+    - name: Upload metrics-data artifact
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v7
+      with:
+        name: metrics-data
+        path: metrics-data
+        if-no-files-found: error
+        retention-days: 7

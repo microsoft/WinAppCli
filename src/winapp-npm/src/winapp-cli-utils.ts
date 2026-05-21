@@ -1,0 +1,142 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { spawn } from 'child_process';
+
+export const WINAPP_CLI_CALLER_VALUE = 'nodejs-package';
+
+export interface CallWinappCliOptions {
+  exitOnError?: boolean;
+}
+
+export interface CallWinappCliResult {
+  exitCode: number;
+}
+
+export interface CallWinappCliCaptureOptions {
+  /** Working directory for the CLI process (defaults to process.cwd()) */
+  cwd?: string;
+}
+
+export interface CallWinappCliCaptureResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Helper function to get the path to the winapp-cli executable
+ */
+export function getWinappCliPath(): string {
+  // Determine architecture
+  const arch = os.arch() === 'arm64' ? 'win-arm64' : 'win-x64';
+
+  // Look for the winapp-cli executable in various locations
+  const possiblePaths = [
+    // Distribution build (single-file executable in npm package)
+    path.join(__dirname, `../bin/${arch}/winapp.exe`),
+    // Build artifacts (published by build-cli.ps1, TFM-independent)
+    path.join(__dirname, `../../../artifacts/cli/${arch}/winapp.exe`),
+    // Global installation
+    'winapp.exe',
+  ];
+
+  return possiblePaths.find((p) => fs.existsSync(p)) || possiblePaths[0];
+}
+
+/**
+ * Helper function to call the native winapp-cli
+ * Always captures output and returns it along with the exit code
+ */
+export async function callWinappCli(args: string[], options: CallWinappCliOptions = {}): Promise<CallWinappCliResult> {
+  const { exitOnError = false } = options;
+  const winappCliPath = getWinappCliPath();
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(winappCliPath, args, {
+      stdio: 'inherit',
+      cwd: process.cwd(),
+      shell: false,
+      env: {
+        ...process.env,
+        WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
+      },
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ exitCode: code });
+      } else {
+        if (exitOnError) {
+          process.exit(code ?? 1);
+        } else {
+          reject(new Error(`winapp-cli exited with code ${code}`));
+        }
+      }
+    });
+
+    child.on('error', (error) => {
+      if (exitOnError) {
+        console.error(`Failed to execute winapp-cli: ${error.message}`);
+        console.error(`Tried to run: ${winappCliPath}`);
+        process.exit(1);
+      } else {
+        reject(new Error(`Failed to execute winapp-cli: ${error.message}`));
+      }
+    });
+  });
+}
+
+/**
+ * Call the native winapp-cli and capture stdout/stderr instead of inheriting stdio.
+ * Use this for programmatic access where you need the output.
+ */
+export async function callWinappCliCapture(
+  args: string[],
+  options: CallWinappCliCaptureOptions = {}
+): Promise<CallWinappCliCaptureResult> {
+  const { cwd = process.cwd() } = options;
+  const winappCliPath = getWinappCliPath();
+
+  return new Promise((resolve, reject) => {
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    const child = spawn(winappCliPath, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd,
+      shell: false,
+      env: {
+        ...process.env,
+        WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
+      },
+    });
+
+    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+    child.on('close', (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      const exitCode = code ?? 1;
+
+      if (exitCode === 0) {
+        resolve({ exitCode, stdout, stderr });
+      } else {
+        const error = new Error(`winapp-cli exited with code ${exitCode}: ${stderr || stdout}`) as Error & {
+          exitCode: number;
+          stdout: string;
+          stderr: string;
+        };
+        error.exitCode = exitCode;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      }
+    });
+
+    child.on('error', (error) => {
+      reject(new Error(`Failed to execute winapp-cli: ${error.message}`));
+    });
+  });
+}

@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <!-- Enable central package versioning -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.JavaScript.NodeApi" Version="0.9.17" />
+    <PackageVersion Include="Microsoft.JavaScript.NodeApi.Generator" Version="0.9.17" />
+
+    <!-- This version is updated automatically during restore to match yaml -->
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="Run winapp restore to set version before building" />
+  </ItemGroup>
+</Project>
