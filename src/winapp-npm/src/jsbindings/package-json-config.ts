@@ -150,12 +150,16 @@ function coerceAdditionalWinmds(value: unknown): AdditionalWinmd[] {
     }
     const r = v as Record<string, unknown>;
     const winmdPath = typeof r.winmdPath === 'string' ? r.winmdPath.trim() : '';
-    if (!winmdPath) {
-      continue;
-    }
     const ns = typeof r.namespace === 'string' ? r.namespace.trim() : '';
     const classes = coerceStringArray(r.classes);
-    const entry: AdditionalWinmd = { winmdPath };
+    // Drop entries that have nothing to emit: no path AND no cherry-pick target.
+    if (!winmdPath && (!ns || classes.length === 0)) {
+      continue;
+    }
+    const entry: AdditionalWinmd = {};
+    if (winmdPath) {
+      entry.winmdPath = winmdPath;
+    }
     if (ns && classes.length > 0) {
       entry.namespace = ns;
       entry.classes = classes;
@@ -170,7 +174,10 @@ function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   return {
     output: config.output,
     additionalWinmds: config.additionalWinmds.map((w) => {
-      const entry: Record<string, unknown> = { winmdPath: w.winmdPath };
+      const entry: Record<string, unknown> = {};
+      if (w.winmdPath) {
+        entry.winmdPath = w.winmdPath;
+      }
       if (w.namespace && w.classes && w.classes.length > 0) {
         entry.namespace = w.namespace;
         entry.classes = [...w.classes];

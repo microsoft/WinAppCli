@@ -223,12 +223,15 @@ Full schema with every field shown explicitly:
       "output": "bindings",
 
       // Extra .winmd files to feed into the codegen alongside the ones
-      // discovered from `winapp.yaml`'s NuGet packages. Two modes per entry:
-      //   * winmdPath only           → bulk-emit the whole winmd
-      //   * + namespace + classes    → cherry-pick: only emit the listed
-      //                                classes from that namespace (the winmd
-      //                                is loaded as ref-only so codegen can
-      //                                still resolve its other types).
+      // discovered from `winapp.yaml`'s NuGet packages. Three entry shapes:
+      //   * winmdPath only                          → bulk-emit the whole winmd
+      //   * winmdPath + namespace + classes         → cherry-pick from that winmd
+      //   * namespace + classes only (no winmdPath) → cherry-pick from the
+      //                                               Windows SDK (auto-detected
+      //                                               Windows.winmd). Use this
+      //                                               for `Windows.*` classes
+      //                                               without hardcoding the
+      //                                               SDK install path.
       // Paths: relative to workspace root, OR absolute. Missing files = warning.
       "additionalWinmds": [
         { "winmdPath": "vendor/MyCompany.Foo.winmd" },
@@ -236,7 +239,9 @@ Full schema with every field shown explicitly:
           "winmdPath": "vendor/BigVendor.SDK.winmd",
           "namespace": "BigVendor.Camera",
           "classes": ["Lens", "Sensor"]
-        }
+        },
+        { "namespace": "Windows.Storage", "classes": ["StorageFile"] },
+        { "namespace": "Windows.ApplicationModel", "classes": ["LimitedAccessFeatures"] }
       ],
 
       // Extra .winmd files loaded for type resolution only (no emit).
@@ -255,15 +260,15 @@ Full schema with every field shown explicitly:
 | Field | Default | Type |
 |-------|---------|------|
 | `output` | `"bindings"` | string |
-| `additionalWinmds` | `[]` | array of `{winmdPath, namespace?, classes?[]}` |
+| `additionalWinmds` | `[]` | array of `{winmdPath?, namespace?, classes?[]}` |
 | `additionalRefs` | `[]` | array of paths |
 
 ### Composition rules
 
 1. **NuGet packages** — every package installed via `winapp.yaml` is partitioned by the built-in policy (WinUI / WebView2 = skip; InteractiveExperiences = ref-only; everything else = bulk-emit). The policy isn't user-configurable; install fewer packages in `winapp.yaml` if you want fewer bindings.
-2. **`additionalWinmds`** — each entry is either bulk-emitted (no `namespace`/`classes`) or cherry-picked (with both). Cherry-pick entries load the winmd as ref-only and only emit the listed classes.
+2. **`additionalWinmds`** — each entry is one of three shapes: bulk-emit a whole winmd (`winmdPath` only), cherry-pick from a specific winmd (`winmdPath` + `namespace` + `classes`), or cherry-pick from the Windows SDK (`namespace` + `classes`, no path — codegen auto-detects `Windows.winmd`).
 3. **`additionalRefs`** — appended to the codegen `--ref` channel for type resolution; never emit.
-4. **Codegen auto-classification** — `Windows.*` system winmds (and other foundation namespaces) are always loaded as resolution-only refs even when listed under `additionalWinmds` with no `namespace`/`classes`. Use the cherry-pick form (with `namespace` + `classes`) to pull individual classes out of them.
+4. **Codegen auto-classification** — `Windows.*` system winmds (and other foundation namespaces) are always loaded as resolution-only refs in bulk. Use the path-less cherry-pick form (`{namespace, classes}`) to pull individual Windows classes out without hardcoding the SDK install path.
 
 ## Common workflows
 

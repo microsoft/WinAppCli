@@ -110,7 +110,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
 
   // Cherry-pick entries load as refs; only listed classes are emitted.
   const bulkAdditional: string[] = [];
-  const cherryPicks: { winmdPath: string; namespace: string; classes: string[] }[] = [];
+  const cherryPicks: { winmdPath?: string; namespace: string; classes: string[] }[] = [];
   for (const entry of userEmit.resolved) {
     if (entry.namespace && entry.classes && entry.classes.length > 0) {
       cherryPicks.push({
@@ -118,7 +118,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         namespace: entry.namespace,
         classes: entry.classes,
       });
-    } else {
+    } else if (entry.winmdPath) {
       bulkAdditional.push(entry.winmdPath);
     }
   }
@@ -127,11 +127,14 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   const partition = partitionPackageWinmds(lockfile.packages);
 
   const emitWinmds = [...partition.emit, ...bulkAdditional];
-  // Include every cherry-pick winmd in --ref so each pass can resolve types
-  // declared in OTHER cherry-pick winmds. buildExtraTypeArgs strips the
-  // current pass's own winmd from --ref to avoid the duplicate.
-  const cherryPickRefs = cherryPicks.map((cp) => cp.winmdPath);
-  const refWinmds = [...partition.refOnly, ...userRefs.resolved.map((r) => r.winmdPath), ...cherryPickRefs];
+  // Include every cherry-pick winmd (when path is given) in --ref so each pass
+  // can resolve types declared in OTHER cherry-pick winmds.
+  const cherryPickRefs = cherryPicks.map((cp) => cp.winmdPath).filter((p): p is string => !!p);
+  const refWinmds = [
+    ...partition.refOnly,
+    ...userRefs.resolved.map((r) => r.winmdPath).filter((p): p is string => !!p),
+    ...cherryPickRefs,
+  ];
 
   if (emitWinmds.length === 0 && cherryPicks.length === 0) {
     return {

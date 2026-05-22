@@ -20,7 +20,8 @@ const CODEGEN_PACKAGE_NAME = '@microsoft/dynwinrt-codegen';
 
 /** One cherry-pick pass derived from `additionalWinmds[i]` with namespace+classes. */
 export interface CodegenCherryPick {
-  winmdPath: string;
+  /** Omit to rely on dynwinrt-codegen auto-detect (Windows SDK Windows.winmd). */
+  winmdPath?: string;
   namespace: string;
   classes: readonly string[];
 }
@@ -251,8 +252,12 @@ export function buildExtraTypeArgs(
 ): string[] {
   const args: string[] = [...prefixArgs, 'generate'];
   const emitSet = new Set<string>(emitWinmds);
-  emitSet.add(extra.winmdPath);
-  args.push('--winmd', Array.from(emitSet).join(';'));
+  if (extra.winmdPath) {
+    emitSet.add(extra.winmdPath);
+  }
+  if (emitSet.size > 0) {
+    args.push('--winmd', Array.from(emitSet).join(';'));
+  }
   args.push(
     '--namespace',
     extra.namespace,
@@ -263,7 +268,7 @@ export function buildExtraTypeArgs(
     '--lang',
     'js'
   );
-  const refs = refWinmds.filter((r) => r !== extra.winmdPath);
+  const refs = extra.winmdPath ? refWinmds.filter((r) => r !== extra.winmdPath) : refWinmds;
   if (refs.length > 0) {
     args.push('--ref', refs.join(';'));
   }

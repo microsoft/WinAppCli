@@ -52,8 +52,18 @@ export function ensureRuntimeDependency(
   const obj = doc.parsed;
   const deps = obj.dependencies;
   if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
-    if (packageName in (deps as Record<string, unknown>)) {
+    const depsRec = deps as Record<string, unknown>;
+    const existing = depsRec[packageName];
+    if (typeof existing === 'string' && existing === version) {
       return { outcome: 'alreadyPresent' };
+    }
+    if (typeof existing === 'string') {
+      // Different version pinned — overwrite so codegen and the runtime stay
+      // version-locked. Stale pins cause hard-to-diagnose ABI mismatches
+      // (e.g. dynwinrt panics on TypeKind variants the older runtime can't
+      // marshal).
+      mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
+      return { outcome: 'added', pinnedVersion: version };
     }
   }
 

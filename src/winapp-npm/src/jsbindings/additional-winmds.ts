@@ -14,14 +14,14 @@ import { isNetworkPath, hasReparsePointOnPath } from './path-safety';
  * while namespace+classes cherry-picks.
  */
 export interface AdditionalWinmd {
-  winmdPath: string;
+  winmdPath?: string;
   namespace?: string;
   classes?: string[];
 }
 
 export interface ResolvedAdditionalWinmd {
-  /** Absolute path after UNC/reparse checks. */
-  winmdPath: string;
+  /** Absolute path after UNC/reparse checks; undefined for auto-detect entries. */
+  winmdPath?: string;
   namespace?: string;
   classes?: string[];
 }
@@ -46,23 +46,55 @@ export function resolveAdditionalWinmds(
   const workspaceFull = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
 
   for (const entry of entries) {
-    if (!entry || typeof entry.winmdPath !== 'string' || !entry.winmdPath.trim()) {
+    if (!entry) {
       continue;
     }
-    const trimmed = entry.winmdPath.trim();
 
-    if (isNetworkPath(trimmed)) {
+    const rawPath = typeof entry.winmdPath === 'string' ? entry.winmdPath.trim() : '';
+    const ns = typeof entry.namespace === 'string' ? entry.namespace.trim() : '';
+    const classes = Array.isArray(entry.classes)
+      ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
+      : [];
+
+    // Path-less entry: rely on dynwinrt-codegen auto-detect (Windows.winmd in
+    // the Windows SDK) — requires namespace+classes to be useful, otherwise
+    // the entry has no actionable content.
+    if (!rawPath) {
+      if (!ns || classes.length === 0) {
+        warnings.push(
+          `jsBindings.${fieldName} entry has no winmdPath and no namespace+classes — skipping (nothing to generate).`
+        );
+        continue;
+      }
+      const dedupeKey = `<auto>|${ns}`;
+      const existingIdx = seenIndex.get(dedupeKey);
+      if (existingIdx !== undefined) {
+        const existing = resolved[existingIdx];
+        const merged = new Set<string>(existing.classes ?? []);
+        for (const c of classes) {
+          merged.add(c);
+        }
+        existing.namespace = ns;
+        existing.classes = [...merged];
+        continue;
+      }
+      seenIndex.set(dedupeKey, resolved.length);
+      resolved.push({ namespace: ns, classes });
+      continue;
+    }
+
+    if (isNetworkPath(rawPath)) {
       warnings.push(
-        `jsBindings.${fieldName} entry refused — network/UNC paths are not allowed (would probe attacker-controlled host). Entry: ${trimmed}`
+        `jsBindings.${fieldName} entry refused — network/UNC paths are not allowed (would probe attacker-controlled host). Entry: ${rawPath}`
       );
       continue;
     }
 
-    const fullPath = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(workspaceFull, trimmed);
+    const fullPath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(workspaceFull, rawPath);
 
     if (isNetworkPath(fullPath)) {
       warnings.push(
-        `jsBindings.${fieldName} entry resolved to UNC path; refusing to probe. Entry: ${trimmed} → ${fullPath}`
+        `jsBindings.${fieldName} entry resolved to UNC path; refusing to probe. Entry: ${rawPath} → ${fullPath}`
       );
       continue;
     }
@@ -74,18 +106,13 @@ export function resolveAdditionalWinmds(
 
     if (hasReparsePointOnPath(fullPath, reparseBoundary)) {
       warnings.push(
-        `jsBindings.${fieldName} entry refused — file or one of its ancestors up to ${reparseBoundary} is a reparse point. Entry: ${trimmed} → ${fullPath}`
+        `jsBindings.${fieldName} entry refused — file or one of its ancestors up to ${reparseBoundary} is a reparse point. Entry: ${rawPath} → ${fullPath}`
       );
       continue;
     }
 
-    const ns = typeof entry.namespace === 'string' ? entry.namespace.trim() : '';
-    const classes = Array.isArray(entry.classes)
-      ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
-      : [];
-
     if (!fs.existsSync(fullPath)) {
-      warnings.push(`jsBindings.${fieldName} entry not found, skipping: ${trimmed} (resolved to ${fullPath})`);
+      warnings.push(`jsBindings.${fieldName} entry not found, skipping: ${rawPath} (resolved to ${fullPath})`);
       continue;
     }
 
