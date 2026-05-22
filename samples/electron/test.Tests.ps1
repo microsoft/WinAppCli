@@ -170,6 +170,50 @@ Describe "Electron Sample" {
                 -Because "restore should leave the managed marker in place after regen"
         }
 
+        It "Should regenerate bindings via 'winapp node generate-bindings' (codegen-only path)" -Skip:$script:skip {
+            $bindingsDir = Join-Path $script:appDir "bindings"
+            # Wipe bindings/ to prove generate-bindings re-creates from the cached lockfile.
+            if (Test-Path $bindingsDir) {
+                Remove-Item -Recurse -Force $bindingsDir
+            }
+            Push-Location $script:appDir
+            try {
+                Invoke-WinappCommand -Arguments "node generate-bindings"
+            } finally { Pop-Location }
+            (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist `
+                -Because "generate-bindings must re-emit the managed marker"
+            (Join-Path $bindingsDir "index.js") | Should -Exist `
+                -Because "generate-bindings must re-emit the bindings index"
+        }
+
+        It "Should detect winapp.yaml drift and refuse generate-bindings (cross-language hash parity)" -Skip:$script:skip {
+            # End-to-end check that the TS yaml-packages-hash matches the C#
+            # YamlPackagesHasher used by `winapp restore`. If they drift, this
+            # test silently passes generate-bindings even though winmds are
+            # stale — exactly the regression the parity test guards against.
+            $yamlPath = Join-Path $script:appDir "winapp.yaml"
+            $original = Get-Content $yamlPath -Raw
+            try {
+                $modified = $original -replace '(?m)^(\s*version:\s*)["'']?([\d\.]+)["'']?', '${1}999.999.999'
+                $modified | Should -Not -Be $original -Because "must actually modify winapp.yaml for the test to be meaningful"
+                Set-Content -Path $yamlPath -Value $modified -NoNewline
+                Push-Location $script:appDir
+                try {
+                    # generate-bindings exits non-zero with a stale-lockfile message;
+                    # capture both streams. Invoke-WinappCommand throws on non-zero,
+                    # so use the raw helper that captures output.
+                    $exitCode = 0
+                    $output = & npx --no-install winapp node generate-bindings 2>&1
+                    $exitCode = $LASTEXITCODE
+                    ($output -join "`n") | Should -Match "stale|drift|restore" `
+                        -Because "generate-bindings must surface the stale-lockfile reason"
+                    $exitCode | Should -Not -Be 0 -Because "stale-lockfile path must exit non-zero"
+                } finally { Pop-Location }
+            } finally {
+                Set-Content -Path $yamlPath -Value $original -NoNewline
+            }
+        }
+
         It "Should create a C++ native addon" -Skip:$script:skip {
             Push-Location $script:appDir
             try {

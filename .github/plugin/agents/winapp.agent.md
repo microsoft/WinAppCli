@@ -228,7 +228,7 @@ Want to inspect or interact with a running app's UI?
 - Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
 - **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
-- JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md
+- JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-bindings.md
 
 ### .NET (WPF, WinForms, Console)
 - **Setup:** `winapp init --use-defaults` — but if you already have a `Package.appxmanifest` (e.g., WinUI 3 apps), you likely **don't need `winapp init`**. Just ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds.

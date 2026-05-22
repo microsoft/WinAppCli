@@ -42,7 +42,7 @@ export function resolveAdditionalWinmds(
     return { resolved, warnings };
   }
 
-  const seen = new Set<string>();
+  const seenIndex = new Map<string, number>();
   const workspaceFull = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
 
   for (const entry of entries) {
@@ -79,21 +79,31 @@ export function resolveAdditionalWinmds(
       continue;
     }
 
-    const dedupeKey = fullPath.toLowerCase();
-    if (seen.has(dedupeKey)) {
-      continue;
-    }
-    seen.add(dedupeKey);
+    const ns = typeof entry.namespace === 'string' ? entry.namespace.trim() : '';
+    const classes = Array.isArray(entry.classes)
+      ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
+      : [];
 
     if (!fs.existsSync(fullPath)) {
       warnings.push(`jsBindings.${fieldName} entry not found, skipping: ${trimmed} (resolved to ${fullPath})`);
       continue;
     }
 
-    const ns = typeof entry.namespace === 'string' ? entry.namespace.trim() : '';
-    const classes = Array.isArray(entry.classes)
-      ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
-      : [];
+    const dedupeKey = `${fullPath.toLowerCase()}|${ns}`;
+    const existingIdx = seenIndex.get(dedupeKey);
+    if (existingIdx !== undefined) {
+      const existing = resolved[existingIdx];
+      if (ns && classes.length > 0) {
+        const merged = new Set<string>(existing.classes ?? []);
+        for (const c of classes) {
+          merged.add(c);
+        }
+        existing.namespace = ns;
+        existing.classes = [...merged];
+      }
+      continue;
+    }
+    seenIndex.set(dedupeKey, resolved.length);
 
     const out: ResolvedAdditionalWinmd = { winmdPath: fullPath };
     if (ns && classes.length > 0) {

@@ -168,7 +168,7 @@ Each generation auto-injects `@microsoft/dynwinrt` as a production dependency in
 
 Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them.
 
-> See [JS bindings guide](guides/electron/js-bindings.md) for the full `winapp.jsBindings` schema, per-package winmd categorization (skip / refOnly / emit overrides), and the `winmds.lock.json` audit artifact.
+> See [JS bindings guide](guides/electron/js-bindings.md) for the full `winapp.jsBindings` schema, the built-in per-package winmd categorization (skip / refOnly / emit), and the `winmds.lock.json` audit artifact.
 
 ---
 

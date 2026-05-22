@@ -77,17 +77,23 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   // If SDK pins changed after restore, codegen would emit against stale winmd inventory.
   if (lockfile.yamlPackagesHash) {
     const currentPackages = readWinappYamlPackages(workspaceDir, options.yamlPath);
-    if (currentPackages) {
-      const currentHash = computeYamlPackagesHash(currentPackages);
-      if (currentHash !== lockfile.yamlPackagesHash) {
-        return {
-          outcome: 'lockfileStale',
-          message:
-            `winapp.yaml \`packages:\` has changed since the last \`winapp restore\` ` +
-            `(lockfile hash ${lockfile.yamlPackagesHash.slice(0, 12)}…, current ${currentHash.slice(0, 12)}…). ` +
-            'Run `winapp restore` to refresh the winmd inventory before generating bindings.',
-        };
-      }
+    if (!currentPackages) {
+      return {
+        outcome: 'lockfileStale',
+        message:
+          'Lockfile records a `winapp.yaml` package hash but `winapp.yaml` could not be read. ' +
+          'Restore the file (or remove `.winapp/winmds.lock.json` if intentional) before regenerating bindings.',
+      };
+    }
+    const currentHash = computeYamlPackagesHash(currentPackages);
+    if (currentHash !== lockfile.yamlPackagesHash) {
+      return {
+        outcome: 'lockfileStale',
+        message:
+          `winapp.yaml \`packages:\` has changed since the last \`winapp restore\` ` +
+          `(lockfile hash ${lockfile.yamlPackagesHash.slice(0, 12)}…, current ${currentHash.slice(0, 12)}…). ` +
+          'Run `winapp restore` to refresh the winmd inventory before generating bindings.',
+      };
     }
   }
 
@@ -104,12 +110,14 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
 
   // Cherry-pick entries load as refs; only listed classes are emitted.
   const bulkAdditional: string[] = [];
-  const cherryPicks: { namespace: string; classes: string[] }[] = [];
-  const cherryPickRefs: string[] = [];
+  const cherryPicks: { winmdPath: string; namespace: string; classes: string[] }[] = [];
   for (const entry of userEmit.resolved) {
     if (entry.namespace && entry.classes && entry.classes.length > 0) {
-      cherryPicks.push({ namespace: entry.namespace, classes: entry.classes });
-      cherryPickRefs.push(entry.winmdPath);
+      cherryPicks.push({
+        winmdPath: entry.winmdPath,
+        namespace: entry.namespace,
+        classes: entry.classes,
+      });
     } else {
       bulkAdditional.push(entry.winmdPath);
     }
@@ -119,7 +127,10 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   const partition = partitionPackageWinmds(lockfile.packages);
 
   const emitWinmds = [...partition.emit, ...bulkAdditional];
-  // Cherry-pick winmds are refs because only their requested classes are emitted.
+  // Include every cherry-pick winmd in --ref so each pass can resolve types
+  // declared in OTHER cherry-pick winmds. buildExtraTypeArgs strips the
+  // current pass's own winmd from --ref to avoid the duplicate.
+  const cherryPickRefs = cherryPicks.map((cp) => cp.winmdPath);
   const refWinmds = [...partition.refOnly, ...userRefs.resolved.map((r) => r.winmdPath), ...cherryPickRefs];
 
   if (emitWinmds.length === 0 && cherryPicks.length === 0) {

@@ -76,4 +76,27 @@ public class YamlPackagesHasherTests
         var b = new[] { new PackagePin { Name = "Foo", Version = "1.0" } };
         Assert.AreEqual(YamlPackagesHasher.Compute(a), YamlPackagesHasher.Compute(b));
     }
+
+    [TestMethod]
+    public void Compute_GoldenFixture_PinsHashForCrossLanguageParity()
+    {
+        // PINNED REFERENCE FIXTURE — the TS implementation in
+        // src/winapp-npm/src/jsbindings/yaml-packages-hash.ts must produce
+        // EXACTLY this hex for the same logical input. If the two drift,
+        // stale-lockfile detection silently breaks (TS sees a different
+        // hash than what restore wrote, but reports no change).
+        //
+        // When updating either side, recompute on both and update this hex
+        // together. Sample inputs taken from a realistic Electron workspace
+        // (lowercase normalization, ordinal sort by `lower(name)|version`).
+        var packages = new[]
+        {
+            new PackagePin { Name = "Microsoft.WindowsAppSDK", Version = "2.1.3" },
+            new PackagePin { Name = "Microsoft.Windows.SDK.CPP", Version = "10.0.28000.1839" },
+        };
+        Assert.AreEqual(
+            "8581abfcb53fa04056a066fc7098c5d94064cc275e20f0e547365c1b8b146e54",
+            YamlPackagesHasher.Compute(packages),
+            "Hash drift detected — update yaml-packages-hash.ts to match (or vice-versa).");
+    }
 }

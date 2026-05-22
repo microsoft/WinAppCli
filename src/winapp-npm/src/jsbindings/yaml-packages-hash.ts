@@ -35,6 +35,17 @@ export interface PackagePin {
  * Compute the canonical hash for a sequence of name/version pairs.
  * Whitespace-only names are skipped (matching C#'s `IsNullOrWhiteSpace`).
  * `null`/`undefined` versions canonicalize to the empty string.
+ *
+ * Cross-language parity is pinned by `YamlPackagesHasherTests.Compute_GoldenFixture_PinsHashForCrossLanguageParity`
+ * on the C# side. Update both implementations together when changing
+ * canonicalization (the test will fail otherwise).
+ *
+ * Golden fixture (for ad-hoc verification):
+ *   packages = [
+ *     { name: 'Microsoft.WindowsAppSDK',   version: '2.1.3' },
+ *     { name: 'Microsoft.Windows.SDK.CPP', version: '10.0.28000.1839' },
+ *   ]
+ *   → '8581abfcb53fa04056a066fc7098c5d94064cc275e20f0e547365c1b8b146e54'
  */
 export function computeYamlPackagesHash(packages: Iterable<PackagePin>): string {
   const lines = new Set<string>();

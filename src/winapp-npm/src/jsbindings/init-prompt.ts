@@ -25,7 +25,7 @@ export interface BindingsPromptOutcome {
   overwriteExistingConfig?: boolean;
 }
 
-const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '-y', '--yes']);
+const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '--no-prompt', '-y', '--yes']);
 
 export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<BindingsPromptOutcome> {
   // Restore never re-prompts: respect whatever the workspace already declares.

@@ -20,6 +20,7 @@ const CODEGEN_PACKAGE_NAME = '@microsoft/dynwinrt-codegen';
 
 /** One cherry-pick pass derived from `additionalWinmds[i]` with namespace+classes. */
 export interface CodegenCherryPick {
+  winmdPath: string;
   namespace: string;
   classes: readonly string[];
 }
@@ -249,9 +250,9 @@ export function buildExtraTypeArgs(
   extra: CodegenCherryPick
 ): string[] {
   const args: string[] = [...prefixArgs, 'generate'];
-  if (emitWinmds.length > 0) {
-    args.push('--winmd', emitWinmds.join(';'));
-  }
+  const emitSet = new Set<string>(emitWinmds);
+  emitSet.add(extra.winmdPath);
+  args.push('--winmd', Array.from(emitSet).join(';'));
   args.push(
     '--namespace',
     extra.namespace,
@@ -262,8 +263,9 @@ export function buildExtraTypeArgs(
     '--lang',
     'js'
   );
-  if (refWinmds.length > 0) {
-    args.push('--ref', refWinmds.join(';'));
+  const refs = refWinmds.filter((r) => r !== extra.winmdPath);
+  if (refs.length > 0) {
+    args.push('--ref', refs.join(';'));
   }
   return args;
 }
@@ -446,6 +448,7 @@ function resolveViaRequireResolve(wrapperDir: string | null): string | null {
       return pkgDir;
     }
   } catch {
+    // require.resolve throws on no-match; treat as "not installed".
   }
   return null;
 }
