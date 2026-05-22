@@ -117,6 +117,14 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
       : typeof obj.nugetCacheDir === 'string'
         ? obj.nugetCacheDir
         : undefined;
+  if (!nugetCacheDir || !nugetCacheDir.trim()) {
+    return {
+      lockfile: null,
+      reason:
+        `Lockfile ${filePath} missing nuget_cache_dir. ` +
+        `Re-run \`winapp restore\` to regenerate (older lockfiles without a containment boundary are unsafe).`,
+    };
+  }
   const yamlPackagesHash =
     typeof obj.yaml_packages_hash === 'string'
       ? obj.yaml_packages_hash
@@ -124,9 +132,7 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
         ? obj.yamlPackagesHash
         : undefined;
 
-  // Require lockfile winmds to stay under nuget_cache_dir; UNC/reparse escapes are dropped.
-  // Without nuget_cache_dir there is no boundary, so codegen surfaces absolute-path issues.
-  const cacheBoundary = nugetCacheDir ? path.resolve(nugetCacheDir).replace(/[\\/]+$/, '') : null;
+  const cacheBoundary = path.resolve(nugetCacheDir).replace(/[\\/]+$/, '');
   const droppedPaths: string[] = [];
   const packages: WinmdsLockfilePackage[] = [];
   for (const entry of packagesRaw) {
@@ -146,18 +152,16 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
         droppedPaths.push(w);
         continue;
       }
-      if (cacheBoundary) {
-        const resolved = path.resolve(w);
-        const prefix = cacheBoundary + path.sep;
-        const inside = resolved.length >= prefix.length && resolved.toLowerCase().startsWith(prefix.toLowerCase());
-        if (!inside) {
-          droppedPaths.push(w);
-          continue;
-        }
-        if (hasReparsePointOnPath(resolved, cacheBoundary)) {
-          droppedPaths.push(w);
-          continue;
-        }
+      const resolved = path.resolve(w);
+      const prefix = cacheBoundary + path.sep;
+      const inside = resolved.length >= prefix.length && resolved.toLowerCase().startsWith(prefix.toLowerCase());
+      if (!inside) {
+        droppedPaths.push(w);
+        continue;
+      }
+      if (hasReparsePointOnPath(resolved, cacheBoundary)) {
+        droppedPaths.push(w);
+        continue;
       }
       winmdsArr.push(w);
     }

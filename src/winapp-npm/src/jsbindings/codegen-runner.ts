@@ -365,6 +365,12 @@ export function resolveCodegenInvocation(): CodegenInvocation {
   const pkgDirs = resolveCodegenPackageDirs(wrapperDir);
   let lastChecked: string | null = null;
   for (const pkgDir of pkgDirs) {
+    // Refuse any pkgDir under UNC or with a reparse-point ancestor — a hostile
+    // npm install layout (junction'd node_modules) could redirect us to a
+    // victim binary.
+    if (isNetworkPath(pkgDir) || hasReparsePointOnPath(pkgDir, path.parse(pkgDir).root || pkgDir)) {
+      continue;
+    }
     // Prefer the pre-built .exe; cli.js is a defensive fallback.
     const exePath = path.join(pkgDir, 'bin', arch, 'dynwinrt-codegen.exe');
     if (fs.existsSync(exePath)) {
