@@ -10,16 +10,26 @@ using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
-// Shared service for setting up winapp workspaces. Split into partials:
-// - this file: orchestration (SetupWorkspaceAsync, init/restore flow)
-// - WorkspaceSetupService.Options.cs: option DTO (WorkspaceSetupOptions)
-// - WorkspaceSetupService.Prompts.cs: Spectre.Console prompts (SDK choice, manifest, dev mode, .csproj picker)
-// - WorkspaceSetupService.Msix.cs: Windows App SDK runtime MSIX install / NuGet-cache discovery
-//
-// JS/TS bindings orchestration (codegen, runtime-dep injection, prompt) lives
-// entirely in the @microsoft/winapp npm wrapper, which calls this native CLI
-// for `init`/`restore` and reads the lockfile written by Step 5.
-internal partial class WorkspaceSetupService(
+/// <summary>
+/// Parameters for workspace setup operations
+/// </summary>
+internal class WorkspaceSetupOptions
+{
+    public required DirectoryInfo BaseDirectory { get; set; }
+    public required DirectoryInfo ConfigDir { get; set; }
+    public SdkInstallMode? SdkInstallMode { get; set; }
+    public bool IgnoreConfig { get; set; }
+    public bool NoGitignore { get; set; }
+    public bool UseDefaults { get; set; }
+    public bool RequireExistingConfig { get; set; }
+    public bool ForceLatestBuildTools { get; set; }
+    public bool ConfigOnly { get; set; }
+}
+
+/// <summary>
+/// Shared service for setting up winapp workspaces
+/// </summary>
+internal class WorkspaceSetupService(
     IConfigService configService,
     IWinappDirectoryService winappDirectoryService,
     IPackageInstallationService packageInstallationService,
@@ -66,7 +76,6 @@ internal partial class WorkspaceSetupService(
         }
 
         // Restore on a non-.NET project with no winapp.yaml — nothing to restore.
-        // (.NET projects without yaml are already rejected on line 61 above.)
         // No-op success rather than error: a project that doesn't declare SDK
         // package versions in winapp.yaml simply has nothing for restore to do.
         if (options.RequireExistingConfig && !configService.Exists())
@@ -507,7 +516,7 @@ internal partial class WorkspaceSetupService(
                             return (1, "Error installing packages.");
                         }
 
-                        // Step 5: Run cppwinrt and set up projections.
+                        // Step 5: Run cppwinrt and set up projections
                         var cppWinrtExe = cppWinrtService.FindCppWinrtExe(nugetCacheDir, usedVersions);
                         if (cppWinrtExe is null)
                         {
@@ -553,18 +562,20 @@ internal partial class WorkspaceSetupService(
                             taskContext.AddDebugMessage($"{UiSymbols.Note} Failed to copy license: {ex.Message}");
                         }
 
-                        // Collect winmd inputs (the npm-wrapper JS bindings pipeline reads the lockfile too).
+                        // Collect winmd inputs and run cppwinrt
                         taskContext.UpdateSubStatus("Searching for .winmd metadata");
                         var winmds = packageLayoutService.FindWinmds(nugetCacheDir, usedVersions).ToList();
                         taskContext.AddDebugMessage($"{UiSymbols.Search} Found {winmds.Count} .winmd");
                         if (winmds.Count == 0)
                         {
-                            return (2, "No .winmd files found in installed SDK packages.");
+                            return (2, "No .winmd files found for C++/WinRT projection.");
                         }
 
-                        // Persist the lockfile so the JS bindings step can skip re-globbing
-                        // / re-fetching nuspecs. Hash source must match what lands in
-                        // winapp.yaml (SDK_PACKAGES-filtered for fresh init, config.Packages for restore).
+                        // Write the winmds lockfile alongside the cppwinrt outputs so the
+                        // npm wrapper's jsBindings orchestrator can replay the same winmd
+                        // inventory without re-walking the NuGet cache. Hash captures the
+                        // winapp.yaml `packages:` block (SDK_PACKAGES-filtered for fresh init,
+                        // config.Packages for restore) so the wrapper can detect yaml drift.
                         var yamlHash = (options.RequireExistingConfig && config?.Packages.Count > 0)
                             ? YamlPackagesHasher.Compute(config.Packages)
                             : YamlPackagesHasher.ComputeFromVersions(usedVersions
@@ -786,6 +797,26 @@ internal partial class WorkspaceSetupService(
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Selects the .csproj file to configure when multiple are found.
+    /// </summary>
+    private async Task<FileInfo> SelectCsprojFileAsync(IReadOnlyList<FileInfo> csprojFiles, CancellationToken cancellationToken)
+    {
+        if (csprojFiles.Count == 1)
+        {
+            return csprojFiles[0];
+        }
+
+        // Multiple .csproj files found — ask the user which one to use
+        var choices = csprojFiles.Select(f => f.Name).ToArray();
+        var selected = await ansiConsole.PromptAsync(
+            new SelectionPrompt<string>()
+                .Title("Multiple .csproj files found. Which project should be configured?")
+                .AddChoices(choices),
+            cancellationToken);
+        return csprojFiles.First(f => f.Name == selected);
+    }
+
     private async Task SetupManifestSubTaskAsync(WorkspaceSetupOptions options, bool shouldGenerateManifest, ManifestGenerationInfo? manifestGenerationInfo, TaskContext taskContext, CancellationToken cancellationToken)
     {
         await taskContext.AddSubTaskAsync("Generating Manifest and Assets", async (taskContext, cancellationToken) =>
@@ -815,5 +846,676 @@ internal partial class WorkspaceSetupService(
                 return (0, "Manifest generation failed, but continuing setup");
             }
         }, cancellationToken);
+    }
+
+    private async Task<(int ReturnCode, WinappConfig? Config, bool HadExistingConfig, bool ShouldGenerateManifest, ManifestGenerationInfo? ManifestGenerationInfo, bool ShouldEnableDeveloperMode, string? RecommendedTfm)> InitializeConfigurationAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
+    {
+        if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null && options.UseDefaults)
+        {
+            // Default to Stable when --use-defaults
+            options.SdkInstallMode = SdkInstallMode.Stable;
+        }
+
+        var hadExistingConfig = configService.Exists();
+        bool shouldGenerateManifest = true;
+        bool shouldEnableDeveloperMode = false;
+        string? recommendedTfm = null;
+        ManifestGenerationInfo? manifestGenerationInfo = null;
+        WinappConfig? config = null;
+
+        // Step 1: Handle configuration requirements
+        if (options.RequireExistingConfig && !configService.Exists())
+        {
+            // Non-.NET project with no winapp.yaml — nothing to restore.
+            // (.NET projects without yaml are handled earlier in SetupWorkspaceAsync.)
+            // This is a no-op rather than an error: a project that doesn't declare
+            // SDK package versions in winapp.yaml has nothing for restore to do.
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+        }
+
+        // Step 2: Load or prepare configuration
+        if (hadExistingConfig)
+        {
+            config = configService.Load();
+
+            if (config.Packages.Count == 0 && options.RequireExistingConfig)
+            {
+                logger.LogInformation("{UISymbol} winapp.yaml found but contains no packages. Nothing to restore.", UiSymbols.Note);
+                shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
+                return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            }
+
+            var operation = options.RequireExistingConfig ? "Found" : "Found existing";
+            logger.LogDebug("{UISymbol} {Operation} winapp.yaml with {PackageCount} packages", UiSymbols.Package, operation, config.Packages.Count);
+
+            if (!options.RequireExistingConfig && config.Packages.Count > 0)
+            {
+                logger.LogDebug("{UISymbol} Using pinned package versions from winapp.yaml unless overridden.", UiSymbols.Note);
+            }
+
+            // For setup command: ask about overwriting existing config (only if not skipping SDK installation and not config-only mode)
+            if (!options.RequireExistingConfig && !options.IgnoreConfig && !options.ConfigOnly && options.SdkInstallMode != SdkInstallMode.None && config.Packages.Count > 0)
+            {
+                if (options.UseDefaults)
+                {
+                    options.IgnoreConfig = true;
+                }
+                else
+                {
+                    var overwriteConfig = await ShowConfirmationPromptAsync(ansiConsole, "winapp.yaml exists with pinned versions. Overwrite?", cancellationToken);
+                    shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
+                    if (shouldGenerateManifest)
+                    {
+                        manifestGenerationInfo = await PromptForManifestInfoAsync(options, cancellationToken);
+                    }
+                    if (!overwriteConfig)
+                    {
+                        options.IgnoreConfig = true;
+                    }
+                    else
+                    {
+                        await AskSdkInstallModeAsync(options, isDotNetProject, csprojFile, cancellationToken);
+                    }
+                }
+            }
+        }
+        else
+        {
+            shouldGenerateManifest = await AskShouldGenerateManifestAsync(options, cancellationToken);
+            if (shouldGenerateManifest)
+            {
+                manifestGenerationInfo = await PromptForManifestInfoAsync(options, cancellationToken);
+            }
+
+            await AskSdkInstallModeAsync(options, isDotNetProject, csprojFile, cancellationToken);
+            if (options.SdkInstallMode != SdkInstallMode.None)
+            {
+                config = new WinappConfig();
+                logger.LogDebug("{UISymbol} No winapp.yaml found; will generate one after setup.", UiSymbols.New);
+            }
+        }
+
+        // .NET: Validate TargetFramework (interactive)
+        if (isDotNetProject && csprojFile != null)
+        {
+            if (dotNetService.IsMultiTargeted(csprojFile))
+            {
+                logger.LogError("The project '{CsprojFile}' uses multi-targeting (TargetFrameworks). winapp init does not support multi-targeted projects.", csprojFile.Name);
+                return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+            }
+
+            var currentTfm = dotNetService.GetTargetFramework(csprojFile);
+            logger.LogDebug("Current TargetFramework: {Tfm}", currentTfm ?? "(not set)");
+
+            if (currentTfm == null || !dotNetService.IsTargetFrameworkSupported(currentTfm))
+            {
+                recommendedTfm = dotNetService.GetRecommendedTargetFramework(currentTfm);
+
+                if (!options.UseDefaults)
+                {
+                    var currentDisplay = currentTfm ?? "(not set)";
+
+                    var promptSuffix = options.SdkInstallMode != SdkInstallMode.None
+                        ? " (Required for Windows App SDK)"
+                        : "";
+
+                    var shouldUpdate = await ShowConfirmationPromptAsync(ansiConsole, $"Update TargetFramework to \"{recommendedTfm}\"{promptSuffix}?", cancellationToken);
+
+                    if (!shouldUpdate)
+                    {
+                        if (options.SdkInstallMode != SdkInstallMode.None)
+                        {
+                            logger.LogError("TargetFramework '{Tfm}' is not supported for Windows App SDK. Cannot continue.", currentDisplay);
+                            return (1, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+                        }
+
+                        // Not installing SDKs, so TFM update is not required — skip it
+                        recommendedTfm = null;
+                    }
+                }
+                else
+                {
+                    var currentDisplay = currentTfm ?? "(not set)";
+                    logger.LogWarning(
+                        "TargetFramework '{CurrentTfm}' is not supported for Windows App SDK. Automatically updating to '{RecommendedTfm}' because --use-defaults was specified.",
+                        currentDisplay,
+                        recommendedTfm);
+                    logger.LogInformation("Automatically updating TargetFramework from {CurrentTfm} to {RecommendedTfm} because --use-defaults was specified.", Markup.Escape(currentDisplay), recommendedTfm);
+                }
+            }
+            else
+            {
+                logger.LogDebug("{UISymbol} TargetFramework '{Tfm}' is supported", UiSymbols.Check, currentTfm);
+            }
+        }
+
+        shouldEnableDeveloperMode = await AskShouldEnableDeveloperModeAsync(options, cancellationToken);
+
+        return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
+    }
+
+    private static async Task<bool> ShowConfirmationPromptAsync(IAnsiConsole ansiConsole, string prompt, CancellationToken cancellationToken)
+    {
+        var result = await ansiConsole.PromptAsync(new ConfirmationPrompt(prompt), cancellationToken);
+
+        ansiConsole.Cursor.MoveUp();
+        ansiConsole.Write("\x1b[2K"); // Clear line
+        ansiConsole.MarkupLine($"{prompt}: [underline]{(result ? "Yes" : "No")}[/]");
+
+        return result;
+    }
+
+    private async Task<ManifestGenerationInfo?> PromptForManifestInfoAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    {
+        if (options.ConfigOnly)
+        {
+            return null;
+        }
+
+        return await manifestService.PromptForManifestInfoAsync(options.BaseDirectory, null, null, "1.0.0.0", "Windows Application", null, options.UseDefaults, cancellationToken);
+    }
+
+    private async Task<bool> AskShouldEnableDeveloperModeAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    {
+        if (options.ConfigOnly || options.RequireExistingConfig)
+        {
+            return false;
+        }
+
+        if (devModeService.IsEnabled())
+        {
+            return false;
+        }
+
+        if (options.UseDefaults)
+        {
+            return false;
+        }
+
+        return await ShowConfirmationPromptAsync(ansiConsole, "Enable Developer Mode (requires elevation and you will be prompted by User Account Control)", cancellationToken);
+    }
+
+    private async Task<bool> AskShouldGenerateManifestAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken)
+    {
+        if (options.RequireExistingConfig)
+        {
+            return true;
+        }
+
+        // Check if manifest already exists, and if so, ask about overwriting
+        var manifestPath = MsixService.FindProjectManifest(currentDirectoryProvider, options.BaseDirectory);
+        if ((manifestPath?.Exists) == true)
+        {
+            logger.LogDebug("{UISymbol} {ManifestFileName} already exists at {ManifestPath}", UiSymbols.Check, manifestPath.Name, manifestPath.FullName);
+            if (options.UseDefaults)
+            {
+                // With --use-defaults, skip overwriting existing manifest (non-destructive)
+                return false;
+            }
+            else
+            {
+                return await ShowConfirmationPromptAsync(ansiConsole, $"{manifestPath.Name} already exists. Overwrite?", cancellationToken);
+            }
+        }
+
+        return true;
+    }
+
+    private async Task AskSdkInstallModeAsync(WorkspaceSetupOptions options, bool isDotNetProject, FileInfo? csprojFile, CancellationToken cancellationToken)
+    {
+        // For init (not restore), prompt for SDK installation choice if not specified
+        if (!options.RequireExistingConfig && !options.ConfigOnly && options.SdkInstallMode == null)
+        {
+            // If the .NET project already references WinAppSDK, skip the prompt and default to None.
+            // This call may take a while on a fresh machine because `dotnet list package` triggers
+            // an implicit restore — surface a spinner so the user knows we're doing something (#463).
+            if (isDotNetProject && csprojFile != null)
+            {
+                var alreadyReferencesWinAppSdk = await RunWithStatusAsync(
+                    "Detecting project SDK references...",
+                    ct => dotNetService.HasPackageReferenceAsync(csprojFile, DotNetService.WINAPP_SDK_NUGET_PACKAGE, ct),
+                    cancellationToken);
+                if (alreadyReferencesWinAppSdk)
+                {
+                    options.SdkInstallMode = SdkInstallMode.None;
+                    logger.LogInformation("{UISymbol} Project already references {PackageName}; skipping Windows App SDK setup.", UiSymbols.Check, DotNetService.WINAPP_SDK_NUGET_PACKAGE);
+                    return;
+                }
+            }
+            // Determine which packages to show versions for
+            var packages = isDotNetProject
+                ? [BuildToolsService.WINAPP_SDK_PACKAGE]
+                : new[] { BuildToolsService.CPP_SDK_PACKAGE, BuildToolsService.WINAPP_SDK_PACKAGE };
+
+            // Fetch versions for all modes in parallel (failures are non-fatal). On a fresh machine
+            // these NuGet feed calls can take many seconds; show a spinner so the prompt doesn't
+            // appear to hang (#463).
+            var modes = new[] { SdkInstallMode.Stable, SdkInstallMode.Preview, SdkInstallMode.Experimental };
+            var versionTasks = await RunWithStatusAsync(
+                "Fetching latest SDK versions...",
+                async ct =>
+                {
+                    var tasks = modes
+                        .SelectMany(mode => packages.Select(pkg => (Mode: mode, Package: pkg, Task: SafeGetLatestVersionAsync(pkg, mode, ct))))
+                        .ToList();
+                    await Task.WhenAll(tasks.Select(v => v.Task));
+                    return tasks;
+                },
+                cancellationToken);
+
+            // Build a lookup: (mode) → version label
+            var versionsByMode = modes.ToDictionary(
+                mode => mode,
+                mode =>
+                {
+                    var parts = versionTasks
+                        .Where(v => v.Mode == mode && v.Task.Result != null)
+                        .Select(v => $"{(v.Package == BuildToolsService.CPP_SDK_PACKAGE ? "Windows SDK" : "Windows App SDK")} [green]{v.Task.Result}[/]");
+                    return string.Join(", ", parts);
+                });
+
+            var label = isDotNetProject ? "Windows App SDK" : "SDKs";
+            string FormatChoice(string modeLabel, SdkInstallMode mode)
+            {
+                var versions = versionsByMode[mode];
+                return string.IsNullOrEmpty(versions)
+                    ? $"Setup {modeLabel} {label}"
+                    : $"Setup {modeLabel} {label} ({versions})";
+            }
+            string[] sdkChoices = [
+                FormatChoice("Stable", SdkInstallMode.Stable),
+                FormatChoice("Preview", SdkInstallMode.Preview),
+                FormatChoice("Experimental", SdkInstallMode.Experimental),
+                $"Do not setup {label}"
+            ];
+
+            ansiConsole.WriteLine($"Select {label} setup option:");
+            var sdkPrompt = new SelectionPrompt<string>()
+                .AddChoices(sdkChoices);
+
+            var sdkChoice = await ansiConsole.PromptAsync(sdkPrompt, cancellationToken);
+
+            ansiConsole.Cursor.MoveUp();
+            ansiConsole.Write("\x1b[2K"); // Clear line
+
+            if (sdkChoice == sdkChoices[0])
+            {
+                options.SdkInstallMode = SdkInstallMode.Stable;
+            }
+            else if (sdkChoice == sdkChoices[1])
+            {
+                options.SdkInstallMode = SdkInstallMode.Preview;
+            }
+            else if (sdkChoice == sdkChoices[2])
+            {
+                options.SdkInstallMode = SdkInstallMode.Experimental;
+            }
+            else
+            {
+                options.SdkInstallMode = SdkInstallMode.None;
+                logger.LogInformation("Setup {Label}: Do not setup {Label}", label, label);
+                return;
+            }
+
+            ansiConsole.MarkupLine($"Setup {label}: [underline]{Markup.Remove(sdkChoice["Setup ".Length..])}[/]");
+        }
+    }
+
+    private async Task<string?> SafeGetLatestVersionAsync(string packageName, SdkInstallMode mode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode: mode, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug("Failed to fetch latest version for {PackageName} ({Mode}): {ErrorMessage}", packageName, mode, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Package entry information from MSIX inventory
+    /// </summary>
+    public class MsixPackageEntry
+    {
+        public required string FileName { get; set; }
+        public required string PackageIdentity { get; set; }
+    }
+
+    /// <summary>
+    /// Parses the MSIX inventory file and returns package entries (shared implementation)
+    /// </summary>
+    /// <param name="msixDir">Directory containing the MSIX packages</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of package entries, or null if not found</returns>
+    public static async Task<List<MsixPackageEntry>?> ParseMsixInventoryAsync(TaskContext taskContext, DirectoryInfo msixDir, CancellationToken cancellationToken)
+    {
+        var architecture = GetSystemArchitecture();
+
+        taskContext.AddDebugMessage($"{UiSymbols.Note} Detected system architecture: {architecture}");
+
+        // Look for MSIX packages for the current architecture
+        var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
+        if (!Directory.Exists(msixArchDir))
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} No MSIX packages found for architecture {architecture}");
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Available directories: {string.Join(", ", msixDir.GetDirectories().Select(d => d.Name))}");
+            return null;
+        }
+
+        // Read the MSIX inventory file
+        var inventoryPath = Path.Combine(msixArchDir, "msix.inventory");
+        if (!File.Exists(inventoryPath))
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} No msix.inventory file found in {msixArchDir}");
+            return null;
+        }
+
+        var inventoryLines = await File.ReadAllLinesAsync(inventoryPath, cancellationToken);
+        var packageEntries = inventoryLines
+            .Where(line => !string.IsNullOrWhiteSpace(line) && line.Contains('='))
+            .Select(line => line.Split('=', 2))
+            .Where(parts => parts.Length == 2)
+            .Select(parts => new MsixPackageEntry { FileName = parts[0].Trim(), PackageIdentity = parts[1].Trim() })
+            .ToList();
+
+        if (packageEntries.Count == 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} No valid package entries found in msix.inventory");
+            return null;
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Package} Found {packageEntries.Count} MSIX packages in inventory");
+
+        return packageEntries;
+    }
+
+    /// <summary>
+    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
+    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
+    /// the real identity directly from the package to ensure correct installation checks.
+    /// </summary>
+    private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
+    {
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(msixFilePath);
+            var manifestEntry = zip.GetEntry("AppxManifest.xml");
+            if (manifestEntry == null)
+            {
+                return (null, null);
+            }
+
+            using var stream = manifestEntry.Open();
+            var doc = System.Xml.Linq.XDocument.Load(stream);
+            var identityElement = doc.Root?.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "Identity");
+
+            var name = identityElement?.Attribute("Name")?.Value;
+            var version = identityElement?.Attribute("Version")?.Value;
+            return (name, version);
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not read identity from {Path.GetFileName(msixFilePath)}: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// Installs Windows App SDK runtime MSIX packages for the current system architecture
+    /// </summary>
+    /// <param name="msixDir">Directory containing the MSIX packages</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    public async Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
+    {
+        var architecture = GetSystemArchitecture();
+
+        // Get package entries from MSIX inventory
+        var packageEntries = await ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
+        if (packageEntries == null || packageEntries.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
+
+        // Build list of packages to evaluate
+        var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();
+        foreach (var entry in packageEntries)
+        {
+            var msixFilePath = Path.Combine(msixArchDir, entry.FileName);
+            if (!File.Exists(msixFilePath))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} MSIX file not found: {msixFilePath}");
+                continue;
+            }
+
+            // Read the actual package identity from the MSIX's AppxManifest.xml.
+            // The inventory file's PackageIdentity can differ from the real installed name.
+            var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
+            if (packageName == null)
+            {
+                // Fallback: parse from inventory identity string
+                var identityParts = entry.PackageIdentity.Split('_');
+                packageName = identityParts[0];
+                newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
+            }
+
+            packagesToCheck.Add((msixFilePath, packageName, newVersionString ?? "", entry.FileName));
+        }
+
+        if (packagesToCheck.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Info} Checking and installing {packagesToCheck.Count} MSIX packages");
+
+        var installedCount = 0;
+        var errorCount = 0;
+
+        foreach (var (filePath, packageName, newVersion, fileName) in packagesToCheck)
+        {
+            // Check if already installed with same or newer version
+            var installedVersion = packageRegistrationService.GetInstalledVersion(packageName);
+            if (installedVersion != null)
+            {
+                if (Version.TryParse(installedVersion, out var existing) &&
+                    Version.TryParse(newVersion, out var incoming) &&
+                    existing >= incoming)
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Already installed or newer version exists");
+                    continue;
+                }
+            }
+
+            taskContext.AddDebugMessage($"{UiSymbols.Info} {fileName}: Will install");
+
+            try
+            {
+                await packageRegistrationService.InstallPackageAsync(filePath, cancellationToken);
+                installedCount++;
+                taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Installation successful");
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                taskContext.AddDebugMessage($"{UiSymbols.Note} {fileName}: {ex.Message}");
+            }
+        }
+
+        // Provide summary feedback
+        if (installedCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} MSIX packages");
+        }
+        if (errorCount > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} {errorCount} packages failed to install");
+        }
+
+        return (installedCount, errorCount);
+    }
+
+    /// <summary>
+    /// Gets the current system architecture string for package selection
+    /// </summary>
+    /// <returns>Architecture string (x64, arm64, x86)</returns>
+    public static string GetSystemArchitecture()
+    {
+        var arch = RuntimeInformation.ProcessArchitecture;
+        return arch switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "x86",
+            _ => "x64" // Default fallback
+        };
+    }
+
+    /// <summary>
+    /// Finds the MSIX directory for Windows App SDK runtime packages
+    /// </summary>
+    /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages</param>
+    /// <returns>The path to the MSIX directory, or null if not found</returns>
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
+    {
+        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
+        return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
+    }
+
+    /// <summary>
+    /// Searches the NuGet global packages cache (lowercase id/version folder convention).
+    /// </summary>
+    private static DirectoryInfo? FindMsixDirectoryInNuGetCache(DirectoryInfo nugetCacheDir, Dictionary<string, string>? usedVersions)
+    {
+        if (usedVersions != null)
+        {
+            // Try runtime package first (Windows App SDK 1.8+)
+            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, out var runtimeVersion))
+            {
+                var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, runtimeVersion);
+                if (msixDir != null)
+                {
+                    return msixDir;
+                }
+            }
+
+            // Fallback to main package
+            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var mainVersion))
+            {
+                var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion);
+                if (msixDir != null)
+                {
+                    return msixDir;
+                }
+            }
+        }
+
+        // General scan: look for any runtime package directories
+        var runtimeDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE.ToLowerInvariant()));
+        if (runtimeDir.Exists)
+        {
+            foreach (var versionDir in runtimeDir.GetDirectories().OrderByDescending(d => d.Name, new VersionStringComparer()))
+            {
+                var msixDir = TryGetMsixDirectoryFromPath(versionDir);
+                if (msixDir != null)
+                {
+                    return msixDir;
+                }
+            }
+        }
+
+        // Fallback: main package
+        var mainDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_PACKAGE.ToLowerInvariant()));
+        if (mainDir.Exists)
+        {
+            foreach (var versionDir in mainDir.GetDirectories().OrderByDescending(d => d.Name, new VersionStringComparer()))
+            {
+                var msixDir = TryGetMsixDirectoryFromPath(versionDir);
+                if (msixDir != null)
+                {
+                    return msixDir;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks the NuGet cache for a specific package/version (lowercase ID/version layout).
+    /// </summary>
+    private static DirectoryInfo? TryGetMsixDirectoryFromNuGetCache(DirectoryInfo nugetCacheDir, string packageId, string version)
+    {
+        // NuGet global cache uses lowercase package IDs
+        var pkgVersionDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageId.ToLowerInvariant(), version));
+        return TryGetMsixDirectoryFromPath(pkgVersionDir);
+    }
+
+    /// <summary>
+    /// Helper method to check if an MSIX directory exists for a given package path
+    /// </summary>
+    /// <param name="packagePath">The full path to the package directory</param>
+    /// <returns>The MSIX directory path if it exists, null otherwise</returns>
+    private static DirectoryInfo? TryGetMsixDirectoryFromPath(DirectoryInfo packagePath)
+    {
+        var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
+        return msixDir.Exists ? msixDir : null;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> while showing a Spectre.Console spinner with <paramref name="message"/>.
+    /// In non-interactive contexts (redirected output, no Information logging), falls back to a single
+    /// log line so the user still sees what's happening (#463).
+    /// </summary>
+    private async Task<T> RunWithStatusAsync<T>(string message, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    {
+        if (Environment.UserInteractive
+            && !Console.IsOutputRedirected
+            && logger.IsEnabled(LogLevel.Information)
+            && ansiConsole.Profile.Capabilities.Interactive)
+        {
+            T result = default!;
+            await ansiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync(message, async _ =>
+                {
+                    result = await work(cancellationToken);
+                });
+            return result;
+        }
+
+        logger.LogInformation("{Message}", message);
+        return await work(cancellationToken);
+    }
+
+    /// <summary>
+    /// Comparer for sorting version strings, including prerelease support
+    /// </summary>
+    private class VersionStringComparer : IComparer<string>
+    {
+        public int Compare(string? x, string? y)
+        {
+            if (x == null && y == null)
+            {
+                return 0;
+            }
+            if (x == null)
+            {
+                return -1;
+            }
+            if (y == null)
+            {
+                return 1;
+            }
+
+            // Use the same comparison logic as NugetService.CompareVersions
+            return NugetService.CompareVersions(x, y);
+        }
     }
 }
