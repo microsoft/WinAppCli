@@ -88,7 +88,7 @@ internal class InitCommand : Command, IShortDescription
                 UseDefaults = useDefaults,
                 RequireExistingConfig = false,
                 ForceLatestBuildTools = true,
-                ConfigOnly = configOnly,
+                ConfigOnly = configOnly
             };
 
             return await workspaceSetupService.SetupWorkspaceAsync(options, cancellationToken);

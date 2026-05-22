@@ -65,6 +65,17 @@ internal partial class WorkspaceSetupService(
             return 1;
         }
 
+        // Restore on a non-.NET project with no winapp.yaml — nothing to restore.
+        // (.NET projects without yaml are already rejected on line 61 above.)
+        // No-op success rather than error: a project that doesn't declare SDK
+        // package versions in winapp.yaml simply has nothing for restore to do.
+        if (options.RequireExistingConfig && !configService.Exists())
+        {
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return 0;
+        }
+
         // Configuration / prompting phase
         bool hadExistingConfig;
         WinappConfig? config;

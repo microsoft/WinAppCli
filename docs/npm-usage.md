@@ -1005,6 +1005,7 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `exitOnError` | `boolean \| undefined` | No |  |
+| `cwd` | `string \| undefined` | No | Working directory for the spawned process (defaults to process.cwd()). |
 
 ### `CallWinappCliResult`
 

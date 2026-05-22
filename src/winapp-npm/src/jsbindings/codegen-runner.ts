@@ -22,7 +22,6 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { JsBindingsConfig } from './package-json-config';
-import { JsBindingsExtraType } from './additional-winmds';
 import { assertSafeWorkspaceOutputDir, isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
 // Marker written into the output dir after a successful run; its presence
@@ -31,12 +30,20 @@ export const MANAGED_MARKER_FILE_NAME = '.dynwinrt-managed';
 
 const CODEGEN_PACKAGE_NAME = '@microsoft/dynwinrt-codegen';
 
+/** One cherry-pick pass derived from `additionalWinmds[i]` with namespace+classes. */
+export interface CodegenCherryPick {
+  namespace: string;
+  classes: readonly string[];
+}
+
 export interface CodegenInputs {
   config: JsBindingsConfig;
-  /** Emit winmds (after winmd-policy filtering). */
+  /** Emit winmds (after winmd-policy filtering + bulk additionalWinmds entries). */
   emitWinmds: readonly string[];
   /** Ref-only winmds (load for type resolution, don't generate bindings). */
   refWinmds: readonly string[];
+  /** Cherry-pick passes — each runs codegen once with `--namespace` + `--class-name` filters. */
+  cherryPicks: readonly CodegenCherryPick[];
   workspaceDir: string;
   /** A logger sink for stdout/stderr lines from the codegen child. */
   log?: (line: string) => void;
@@ -82,15 +89,15 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
 
   await runWithStaging(outputDir, async (stagingDir) => {
     if (emit.length > 0) {
-      const args = buildBulkArgs(prefixArgs, emit, stagingDir, inputs.config, refs);
+      const args = buildBulkArgs(prefixArgs, emit, stagingDir, refs);
       const stdout = await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
       accumulateSummary(summary, parseSummary(stdout));
     }
-    for (const et of inputs.config.extraTypes) {
-      if (!et.namespace.trim() || et.classes.length === 0) {
+    for (const cp of inputs.cherryPicks) {
+      if (!cp.namespace.trim() || cp.classes.length === 0) {
         continue;
       }
-      const args = buildExtraTypeArgs(prefixArgs, emit, stagingDir, inputs.config, refs, et);
+      const args = buildExtraTypeArgs(prefixArgs, emit, stagingDir, refs, cp);
       const stdout = await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
       accumulateSummary(summary, parseSummary(stdout));
     }
@@ -242,7 +249,6 @@ export function buildBulkArgs(
   prefixArgs: readonly string[],
   emitWinmds: readonly string[],
   outputDir: string,
-  config: JsBindingsConfig,
   refWinmds: readonly string[]
 ): string[] {
   const args: string[] = [
@@ -253,13 +259,10 @@ export function buildBulkArgs(
     '--output',
     outputDir,
     '--lang',
-    config.lang,
+    'js',
   ];
   if (refWinmds.length > 0) {
     args.push('--ref', refWinmds.join(';'));
-  }
-  if (config.lang === 'py') {
-    args.push('--pyi');
   }
   return args;
 }
@@ -268,9 +271,8 @@ export function buildExtraTypeArgs(
   prefixArgs: readonly string[],
   emitWinmds: readonly string[],
   outputDir: string,
-  config: JsBindingsConfig,
   refWinmds: readonly string[],
-  extra: JsBindingsExtraType
+  extra: CodegenCherryPick
 ): string[] {
   const args: string[] = [...prefixArgs, 'generate'];
   if (emitWinmds.length > 0) {
@@ -284,7 +286,7 @@ export function buildExtraTypeArgs(
     '--output',
     outputDir,
     '--lang',
-    config.lang
+    'js'
   );
   if (refWinmds.length > 0) {
     args.push('--ref', refWinmds.join(';'));

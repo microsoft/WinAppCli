@@ -10,7 +10,5 @@ internal interface IConfigService
     FileInfo ConfigPath { get; set; }
     bool Exists();
     WinappConfig Load();
-
-    // Full save. Drops comments / unknown fields.
     void Save(WinappConfig cfg);
 }

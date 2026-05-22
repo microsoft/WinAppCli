@@ -16,41 +16,24 @@
 //     (init, restore, package, ...) is identical regardless of whether the
 //     user opted into JS bindings.
 
-import { JsBindingsExtraType } from './additional-winmds';
+import { AdditionalWinmd } from './additional-winmds';
 import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
 
 export interface JsBindingsConfig {
-  // Target language. Currently 'js' (default) or 'py'.
-  lang: string;
   // Output directory, relative to the workspace root.
   output: string;
-  // NuGet package IDs to scope binding generation to (empty = all in scope).
-  packages: string[];
-  // Individual classes to generate alongside the bulk pass.
-  extraTypes: JsBindingsExtraType[];
-  // Extra .winmd files to emit bindings for.
-  additionalWinmds: string[];
-  // Extra .winmd files loaded for type resolution only.
+  // Extra .winmd files to feed into the codegen. Each entry either bulk-emits
+  // the whole winmd or cherry-picks individual classes from it.
+  additionalWinmds: AdditionalWinmd[];
+  // Extra .winmd files loaded for type resolution only (no emit).
   additionalRefs: string[];
-  // NuGet package IDs to drop entirely.
-  skipPackages: string[];
-  // NuGet package IDs to load as --ref only.
-  refOnlyPackages: string[];
-  // NuGet package IDs to force-emit, overriding skip / ref-only.
-  emitPackages: string[];
 }
 
 export function defaultJsBindingsConfig(): JsBindingsConfig {
   return {
-    lang: 'js',
     output: 'bindings',
-    packages: [],
-    extraTypes: [],
     additionalWinmds: [],
     additionalRefs: [],
-    skipPackages: [],
-    refOnlyPackages: [],
-    emitPackages: [],
   };
 }
 
@@ -211,15 +194,9 @@ function coerceConfig(raw: unknown): JsBindingsConfig {
   const r = raw as Record<string, unknown>;
 
   return {
-    lang: typeof r.lang === 'string' && r.lang.trim() ? r.lang.trim() : defaults.lang,
     output: typeof r.output === 'string' && r.output.trim() ? r.output.trim() : defaults.output,
-    packages: coerceStringArray(r.packages),
-    extraTypes: coerceExtraTypes(r.extraTypes),
-    additionalWinmds: coerceStringArray(r.additionalWinmds),
+    additionalWinmds: coerceAdditionalWinmds(r.additionalWinmds),
     additionalRefs: coerceStringArray(r.additionalRefs),
-    skipPackages: coerceStringArray(r.skipPackages),
-    refOnlyPackages: coerceStringArray(r.refOnlyPackages),
-    emitPackages: coerceStringArray(r.emitPackages),
   };
 }
 
@@ -239,21 +216,28 @@ function coerceStringArray(value: unknown): string[] {
   return out;
 }
 
-function coerceExtraTypes(value: unknown): JsBindingsExtraType[] {
+function coerceAdditionalWinmds(value: unknown): AdditionalWinmd[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  const out: JsBindingsExtraType[] = [];
+  const out: AdditionalWinmd[] = [];
   for (const v of value) {
     if (!v || typeof v !== 'object') {
       continue;
     }
     const r = v as Record<string, unknown>;
+    const winmdPath = typeof r.winmdPath === 'string' ? r.winmdPath.trim() : '';
+    if (!winmdPath) {
+      continue;
+    }
     const ns = typeof r.namespace === 'string' ? r.namespace.trim() : '';
     const classes = coerceStringArray(r.classes);
-    if (ns) {
-      out.push({ namespace: ns, classes });
+    const entry: AdditionalWinmd = { winmdPath };
+    if (ns && classes.length > 0) {
+      entry.namespace = ns;
+      entry.classes = classes;
     }
+    out.push(entry);
   }
   return out;
 }
@@ -266,18 +250,16 @@ function coerceExtraTypes(value: unknown): JsBindingsExtraType[] {
  */
 function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   return {
-    lang: config.lang,
     output: config.output,
-    packages: [...config.packages],
-    extraTypes: config.extraTypes.map((et) => ({
-      namespace: et.namespace,
-      classes: [...et.classes],
-    })),
-    additionalWinmds: [...config.additionalWinmds],
+    additionalWinmds: config.additionalWinmds.map((w) => {
+      const entry: Record<string, unknown> = { winmdPath: w.winmdPath };
+      if (w.namespace && w.classes && w.classes.length > 0) {
+        entry.namespace = w.namespace;
+        entry.classes = [...w.classes];
+      }
+      return entry;
+    }),
     additionalRefs: [...config.additionalRefs],
-    skipPackages: [...config.skipPackages],
-    refOnlyPackages: [...config.refOnlyPackages],
-    emitPackages: [...config.emitPackages],
   };
 }
 

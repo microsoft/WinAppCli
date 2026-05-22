@@ -17,7 +17,7 @@
 // so the cli.ts caller can decide whether to print anything.
 
 import * as path from 'path';
-import { readJsBindingsConfig, JsBindingsConfig } from './package-json-config';
+import { readJsBindingsConfig } from './package-json-config';
 import { tryReadLockfile } from './lockfile-reader';
 import { partitionPackageWinmds } from './winmd-policy';
 import { resolveAdditionalWinmds } from './additional-winmds';
@@ -120,35 +120,47 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     }
   }
 
-  // 3. Resolve user-supplied additional winmds (each independently).
+  // 3. Resolve user-supplied additional winmds + refs (path safety + dedupe).
+  //    `additionalWinmds` entries can be bulk (winmdPath only) or cherry-pick
+  //    (winmdPath + namespace + classes); we split them after resolution.
   const userEmit = resolveAdditionalWinmds(config.additionalWinmds, workspaceDir, 'additionalWinmds');
-  const userRefs = resolveAdditionalWinmds(config.additionalRefs, workspaceDir, 'additionalRefs');
+  const userRefs = resolveAdditionalWinmds(
+    (config.additionalRefs ?? []).map((p) => ({ winmdPath: p })),
+    workspaceDir,
+    'additionalRefs'
+  );
   for (const w of [...userEmit.warnings, ...userRefs.warnings]) {
     log(w);
   }
 
-  // 4. Partition NuGet winmds by category, using the lockfile's per-package
-  //    grouping directly (no path-extraction guesswork). Per-package overrides
-  //    from config are layered on top of the built-in skip / ref-only lists.
-  const partition = partitionPackageWinmds(lockfile.packages, {
-    overrides: {
-      skip: config.skipPackages,
-      refOnly: config.refOnlyPackages,
-      emit: config.emitPackages,
-    },
-    emitScope: config.packages.length > 0 ? config.packages : undefined,
-  });
+  // Split resolved additionalWinmds into bulk emit vs cherry-pick passes.
+  // Cherry-pick entries are loaded as ref-only so codegen can resolve types;
+  // only the listed classes are emitted.
+  const bulkAdditional: string[] = [];
+  const cherryPicks: { namespace: string; classes: string[] }[] = [];
+  const cherryPickRefs: string[] = [];
+  for (const entry of userEmit.resolved) {
+    if (entry.namespace && entry.classes && entry.classes.length > 0) {
+      cherryPicks.push({ namespace: entry.namespace, classes: entry.classes });
+      cherryPickRefs.push(entry.winmdPath);
+    } else {
+      bulkAdditional.push(entry.winmdPath);
+    }
+  }
+
+  // 4. Partition NuGet winmds by built-in package category (no user overrides).
+  const partition = partitionPackageWinmds(lockfile.packages);
 
   // 5. Compose final emit + ref sets.
-  const emitWinmds = [...partition.emit, ...userEmit.resolved];
-  const refWinmds = [...partition.refOnly, ...userRefs.resolved];
+  const emitWinmds = [...partition.emit, ...bulkAdditional];
+  const refWinmds = [...partition.refOnly, ...userRefs.resolved.map((r) => r.winmdPath), ...cherryPickRefs];
 
-  if (emitWinmds.length === 0 && countValidExtraTypes(config) === 0) {
+  if (emitWinmds.length === 0 && cherryPicks.length === 0) {
     return {
       outcome: 'noWinmdsToEmit',
       message:
-        'No winmds matched the emit policy and no extraTypes are configured — nothing to generate. ' +
-        'Add packages: entries (or wider scope) or extraTypes: in package.json `winapp.jsBindings`.',
+        'No winmds matched the emit policy and no cherry-pick entries are configured — nothing to generate. ' +
+        'Install more NuGet packages in `winapp.yaml`, or add `additionalWinmds` in `package.json` `winapp.jsBindings`.',
     };
   }
 
@@ -175,6 +187,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
       config,
       emitWinmds,
       refWinmds,
+      cherryPicks,
       workspaceDir,
       log,
       verbose: options.verbose,
@@ -224,16 +237,6 @@ function formatCompletedMessage(
   if (summary.interfaces > 0) parts.push(`${summary.interfaces} interface${summary.interfaces === 1 ? '' : 's'}`);
   if (summary.enums > 0) parts.push(`${summary.enums} enum${summary.enums === 1 ? '' : 's'}`);
   return `Generated JS bindings → ${outputDir} (${parts.join(', ')})`;
-}
-
-function countValidExtraTypes(config: JsBindingsConfig): number {
-  let count = 0;
-  for (const et of config.extraTypes) {
-    if (et.namespace && et.namespace.trim() && et.classes && et.classes.length > 0) {
-      count++;
-    }
-  }
-  return count;
 }
 
 function safeGetVersionPin(log: (line: string) => void): string | null {

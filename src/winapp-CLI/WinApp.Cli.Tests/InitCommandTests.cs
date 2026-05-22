@@ -7,7 +7,9 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
-// Tests for the InitCommand including SDK installation mode handling
+/// <summary>
+/// Tests for the InitCommand including SDK installation mode handling
+/// </summary>
 [TestClass]
 public class InitCommandTests : BaseCommandTests
 {

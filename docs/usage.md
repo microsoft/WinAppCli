@@ -46,7 +46,7 @@ Add JS/TypeScript bindings to this project? [Y/n]:
 
 Picking **Yes** writes a default `"winapp.jsBindings"` namespace to `package.json` and runs `dynwinrt-codegen` to emit JS/TS wrappers. C++ projections (cppwinrt headers/libs/runtimes) are generated either way — there is no "JS only" mode; the JS bindings are an addition on top of the standard native workspace. Subsequent `winapp restore` calls re-run codegen against the pinned packages, or use `winapp node generate-bindings` for fast codegen-only re-runs after editing `winapp.jsBindings`.
 
-See the [JS bindings reference](js-bindings.md) for the full schema (`packages`, `skip`, `refOnly`, `extraTypes`, etc.) and the [Electron JS bindings guide](guides/electron/jsbindings.md) for the end-to-end workflow.
+See the [Electron JS bindings guide](guides/electron/js-bindings.md) for the full schema (`packages`, `skip`, `refOnly`, `extraTypes`, etc.) and the end-to-end workflow.
 
 **What it does:**
 
@@ -182,7 +182,7 @@ JS/TS bindings are configured by declaring a `"winapp": { "jsBindings": {...} }`
 
 JS/TS bindings are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The interactive bindings prompt during `init` only fires when invoked via the npm shim (`npx winapp …`); the standalone winget CLI does not surface it.
 
-> See [JS bindings docs](js-bindings.md) for the full `winapp.jsBindings` schema, per-package winmd categorization (skip / refOnly / emit overrides), and the `winmds.lock.json` audit artifact.
+> See [JS bindings guide](guides/electron/js-bindings.md) for the full `winapp.jsBindings` schema, per-package winmd categorization (skip / refOnly / emit overrides), and the `winmds.lock.json` audit artifact.
 
 ---
 

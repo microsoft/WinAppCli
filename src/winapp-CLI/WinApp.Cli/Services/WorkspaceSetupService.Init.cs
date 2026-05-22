@@ -37,19 +37,10 @@ internal partial class WorkspaceSetupService
         ManifestGenerationInfo? manifestGenerationInfo = null;
         WinappConfig? config = null;
 
-        // Step 1: Handle configuration requirements
-        if (options.RequireExistingConfig && !configService.Exists())
-        {
-            // Non-.NET project with no winapp.yaml — nothing to restore.
-            // (.NET projects without yaml are handled earlier in SetupWorkspaceAsync.)
-            // This is a no-op rather than an error: a project that doesn't declare
-            // SDK package versions in winapp.yaml has nothing for restore to do.
-            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
-            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
-            return (0, config, hadExistingConfig, shouldGenerateManifest, manifestGenerationInfo, shouldEnableDeveloperMode, recommendedTfm);
-        }
-
-        // Step 2: Load or prepare configuration
+        // Step 1: Load or prepare configuration
+        // (The "RequireExistingConfig && no config exists" no-op case is handled
+        // earlier in SetupWorkspaceAsync — by the time we reach this method,
+        // either RequireExistingConfig is false or the config exists.)
         if (hadExistingConfig)
         {
             config = configService.Load();

@@ -184,18 +184,20 @@ public class WorkspaceSetupServiceTests : BaseCommandTests
         // Act
         var exitCode = await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
-        // Restore on a non-.NET project without winapp.yaml is a no-op:
-        // nothing declared = nothing to restore. (.NET projects without yaml
-        // are rejected elsewhere.)
+        // Assert
+        // Restore on a non-.NET project with no winapp.yaml is a graceful no-op:
+        // a project that doesn't declare SDK package versions has nothing to restore.
+        // (.NET projects without yaml are still rejected — handled separately by the
+        // csproj-detection branch in SetupWorkspaceAsync.)
         Assert.AreEqual(0, exitCode, "Restore should be a no-op (exit 0) when no winapp.yaml exists on a non-.NET project");
     }
 }
 
-
 /// <summary>
-/// End-to-end tests for the merged .NET / native workspace setup. Verifies the
-/// unified WorkspaceSetupService handles both csproj and C++ projects through
-/// the shared flow, including Windows App SDK Runtime install on .NET.
+/// End-to-end tests for the merged .NET and native workspace setup code paths.
+/// These tests verify that the unified WorkspaceSetupService correctly handles
+/// both .NET (csproj) and native (C++) projects through the shared flow,
+/// including the key fix: Windows App SDK Runtime installation on the .NET path.
 /// </summary>
 [TestClass]
 public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
@@ -498,8 +500,11 @@ public class WorkspaceSetupServiceMergedPathTests : BaseCommandTests
         // (runtime install failure is non-blocking)
         Assert.AreEqual(0, exitCode, "Setup should complete despite runtime install not finding MSIX packages");
 
-        // Verify the runtime install step was reached. (Pre-merge, .NET
-        // projects never hit this code path.)
+        // Verify the runtime install was ATTEMPTED by checking output for the
+        // runtime install step. This is the key behavioral change from the merge:
+        // before, .NET projects never reached this code path.
+        // Note: Non-error log messages go to static AnsiConsole, error logs to ConsoleStdErr,
+        // and Spectre status display goes to TestAnsiConsole
         var ansiOutput = TestAnsiConsole.Output;
         var logOutput = ConsoleStdErr.ToString();
         var combinedOutput = ansiOutput + logOutput;

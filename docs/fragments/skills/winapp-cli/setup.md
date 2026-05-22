@@ -47,41 +47,14 @@ winapp init --use-defaults --setup-sdks none
 winapp init --use-defaults --setup-sdks preview
 ```
 
-### Add JS/TS bindings for Node / Electron apps (npm only)
-
-When invoked via the `@microsoft/winappcli` npm package (i.e. `npx winapp init`
-inside a Node / Electron project), `init` adds an interactive yes/no **bindings
-prompt** — `Add JS/TypeScript bindings to this project? [Y/n]:`. Answering Yes
-(the default) wires a default `"winapp": { "jsBindings": {} }` namespace into
-`package.json` (covering the full Windows App SDK) and runs codegen as part of
-init. C++ projections are always generated regardless of the answer.
-
-```powershell
-# Interactive — prompted with the yes/no question.
-npx winapp init
-
-# Non-interactive — auto-answers Yes (opts in to JS bindings).
-npx winapp init --use-defaults
-
-# After editing winapp.jsBindings in package.json by hand (or pulling a
-# teammate's package.json), regenerate bindings without re-prompting:
-# Fast path — reuses the cached lockfile, no NuGet / cppwinrt re-run.
-npx winapp node generate-bindings
-
-# Use the full restore instead if you also changed winapp.yaml (packages,
-# sdkVersion, ...) — it refreshes the lockfile before re-running codegen.
-npx winapp restore
-```
-
-Generated files land under `bindings/` and `@microsoft/dynwinrt` is
-added to your `package.json` dependencies so production installs include it.
-
 After `init`, your project will contain:
 - `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
 - `.gitignore` update — excludes `.winapp/` and `devcert.pfx`
+- `bindings/` — typed JS/TS WinRT projections (npm-only, Node / Electron)
+- `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
 ### Restore after cloning
 

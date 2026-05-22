@@ -15,17 +15,39 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
+/**
+ * One entry in `winapp.jsBindings.additionalWinmds` (in package.json).
+ *
+ *   * `winmdPath` alone → bulk-emit the entire winmd
+ *   * `winmdPath` + `namespace` + non-empty `classes` → cherry-pick: only
+ *     emit the listed classes from the namespace (the winmd is loaded as
+ *     ref-only so codegen can resolve its other types if needed).
+ */
+export interface AdditionalWinmd {
+  winmdPath: string;
+  namespace?: string;
+  classes?: string[];
+}
+
+/** An `AdditionalWinmd` whose `winmdPath` has been resolved + safety-checked. */
+export interface ResolvedAdditionalWinmd {
+  /** Absolute path to a real, on-disk, non-UNC, non-reparse winmd file. */
+  winmdPath: string;
+  namespace?: string;
+  classes?: string[];
+}
+
 export interface ResolveAdditionalWinmdsResult {
-  resolved: string[];
+  resolved: ResolvedAdditionalWinmd[];
   warnings: string[];
 }
 
 export function resolveAdditionalWinmds(
-  entries: readonly string[] | undefined,
+  entries: readonly AdditionalWinmd[] | undefined,
   workspaceDir: string,
   fieldName: string
 ): ResolveAdditionalWinmdsResult {
-  const resolved: string[] = [];
+  const resolved: ResolvedAdditionalWinmd[] = [];
   const warnings: string[] = [];
   if (!entries || entries.length === 0) {
     return { resolved, warnings };
@@ -35,36 +57,27 @@ export function resolveAdditionalWinmds(
   const workspaceFull = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
 
   for (const entry of entries) {
-    if (typeof entry !== 'string' || !entry.trim()) {
+    if (!entry || typeof entry.winmdPath !== 'string' || !entry.winmdPath.trim()) {
       continue;
     }
-    const trimmed = entry.trim();
+    const trimmed = entry.winmdPath.trim();
 
-    // Reject UNC entries up-front (before any FS probe).
     if (isNetworkPath(trimmed)) {
       warnings.push(
-        `jsBindings.${fieldName} entry refused — network/UNC paths are not allowed (would probe attacker-controlled host). Entry: ${entry}`
+        `jsBindings.${fieldName} entry refused — network/UNC paths are not allowed (would probe attacker-controlled host). Entry: ${trimmed}`
       );
       continue;
     }
 
     const fullPath = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(workspaceFull, trimmed);
 
-    // Re-check after resolve: a relative path under a UNC workspace
-    // resolves to a UNC.
     if (isNetworkPath(fullPath)) {
       warnings.push(
-        `jsBindings.${fieldName} entry resolved to UNC path; refusing to probe. Entry: ${entry} → ${fullPath}`
+        `jsBindings.${fieldName} entry resolved to UNC path; refusing to probe. Entry: ${trimmed} → ${fullPath}`
       );
       continue;
     }
 
-    // Reparse-point guard.
-    //   * Relative paths and absolute paths under the workspace → boundary = workspace.
-    //   * Absolute paths outside the workspace → boundary = drive root.
-    //   The user explicitly opted in to an out-of-workspace path (docs
-    //   support absolute paths); we still walk every segment for reparse
-    //   points, but don't force workspace containment.
     const sameAsWorkspace = fullPath.toLowerCase() === workspaceFull.toLowerCase();
     const underWorkspace =
       sameAsWorkspace || fullPath.toLowerCase().startsWith((workspaceFull + path.sep).toLowerCase());
@@ -72,7 +85,7 @@ export function resolveAdditionalWinmds(
 
     if (hasReparsePointOnPath(fullPath, reparseBoundary)) {
       warnings.push(
-        `jsBindings.${fieldName} entry refused — file or one of its ancestors up to ${reparseBoundary} is a reparse point. Entry: ${entry} → ${fullPath}`
+        `jsBindings.${fieldName} entry refused — file or one of its ancestors up to ${reparseBoundary} is a reparse point. Entry: ${trimmed} → ${fullPath}`
       );
       continue;
     }
@@ -84,39 +97,29 @@ export function resolveAdditionalWinmds(
     seen.add(dedupeKey);
 
     if (!fs.existsSync(fullPath)) {
-      warnings.push(`jsBindings.${fieldName} entry not found, skipping: ${entry} (resolved to ${fullPath})`);
+      warnings.push(`jsBindings.${fieldName} entry not found, skipping: ${trimmed} (resolved to ${fullPath})`);
       continue;
     }
 
-    resolved.push(fullPath);
+    const ns = typeof entry.namespace === 'string' ? entry.namespace.trim() : '';
+    const classes = Array.isArray(entry.classes)
+      ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
+      : [];
+
+    const out: ResolvedAdditionalWinmd = { winmdPath: fullPath };
+    if (ns && classes.length > 0) {
+      out.namespace = ns;
+      out.classes = classes;
+    }
+    resolved.push(out);
   }
 
   return { resolved, warnings };
 }
 
-// Codegen extraTypes are silently skipped when malformed; count the valid
-// entries for orchestration decisions (empty-emit + no valid extra types =
-// nothing to do).
-export function countValidExtraTypes(extraTypes: readonly JsBindingsExtraType[] | undefined): number {
-  if (!extraTypes) {
-    return 0;
-  }
-  let count = 0;
-  for (const et of extraTypes) {
-    if (et && et.namespace && et.namespace.trim() && et.classes && et.classes.length > 0) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Shape of one `extraTypes` entry in the JS bindings configuration block.
-// The canonical schema lives in package-json-config.ts (the
-// `"winapp.jsBindings"` namespace inside package.json); the type lives here
-// to break a circular import between package-json-config.ts and
-// additional-winmds.ts (the latter is used by codegen-runner.ts to expand
-// `additionalWinmds` paths).
-export interface JsBindingsExtraType {
-  namespace: string;
-  classes: string[];
+/** True when the resolved entry is a cherry-pick (has both namespace + classes). */
+export function isCherryPick(
+  entry: ResolvedAdditionalWinmd
+): entry is ResolvedAdditionalWinmd & { namespace: string; classes: string[] } {
+  return typeof entry.namespace === 'string' && Array.isArray(entry.classes) && entry.classes.length > 0;
 }

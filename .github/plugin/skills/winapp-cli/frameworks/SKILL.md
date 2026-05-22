@@ -30,37 +30,35 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- An interactive yes/no bindings prompt during `npx winapp init` — `Add JS/TypeScript bindings to this project? [Y/n]:` — that opts your project into typed JS/TypeScript WinRT wrappers via dynwinrt (no native build required)
+- Typed JS/TypeScript WinRT bindings via dynwinrt (no native build required), opt-in during `npx winapp init` or via `npx winapp node generate-bindings`
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults                    # init + generate full Windows App SDK JS bindings AND C++ projections (default: Both)
-# (interactive: omit --use-defaults to pick C++ / JS / Both at the prompt)
+npx winapp init --use-defaults                    # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
+npx winapp node generate-bindings                 # existing project: add (or re-run) JS bindings only
 npx winapp node create-addon --template cs        # create a C# native addon (for what dynwinrt can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
 
-JS/TS bindings (the `"winapp": { "jsBindings": {...} }` namespace in `package.json`) are **npm-only** — they require invocation via the `@microsoft/winappcli` npm package because they pull in `@microsoft/dynwinrt-codegen` as a transitive dep. The bindings prompt does not appear when running the standalone winget CLI.
-
 #### Choosing between jsBindings and a native addon
 
-The decision is almost entirely about the **shape of the API**, not preference.
+The decision is about the **shape of the API**, not preference.
 
-**Default: if the API is WinRT (ships in a `.winmd`), pick JS bindings at the `npx winapp init` prompt.** That covers nearly everything an Electron app actually calls on Windows — `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, Storage, AI inference like `TextRecognizer` / `LanguageModel`), most of `Windows.*`, and all of `Microsoft.WindowsAppSDK.AI`. dynwinrt's [own scope statement](https://github.com/microsoft/dynwinrt#scope) sums it up as "non-UI WinRT APIs ... headless services from the Windows SDK and WinAppSDK".
+**Default — WinRT API (ships in a `.winmd`) → JS bindings.** Covers most of `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, AI like `TextRecognizer` / `LanguageModel`), `Windows.*`, and `Microsoft.WindowsAppSDK.AI`. See [dynwinrt scope](https://github.com/microsoft/dynwinrt#scope).
 
-**Fall back to `node create-addon` when one of these is true:**
+**Fall back to `node create-addon` when there's no `.winmd`:**
 
-| Scenario | Template | Why dynwinrt can't help |
-|---|---|---|
-| The API is **Win32 / pure COM with no WinRT projection** (P/Invoke-style APIs, raw `IFileDialog`, registry, custom COM servers). | `--template cpp` | No `.winmd` exists, so there's nothing for the codegen to project. |
-| You're integrating a **C++ library that ships only headers + a static/shared lib** (no `.winmd`). | `--template cpp` | Same — dynwinrt requires WinRT metadata. |
-| You're integrating a **vendor SDK that only ships a managed .NET assembly** (no `.winmd`). | `--template cs` (uses [node-api-dotnet](https://github.com/microsoft/node-api-dotnet) under the hood). | Same — no WinRT projection to consume. |
+| Scenario | Template |
+|---|---|
+| Win32 / pure COM (P/Invoke, raw `IFileDialog`, registry, custom COM servers) | `--template cpp` |
+| C++ library (headers + static/shared lib only) | `--template cpp` |
+| Managed .NET assembly only (vendor SDK) | `--template cs` ([node-api-dotnet](https://github.com/microsoft/node-api-dotnet)) |
 
-It's normal to mix both in one app: jsBindings for the non-UI WinRT surface, a small C# or C++ addon for the one or two Win32 / non-WinRT calls that don't fit.
+Mixing both in one app is normal.
 
 Additional Electron guides:
-- [JS bindings reference](https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md) — full `winapp.jsBindings` JSON schema, per-package classification, lockfile
+- [JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-bindings.md) — full `winapp.jsBindings` JSON schema, per-package classification, lockfile
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

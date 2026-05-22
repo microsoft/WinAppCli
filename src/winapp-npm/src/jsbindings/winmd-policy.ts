@@ -19,40 +19,29 @@ const DEFAULT_REF_ONLY_PACKAGES = new Set<string>(
   ['Microsoft.WindowsAppSDK.InteractiveExperiences'].map((p) => p.toLowerCase())
 );
 
-const DEFAULT_SKIPPED_PACKAGES = new Set<string>(['Microsoft.WindowsAppSDK.WinUI'].map((p) => p.toLowerCase()));
-
-export interface PackageCategoryOverrides {
-  skip?: string[];
-  refOnly?: string[];
-  emit?: string[];
-}
-
-function lowercaseSet(values: readonly string[] | undefined): Set<string> | undefined {
-  if (!values || values.length === 0) {
-    return undefined;
-  }
-  return new Set(values.map((v) => v.toLowerCase()));
-}
+// Packages whose .winmd files are dropped entirely from the codegen input.
+// These are pulled in transitively by Microsoft.WindowsAppSDK but expose UI /
+// HWND / Composition surfaces that dynwinrt can't usefully drive from a
+// headless Node process:
+//   - Microsoft.WindowsAppSDK.WinUI : XAML composables (Button, Page, ...)
+//   - Microsoft.Web.WebView2        : HWND / Composition-hosted browser
+// Users who need a denylisted package back can list it under
+// `winapp.jsBindings.emitPackages`.
+const DEFAULT_SKIPPED_PACKAGES = new Set<string>(
+  ['Microsoft.WindowsAppSDK.WinUI', 'Microsoft.Web.WebView2'].map((p) => p.toLowerCase())
+);
 
 // Categorize a single package ID. Precedence:
-//   force-emit > skip > refOnly > emit (default)
-export function classifyPackage(packageId: string, overrides?: PackageCategoryOverrides): WinmdPackageCategory {
+//   skip > refOnly > emit (default)
+export function classifyPackage(packageId: string): WinmdPackageCategory {
   if (!packageId || !packageId.trim()) {
     return 'emit';
   }
   const id = packageId.toLowerCase();
-  const skip = lowercaseSet(overrides?.skip);
-  const refOnly = lowercaseSet(overrides?.refOnly);
-  const forceEmit = lowercaseSet(overrides?.emit);
-
-  // Force-emit always wins — lets users opt back in to a denylisted package.
-  if (forceEmit?.has(id)) {
-    return 'emit';
-  }
-  if (DEFAULT_SKIPPED_PACKAGES.has(id) || skip?.has(id)) {
+  if (DEFAULT_SKIPPED_PACKAGES.has(id)) {
     return 'skip';
   }
-  if (DEFAULT_REF_ONLY_PACKAGES.has(id) || refOnly?.has(id)) {
+  if (DEFAULT_REF_ONLY_PACKAGES.has(id)) {
     return 'refOnly';
   }
   return 'emit';
@@ -109,23 +98,10 @@ export interface PackageWinmds {
  * package name directly (no path extraction needed — the lockfile already
  * groups winmds by package on the writer side).
  *
- * `emitScope` (when provided) demotes out-of-scope emit packages to refOnly
- * so codegen still sees their metadata for cross-package type resolution.
- * Skip/refOnly classifications take precedence over scope.
- *
  * Prefer this overload over `partitionByPackageCategory(string[], …)` when
  * the source data is the lockfile — see orchestrator.ts.
  */
-export function partitionPackageWinmds(
-  packages: readonly PackageWinmds[],
-  options?: {
-    overrides?: PackageCategoryOverrides;
-    emitScope?: readonly string[];
-  }
-): WinmdPartition {
-  const overrides = options?.overrides;
-  const scope = lowercaseSet(options?.emitScope);
-
+export function partitionPackageWinmds(packages: readonly PackageWinmds[]): WinmdPartition {
   const emit: string[] = [];
   const refOnly: string[] = [];
   const skipped: string[] = [];
@@ -134,10 +110,7 @@ export function partitionPackageWinmds(
     if (!pkg || !pkg.name || !pkg.winmds || pkg.winmds.length === 0) {
       continue;
     }
-    let cat: WinmdPackageCategory = classifyPackage(pkg.name, overrides);
-    if (scope && cat === 'emit' && !scope.has(pkg.name.toLowerCase())) {
-      cat = 'refOnly';
-    }
+    const cat: WinmdPackageCategory = classifyPackage(pkg.name);
     const bucket = cat === 'skip' ? skipped : cat === 'refOnly' ? refOnly : emit;
     for (const w of pkg.winmds) {
       bucket.push(w);
@@ -149,23 +122,15 @@ export function partitionPackageWinmds(
 
 // Partition a flat list of winmd paths by category. Falls back to
 // `extractPackageIdFromPath` for each entry — needed for loose user-supplied
-// `additionalWinmds` / `additionalRefs` that don't carry their package
-// identity. For lockfile-sourced winmds, use `partitionPackageWinmds` instead.
-//
-// `emitScope` (when provided) demotes out-of-scope emit packages to refOnly
-// so codegen still sees their metadata for cross-package type resolution.
-// Skip/refOnly classifications take precedence over scope.
+// winmds that don't carry their package identity. For lockfile-sourced
+// winmds, use `partitionPackageWinmds` instead.
 export function partitionByPackageCategory(
   winmds: readonly string[],
   options?: {
-    overrides?: PackageCategoryOverrides;
     nugetCacheRoot?: string;
-    emitScope?: readonly string[];
   }
 ): WinmdPartition {
-  const overrides = options?.overrides;
   const nugetCacheRoot = options?.nugetCacheRoot;
-  const scope = lowercaseSet(options?.emitScope);
 
   const emit: string[] = [];
   const refOnly: string[] = [];
@@ -173,11 +138,7 @@ export function partitionByPackageCategory(
 
   for (const w of winmds) {
     const pkg = extractPackageIdFromPath(w, nugetCacheRoot);
-    let cat: WinmdPackageCategory = pkg === null ? 'emit' : classifyPackage(pkg, overrides);
-
-    if (scope && cat === 'emit' && pkg !== null && !scope.has(pkg.toLowerCase())) {
-      cat = 'refOnly';
-    }
+    const cat: WinmdPackageCategory = pkg === null ? 'emit' : classifyPackage(pkg);
 
     if (cat === 'skip') {
       skipped.push(w);
