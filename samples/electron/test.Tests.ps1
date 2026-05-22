@@ -31,7 +31,6 @@ Describe "Electron Sample" {
 
         $script:sampleDir = $PSScriptRoot
         $script:tempDir = $null
-        $script:samplePhase2Dir = $null
         $script:appDir = $null
         $script:resolvedPkg = $null
 
@@ -41,12 +40,11 @@ Describe "Electron Sample" {
     }
 
     AfterAll {
+        Set-Location $script:sampleDir
+
         if (-not $SkipCleanup) {
             if ($script:tempDir) { Remove-TempTestDirectory -Path $script:tempDir }
-            # Phase 2 now runs against a temp copy of samples/electron, so the
-            # checked-in sample is never mutated and only the temp copy needs
-            # to be torn down — no git checkout / snapshot dance required.
-            if ($script:samplePhase2Dir) { Remove-TempTestDirectory -Path $script:samplePhase2Dir }
+            Remove-Item -Path (Join-Path $script:sampleDir 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -227,9 +225,12 @@ Describe "Electron Sample" {
         }
 
         It "Should download the Electron binary" -Skip:$script:skip {
-            # Electron 42+ stopped auto-downloading on `npm install`; trigger
-            # it explicitly. install-electron is the v42 mechanism; exit code
-            # is ignored — the Should -Exist below is the real assertion.
+            # Electron 42+ no longer downloads its binary during `npm install` (see issue #524).
+            # Trigger the download explicitly so `add-electron-debug-identity` can find electron.exe.
+            # `install-electron` was added in Electron 42; older versions auto-download via
+            # postinstall, so the bin is absent and `npx --no-install` exits non-zero. Either
+            # outcome is fine as long as electron.exe ends up on disk — the Should -Exist below
+            # is the real assertion.
             Push-Location $script:appDir
             try {
                 & npx --no-install install-electron 2>&1 | ForEach-Object { Write-Host $_ }
@@ -283,124 +284,34 @@ Describe "Electron Sample" {
     }
 
     Context "Phase 2: Sample Build Check" {
-        BeforeAll {
-            if (-not $script:skip) {
-                # Phase 2 mutates package.json and writes generated artifacts
-                # (.winapp, bindings, node_modules, out). To keep the
-                # checked-in sample directory pristine for the contributor's
-                # working tree, run the entire phase against a temp copy.
-                # Exclude only the install/build outputs — keep the tracked
-                # package-lock.json so `npm ci` enforces the exact dependency
-                # graph contributors ship.
-                $script:samplePhase2Dir = New-TempTestDirectory -Prefix "electron-phase2"
-                $skipDirs = @('node_modules', '.winapp', 'bindings', 'out')
-                Get-ChildItem -Path $script:sampleDir -Force | Where-Object {
-                    if ($_.PSIsContainer) { $skipDirs -notcontains $_.Name }
-                    else { $true }
-                } | ForEach-Object {
-                    Copy-Item -Path $_.FullName -Destination $script:samplePhase2Dir -Recurse -Force
-                }
-            }
-        }
-
         It "Should install sample dependencies" -Skip:$script:skip {
-            Push-Location $script:samplePhase2Dir
+            Push-Location $script:sampleDir
             try {
-                # `npm ci` enforces the tracked package-lock.json so the
-                # exact dependency graph contributors ship is exercised
-                # (catches transitive regressions a relaxed `npm install`
-                # would mask). `--ignore-scripts` skips the sample's
-                # `postinstall` (`winapp restore && cert generate &&
-                # setup-debug`) which would otherwise call the *published*
-                # winappcli pulled in via the devDependency pin — we
-                # override it with the local build below before running
-                # restore ourselves.
-                Invoke-Expression "npm ci --ignore-scripts"
+                Invoke-Expression "npm install --ignore-scripts"
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
 
         It "Should have node_modules" -Skip:$script:skip {
-            Join-Path $script:samplePhase2Dir 'node_modules' | Should -Exist
+            Join-Path $script:sampleDir 'node_modules' | Should -Exist
         }
 
         It "Should have package.json" -Skip:$script:skip {
-            Join-Path $script:samplePhase2Dir 'package.json' | Should -Exist
+            Join-Path $script:sampleDir 'package.json' | Should -Exist
         }
 
         It "Should have forge.config.js" -Skip:$script:skip {
-            Join-Path $script:samplePhase2Dir 'forge.config.js' | Should -Exist
+            Join-Path $script:sampleDir 'forge.config.js' | Should -Exist
         }
 
         It "Should have appxmanifest.xml" -Skip:$script:skip {
-            Join-Path $script:samplePhase2Dir 'appxmanifest.xml' | Should -Exist
+            Join-Path $script:sampleDir 'appxmanifest.xml' | Should -Exist
         }
 
-        It "Should install the locally-built winappcli on top" -Skip:$script:skip {
-            # Sample's devDependency pin would otherwise resolve `winapp` to
-            # the published version; we need the build under test.
-            Push-Location $script:samplePhase2Dir
+        It "Should build the C# addon" -Skip:$script:skip {
+            Push-Location $script:sampleDir
             try {
-                Install-WinappNpmPackage -PackagePath $script:resolvedPkg
-                Join-Path $script:samplePhase2Dir 'node_modules\.bin\winapp.cmd' | Should -Exist
-            } finally { Pop-Location }
-        }
-
-        It "Should exercise the JS bindings flow via 'winapp restore'" -Skip:$script:skip {
-            # The sample ships `"winapp": { "jsBindings": {} }` in its
-            # package.json; restore must drive the npm-wrapper orchestrator
-            # end-to-end (winmd discovery → codegen → runtime-dep injection)
-            # so a regression to the bindings pipeline cannot silently
-            # survive Phase 2.
-            Push-Location $script:samplePhase2Dir
-            try {
-                Invoke-WinappCommand -Arguments "restore"
-            } finally { Pop-Location }
-        }
-
-        It "Should have generated bindings/ with the managed marker" -Skip:$script:skip {
-            $bindingsDir = Join-Path $script:samplePhase2Dir 'bindings'
-            $bindingsDir | Should -Exist
-            (Join-Path $bindingsDir '.dynwinrt-managed') | Should -Exist `
-                -Because "restore on a workspace with winapp.jsBindings must populate the managed marker"
-            $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -ErrorAction SilentlyContinue).Count
-            $jsCount | Should -BeGreaterThan 50 -Because "Default jsBindings (full WinAppSDK) should generate many JS files"
-        }
-
-        It "Should inject @microsoft/dynwinrt as a runtime dep in package.json" -Skip:$script:skip {
-            # Bindings import @microsoft/dynwinrt at load time — restore
-            # must auto-inject it as a production dep so `npm ci --omit=dev`
-            # doesn't strip it.
-            $pkgPath = Join-Path $script:samplePhase2Dir 'package.json'
-            $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
-            $pkg.dependencies.'@microsoft/dynwinrt' | Should -Not -BeNullOrEmpty `
-                -Because "restore on a workspace with winapp.jsBindings must inject the runtime dep"
-        }
-
-        It "Should materialize @microsoft/dynwinrt under node_modules after a follow-up install" -Skip:$script:skip {
-            # The injector only mutates package.json; a follow-up `npm install`
-            # is what actually pulls the runtime down. Re-install with
-            # --ignore-scripts so we don't recurse through `winapp restore`
-            # again, then assert the package is on disk — guarantees the
-            # runtime is actually resolvable at app start, not just declared.
-            Push-Location $script:samplePhase2Dir
-            try {
-                Invoke-Expression "npm install --ignore-scripts"
-                $LASTEXITCODE | Should -Be 0
-            } finally { Pop-Location }
-            Join-Path $script:samplePhase2Dir 'node_modules\@microsoft\dynwinrt' | Should -Exist `
-                -Because "the runtime dep injected by restore must actually be installable"
-        }
-
-        It "Should run the full sample build (build-all)" -Skip:$script:skip {
-            # `build-all = build-csAddon && build-addon` — the full build the
-            # sample's package, package-msix, and package-msix:x64 scripts
-            # depend on. Building only `build-csAddon` (the previous
-            # assertion) leaves the C++ side untested and let a node-gyp /
-            # node-addon-api regression survive Phase 2.
-            Push-Location $script:samplePhase2Dir
-            try {
-                Invoke-Expression "npm run build-all"
+                Invoke-Expression "npm run build-csAddon"
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }

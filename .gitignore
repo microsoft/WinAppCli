@@ -1,9 +1,6 @@
 # Test working directory
 test-wd/
 
-# Local Claude / Copilot CLI agent permissions (per-machine, never committed)
-.claude/
-
 # Logs
 logs
 *.log
