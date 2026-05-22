@@ -8,15 +8,11 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class ManifestHelper
 {
-    private static readonly string[] ManifestNames = ["Package.appxmanifest", "AppxManifest.xml", "appxmanifest.xml"];
+    private static readonly string[] ManifestNames = ["Package.appxmanifest", "appxmanifest.xml"];
 
     /// <summary>
     /// Finds an appxmanifest file in the specified directory.
-    /// Checks for <c>Package.appxmanifest</c> first, then <c>AppxManifest.xml</c>,
-    /// then <c>appxmanifest.xml</c>. The two .xml spellings are equivalent on
-    /// case-insensitive filesystems (NTFS) but differ on case-sensitive ones
-    /// (POSIX-style); both spellings are listed in our NuGet targets, so this
-    /// helper accepts both as well.
+    /// Checks for <c>Package.appxmanifest</c> first, then <c>appxmanifest.xml</c>.
     /// </summary>
     /// <returns>A <see cref="FileInfo"/> for the manifest. Check <see cref="FileInfo.Exists"/> before using.</returns>
     public static FileInfo FindManifest(string directory)

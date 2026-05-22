@@ -687,15 +687,9 @@ public class MsixServiceTests
         // Act
         var result = MsixService.FindManifestInDirectory(_tempDir);
 
-        // Assert: FindManifestInDirectory delegates to ManifestHelper which
-        // probes Package.appxmanifest → AppxManifest.xml → appxmanifest.xml.
-        // On NTFS (case-insensitive) the AppxManifest.xml probe matches the
-        // on-disk "appxmanifest.xml" file, so the returned Name reflects
-        // whichever spelling our precedence list probed first — compare
-        // case-insensitively. The contract is "a .xml manifest was found".
+        // Assert
         Assert.IsNotNull(result);
-        Assert.IsTrue(string.Equals("appxmanifest.xml", result.Name, StringComparison.OrdinalIgnoreCase),
-            $"Expected an appxmanifest.xml-family name, got '{result.Name}'");
+        Assert.AreEqual("appxmanifest.xml", result.Name);
     }
 
     [TestMethod]
@@ -725,29 +719,6 @@ public class MsixServiceTests
         // Assert
         Assert.IsNotNull(result);
         Assert.AreEqual("Package.appxmanifest", result.Name);
-    }
-
-    [TestMethod]
-    public void FindManifestInDirectory_FindsAppxManifestXml_PascalCase()
-    {
-        // The NuGet targets' GetWinAppRunSupportInfo target probes
-        // AppxManifest.xml (Pascal-case) as one of the standard names —
-        // and ManifestHelper.GetWellKnownManifestFileNames lists it too.
-        // FindManifestInDirectory must accept the same spelling so
-        // `winapp run` / `create-debug-identity` find the same file the
-        // build outputs.
-        //
-        // On NTFS (case-insensitive) the actual returned Name may reflect
-        // whichever spelling our internal precedence list probed first,
-        // so we compare case-insensitively — the contract here is "the
-        // file was found", not "Name preserves the exact on-disk case".
-        File.WriteAllText(Path.Combine(_tempDir.FullName, "AppxManifest.xml"), "<Package/>");
-
-        var result = MsixService.FindManifestInDirectory(_tempDir);
-
-        Assert.IsNotNull(result);
-        Assert.IsTrue(string.Equals("AppxManifest.xml", result.Name, StringComparison.OrdinalIgnoreCase),
-            $"Expected an appxmanifest.xml-family name, got '{result.Name}'");
     }
 
     [TestMethod]

@@ -6,9 +6,9 @@ using System.IO;
 namespace WinApp.Cli.Helpers;
 
 // Shared filesystem-safety helpers. Centralizing the reparse-point /
-// containment check keeps callers (ConfigService, WinmdsLockfileService)
-// consistent — every "write into the user's workspace" site needs the
-// same guard, and we don't want one to drift behind the others.
+// containment check keeps every "write into the user's workspace" site
+// (e.g. WinmdsLockfileService) consistent — we don't want one to drift
+// behind the others.
 internal static class PathSafety
 {
     // True if `path` is not safely contained under `boundary`, or if any
@@ -199,47 +199,8 @@ internal static class PathSafety
     // Write `contents` to `path` atomically: stage to a sibling temp file
     // (same volume so the move stays atomic), flush to disk, then rename
     // over the destination. Prevents a crash / power loss mid-write from
-    // leaving the file truncated or empty.
-    public static void AtomicWriteAllText(string path, string contents, System.Text.Encoding encoding)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (string.IsNullOrEmpty(dir))
-        {
-            dir = Directory.GetCurrentDirectory();
-        }
-        var tmp = Path.Combine(dir, Path.GetFileName(path) + ".tmp-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            using (var sw = new StreamWriter(fs, encoding))
-            {
-                sw.Write(contents);
-                sw.Flush();
-                fs.Flush(flushToDisk: true);
-            }
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch
-        {
-            try
-            {
-                if (File.Exists(tmp))
-                {
-                    File.Delete(tmp);
-                }
-            }
-            catch
-            {
-                // Best-effort cleanup; surface original error.
-            }
-            throw;
-        }
-    }
-
-    // Async variant of <see cref="AtomicWriteAllText"/>. Same staging /
-    // flush-to-disk / rename semantics, but the write itself is async so
-    // callers in the workspace setup pipeline don't block on disk IO.
-    // Supports cancellation while staging (cleanup still runs).
+    // leaving the file truncated or empty. Supports cancellation while
+    // staging (cleanup still runs).
     public static async Task AtomicWriteAllTextAsync(
         string path,
         string contents,

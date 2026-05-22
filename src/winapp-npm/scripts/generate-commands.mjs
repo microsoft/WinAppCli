@@ -73,18 +73,10 @@ function kebabToPascal(s) {
   return cc.charAt(0).toUpperCase() + cc.slice(1);
 }
 
-// Clean up CLI description for JSDoc: single line, escape `*/` (closes the
-// JSDoc) and `@` (truncates description in TS doc extractors). Escape `\`
-// first so the escape sequences we introduce below aren't double-processed.
+/** Clean up CLI description for JSDoc (single line, no trailing period). */
 function cleanDesc(desc) {
   if (!desc) return '';
-  return desc
-    .replace(/\r?\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\\/g, '\\\\')
-    .replace(/\*\//g, '*\\/')
-    .replace(/@/g, '\\@');
+  return desc.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
@@ -256,7 +248,7 @@ function generate(schema) {
   for (const { path: cmdPath, cmd } of commands) {
     const cmdPathStr = cmdPath.join(' ');
     const fnName = getFunctionName(cmdPath);
-    const ifaceName = getInterfaceName(cmdPath);
+    const ifaceName = kebabToPascal(cmdPath.join('-')) + 'Options';
 
     // Check for passthrough command
     const passthrough = PASSTHROUGH_COMMANDS[cmdPath.join(' ')] || null;
@@ -365,8 +357,6 @@ const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
 };
 
-const IFACE_NAME_OVERRIDES = {};
-
 function getFunctionName(cmdPath) {
   const key = cmdPath.join(' ');
   if (FN_NAME_OVERRIDES[key]) return FN_NAME_OVERRIDES[key];
@@ -374,12 +364,6 @@ function getFunctionName(cmdPath) {
   // e.g. ['cert', 'generate'] → 'certGenerate'
   const name = cmdPath.map((p, i) => (i === 0 ? kebabToCamel(p) : kebabToPascal(p))).join('');
   return TS_RESERVED.has(name) ? name + 'Command' : name;
-}
-
-function getInterfaceName(cmdPath) {
-  const key = cmdPath.join(' ');
-  if (IFACE_NAME_OVERRIDES[key]) return IFACE_NAME_OVERRIDES[key];
-  return kebabToPascal(cmdPath.join('-')) + 'Options';
 }
 
 // ---------------------------------------------------------------------------

@@ -69,23 +69,9 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Join lines into a single string with LF endings + one trailing newline.
+# Join array lines into single string with LF line endings (CLI outputs pretty-printed JSON)
+# Ensure exactly one trailing newline for consistency
 $SchemaJson = ($SchemaJsonLines -join "`n").TrimEnd() + "`n"
-
-# Override schema version with version.json (CLI binary may have the
-# AssemblyInformationalVersion default "1.0.0"). validate-llm-docs.ps1
-# does the same substitution at compare time.
-$VersionJsonPath = Join-Path (Split-Path $PSScriptRoot) "version.json"
-if (Test-Path $VersionJsonPath) {
-    $BaseVersion = (Get-Content $VersionJsonPath | ConvertFrom-Json).version
-    $SchemaObj = $SchemaJson | ConvertFrom-Json
-    if ($SchemaObj.version -ne $BaseVersion) {
-        Write-Host "[DOCS] Overriding schema version '$($SchemaObj.version)' (from CLI binary) with '$BaseVersion' (from version.json)" -ForegroundColor Yellow
-        $SchemaObj.version = $BaseVersion
-        $SchemaJson = ($SchemaObj | ConvertTo-Json -Depth 100) -replace "`r`n", "`n"
-        if (-not $SchemaJson.EndsWith("`n")) { $SchemaJson += "`n" }
-    }
-}
 
 # Save schema JSON with consistent LF line endings
 [System.IO.File]::WriteAllText($SchemaOutputPath, $SchemaJson, [System.Text.UTF8Encoding]::new($false))
@@ -121,25 +107,15 @@ $SkillCommandMap = @{
 
 # Validate that all CLI commands are covered by at least one skill
 $allMappedCommands = $SkillCommandMap.Values | ForEach-Object { $_ } | Where-Object { $_ }
-
-# Recursively enumerate all leaf command paths in the schema.
-function Get-AllLeafPaths {
-    param([PSObject]$Node, [string]$Prefix)
-
-    $paths = @()
-    if (-not $Node.subcommands) {
-        return @($Prefix)
-    }
-    foreach ($sub in $Node.subcommands.PSObject.Properties) {
-        $childPath = if ($Prefix) { "$Prefix $($sub.Name)" } else { $sub.Name }
-        $paths += Get-AllLeafPaths -Node $sub.Value -Prefix $childPath
-    }
-    return $paths
-}
-
 $allSchemaCommands = @()
 foreach ($cmd in $Schema.subcommands.PSObject.Properties) {
-    $allSchemaCommands += Get-AllLeafPaths -Node $cmd.Value -Prefix $cmd.Name
+    if ($cmd.Value.subcommands) {
+        foreach ($sub in $cmd.Value.subcommands.PSObject.Properties) {
+            $allSchemaCommands += "$($cmd.Name) $($sub.Name)"
+        }
+    } else {
+        $allSchemaCommands += $cmd.Name
+    }
 }
 $unmappedCommands = $allSchemaCommands | Where-Object { $_ -notin $allMappedCommands }
 if ($unmappedCommands) {

@@ -52,7 +52,7 @@
     "win32"
   ],
   "dependencies": {
-    "@microsoft/dynwinrt-codegen": "0.1.0-preview.1"
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

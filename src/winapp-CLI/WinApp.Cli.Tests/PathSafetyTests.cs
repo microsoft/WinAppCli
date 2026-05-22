@@ -276,16 +276,16 @@ public class PathSafetyTests
     }
 
     // ---------------------------------------------------------------------
-    // AtomicWriteAllText (round-4 M3)
+    // AtomicWriteAllTextAsync (round-4 M3)
     // ---------------------------------------------------------------------
 
     [TestMethod]
-    public void AtomicWriteAllText_NewFile_WritesContentsAndLeavesNoTempBehind()
+    public async Task AtomicWriteAllTextAsync_NewFile_WritesContentsAndLeavesNoTempBehind()
     {
         var target = Path.Combine(_tempDir.FullName, "out.yaml");
         const string contents = "key: value\n";
 
-        PathSafety.AtomicWriteAllText(target, contents, System.Text.Encoding.UTF8);
+        await PathSafety.AtomicWriteAllTextAsync(target, contents, System.Text.Encoding.UTF8);
 
         Assert.IsTrue(File.Exists(target), "target file must exist after atomic write");
         Assert.AreEqual(contents, File.ReadAllText(target));
@@ -295,18 +295,18 @@ public class PathSafetyTests
     }
 
     [TestMethod]
-    public void AtomicWriteAllText_ExistingFile_OverwritesContents()
+    public async Task AtomicWriteAllTextAsync_ExistingFile_OverwritesContents()
     {
         var target = Path.Combine(_tempDir.FullName, "existing.yaml");
         File.WriteAllText(target, "old contents");
 
-        PathSafety.AtomicWriteAllText(target, "new contents", System.Text.Encoding.UTF8);
+        await PathSafety.AtomicWriteAllTextAsync(target, "new contents", System.Text.Encoding.UTF8);
 
         Assert.AreEqual("new contents", File.ReadAllText(target));
     }
 
     [TestMethod]
-    public void AtomicWriteAllText_DestinationDirMissing_ThrowsAndCleansSiblingTemp()
+    public async Task AtomicWriteAllTextAsync_DestinationDirMissing_ThrowsAndCleansSiblingTemp()
     {
         // Stage failure: the sibling temp creation calls FileStream with
         // FileMode.CreateNew under a non-existent parent dir, throwing
@@ -316,8 +316,8 @@ public class PathSafetyTests
         var missingDir = Path.Combine(_tempDir.FullName, "no-such-dir");
         var target = Path.Combine(missingDir, "out.yaml");
 
-        Assert.ThrowsExactly<DirectoryNotFoundException>(() =>
-            PathSafety.AtomicWriteAllText(target, "x", System.Text.Encoding.UTF8));
+        await Assert.ThrowsExactlyAsync<DirectoryNotFoundException>(async () =>
+            await PathSafety.AtomicWriteAllTextAsync(target, "x", System.Text.Encoding.UTF8));
 
         Assert.IsFalse(Directory.Exists(missingDir), "atomic write must not create parent dirs");
         // No sibling temp under the workspace either (the failure happened

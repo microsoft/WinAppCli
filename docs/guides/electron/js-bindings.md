@@ -1,7 +1,9 @@
 <!-- mslearn: true -->
 # Calling WinRT APIs from JavaScript (JS / TypeScript bindings)
 
-This guide shows you how to call modern Windows Runtime (WinRT) APIs directly from your Electron app's JavaScript or TypeScript — **without** writing a C++ or C# native addon. `winapp` integrates the [`@microsoft/dynwinrt-codegen`](https://www.npmjs.com/package/@microsoft/dynwinrt-codegen) codegen, which produces typed JS + `.d.ts` bindings for WinAppSDK (and any other WinRT) APIs from their `.winmd` metadata. The generated bindings then use [`@microsoft/dynwinrt`](https://www.npmjs.com/package/@microsoft/dynwinrt) to access the underlying WinRT APIs directly at runtime. The result: full IntelliSense at compile time, no `node-gyp` / MSBuild step from your Electron project.
+Call modern Windows Runtime (WinRT) APIs directly from JavaScript or TypeScript — **no native addon, no `node-gyp` / MSBuild step, full IntelliSense**.
+
+`winapp` does this by running [`@microsoft/dynwinrt-codegen`](https://www.npmjs.com/package/@microsoft/dynwinrt-codegen) against your `.winmd` metadata to emit typed `.js` + `.d.ts` bindings; at runtime they delegate to [`@microsoft/dynwinrt`](https://www.npmjs.com/package/@microsoft/dynwinrt).
 
 > **When to choose JS bindings over a native addon:** when the API ships in a `.winmd` (most of `Windows.*` and `Microsoft.WindowsAppSDK.*`). Reach for a native addon only when there's no WinRT projection — Win32 / pure COM (raw `IFileDialog`, registry, custom COM servers), C++ libraries that ship only headers + a static/shared lib, or vendor SDKs that ship only a managed .NET assembly. See the C++ / C# addon guides for those cases.
 
@@ -71,13 +73,13 @@ To put them somewhere else, set `output` inside `winapp.jsBindings` in `package.
 Import from the generated `index.js` — you don't need to know which file inside `bindings/` a class lives in. Here's a native file picker (`Microsoft.Windows.Storage.Pickers.FileOpenPicker`) opened from your Electron main process. This API works on any Windows 11 machine once you've wired up debug identity in [Step 3](#step-3-run-it):
 
 ```js
-// src/index.js (Electron main)
-const { app, BrowserWindow } = require('electron');
-const {
+// src/main.js (Electron main)
+import { app, BrowserWindow, ipcMain } from 'electron';
+import {
   FileOpenPicker,
   PickerLocationId,
   PickerViewMode,
-} = require('../bindings/index.js');
+} from '../bindings/index.js';
 
 async function pickAnImage(mainWindow) {
   // FileOpenPicker needs the parent window's HWND wrapped in a WindowId struct.
@@ -93,10 +95,69 @@ async function pickAnImage(mainWindow) {
   return result?.path; // string with the chosen path, or undefined if the user cancelled
 }
 
-// Usage (after `app.whenReady()`):
-//   const path = await pickAnImage(BrowserWindow.getFocusedWindow());
-//   if (path) console.log('Picked:', path);
+// Expose it to the renderer via IPC so a button click can trigger the picker.
+ipcMain.handle('pick-image', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return pickAnImage(win);
+});
 ```
+
+Then bridge it into the renderer through your preload script:
+
+```js
+// src/preload.js
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('winapp', {
+  pickImage: () => ipcRenderer.invoke('pick-image'),
+});
+```
+
+…and call it from the renderer (e.g. on a button click):
+
+```html
+<!-- src/index.html (anywhere inside <body>) -->
+<button id="pick-image-btn">Pick an image…</button>
+```
+
+```js
+// src/renderer.js
+document.querySelector('#pick-image-btn').addEventListener('click', async () => {
+  const path = await window.winapp.pickImage();
+  console.log(path ? `Picked: ${path}` : 'Picker cancelled.');
+});
+```
+
+See [Electron's IPC docs](https://www.electronjs.org/docs/latest/tutorial/ipc) for the broader pattern (preload + `contextBridge` is the recommended way to expose any main-process API — WinRT or otherwise — to your UI).
+
+> [!IMPORTANT]
+> **Using Vite (the current `electron-forge` default)?** Externalize `@microsoft/dynwinrt` in `vite.main.config.mjs`, otherwise the build fails with `Unexpected character '\0'`:
+>
+> ```js
+> import { defineConfig } from 'vite';
+>
+> export default defineConfig({
+>   build: {
+>     rollupOptions: {
+>       external: ['@microsoft/dynwinrt'],
+>     },
+>   },
+> });
+> ```
+>
+> The `electron-forge` Webpack template (`--template=webpack` / `--template=webpack-typescript`) works out of the box — no config changes needed.
+
+> [!NOTE]
+> **Which import syntax should I use?** Check your `package.json`:
+>
+> - **Has a bundler plugin** (`@electron-forge/plugin-vite`, `@electron-forge/plugin-webpack`, etc. — this is the **current `electron-forge` default**): use the top-level `import` shown above as-is. Done.
+> - **No bundler** (older vanilla `electron-forge` template, or a hand-rolled Node project): pick one:
+>   - **Switch to ESM** — add `"type": "module"` to your `package.json`, then rename `forge.config.js` → `forge.config.cjs` and (if you have it) `scripts/postinstall.js` → `.cjs`. Then the `import` above works.
+>   - **Stay CommonJS** — replace the static `import` with a dynamic one inside an `async` function:
+>     ```js
+>     const { FileOpenPicker, PickerLocationId, PickerViewMode } = await import('../bindings/index.js');
+>     ```
+>     (Top-level `await` doesn't work in CommonJS, so the call must be inside `async`.)
 
 The same `bindings/index.js` re-exports every other emitted class — `AppNotificationManager`, `PowerManager`, `WidgetManager`, and so on. Import what you need; the codegen has already generated typed declarations for everything in your `winapp.jsBindings` scope.
 
@@ -110,7 +171,7 @@ A few conventions to remember:
 
 Events follow an `on<Name>(handler)` shape that returns an unsubscribe function (`const off = obj.onSomething(cb); /* … */ off()`), and `IDisposable` WinRT objects should be wrapped in `try/finally` with a `.close()` call.
 
-You can call the same API from the renderer via `contextBridge` / `ipcRenderer` — exactly as you would for a native addon. The bindings have no dependency on Electron's main process; they work anywhere Node.js can `require()` them.
+You can call the same API from the renderer via `contextBridge` / `ipcRenderer` — exactly as you would for a native addon. The bindings have no dependency on Electron's main process; they work anywhere Node.js can load ES modules.
 
 ## Step 3: Run it
 
