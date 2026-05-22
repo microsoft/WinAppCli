@@ -111,13 +111,6 @@ Describe "Electron Sample" {
         }
 
         It "Should initialize winapp workspace with JS bindings and C++ projections" -Skip:$script:skip {
-            # `init --use-defaults` invoked via the npm shim auto-answers Yes
-            # at the bindings prompt (Add JS/TypeScript bindings? [Y/n]) and
-            # runs codegen in one step. C++ projections always run. The
-            # prompt only fires when WINAPP_CLI_CALLER=nodejs-package (set by
-            # the `npx winapp` shim, which Invoke-WinappCommand resolves to
-            # here after Install-WinappNpmPackage). Selecting Yes writes
-            # `"winapp": { "jsBindings": {} }` into package.json.
             Push-Location $script:appDir
             try {
                 Invoke-WinappCommand -Arguments "init . --use-defaults --setup-sdks=stable"
@@ -131,25 +124,18 @@ Describe "Electron Sample" {
         }
 
         # ── JS bindings smoke (v2.x) ─────────────────────────────────────
-        # Verify the npm-caller init path produced the expected bindings
-        # output, lockfile, and runtime dep — and that re-running `restore`
-        # is idempotent (no winapp.yaml or package.json mutation).
 
         It "Should have generated bindings/ with the managed marker" -Skip:$script:skip {
             $bindingsDir = Join-Path $script:appDir "bindings"
             $bindingsDir | Should -Exist
-            # Marker proves the staging-then-swap completed.
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist
-            # Full WinAppSDK generates hundreds of .js files; assert a
-            # generous lower bound to catch the "0 files generated" regression
-            # without being brittle to upstream SDK changes.
+            # 50 is a generous lower bound for the full WinAppSDK scope; catches
+            # "0 files generated" regressions without being brittle to SDK updates.
             $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -ErrorAction SilentlyContinue).Count
             $jsCount | Should -BeGreaterThan 50 -Because "Default jsBindings (full WinAppSDK) should generate many JS files"
         }
 
         It "Should inject @microsoft/dynwinrt as a runtime dep in package.json" -Skip:$script:skip {
-            # Bindings import @microsoft/dynwinrt at load time — must be a
-            # production dep so `npm ci --omit=dev` doesn't strip it.
             $pkgPath = Join-Path $script:appDir "package.json"
             $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
             $pkg.dependencies.'@microsoft/dynwinrt' | Should -Not -BeNullOrEmpty `
@@ -157,8 +143,6 @@ Describe "Electron Sample" {
         }
 
         It "Should write a winmds.lock.json under .winapp/" -Skip:$script:skip {
-            # Seeded by restore (during init); diagnostic record of the
-            # winmd → package mapping at codegen time.
             $lockfilePath = Join-Path $script:appDir ".winapp\winmds.lock.json"
             $lockfilePath | Should -Exist
             $lockfile = Get-Content $lockfilePath -Raw | ConvertFrom-Json
@@ -167,9 +151,6 @@ Describe "Electron Sample" {
         }
 
         It "Should re-run codegen via 'winapp restore' without mutating winapp.yaml or jsBindings" -Skip:$script:skip {
-            # `restore` is the read-only re-run path — it must not modify
-            # winapp.yaml or the winapp.jsBindings namespace in package.json.
-            # Capture both hashes before/after to prove it.
             $yamlPath = Join-Path $script:appDir "winapp.yaml"
             $pkgPath = Join-Path $script:appDir "package.json"
             $bindingsDir = Join-Path $script:appDir "bindings"

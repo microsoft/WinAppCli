@@ -1,20 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Top-level glue for JS bindings generation. Called after native `winapp restore`
-// has written the winmd lockfile and after we've established that the user
-// wants JS bindings (`winapp.jsBindings` namespace present in package.json).
-//
-// Pipeline:
-//   1. Read package.json → get jsBindings config (npm wrapper-owned).
-//   2. Read .winapp/winmds.lock.json → get NuGet winmd inventory.
-//   3. Resolve user-supplied additional winmds + refs (reparse / UNC safety).
-//   4. Partition by package category (skip / refOnly / emit) with user overrides.
-//   5. Run dynwinrt-codegen (bulk + per-extraType passes) into staged dir.
-//   6. Ensure @microsoft/dynwinrt is in package.json dependencies + print PM hint.
-//
-// Returns a structured outcome (not exceptions for "no jsBindings configured")
-// so the cli.ts caller can decide whether to print anything.
+// Runs after native restore writes the lockfile and package.json opts into JS bindings.
+// Returns structured outcomes so callers can decide what to print.
 
 import * as path from 'path';
 import { readJsBindingsConfig } from './package-json-config';
@@ -35,31 +23,21 @@ export interface OrchestratorResult {
   outcome: OrchestratorOutcome;
   /** Human-readable diagnostic. Always set. */
   message: string;
-  /** Output dir written by codegen (only when outcome === 'completed'). */
+  /** Output dir written by codegen when completed. */
   outputDir?: string;
 }
 
 export interface OrchestratorOptions {
   workspaceDir: string;
-  /**
-   * Explicit `winapp.yaml` path the native CLI used (resolved from `--config-dir`
-   * by the caller via {@link resolveYamlPath}). Defaults to
-   * `<workspaceDir>/winapp.yaml` for backward-compat; pass it explicitly
-   * whenever the user supplied `--config-dir` so the staleness check
-   * compares against the same file native hashed into the lockfile.
-   */
+  /** Path native CLI hashed; keeps stale-lockfile checks aligned with --config-dir. */
   yamlPath?: string;
-  /** Override for the npm wrapper's pinned dynwinrt version (used in tests). */
+  /** Override for the npm wrapper's pinned dynwinrt version, used in tests. */
   versionOverride?: string;
-  /** Sink for per-line progress (stdout/stderr from codegen). Defaults to console. */
+  /** Sink for codegen progress lines; defaults to console. */
   log?: (line: string) => void;
-  /** Forward to codegen-runner. False (default) suppresses per-file noise. */
+  /** Forward to codegen-runner; false suppresses per-file noise. */
   verbose?: boolean;
-  /**
-   * Suppress all non-essential progress / hint output. Errors and warnings
-   * still go through `log`; the spinner, `🔨` fallback, and runtime-dep hint
-   * are skipped. Used by `--quiet` on the wrapper.
-   */
+  /** Suppress progress and hints; warnings still go through `log`. */
   quiet?: boolean;
 }
 
@@ -67,7 +45,6 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   const log = options.log ?? ((line) => console.log(line));
   const workspaceDir = path.resolve(options.workspaceDir);
 
-  // 1. Read package.json for the `winapp.jsBindings` namespace.
   const pkgResult = readJsBindingsConfig(workspaceDir);
   if (!pkgResult.packageJsonExists) {
     return {
@@ -83,7 +60,6 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   }
   const config = pkgResult.jsBindings;
 
-  // 2. Read lockfile (workspace-scoped: lives at <workspace>/.winapp/winmds.lock.json).
   const lockResult = tryReadLockfile(workspaceDir);
   if (!lockResult.lockfile) {
     return {
@@ -98,12 +74,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   }
   const lockfile = lockResult.lockfile;
 
-  // 2a. Compare the lockfile's recorded `yaml_packages_hash` against a fresh
-  //     hash of `winapp.yaml`. If the user edited the SDK pins without
-  //     re-running `winapp restore`, the lockfile's winmd inventory is for
-  //     the OLD packages — emitting JS bindings now would generate against
-  //     stale types. Surface as `lockfileStale` so the cli.ts caller prints
-  //     the actionable `winapp restore` hint.
+  // If SDK pins changed after restore, codegen would emit against stale winmd inventory.
   if (lockfile.yamlPackagesHash) {
     const currentPackages = readWinappYamlPackages(workspaceDir, options.yamlPath);
     if (currentPackages) {
@@ -120,9 +91,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     }
   }
 
-  // 3. Resolve user-supplied additional winmds + refs (path safety + dedupe).
-  //    `additionalWinmds` entries can be bulk (winmdPath only) or cherry-pick
-  //    (winmdPath + namespace + classes); we split them after resolution.
+  // User-supplied winmd paths go through UNC/reparse safety checks before codegen sees them.
   const userEmit = resolveAdditionalWinmds(config.additionalWinmds, workspaceDir, 'additionalWinmds');
   const userRefs = resolveAdditionalWinmds(
     (config.additionalRefs ?? []).map((p) => ({ winmdPath: p })),
@@ -133,9 +102,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     log(w);
   }
 
-  // Split resolved additionalWinmds into bulk emit vs cherry-pick passes.
-  // Cherry-pick entries are loaded as ref-only so codegen can resolve types;
-  // only the listed classes are emitted.
+  // Cherry-pick entries load as refs; only listed classes are emitted.
   const bulkAdditional: string[] = [];
   const cherryPicks: { namespace: string; classes: string[] }[] = [];
   const cherryPickRefs: string[] = [];
@@ -148,11 +115,11 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     }
   }
 
-  // 4. Partition NuGet winmds by built-in package category (no user overrides).
+  // Built-in NuGet policy has no user overrides; additionalWinmds are explicit overrides.
   const partition = partitionPackageWinmds(lockfile.packages);
 
-  // 5. Compose final emit + ref sets.
   const emitWinmds = [...partition.emit, ...bulkAdditional];
+  // Cherry-pick winmds are refs because only their requested classes are emitted.
   const refWinmds = [...partition.refOnly, ...userRefs.resolved.map((r) => r.winmdPath), ...cherryPickRefs];
 
   if (emitWinmds.length === 0 && cherryPicks.length === 0) {
@@ -164,11 +131,8 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     };
   }
 
-  // 6. Run codegen. Show a TTY spinner so the user sees progress during the
-  //    ~30s where codegen-runner suppresses all child output (quiet mode).
-  //    Spinner is suppressed in verbose mode (where codegen prints its own
-  //    line-by-line output) and when the caller injected a custom log sink
-  //    (e.g., tests — we mustn't interleave ANSI noise with assertion output).
+  // Spinner covers quiet child output; skip it for verbose output or injected log sinks.
+  // Tests inject logs, so avoid interleaving ANSI spinner output with assertions.
   const progressText =
     `Generating JS bindings from ${emitWinmds.length} winmd${emitWinmds.length === 1 ? '' : 's'}` +
     (refWinmds.length > 0 ? ` (+${refWinmds.length} ref)` : '') +
@@ -196,7 +160,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     spinner?.stop();
   }
 
-  // 7. Ensure runtime dep + print PM hint.
+  // Runtime dep injection is best-effort; codegen output is still useful if it fails.
   const pinnedVersion = options.versionOverride ?? safeGetVersionPin(log);
   if (pinnedVersion) {
     try {
@@ -212,7 +176,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         log(hint.message);
       }
     } catch (err) {
-      // Warnings always surface, even in --quiet, so users still see real failures.
+      // Warnings always surface, even in --quiet.
       log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
     }
   }

@@ -415,9 +415,9 @@ After a successful generation winapp writes `<output>/.dynwinrt-managed` into th
 In addition, `winapp restore` writes `.winapp/winmds.lock.json` — a human-readable snapshot of every NuGet package the restore resolved, with its version and the per-package winmd discovery results. The lockfile is the bridge between the native `winapp restore` (which writes it) and the npm wrapper (which reads it and applies the emit/refOnly/skip policy at codegen time). It's also a useful diagnostic artifact:
 
 - Useful to share when reporting bugs: it tells the maintainer exactly what got resolved without us needing to repro your NuGet feed setup.
-- Records a SHA-256 of the top-level `packages:` block so you can spot yaml drift between restore runs.
+- Records a SHA-256 hash over sorted `lower(name)|version` lines from your yaml `packages:` block — a canonical fingerprint of the resolved set, so the npm wrapper can spot yaml drift between restore runs.
 
-**Write atomicity**: lockfile writes go through a per-call `.tmp.<guid>` sibling that's renamed into place on completion, so concurrent readers always see a consistent (old or new) file, never a torn write.
+**Write atomicity**: lockfile writes go through a per-call `.tmp-<guid>` sibling that's renamed into place on completion, so concurrent readers always see a consistent (old or new) file, never a torn write.
 
 ## Next steps
 

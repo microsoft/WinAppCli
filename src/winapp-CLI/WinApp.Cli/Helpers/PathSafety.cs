@@ -5,33 +5,21 @@ using System.IO;
 
 namespace WinApp.Cli.Helpers;
 
-// Shared filesystem-safety helpers. Centralizing the reparse-point /
-// containment check keeps every "write into the user's workspace" site
-// (e.g. WinmdsLockfileService) consistent — we don't want one to drift
-// behind the others.
+// Filesystem-safety helpers shared by every "write into the user's workspace"
+// site (e.g. WinmdsLockfileService).
 internal static class PathSafety
 {
-    // True if `path` is not safely contained under `boundary`, or if any
-    // segment from `boundary` down to `path` is a reparse point, or if
-    // either side is a UNC path. Used to refuse rewriting / probing files
-    // that a hostile workspace could redirect via a symlink/junction to a
-    // victim location elsewhere on the machine.
+    // True if `path` is not safely contained under `boundary`, if any segment
+    // from `boundary` down to `path` is a reparse point, or if either side is
+    // a UNC path.
     //
-    // Implementation notes:
-    //   * Walks DOWN from `boundary` instead of UP from `path`. Walking up
-    //     would force the OS to traverse any junctions / symlinks in `path`
-    //     to look up the leaf's attributes, which on Windows can trigger
-    //     SMB negotiation (and NTLM leak) before we ever see the
-    //     reparse-point flag. Walking down lets us reject as soon as a
-    //     suspicious segment is observed, without ever probing past it.
-    //   * Uses `File.GetAttributes` rather than `FileInfo.Exists` /
-    //     `DirectoryInfo.Exists`; the latter call FindFirstFile internally,
-    //     which on a UNC ancestor would also probe the network before the
-    //     reparse-point flag can be inspected.
-    //   * UNC inputs are rejected outright (long-path `\\?\C:\…` is fine;
-    //     `\\server\share` and `\\?\UNC\…` are not).
-    //   * Missing segments are skipped (no I/O), so a caller about to
-    //     create the file still passes the guard.
+    // Walks DOWN from `boundary` (not UP from `path`): walking up forces the
+    // OS to traverse symlinks/junctions in `path` to look up the leaf's
+    // attributes, which on Windows can trigger SMB negotiation (and NTLM
+    // leak) before the reparse-point flag is visible. Uses File.GetAttributes
+    // (FileInfo.Exists / DirectoryInfo.Exists call FindFirstFile internally,
+    // same SMB-probe hazard). Missing segments are skipped — callers about to
+    // create the file still pass the guard.
     public static bool HasReparsePointOnPath(string path, string boundary)
     {
         string fullPath;
@@ -54,10 +42,8 @@ internal static class PathSafety
         var normalizedBoundary = NormalizeForContainment(fullBoundary);
         var normalizedPath = NormalizeForContainment(fullPath);
 
-        // Containment (string-only — no I/O). The boundary itself is a
-        // valid target (path == boundary), otherwise path must live under
-        // boundary + a separator. Boundary may already end in a separator
-        // (drive root, e.g. `C:\`) — don't double up.
+        // String-only containment. Boundary itself is a valid target;
+        // otherwise path must live under boundary + a separator.
         bool isBoundaryItself = string.Equals(
             normalizedPath,
             normalizedBoundary,
@@ -73,9 +59,8 @@ internal static class PathSafety
             return true;
         }
 
-        // Check the boundary itself FIRST. If the boundary is a reparse
-        // point, every descendant probe would silently follow it; refuse
-        // before we ever touch a descendant path.
+        // Check boundary itself first — a reparse-point boundary would make
+        // every descendant probe silently follow it.
         if (TryGetAttributes(normalizedBoundary, out var boundaryAttr)
             && boundaryAttr.HasFlag(FileAttributes.ReparsePoint))
         {
@@ -87,10 +72,6 @@ internal static class PathSafety
             return false;
         }
 
-        // Walk DOWN from boundary one segment at a time. The remainder
-        // after the boundary cannot contain `..` (Path.GetFullPath
-        // normalised it) so each segment is a literal directory / file
-        // name.
         var remainder = normalizedPath.Substring(normalizedBoundary.Length);
         var segments = remainder.Split(
             new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
@@ -105,7 +86,6 @@ internal static class PathSafety
             {
                 return true;
             }
-            // Missing segments are fine — we don't refuse on absence.
         }
 
         return false;
@@ -113,8 +93,6 @@ internal static class PathSafety
 
     // True for UNC / network paths (`\\server\share`, `\\?\UNC\…`,
     // `\\.\UNC\…`). Local DOS device paths (`\\?\C:\…`) are not network.
-    // Centralized here so every caller shares the same definition of
-    // "a path that would trigger an SMB probe / NTLM leak".
     public static bool IsNetworkPath(string path)
     {
         if (string.IsNullOrEmpty(path))
@@ -124,8 +102,7 @@ internal static class PathSafety
 
         var p = path.Replace('/', '\\');
 
-        // Plain UNC: \\server\share…  (server is non-empty, not a device
-        // designator like '?' or '.').
+        // Plain UNC: \\server\share…
         if (p.Length >= 3
             && p[0] == '\\' && p[1] == '\\'
             && p[2] != '?' && p[2] != '.')
@@ -133,7 +110,7 @@ internal static class PathSafety
             return true;
         }
 
-        // Device-prefixed UNC: \\?\UNC\server\… or \\.\UNC\server\…
+        // Device-prefixed UNC: \\?\UNC\… or \\.\UNC\…
         if (p.Length >= 8
             && p[0] == '\\' && p[1] == '\\'
             && (p[2] == '?' || p[2] == '.')
@@ -149,13 +126,10 @@ internal static class PathSafety
         return false;
     }
 
-    // Trims trailing separators but preserves the root separator for a
-    // bare drive designator. `C:\` would otherwise collapse to `C:` (a
-    // drive-relative reference) and the descent loop would then call
-    // Path.Combine("C:", seg) — yielding "C:foo" (drive-relative, resolved
-    // against the per-drive CWD) instead of "C:\foo". That silently
-    // bypasses the reparse-point check for any workspace/config-dir
-    // rooted at a drive letter.
+    // Trims trailing separators but preserves the root separator on bare
+    // drive designators. `C:\` collapsed to `C:` would make Path.Combine
+    // produce drive-relative paths (`C:foo` → resolved against the per-drive
+    // CWD), silently bypassing the reparse-point check.
     private static string NormalizeForContainment(string path)
     {
         var trimmed = TrimTrailingSeparators(path);
@@ -188,19 +162,14 @@ internal static class PathSafety
         }
         catch
         {
-            // Any other error (access denied, IO, etc.): treat as "no
-            // attributes available". Callers can still refuse the
-            // operation when they hit the actual read/write.
             attributes = default;
             return false;
         }
     }
 
-    // Write `contents` to `path` atomically: stage to a sibling temp file
-    // (same volume so the move stays atomic), flush to disk, then rename
-    // over the destination. Prevents a crash / power loss mid-write from
-    // leaving the file truncated or empty. Supports cancellation while
-    // staging (cleanup still runs).
+    // Stage to a sibling temp file (same volume so the move stays atomic),
+    // flush to disk, rename over the destination. Prevents a crash mid-write
+    // from leaving the file truncated.
     public static async Task AtomicWriteAllTextAsync(
         string path,
         string contents,

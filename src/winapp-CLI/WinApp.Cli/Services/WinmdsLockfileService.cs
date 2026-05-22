@@ -17,18 +17,12 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
     public FileInfo GetLockfilePath(DirectoryInfo winappDir) =>
         new(Path.Combine(winappDir.FullName, LockfileName));
 
-    // Refuse to read/write the lockfile if `.winapp/` (or any segment of
-    // its path up to the workspace) is a symlink / junction. The lockfile
-    // lives next to user-controlled state; a malicious workspace can plant
-    // `.winapp` as a junction to a UNC share or a victim file before
-    // winapp ever runs, so we cannot trust the path even though we'd
-    // normally consider `.winapp/` winapp-managed.
+    // `.winapp` can be user-planted as a junction/UNC target before winapp runs,
+    // so the lockfile path is untrusted even though winapp normally manages it.
     private static bool IsLockfilePathUnsafe(DirectoryInfo winappDir, FileInfo lockfilePath)
     {
-        // Use the parent of `.winapp` (i.e. the workspace) as the boundary
-        // when discoverable. Fall back to `.winapp` itself otherwise (the
-        // call still flags the dir being a reparse point because PathSafety
-        // checks the boundary).
+        // Use the workspace as boundary when discoverable.
+        // PathSafety checks the boundary too, so `.winapp` itself is covered.
         var boundary = winappDir.Parent?.FullName ?? winappDir.FullName;
         return PathSafety.HasReparsePointOnPath(lockfilePath.FullName, boundary);
     }
@@ -46,9 +40,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
             var path = GetLockfilePath(winappDir);
             if (IsLockfilePathUnsafe(winappDir, path))
             {
-                // Lockfile is an optimization, not a correctness requirement —
-                // log + skip rather than throw, so codegen still proceeds via
-                // live discovery.
+                // Lockfile is optional; skip unsafe writes so live discovery can proceed.
                 logger.LogDebug(
                     "Skipping winmds lockfile write at {LockfilePath}: .winapp or one of its ancestors is a symlink / reparse point.",
                     path.FullName);
@@ -59,8 +51,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
             var lockfile = BuildLockfile(usedVersions, discoveredWinmds, nugetCacheDir, yamlPackagesHash);
             var json = JsonSerializer.Serialize(lockfile, WinmdsLockfileJsonContext.Default.WinmdsLockfile);
 
-            // Atomic write via the shared PathSafety helper — single source
-            // of truth for staging + fsync + rename semantics.
+            // Shared helper owns staging + fsync + rename semantics.
             await PathSafety.AtomicWriteAllTextAsync(
                 path.FullName,
                 json + "\n",
@@ -73,7 +64,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Lockfile is an optimization, not a correctness requirement.
+            // Lockfile is optional.
             logger.LogDebug(ex, "Failed to write winmds lockfile (continuing without)");
         }
     }
@@ -85,6 +76,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         var path = GetLockfilePath(winappDir);
         if (IsLockfilePathUnsafe(winappDir, path))
         {
+            // Unsafe reads fall back to live discovery.
             logger.LogDebug(
                 "Skipping winmds lockfile read at {LockfilePath}: .winapp or one of its ancestors is a symlink / reparse point.",
                 path.FullName);
@@ -131,18 +123,15 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         }
     }
 
-    // Bucket winmds by package. Paths off the NuGet cache layout are dropped.
-    // Classification (emit/refOnly/skip) is intentionally NOT recorded — that
-    // policy lives in the npm wrapper so changing it doesn't force a native
-    // CLI rebuild + redeploy.
+    // Bucket winmds by package; paths off the NuGet cache layout are dropped.
+    // Classification stays in the npm wrapper so policy changes don't require native redeploy.
     internal static WinmdsLockfile BuildLockfile(
         IReadOnlyDictionary<string, string> usedVersions,
         IReadOnlyList<FileInfo> discoveredWinmds,
         DirectoryInfo nugetCacheDir,
         string? yamlPackagesHash = null)
     {
-        // NuGet cache layout is lowercase; bucket by lowercased id. Output
-        // entries keep usedVersions's original casing.
+        // NuGet cache layout is lowercase; output keeps usedVersions casing.
         var winmdsByPackage = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var w in discoveredWinmds)
         {
@@ -188,8 +177,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
     }
 
     // NuGet cache layout: `<cache>/<package-id-lowercased>/<version>/...`.
-    // Returns the lowercased package id segment, or null if the file isn't
-    // under the cache (e.g. a user-supplied `additionalWinmds` path).
+    // Returns null for user-supplied additionalWinmds outside the cache.
     private static string? ExtractPackageIdFromPath(string winmdFullPath, string nugetCacheDir)
     {
         var normCache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(nugetCacheDir));

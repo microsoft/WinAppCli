@@ -223,8 +223,9 @@ Want to inspect or interact with a running app's UI?
     - **Re-run:** `npx winapp node generate-bindings` after editing `winapp.jsBindings.{packages,extraTypes,additionalWinmds}`. Use `npx winapp restore` instead when you changed `winapp.yaml`.
     - Codegen injects `@microsoft/dynwinrt` as a production dep — run `npm install` afterwards to materialize it.
   - **Native addons:** `winapp node create-addon --template cs` (or `--template cpp`) for C#/C++ addons when you need full WinRT access or stateful native services.
-  - Then: `winapp node add-electron-debug-identity` to enable identity-required APIs.
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`
+- Use `winapp node create-addon` to create native C#/C++ addons for Windows APIs
+- Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
 - **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
 - JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/js-bindings.md

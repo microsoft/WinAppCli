@@ -1,27 +1,17 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Resolves entries from `jsBindings.additionalWinmds` / `additionalRefs` to
-// absolute file paths, with the same defenses as the original C# code:
-//   * Reject UNC / network paths before any probe (FileInfo.Exists on a UNC
-//     would trigger SMB negotiation and leak NTLM).
-//   * Reject reparse-point ancestors (symlink/junction) — for absolute paths
-//     under the workspace, boundary = workspace; for absolute paths outside
-//     the workspace, boundary = the drive root.
-//   * Silently skip missing files (codegen would just fail anyway).
-//   * Dedupe by full path, case-insensitive.
+// Reject UNC paths before probing to avoid SMB/NTLM leakage.
+// Reject reparse-point ancestors; workspace paths use workspace as boundary,
+// and absolute paths outside the workspace use the drive root.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
 /**
- * One entry in `winapp.jsBindings.additionalWinmds` (in package.json).
- *
- *   * `winmdPath` alone → bulk-emit the entire winmd
- *   * `winmdPath` + `namespace` + non-empty `classes` → cherry-pick: only
- *     emit the listed classes from the namespace (the winmd is loaded as
- *     ref-only so codegen can resolve its other types if needed).
+ * Package.json entry; `winmdPath` alone bulk-emits,
+ * while namespace+classes cherry-picks.
  */
 export interface AdditionalWinmd {
   winmdPath: string;
@@ -29,9 +19,8 @@ export interface AdditionalWinmd {
   classes?: string[];
 }
 
-/** An `AdditionalWinmd` whose `winmdPath` has been resolved + safety-checked. */
 export interface ResolvedAdditionalWinmd {
-  /** Absolute path to a real, on-disk, non-UNC, non-reparse winmd file. */
+  /** Absolute path after UNC/reparse checks. */
   winmdPath: string;
   namespace?: string;
   classes?: string[];
@@ -117,7 +106,6 @@ export function resolveAdditionalWinmds(
   return { resolved, warnings };
 }
 
-/** True when the resolved entry is a cherry-pick (has both namespace + classes). */
 export function isCherryPick(
   entry: ResolvedAdditionalWinmd
 ): entry is ResolvedAdditionalWinmd & { namespace: string; classes: string[] } {

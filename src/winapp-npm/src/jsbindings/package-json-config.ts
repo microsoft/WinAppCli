@@ -1,20 +1,5 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
-//
-// Reads and writes the `"winapp": { "jsBindings": {...} }` namespace inside
-// the workspace's package.json.
-//
-// Why package.json instead of winapp.yaml?
-//   * `winapp.yaml` is owned by the native CLI and only describes SDK
-//     `packages:` pins. Layering JS-only configuration in there meant the
-//     native CLI had to either parse and ignore a JS-only block or risk
-//     mangling unknown keys on round-trip.
-//   * package.json already exists in every npm/Node workspace and is the
-//     canonical place for Node-tool configuration (eslint, jest, prettier,
-//     tsup, ...). The `"winapp"` key follows the same convention.
-//   * The native CLI now has zero awareness of JS bindings — every code path
-//     (init, restore, package, ...) is identical regardless of whether the
-//     user opted into JS bindings.
 
 import { AdditionalWinmd } from './additional-winmds';
 import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
@@ -22,10 +7,9 @@ import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './p
 export interface JsBindingsConfig {
   // Output directory, relative to the workspace root.
   output: string;
-  // Extra .winmd files to feed into the codegen. Each entry either bulk-emits
-  // the whole winmd or cherry-picks individual classes from it.
+  // Extra .winmd files to feed into codegen, either bulk-emitted or cherry-picked.
   additionalWinmds: AdditionalWinmd[];
-  // Extra .winmd files loaded for type resolution only (no emit).
+  // Extra .winmd files loaded for type resolution only.
   additionalRefs: string[];
 }
 
@@ -40,19 +24,11 @@ export function defaultJsBindingsConfig(): JsBindingsConfig {
 export interface ReadJsBindingsResult {
   /** True when package.json existed and parsed successfully. */
   packageJsonExists: boolean;
-  /** Parsed jsBindings config, or null when the namespace isn't present. */
+  /** Parsed config, or null when `winapp.jsBindings` isn't present. */
   jsBindings: JsBindingsConfig | null;
 }
 
-/**
- * Read package.json from the workspace and return any
- * `"winapp": { "jsBindings": {...} }` namespace it declares.
- *
- * Missing file (or unsafe workspace path) → `{ packageJsonExists: false, jsBindings: null }`.
- * Present file, no `winapp.jsBindings` → `{ packageJsonExists: true, jsBindings: null }`.
- * Malformed JSON propagates as an exception so callers can surface a clear
- * error rather than silently treating the workspace as un-configured.
- */
+/** Read package.json and return `winapp.jsBindings` when present. */
 export function readJsBindingsConfig(workspaceDir: string): ReadJsBindingsResult {
   const doc = readPackageJsonDoc(workspaceDir);
   if (!doc) {
@@ -67,51 +43,21 @@ export function readJsBindingsConfig(workspaceDir: string): ReadJsBindingsResult
   return { packageJsonExists: true, jsBindings: coerceConfig(block) };
 }
 
-/**
- * Convenience: returns true when package.json declares `winapp.jsBindings`.
- * Propagates JSON parse errors (does NOT swallow them) — a malformed
- * package.json should fail the command with the actual parse error rather
- * than silently skip codegen. Callers should `try` around this if they need
- * to handle malformed input gracefully.
- */
+/** Propagates malformed package.json errors instead of silently skipping codegen. */
 export function hasJsBindings(workspaceDir: string): boolean {
   return readJsBindingsConfig(workspaceDir).jsBindings !== null;
 }
 
-/**
- * Outcome of {@link ensureJsBindingsBlock}.
- *   * `added`     — namespace was missing; default block written.
- *   * `reset`     — namespace existed but caller asked to overwrite it with defaults.
- *   * `unchanged` — namespace existed and caller did not request a reset.
- */
 export type EnsureJsBindingsOutcome = 'added' | 'reset' | 'unchanged';
 
 export interface EnsureJsBindingsOptions {
-  /**
-   * When true, overwrite an existing `winapp.jsBindings` block with the
-   * default config. Use this when the user explicitly opted in again
-   * (e.g. re-running `winapp init` and answering Yes after previously
-   * customizing the block) — we never silently overwrite otherwise.
-   */
+  /** Only reset existing user config after explicit opt-in. */
   reset?: boolean;
   /** Suppress the informational banner printed to stdout. */
   quiet?: boolean;
 }
 
-/**
- * Make sure the workspace's package.json declares the
- * `winapp.jsBindings` namespace, then return what we did.
- *
- * Shared by `winapp init` (after a "yes" answer) and
- * `winapp node generate-bindings` (so the command works without making
- * the user hand-edit JSON before invoking it). NOT called from
- * `winapp restore` — restore must remain a passive "respect existing
- * declarations" operation and never silently add config the user did
- * not request.
- *
- * Requires package.json to exist; callers should fail with a clear
- * "this is not an npm project" error first when it does not.
- */
+/** Ensure package.json declares `winapp.jsBindings`; explicit opt-in only, never restore. */
 export function ensureJsBindingsBlock(
   workspaceDir: string,
   opts: EnsureJsBindingsOptions = {}
@@ -137,23 +83,8 @@ export function ensureJsBindingsBlock(
 }
 
 /**
- * Write (or update) the `"winapp": { "jsBindings": {...} }` namespace in
- * package.json.
- *
- * Behaviour:
- *   * Preserves the existing 2-space indent + trailing newline (via
- *     `mutatePackageJsonDoc`). We do not pull in `prettier` for this single
- *     edit — JSON.stringify gives us a stable canonical layout and
- *     `package.json` is the only file we own.
- *   * Atomic: writes to a sibling temp file, fsyncs, then renames over the
- *     real file so a half-written package.json is never visible.
- *   * Inserts the `"winapp"` key at the end of the top-level object when it
- *     does not yet exist — npm tooling does not care about key order, and
- *     stable insertion keeps round-trips clean.
- *   * Throws when package.json is missing or malformed; callers should
- *     ensure the file exists (e.g. by suggesting `npm init -y`) before
- *     writing.
- *   * Throws when the workspace path is UNC or has a reparse-point ancestor.
+ * Write or update the `winapp.jsBindings` namespace in package.json.
+ * `mutatePackageJsonDoc` preserves JSON layout and performs the atomic write.
  */
 export function writeJsBindingsConfig(workspaceDir: string, config: JsBindingsConfig): void {
   if (!packageJsonExists(workspaceDir)) {
@@ -172,19 +103,10 @@ export function writeJsBindingsConfig(workspaceDir: string, config: JsBindingsCo
   });
 }
 
-/**
- * Hook for tests / future helpers: render the config block as it would be
- * embedded in package.json. Returns the JSON-serializable shape — callers
- * typically don't need this directly, but the orchestrator tests use it to
- * assert round-trip behaviour without re-implementing the schema.
- */
+/** Render the JSON-serializable config shape embedded in package.json. */
 export function renderJsBindingsConfig(config: JsBindingsConfig): unknown {
   return serializeConfig(config);
 }
-
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
 
 function coerceConfig(raw: unknown): JsBindingsConfig {
   const defaults = defaultJsBindingsConfig();
@@ -242,12 +164,7 @@ function coerceAdditionalWinmds(value: unknown): AdditionalWinmd[] {
   return out;
 }
 
-/**
- * Serialize a JsBindingsConfig in a stable, schema-faithful shape:
- *   * keys are emitted in a fixed order so diffs stay clean across edits;
- *   * empty arrays are kept (they're documentation: "yes I considered this,
- *     and meant the empty default") rather than stripped.
- */
+/** Stable key order; empty arrays remain explicit defaults in package.json. */
 function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   return {
     output: config.output,
@@ -263,6 +180,4 @@ function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   };
 }
 
-// Re-exported so callers don't have to know whether the implementation lives
-// in this module or elsewhere.
 export { PACKAGE_JSON_FILENAME } from './package-json-doc';

@@ -1,22 +1,5 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
-//
-// Decides whether the user wants JS/TypeScript bindings in addition to the
-// C++ projections that the native CLI always sets up.
-//
-// Decision tree:
-//   * `winapp restore` (not `init`) → infer from package.json; never prompt.
-//   * Existing `"winapp.jsBindings"` namespace in package.json → infer Yes
-//     (we don't second-guess the user's prior choice).
-//   * .NET project (any *.csproj / *.fsproj / *.vbproj in cwd) → silent No;
-//     dynwinrt bindings don't target .NET (CsWinRT already provides
-//     projections).
-//   * `--use-defaults` / `-y` / `--yes` → silent Yes (npm user opted in).
-//   * Non-TTY stdin → silent Yes (scripted npm invocation, same default).
-//   * Otherwise → prompt `Add JS/TypeScript bindings? [Y/n]`.
-//
-// Note: `--setup-sdks none` is fast-pathed before this function is called
-// (cli.ts forwards straight to the native CLI), so we never see it here.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,7 +11,7 @@ export interface BindingsPromptInputs {
   workspaceDir: string;
   /** Raw argv after the `init` command (excludes the `init` word). */
   argv: readonly string[];
-  /** True for `init`. False for `restore` (which never prompts). */
+  /** True for `init`; false for `restore`, which never prompts. */
   isInit: boolean;
   /** True when package.json already declares `winapp.jsBindings`. */
   existingJsBindings: boolean;
@@ -36,14 +19,9 @@ export interface BindingsPromptInputs {
 
 export interface BindingsPromptOutcome {
   kind: BindingsKind;
-  /** Reason the prompt was skipped (silent decision). undefined when the prompt actually ran. */
+  /** Reason the prompt was skipped; undefined when the prompt ran. */
   silentReason?: string;
-  /**
-   * Set when `existingJsBindings` was true at prompt time. true = user (or
-   * silent path) elected to overwrite the existing config with fresh defaults;
-   * false = preserve the user's existing config as-is. undefined when no
-   * existing config existed.
-   */
+  /** Set only for existing config: true resets, false preserves. */
   overwriteExistingConfig?: boolean;
 }
 
@@ -61,15 +39,10 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     };
   }
 
-  // Existing jsBindings + init re-run → ask whether to overwrite, mirroring
-  // the native CLI's `winapp.yaml exists with pinned versions. Overwrite?` and
-  // `<manifest> already exists. Overwrite?` prompts. Default Yes matches
-  // those native prompts; users can answer N to preserve customizations.
+  // Init re-runs mirror native overwrite prompts; default Yes preserves UX parity.
   if (inputs.existingJsBindings) {
     const isDotNet = detectDotNetProject(inputs.workspaceDir);
     if (isDotNet) {
-      // Edge: someone added winapp.jsBindings to a .NET project and is now
-      // re-running init. Honor .NET classification and silent-preserve.
       return {
         kind: 'yes',
         silentReason: '.NET project detected — preserving existing winapp.jsBindings without prompting.',
@@ -85,8 +58,7 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
       };
     }
     if (!process.stdin.isTTY) {
-      // Scripted invocation — preserve existing config (safer default for
-      // non-interactive runs; --use-defaults is the explicit opt-in to reset).
+      // Non-interactive runs preserve existing config unless --use-defaults opts into reset.
       return {
         kind: 'yes',
         silentReason: 'non-TTY stdin — preserving existing winapp.jsBindings.',
@@ -99,6 +71,7 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
 
   const isDotNet = detectDotNetProject(inputs.workspaceDir);
   if (isDotNet) {
+    // dynwinrt bindings target Node/Electron; .NET already gets WinRT via CsWinRT.
     return {
       kind: 'no',
       silentReason:
@@ -106,10 +79,7 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     };
   }
 
-  // JS bindings only apply to Node/Electron projects, which always have a
-  // package.json. Skip silently when one isn't present so we don't ask a
-  // question whose answer can't be honored (we'd need somewhere to write
-  // `winapp.jsBindings` and to inject the runtime dep).
+  // Without package.json we have nowhere to write `winapp.jsBindings` or the runtime dep.
   if (!fs.existsSync(path.join(inputs.workspaceDir, 'package.json'))) {
     return {
       kind: 'no',
@@ -149,13 +119,7 @@ function detectDotNetProject(workspaceDir: string): boolean {
   return false;
 }
 
-// Look for `--setup-sdks <mode>` or `--setup-sdks=<mode>` in the argv.
-// Mirrors the native option exactly; we don't validate the value beyond the
-// "none" check (native will reject invalid values).
-//
-// Exported so cli.ts can fast-path `init --setup-sdks none` straight to the
-// native CLI without invoking the bindings prompt (parity with the
-// pre-wrapper UX where --setup-sdks none was a no-op for JS bindings).
+// cli.ts uses this to fast-path `init --setup-sdks none`; native validates values.
 export function parseSetupSdksArg(argv: readonly string[]): string | undefined {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -169,19 +133,10 @@ export function parseSetupSdksArg(argv: readonly string[]): string | undefined {
   return undefined;
 }
 
-/**
- * Mirrors Spectre.Console's `ConfirmationPrompt` rendering used by the native
- * CLI: live prompt shows `{title} [y/n] (y):` with the hint in dim grey,
- * and after the user answers the line is rewritten as `{title}: <Yes|No>`
- * with the answer underlined. Keeps init UX consistent across native and
- * npm-wrapper prompts.
- */
+/** Mirrors the native CLI confirmation prompt UX. */
 async function confirmationPrompt(title: string, defaultYes: boolean = true): Promise<boolean> {
   const useColor = !!process.stdout.isTTY && !process.env.NO_COLOR;
-  // Match Spectre.Console's default ConfirmationPrompt palette:
-  //   * Choices `[y/n]` → blue (ChoicesStyle default)
-  //   * Default value `(y)` → green (DefaultValueStyle default)
-  //   * Post-answer value → underline (matches our C# rewrite path)
+  // Match Spectre.Console's ConfirmationPrompt palette for native/npm parity.
   const blue = (s: string) => (useColor ? `\x1b[34m${s}\x1b[39m` : s);
   const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[39m` : s);
   const underline = (s: string) => (useColor ? `\x1b[4m${s}\x1b[24m` : s);
@@ -192,8 +147,7 @@ async function confirmationPrompt(title: string, defaultYes: boolean = true): Pr
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    // Loop until we get a recognized answer (or an empty answer, which uses
-    // the default). Matches Spectre's behavior of refusing garbage input.
+    // Keep retrying to match Spectre's refusal of unrecognized answers.
     for (;;) {
       const raw = await question(rl, livePrompt);
       const trimmed = (raw ?? '').trim().toLowerCase();
@@ -208,13 +162,11 @@ async function confirmationPrompt(title: string, defaultYes: boolean = true): Pr
       }
 
       if (result === null) {
-        // Invalid — re-prompt (Spectre prints validation error; we keep it terse).
         continue;
       }
 
       if (useColor) {
-        // Move cursor up one line (over the line we just wrote), clear it,
-        // then rewrite the prompt with the underlined answer.
+        // Rewrite the live prompt with the underlined answer.
         process.stdout.write('\x1b[1A\x1b[2K\r');
         process.stdout.write(`${title}: ${underline(result ? 'Yes' : 'No')}\n`);
       }
