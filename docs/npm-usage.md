@@ -1,6 +1,4 @@
----
-ms.custom: mslearn
----
+<!-- mslearn: true -->
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -1005,7 +1003,6 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `exitOnError` | `boolean \| undefined` | No |  |
-| `cwd` | `string \| undefined` | No | Working directory for the spawned process (defaults to process.cwd()). |
 
 ### `CallWinappCliResult`
 

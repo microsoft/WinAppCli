@@ -351,7 +351,7 @@ async function handleNode(args: string[]): Promise<void> {
       break;
 
     default:
-      console.error(`Unknown node subcommand: ${subcommand}`);
+      console.error(`❌ Unknown node subcommand: ${subcommand}`);
       console.error(`Run "${CLI_NAME} node" for available subcommands.`);
       process.exit(1);
   }
@@ -396,7 +396,7 @@ async function handleCreateAddon(args: string[]): Promise<void> {
 
   // Validate template
   if (!['cpp', 'cs'].includes(options.template as string)) {
-    console.error(`Invalid template: ${options.template}. Valid options: cpp, cs`);
+    console.error(`❌ Invalid template: ${options.template}. Valid options: cpp, cs`);
     process.exit(1);
   }
 

@@ -92,53 +92,7 @@ for (const sym of allExports) {
 // ---------------------------------------------------------------------------
 // Extraction helpers
 // ---------------------------------------------------------------------------
-
-// Strip JSDoc markers and return description text, stopping at the first
-// `@tag` line. Mid-prose `@microsoft/...` references are preserved (TS's
-// own `displayPartsToString` truncates at any `@`).
-function rawDescFromJsDocText(rawCommentText) {
-  if (!rawCommentText) return '';
-  let text = rawCommentText.trim();
-  if (text.startsWith('/**')) text = text.slice(3);
-  if (text.endsWith('*/')) text = text.slice(0, -2);
-
-  const lines = text.split(/\r?\n/);
-  const out = [];
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/^\s*\*\s?/, '');
-    // A JSDoc tag at start-of-line ends the description.
-    if (/^@\w/.test(line.trimStart()) && line.trimStart().startsWith('@')) {
-      break;
-    }
-    out.push(line);
-  }
-  return out.join(' ').replace(/\s+/g, ' ').trim();
-}
-
-// Read the leading /** */ block for a declaration directly from source,
-// preserving `@microsoft/...` references that TS's doc API would truncate.
-function getRawJsDoc(decl) {
-  if (!decl) return null;
-  const sourceFile = decl.getSourceFile();
-  const sourceText = sourceFile.getFullText();
-  const ranges = ts.getLeadingCommentRanges(sourceText, decl.getFullStart());
-  if (!ranges || ranges.length === 0) return null;
-  for (let i = ranges.length - 1; i >= 0; i--) {
-    const r = ranges[i];
-    const slice = sourceText.slice(r.pos, r.end);
-    if (slice.startsWith('/**')) return slice;
-  }
-  return null;
-}
-
 function getDoc(sym) {
-  // Prefer raw source extraction to keep mid-prose `@` sequences intact.
-  const decl = sym.valueDeclaration ?? sym.declarations?.[0];
-  const raw = getRawJsDoc(decl);
-  if (raw) {
-    const txt = rawDescFromJsDocText(raw);
-    if (txt) return txt;
-  }
   return ts.displayPartsToString(sym.getDocumentationComment(checker)).trim();
 }
 
