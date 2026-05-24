@@ -56,7 +56,7 @@ internal class BundleValidationService : IBundleValidationService
             errors.Add(new BundleValidationError(
                 "Architecture",
                 "All input folders contain architecture-neutral binaries. A bundle requires at least one architecture-specific slice.",
-                architectures.ToList()));
+                inputFolders.Select((f, i) => $"{f.Name}: {architectures[i]}").ToList()));
         }
     }
 
