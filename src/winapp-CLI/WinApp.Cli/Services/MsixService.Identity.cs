@@ -130,6 +130,9 @@ internal partial class MsixService
         {
             taskContext.AddDebugMessage($"{UiSymbols.Note} MSBuild-generated manifest detected");
 
+            // Snapshot the previous registered manifest BEFORE the copy/sync overwrites it (issue #537).
+            var previousManifestBytes = TryReadExistingLayoutManifestBytes(outputAppXDirectory);
+
             // Look for a .build.appxrecipe file in the input directory
             var recipeFile = inputDirectory.EnumerateFiles("*.build.appxrecipe", SearchOption.TopDirectoryOnly).FirstOrDefault();
 
@@ -151,19 +154,25 @@ internal partial class MsixService
             var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
 
+            // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
+            // ManifestHelper.FindManifest already probes both canonical filenames; if it
+            // returns a non-existent FileInfo, downstream RegisterLooseLayoutPackageAsync
+            // will surface the missing-manifest error.
+            var registrationManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+
+            var skipResult = TrySkipRegistration(
+                identity.PackageName, identity.Publisher, identity.ApplicationId,
+                previousManifestBytes, registrationManifest, outputAppXDirectory,
+                clean, taskContext, cancellationToken);
+            if (skipResult is not null)
+            {
+                return skipResult;
+            }
+
             // Unregister any existing package first (preserving app data by default)
             await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
 
             // Register from the AppX layout directory
-            var registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "AppxManifest.xml"));
-            if (!registrationManifest.Exists)
-            {
-                registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "Package.appxmanifest"));
-            }
-            if (!registrationManifest.Exists)
-            {
-                registrationManifest = new FileInfo(Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml"));
-            }
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);
 
             return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
@@ -175,6 +184,9 @@ internal partial class MsixService
         {
             outputAppXDirectory.Create();
         }
+
+        // Snapshot the previously-registered manifest BEFORE Sync overwrites it (issue #537).
+        var previousRawManifestBytes = TryReadExistingLayoutManifestBytes(outputAppXDirectory);
 
         SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
 
@@ -275,6 +287,16 @@ internal partial class MsixService
 
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
+
+            // See MSBuild branch above for the rationale (issue #537).
+            var skipResult = TrySkipRegistration(
+                identity.PackageName, identity.Publisher, identity.ApplicationId,
+                previousRawManifestBytes, copiedAppxManifestPath, outputAppXDirectory,
+                clean, taskContext, cancellationToken);
+            if (skipResult is not null)
+            {
+                return skipResult;
+            }
 
             // Unregister any existing package first (preserving app data by default)
             await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
