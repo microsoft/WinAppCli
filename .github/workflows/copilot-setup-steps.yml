@@ -1,0 +1,61 @@
+name: "Copilot Setup Steps"
+
+# Run automatically when this file changes, and allow manual runs from the Actions tab
+# so we can smoke-test the setup before merging.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # Job name MUST be `copilot-setup-steps` or Copilot will not pick it up.
+  copilot-setup-steps:
+    # winappcli is a Windows-only toolchain (net10.0-windows10.0.19041.0, NativeAOT
+    # win-x64/win-arm64, MSIX packaging, Pester sample tests). The default Ubuntu
+    # agent image cannot build or test this repo, so we switch to Windows.
+    #
+    # NOTE: The Copilot integrated firewall is not compatible with Windows runners.
+    # It must be disabled in Settings -> Copilot -> Coding agent -> Firewall policy
+    # for agent tasks to have network access.
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # Required for MSIX / sparse-package work. `windows-latest` images usually
+      # have this on already, but it's cheap insurance.
+      - name: Enable Developer Mode
+        shell: cmd
+        run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+
+      - name: Restore .NET dependencies
+        run: dotnet restore src/winapp-CLI/winapp.sln
+
+      - name: Restore npm dependencies
+        working-directory: src/winapp-npm
+        run: npm ci
+
+      # Warm the build cache with a CLI-only Debug build. We deliberately do NOT
+      # run the full build-cli.ps1 here — MSIX/NuGet/sample-test packaging would
+      # eat most of the 30 min budget. The agent can run the full script on demand.
+      - name: Warm CLI build
+        run: dotnet build src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Debug --no-restore

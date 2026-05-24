@@ -21,10 +21,12 @@ internal class UpdateNotificationService(
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/winappcli/releases/latest";
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
+    private const int MaxReasonableFutureMajorDelta = 20;
     private static readonly TimeSpan FirstRunRefreshTimeout = TimeSpan.FromMilliseconds(250);
 
     // For testing only — when true, skips the fire-and-forget background network refresh
     internal bool SkipBackgroundRefreshForTesting;
+    internal Func<string> CurrentVersionProvider { get; set; } = VersionHelper.GetVersionString;
 
     // The console used for upgrade notices. Defaults to stderr so scripted commands
     // (e.g. get-winapp-path, --version) are never corrupted. Tests can override to capture output.
@@ -50,9 +52,19 @@ internal class UpdateNotificationService(
             var cacheFile = GetUpdateCheckFile();
             var cache = ReadCache(cacheFile);
 
-            // Show notice if a newer version is cached and not yet shown today
+            var currentVersion = CurrentVersionProvider();
+
+            // Paranoia: discard cached versions that look like test artifacts (e.g., 99.0.0, 999.0.0)
+            if (!string.IsNullOrEmpty(cache.LatestVersion) && IsUnreasonableVersion(cache.LatestVersion, currentVersion))
+            {
+                logger.LogDebug("Discarded unreasonable cached update version {Version}", cache.LatestVersion);
+                cache = cache with { LastCheck = null, LatestVersion = "", LastShownDate = "" };
+                WriteCacheFile(cacheFile, cache);
+            }
+
+            // Show notice if a newer version is cached and not yet shown today.
             if (!string.IsNullOrEmpty(cache.LatestVersion)
-                && IsNewerVersion(cache.LatestVersion, VersionHelper.GetVersionString())
+                && IsNewerVersion(cache.LatestVersion, currentVersion)
                 && cache.LastShownDate != DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             {
                 DisplayUpdateNotification(cache.LatestVersion);
@@ -172,29 +184,62 @@ internal class UpdateNotificationService(
         NotificationConsole.MarkupLine($"[yellow]v{Markup.Escape(newVersion)} is available. To update, {Markup.Escape(upgradeHint)}.[/]");
     }
 
-    internal static bool IsNewerVersion(string latest, string current)
+    /// <summary>
+    /// Parses a SemVer-like version string into its core <see cref="Version"/> and optional prerelease suffix.
+    /// Handles v-prefix, build metadata (+...), and prerelease (-...) in a single pass.
+    /// </summary>
+    private static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
     {
-        static bool TryParseSemVer(string value, out Version coreVersion, out string? prerelease)
+        coreVersion = new Version(0, 0);
+        prerelease = null;
+
+        if (value.StartsWith('v') || value.StartsWith('V'))
         {
-            coreVersion = new Version(0, 0);
-            prerelease = null;
-
-            var plusIdx = value.IndexOf('+');
-            if (plusIdx >= 0)
-            {
-                value = value[..plusIdx];
-            }
-
-            var dashIdx = value.IndexOf('-');
-            if (dashIdx >= 0)
-            {
-                prerelease = value[(dashIdx + 1)..];
-                value = value[..dashIdx];
-            }
-
-            return Version.TryParse(value, out coreVersion!);
+            value = value[1..];
         }
 
+        var plusIdx = value.IndexOf('+');
+        if (plusIdx >= 0)
+        {
+            value = value[..plusIdx];
+        }
+
+        var dashIdx = value.IndexOf('-');
+        if (dashIdx >= 0)
+        {
+            prerelease = value[(dashIdx + 1)..];
+            value = value[..dashIdx];
+        }
+
+        return Version.TryParse(value, out coreVersion!);
+    }
+
+    /// <summary>
+    /// Returns the core version without prerelease suffix or build metadata.
+    /// E.g., "0.3.2-prerelease.73+abc" → "0.3.2"
+    /// </summary>
+    internal static string GetCoreVersion(string version)
+    {
+        return TryParseSemVer(version, out var core, out _) ? core.ToString() : version;
+    }
+
+    /// <summary>
+    /// Detects unreasonably high cached version numbers that likely came from test fixtures
+    /// (e.g., 99.0.0, 999.0.0) by comparing against the current CLI major version.
+    /// </summary>
+    internal static bool IsUnreasonableVersion(string version, string currentVersion)
+    {
+        if (!TryParseSemVer(version, out var cachedCore, out _)
+            || !TryParseSemVer(currentVersion, out var currentCore, out _))
+        {
+            return false;
+        }
+
+        return cachedCore.Major > currentCore.Major + MaxReasonableFutureMajorDelta;
+    }
+
+    internal static bool IsNewerVersion(string latest, string current)
+    {
         if (!TryParseSemVer(latest, out var latestCore, out var latestPre))
         {
             return false;
