@@ -97,8 +97,14 @@ internal class InitCommand : Command, IShortDescription
             }
             else if (useDefaults)
             {
-                // --use-defaults without explicit directory: search and error with guidance
-                selectedDirectory = await DetectAndErrorForDefaultsAsync(baseDirectory, cancellationToken);
+                // --use-defaults without explicit directory: use cwd, but warn if no project detected
+                var detected = projectDetectionService.DetectProjectAt(baseDirectory);
+                if (detected == null)
+                {
+                    logger.LogWarning("{Warning}  No compatible project detected in current directory.",
+                        UiSymbols.Warning);
+                }
+                selectedDirectory = baseDirectory;
             }
             else
             {
@@ -139,50 +145,10 @@ internal class InitCommand : Command, IShortDescription
             if (result == 0 && selectedDirectory.FullName != baseDirectory.FullName)
             {
                 var relativePath = Path.GetRelativePath(baseDirectory.FullName, selectedDirectory.FullName);
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Run [blue]cd {relativePath}[/] to use further winapp commands in your project directory.");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Run [blue]cd \"{relativePath}\"[/] to use further winapp commands in your project directory.");
             }
 
             return result;
-        }
-
-        /// <summary>
-        /// When --use-defaults is set without an explicit directory argument, searches for projects
-        /// and errors out with guidance on which directory to pass.
-        /// </summary>
-        private async Task<DirectoryInfo?> DetectAndErrorForDefaultsAsync(
-            DirectoryInfo searchRoot,
-            CancellationToken cancellationToken)
-        {
-            const int maxProjects = 10;
-
-            var results = await projectDetectionService.DetectProjectsAsync(
-                searchRoot, maxProjects, progress: null, cancellationToken);
-
-            if (results.Count == 0)
-            {
-                logger.LogError("{Error} No compatible projects found. Provide a project directory: winapp init <path-to-project> --use-defaults",
-                    UiSymbols.Error);
-                return null;
-            }
-
-            // If the only result is at the search root, use it directly
-            if (results.Count == 1 && results[0].DisplayPath == ".")
-            {
-                logger.LogInformation("{Check} {TypeLabel} project detected ({FilePath})",
-                    UiSymbols.Check, results[0].TypeLabel, results[0].DisplayFilePath);
-                return results[0].Directory;
-            }
-
-            // Projects found but user didn't specify which one
-            logger.LogError("{Error} --use-defaults requires an explicit project directory. Detected projects:",
-                UiSymbols.Error);
-            foreach (var project in results)
-            {
-                logger.LogError("  {Bullet} {TypeLabel} project ({FilePath})",
-                    UiSymbols.Bullet, project.TypeLabel, project.DisplayFilePath);
-            }
-            logger.LogError("Run: winapp init <path-to-project> --use-defaults");
-            return null;
         }
 
         /// <summary>

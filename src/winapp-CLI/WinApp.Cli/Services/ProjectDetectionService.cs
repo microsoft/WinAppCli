@@ -325,40 +325,51 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
             return;
         }
 
-        foreach (var subDir in subdirs)
+        try
         {
-            try
+            foreach (var subDir in subdirs)
             {
-                // Skip hidden directories (starting with .) that aren't in the explicit ignore list
-                if (subDir.Name.StartsWith('.') && !ignoredNames.Contains(subDir.Name))
+                try
                 {
-                    logger.LogDebug("Skipping hidden directory: {Path}", subDir.FullName);
-                    continue;
-                }
+                    // Skip hidden directories (starting with .) that aren't in the explicit ignore list
+                    if (subDir.Name.StartsWith('.') && !ignoredNames.Contains(subDir.Name))
+                    {
+                        logger.LogDebug("Skipping hidden directory: {Path}", subDir.FullName);
+                        continue;
+                    }
 
-                if (ignoredNames.Contains(subDir.Name))
+                    if (ignoredNames.Contains(subDir.Name))
+                    {
+                        logger.LogDebug("Skipping ignored directory: {Path}", subDir.FullName);
+                        continue;
+                    }
+
+                    // Skip reparse points (symlinks, junctions) to avoid cycles
+                    if (subDir.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        logger.LogDebug("Skipping reparse point: {Path}", subDir.FullName);
+                        continue;
+                    }
+
+                    queue.Enqueue(subDir);
+                }
+                catch (UnauthorizedAccessException)
                 {
-                    logger.LogDebug("Skipping ignored directory: {Path}", subDir.FullName);
-                    continue;
+                    logger.LogDebug("Cannot access directory: {Path}", subDir.FullName);
                 }
-
-                // Skip reparse points (symlinks, junctions) to avoid cycles
-                if (subDir.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                catch (IOException ex)
                 {
-                    logger.LogDebug("Skipping reparse point: {Path}", subDir.FullName);
-                    continue;
+                    logger.LogDebug("I/O error accessing {Path}: {Message}", subDir.FullName, ex.Message);
                 }
-
-                queue.Enqueue(subDir);
             }
-            catch (UnauthorizedAccessException)
-            {
-                logger.LogDebug("Cannot access directory: {Path}", subDir.FullName);
-            }
-            catch (IOException ex)
-            {
-                logger.LogDebug("I/O error accessing {Path}: {Message}", subDir.FullName, ex.Message);
-            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            logger.LogDebug("Cannot access directory during enumeration: {Path}", parent.FullName);
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug("I/O error during enumeration of {Path}: {Message}", parent.FullName, ex.Message);
         }
     }
 

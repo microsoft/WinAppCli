@@ -215,17 +215,17 @@ public class InitCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_UseDefaults_NoProject_NoDirectory_ErrorsWithGuidance()
+    public async Task InitCommand_UseDefaults_NoProject_NoDirectory_UsesCurrentDirectory()
     {
         // Arrange — empty directory, no project markers, no explicit directory argument
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--use-defaults", "--config-only" };
 
-        // Act — no prompts expected with --use-defaults
+        // Act — --use-defaults without explicit directory uses cwd directly
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
-        // Assert — should error because --use-defaults without explicit directory requires a detectable project
-        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when no project is detected and no directory is specified");
+        // Assert — should succeed using cwd (preserves pre-existing behavior)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd even when no project is detected");
     }
 
     [TestMethod]
@@ -253,9 +253,9 @@ public class InitCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_UseDefaults_MultipleProjects_ErrorsWithList()
+    public async Task InitCommand_UseDefaults_MultipleProjects_UsesCurrentDirectory()
     {
-        // Arrange — create two project markers in subdirectories so detection finds them
+        // Arrange — create two project markers in subdirectories so detection would find them
         var subDir1 = _tempDirectory.CreateSubdirectory("app1");
         File.WriteAllText(Path.Combine(subDir1.FullName, "App1.csproj"), """
         <Project Sdk="Microsoft.NET.Sdk">
@@ -266,17 +266,14 @@ public class InitCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "");
 
         var initCommand = GetRequiredService<InitCommand>();
-        // --use-defaults without explicit directory
+        // --use-defaults without explicit directory — uses cwd directly
         var args = new[] { "--use-defaults", "--config-only" };
 
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
-        // Assert — should error because multiple projects require explicit directory
-        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when multiple projects are detected");
-        var output = ConsoleStdErr.ToString();
-        Assert.Contains("--use-defaults requires an explicit project directory", output,
-            "Error should explain that --use-defaults needs an explicit path");
+        // Assert — should succeed using cwd (no detection gating with --use-defaults)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd regardless of detected projects");
     }
 
     [TestMethod]
@@ -324,7 +321,7 @@ public class InitCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InitCommand_NoArgs_MultipleProjects_ExitCode0_WhenCurrentDirFallbackAvailable()
+    public async Task InitCommand_NoArgs_MultipleProjects_UseDefaults_UsesCurrentDirectory()
     {
         // Arrange — create two projects in nested directories; the current dir has no project
         var subDir1 = _tempDirectory.CreateSubdirectory("app1");
@@ -333,20 +330,13 @@ public class InitCommandTests : BaseCommandTests
         File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "[package]\nname = \"app2\"");
 
         var initCommand = GetRequiredService<InitCommand>();
-        // NOTE: SelectionPrompt requires exclusive terminal mode which TestConsole doesn't support.
-        // Use --use-defaults to test the error path instead.
         var args = new[] { "--use-defaults", "--config-only" };
 
-        // Act — --use-defaults without explicit dir and multiple projects → error
+        // Act — --use-defaults without explicit dir uses cwd directly
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
-        // Assert — should error because multiple projects require explicit directory
-        Assert.AreEqual(1, exitCode, "Init should fail with --use-defaults when multiple projects are detected");
-        var output = ConsoleStdErr.ToString();
-        Assert.Contains("--use-defaults requires an explicit project directory", output,
-            "Error should explain that --use-defaults needs an explicit path");
-        Assert.Contains("app1", output, "Error should list detected projects");
-        Assert.Contains("app2", output, "Error should list detected projects");
+        // Assert — should succeed using cwd (no detection gating)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd regardless of multiple detected projects");
     }
 
     [TestMethod]
