@@ -103,45 +103,47 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         var displayPath = GetRelativeDisplayPath(directory, searchRoot);
 
         // Tauri: check immediate subdirectories for tauri.conf.json
-        if (IsTauriProject(directory))
+        var tauriConf = FindTauriConfFile(directory);
+        if (tauriConf != null)
         {
-            return new DetectedProject(DetectedProjectType.Tauri, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.Tauri, directory, displayPath, tauriConf);
         }
 
         // Electron: package.json with electron dependency (check before generic markers)
         if (IsElectronProject(directory))
         {
-            return new DetectedProject(DetectedProjectType.Electron, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.Electron, directory, displayPath, "package.json");
         }
 
         // Flutter: pubspec.yaml
         if (File.Exists(Path.Combine(directory.FullName, "pubspec.yaml")))
         {
-            return new DetectedProject(DetectedProjectType.Flutter, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.Flutter, directory, displayPath, "pubspec.yaml");
         }
 
         // .NET: *.csproj (only executable, non-test projects)
-        if (HasExecutableCsproj(directory))
+        var csprojName = FindExecutableCsproj(directory);
+        if (csprojName != null)
         {
-            return new DetectedProject(DetectedProjectType.Dotnet, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.Dotnet, directory, displayPath, csprojName);
         }
 
         // Rust: Cargo.toml
         if (File.Exists(Path.Combine(directory.FullName, "Cargo.toml")))
         {
-            return new DetectedProject(DetectedProjectType.Rust, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.Rust, directory, displayPath, "Cargo.toml");
         }
 
         // C++: CMakeLists.txt
         if (File.Exists(Path.Combine(directory.FullName, "CMakeLists.txt")))
         {
-            return new DetectedProject(DetectedProjectType.CPP, directory, displayPath);
+            return new DetectedProject(DetectedProjectType.CPP, directory, displayPath, "CMakeLists.txt");
         }
 
         return null;
     }
 
-    private static bool IsTauriProject(DirectoryInfo directory)
+    private static string? FindTauriConfFile(DirectoryInfo directory)
     {
         try
         {
@@ -155,7 +157,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
 
                 if (File.Exists(Path.Combine(subDir.FullName, "tauri.conf.json")))
                 {
-                    return true;
+                    return $"{subDir.Name}/tauri.conf.json";
                 }
             }
         }
@@ -168,7 +170,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
             // Skip directories with I/O errors
         }
 
-        return false;
+        return null;
     }
 
     private static bool IsElectronProject(DirectoryInfo directory)
@@ -226,11 +228,10 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
     }
 
     /// <summary>
-    /// Returns true if the directory contains at least one .csproj that is an executable
-    /// (OutputType = Exe or WinExe) and is not a test project.
-    /// Library projects and test projects are excluded from init detection.
+    /// Returns the file name of the first executable .csproj in the directory,
+    /// or null if none is found. Only executable (OutputType = Exe or WinExe), non-test projects qualify.
     /// </summary>
-    internal static bool HasExecutableCsproj(DirectoryInfo directory)
+    internal static string? FindExecutableCsproj(DirectoryInfo directory)
     {
         IEnumerable<FileInfo> csprojFiles;
         try
@@ -239,22 +240,22 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         }
         catch (UnauthorizedAccessException)
         {
-            return false;
+            return null;
         }
         catch (IOException)
         {
-            return false;
+            return null;
         }
 
         foreach (var csproj in csprojFiles)
         {
             if (IsExecutableNonTestProject(csproj))
             {
-                return true;
+                return csproj.Name;
             }
         }
 
-        return false;
+        return null;
     }
 
     private static bool IsExecutableNonTestProject(FileInfo csprojFile)

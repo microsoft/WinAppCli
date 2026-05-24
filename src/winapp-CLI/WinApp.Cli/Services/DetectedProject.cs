@@ -9,12 +9,20 @@ namespace WinApp.Cli.Services;
 /// <param name="Type">The detected project type</param>
 /// <param name="Directory">The root directory of the detected project</param>
 /// <param name="DisplayPath">Relative path from the search root for display purposes</param>
-internal sealed record DetectedProject(DetectedProjectType Type, DirectoryInfo Directory, string DisplayPath)
+/// <param name="ProjectFileName">The primary project file name (e.g., "MyApp.csproj", "package.json")</param>
+internal sealed record DetectedProject(DetectedProjectType Type, DirectoryInfo Directory, string DisplayPath, string ProjectFileName)
 {
     /// <summary>
-    /// Returns a human-readable description like "Tauri project at src/my-app"
+    /// Returns the relative path to the project file with ./ prefix, e.g. "./src/MyApp/MyApp.csproj"
     /// </summary>
-    public string ToDisplayString() => $"{TypeLabel} project at {DisplayPath}";
+    public string DisplayFilePath => DisplayPath == "."
+        ? $"./{ProjectFileName}"
+        : $"./{DisplayPath}/{ProjectFileName}";
+
+    /// <summary>
+    /// Returns a human-readable description like ".NET project (./src/MyApp/MyApp.csproj)"
+    /// </summary>
+    public string ToDisplayString() => $"{TypeLabel} project ({DisplayFilePath})";
 
     /// <summary>
     /// Returns the user-friendly label for the project type.

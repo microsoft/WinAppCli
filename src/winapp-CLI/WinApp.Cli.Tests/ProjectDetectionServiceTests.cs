@@ -444,19 +444,19 @@ public class ProjectDetectionServiceTests
     [TestMethod]
     public void DetectedProject_ToDisplayString()
     {
-        var project = new DetectedProject(DetectedProjectType.Tauri, Root, "src/my-app");
-        Assert.AreEqual("Tauri project at src/my-app", project.ToDisplayString());
+        var project = new DetectedProject(DetectedProjectType.Tauri, Root, "src/my-app", "src-tauri/tauri.conf.json");
+        Assert.AreEqual("Tauri project (./src/my-app/src-tauri/tauri.conf.json)", project.ToDisplayString());
     }
 
     [TestMethod]
     public void DetectedProject_TypeLabel_AllTypes()
     {
-        Assert.AreEqual("Tauri", new DetectedProject(DetectedProjectType.Tauri, Root, ".").TypeLabel);
-        Assert.AreEqual("Electron", new DetectedProject(DetectedProjectType.Electron, Root, ".").TypeLabel);
-        Assert.AreEqual("Flutter", new DetectedProject(DetectedProjectType.Flutter, Root, ".").TypeLabel);
-        Assert.AreEqual(".NET", new DetectedProject(DetectedProjectType.Dotnet, Root, ".").TypeLabel);
-        Assert.AreEqual("Rust", new DetectedProject(DetectedProjectType.Rust, Root, ".").TypeLabel);
-        Assert.AreEqual("C++", new DetectedProject(DetectedProjectType.CPP, Root, ".").TypeLabel);
+        Assert.AreEqual("Tauri", new DetectedProject(DetectedProjectType.Tauri, Root, ".", "src-tauri/tauri.conf.json").TypeLabel);
+        Assert.AreEqual("Electron", new DetectedProject(DetectedProjectType.Electron, Root, ".", "package.json").TypeLabel);
+        Assert.AreEqual("Flutter", new DetectedProject(DetectedProjectType.Flutter, Root, ".", "pubspec.yaml").TypeLabel);
+        Assert.AreEqual(".NET", new DetectedProject(DetectedProjectType.Dotnet, Root, ".", "MyApp.csproj").TypeLabel);
+        Assert.AreEqual("Rust", new DetectedProject(DetectedProjectType.Rust, Root, ".", "Cargo.toml").TypeLabel);
+        Assert.AreEqual("C++", new DetectedProject(DetectedProjectType.CPP, Root, ".", "CMakeLists.txt").TypeLabel);
     }
 
     // --- Edge cases ---

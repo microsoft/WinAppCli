@@ -139,8 +139,7 @@ internal class InitCommand : Command, IShortDescription
             if (result == 0 && selectedDirectory.FullName != baseDirectory.FullName)
             {
                 var relativePath = Path.GetRelativePath(baseDirectory.FullName, selectedDirectory.FullName);
-                logger.LogInformation("{Info} Run [blue]cd {Path}[/] to use further winapp commands in your project directory.",
-                    UiSymbols.Info, relativePath);
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Run [blue]cd {relativePath}[/] to use further winapp commands in your project directory.");
             }
 
             return result;
@@ -169,8 +168,8 @@ internal class InitCommand : Command, IShortDescription
             // If the only result is at the search root, use it directly
             if (results.Count == 1 && results[0].DisplayPath == ".")
             {
-                logger.LogInformation("{Check} {TypeLabel} project detected in current directory",
-                    UiSymbols.Check, results[0].TypeLabel);
+                logger.LogInformation("{Check} {TypeLabel} project detected ({FilePath})",
+                    UiSymbols.Check, results[0].TypeLabel, results[0].DisplayFilePath);
                 return results[0].Directory;
             }
 
@@ -179,8 +178,8 @@ internal class InitCommand : Command, IShortDescription
                 UiSymbols.Error);
             foreach (var project in results)
             {
-                logger.LogError("  {Bullet} {TypeLabel} project at {Path}",
-                    UiSymbols.Bullet, project.TypeLabel, project.DisplayPath);
+                logger.LogError("  {Bullet} {TypeLabel} project ({FilePath})",
+                    UiSymbols.Bullet, project.TypeLabel, project.DisplayFilePath);
             }
             logger.LogError("Run: winapp init <path-to-project> --use-defaults");
             return null;
@@ -220,12 +219,6 @@ internal class InitCommand : Command, IShortDescription
             }
 
             // Handle results based on count
-            if (results.Count >= maxProjects)
-            {
-                logger.LogWarning("{Warning} Search stopped at {Max} projects. If your project wasn't found, provide a directory argument: winapp init <path-to-project>",
-                    UiSymbols.Warning, maxProjects);
-            }
-
             if (results.Count == 0)
             {
                 return await HandleNoProjectsFoundAsync(searchRoot, cancellationToken);
@@ -234,8 +227,8 @@ internal class InitCommand : Command, IShortDescription
             // If the only result is at the search root, use it directly
             if (results.Count == 1 && results[0].DisplayPath == ".")
             {
-                logger.LogInformation("{Check} {TypeLabel} project detected in current directory",
-                    UiSymbols.Check, results[0].TypeLabel);
+                logger.LogInformation("{Check} {TypeLabel} project detected ({FilePath})",
+                    UiSymbols.Check, results[0].TypeLabel, results[0].DisplayFilePath);
                 return results[0].Directory;
             }
 
@@ -244,7 +237,7 @@ internal class InitCommand : Command, IShortDescription
                 return await HandleSingleProjectAsync(results[0], cancellationToken);
             }
 
-            return await HandleMultipleProjectsAsync(results, searchRoot, cancellationToken);
+            return await HandleMultipleProjectsAsync(results, searchRoot, results.Count >= maxProjects, cancellationToken);
         }
 
         /// <summary>
@@ -260,26 +253,22 @@ internal class InitCommand : Command, IShortDescription
 
             if (detected != null)
             {
-                logger.LogInformation("{Check} {TypeLabel} project detected at {Path}",
-                    UiSymbols.Check, detected.TypeLabel, targetDirectory.FullName);
+                logger.LogInformation("{Check} {TypeLabel} project detected ({FilePath})",
+                    UiSymbols.Check, detected.TypeLabel, detected.DisplayFilePath);
                 return targetDirectory;
             }
 
             // No project detected at the specified path
-            logger.LogWarning("{Warning} No compatible project detected at {Path}",
-                UiSymbols.Warning, targetDirectory.FullName);
-
             if (useDefaults)
             {
-                logger.LogWarning("{Warning} Proceeding anyway (--use-defaults). The CLI might not function as expected.",
-                    UiSymbols.Warning);
+                logger.LogWarning("{Warning} No compatible project detected at {Path}. Proceeding anyway (--use-defaults).",
+                    UiSymbols.Warning, targetDirectory.FullName);
                 return targetDirectory;
             }
 
             var proceed = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
-                    $"[yellow]No compatible project was detected at this path.[/] Initialize winapp here anyway? " +
-                    $"([dim]The CLI might not function as expected[/])")
+                    $"[yellow]No compatible project was detected at this path.[/] Initialize winapp here anyway?")
                 {
                     DefaultValue = false
                 },
@@ -298,13 +287,9 @@ internal class InitCommand : Command, IShortDescription
             DirectoryInfo searchRoot,
             CancellationToken cancellationToken)
         {
-            logger.LogWarning("{Warning} No compatible projects found in {Path}",
-                UiSymbols.Warning, searchRoot.FullName);
-
             var proceed = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
-                    $"[yellow]No compatible projects were found.[/] Initialize winapp here anyway? " +
-                    $"([dim]The CLI might not function as expected[/])")
+                    $"[yellow]No compatible projects were found.[/] Initialize winapp here anyway?")
                 {
                     DefaultValue = false
                 },
@@ -325,7 +310,7 @@ internal class InitCommand : Command, IShortDescription
         {
             var confirm = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
-                    $"Found [green]{Markup.Escape(project.TypeLabel)}[/] project at [blue]{Markup.Escape(project.DisplayPath)}[/]. Initialize with winapp?"),
+                    $"Found [green]{Markup.Escape(project.TypeLabel)}[/] project at [blue]{Markup.Escape(project.DisplayFilePath)}[/]. Initialize with winapp?"),
                 cancellationToken);
 
             if (!confirm)
@@ -334,45 +319,48 @@ internal class InitCommand : Command, IShortDescription
                 return null;
             }
 
-            logger.LogInformation("{Check} Selected {TypeLabel} project at {Path}",
-                UiSymbols.Check, project.TypeLabel, project.DisplayPath);
+            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Selected [green]{project.TypeLabel} project ({project.DisplayFilePath})[/]");
             return project.Directory;
         }
 
         private async Task<DirectoryInfo?> HandleMultipleProjectsAsync(
             IReadOnlyList<DetectedProject> projects,
             DirectoryInfo searchRoot,
+            bool searchLimitReached,
             CancellationToken cancellationToken)
         {
             var choices = projects.Select(p =>
-                $"{Markup.Escape(p.TypeLabel)} project at {Markup.Escape(p.DisplayPath)}").ToList();
+                $"{Markup.Escape(p.TypeLabel)} project ({Markup.Escape(p.DisplayFilePath)})").ToList();
 
             // Always offer the current directory as a fallback option
             var currentDirIsListed = projects.Any(p => p.DisplayPath == ".");
             if (!currentDirIsListed)
             {
-                choices.Add(". (current directory — no project detected)");
+                choices.Add("Current directory (./) — no project detected");
             }
 
-            ansiConsole.WriteLine("Which project would you like to initialize with winapp?");
-            var selected = await ansiConsole.PromptAsync(
-                new SelectionPrompt<string>()
-                    .AddChoices(choices),
-                cancellationToken);
+            var prompt = new SelectionPrompt<string>()
+                .Title("Which project would you like to initialize with winapp?")
+                .AddChoices(choices);
+
+            if (searchLimitReached)
+            {
+                prompt.Title("Which project would you like to initialize with winapp? [dim](If your project wasn't found, run: winapp init <path-to-project>)[/]");
+            }
+
+            var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
 
             var selectedIndex = choices.IndexOf(selected);
 
             // If the user picked the appended current-directory fallback
             if (!currentDirIsListed && selectedIndex == projects.Count)
             {
-                logger.LogWarning("{Warning} No compatible project was detected in the current directory. The CLI might not function as expected.",
-                    UiSymbols.Warning);
+                ansiConsole.MarkupLine("Which project would you like to initialize with winapp? [underline]Current directory (./)[/]");
                 return searchRoot;
             }
 
             var selectedProject = projects[selectedIndex];
-            logger.LogInformation("{Check} Selected {TypeLabel} project at {Path}",
-                UiSymbols.Check, selectedProject.TypeLabel, selectedProject.DisplayPath);
+            ansiConsole.MarkupLineInterpolated($"Which project would you like to initialize with winapp? [underline]{selectedProject.TypeLabel} project ({selectedProject.DisplayFilePath})[/]");
             return selectedProject.Directory;
         }
     }
