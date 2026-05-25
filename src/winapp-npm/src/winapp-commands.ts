@@ -365,7 +365,7 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 // ---------------------------------------------------------------------------
 
 export interface PackageOptions extends CommonOptions {
-  /** Input folder with package layout */
+  /** One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
   inputFolder: string;
   /** Path to signing certificate (will auto-sign if provided) */
   cert?: string;
@@ -381,7 +381,7 @@ export interface PackageOptions extends CommonOptions {
   manifest?: string;
   /** Package name (default: from manifest) */
   name?: string;
-  /** Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) */
+  /** Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. */
   output?: string;
   /** Publisher name for certificate generation */
   publisher?: string;

@@ -3,6 +3,7 @@
 
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
+using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
@@ -123,6 +124,112 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task CreateMsixBundleAsync_NoExecutableInFolder_ThrowsWithClearError()
+    {
+        // Arrange - folder with no .exe
+        var folder = _tempDirectory.CreateSubdirectory("no-exe-folder");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64"));
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "no executable found");
+        StringAssert.Contains(ex.Message, folder.FullName);
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_NoManifestInFolder_ThrowsFileNotFoundException()
+    {
+        // Arrange - folder with exe but no manifest
+        var folder = _tempDirectory.CreateSubdirectory("no-manifest-folder");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "Manifest file not found");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_RuntimeToolExeIsSkippedInAutoDetection_UsesRealExe()
+    {
+        // Arrange - folder with createdump.exe (runtime tool) and the real app exe
+        var folder = _tempDirectory.CreateSubdirectory("runtime-tool-folder");
+        // Put createdump.exe first alphabetically (c < t) to verify it's skipped
+        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64"));
+
+        var arm64Folder = CreateSliceFolder("slice-arm64", 0xAA64, "arm64");
+
+        // Act - should succeed because manifest specifies executable, so runtime tool filter 
+        // only affects the "last resort" fallback
+        var result = await _msixService.CreateMsixBundleAsync(
+            [folder, arm64Folder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            cancellationToken: TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual(2, result.Slices.Count);
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_OnlyRuntimeToolExeInFolder_ThrowsNoExecutableFound()
+    {
+        // Arrange - folder with ONLY runtime tool executables (no manifest exe reference)
+        var folder = _tempDirectory.CreateSubdirectory("only-runtime-tools");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
+        // Manifest does NOT reference an executable that exists
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+              <Identity Name="TestApp" Publisher="CN=TestPublisher" Version="1.0.0.0" ProcessorArchitecture="x64" />
+              <Dependencies>
+                <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+              </Dependencies>
+              <Capabilities>
+                <Capability Name="internetClient" />
+              </Capabilities>
+              <Applications>
+                <Application Id="App" Executable="MissingApp.exe" EntryPoint="Windows.FullTrustApplication">
+                  <uap:VisualElements DisplayName="TestApp" Description="Test" Square150x150Logo="logo.png" Square44x44Logo="logo.png" BackgroundColor="transparent" />
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "no executable found");
+    }
+
+    [TestMethod]
     public async Task CreateMsixBundleAsync_ValidationFails_ThrowsWithValidationErrors()
     {
         // Arrange
@@ -228,6 +335,60 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         Assert.AreEqual(explicitOutputPath.FullName, result.BundlePath.FullName);
         Assert.AreEqual(explicitOutputPath.FullName, _fakeBundleService.LastOutput!.FullName);
         Assert.IsTrue(result.BundlePath.Exists);
+    }
+
+    [TestMethod]
+    public async Task PackageCommand_DuplicateInputFolders_ReturnsNonZeroExitCode()
+    {
+        // Arrange
+        var folder = CreateSliceFolder("dupe-folder", 0x8664, "x64");
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var args = new[] { folder.FullName, folder.FullName, "--skip-pri" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, args);
+
+        // Assert
+        Assert.AreNotEqual(0, exitCode, "Should fail for duplicate input folders");
+        var output = ConsoleStdErr!.ToString();
+        StringAssert.Contains(output, "Duplicate input folder");
+    }
+
+    [TestMethod]
+    public async Task PackageCommand_BundleWithMsixExtension_ReturnsNonZeroExitCode()
+    {
+        // Arrange - two folders + .msix output (should require .msixbundle)
+        var x64Folder = CreateSliceFolder("ext-x64", 0x8664, "x64");
+        var arm64Folder = CreateSliceFolder("ext-arm64", 0xAA64, "arm64");
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var outputPath = Path.Combine(_tempDirectory.FullName, "output.msix");
+        var args = new[] { x64Folder.FullName, arm64Folder.FullName, "--output", outputPath, "--skip-pri" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, args);
+
+        // Assert
+        Assert.AreNotEqual(0, exitCode, "Should fail for .msix extension with bundle");
+        var output = ConsoleStdErr!.ToString();
+        StringAssert.Contains(output, "Cannot use .msix extension");
+    }
+
+    [TestMethod]
+    public async Task PackageCommand_SingleFolderWithMsixBundleExtension_ReturnsNonZeroExitCode()
+    {
+        // Arrange - one folder + .msixbundle output (should require .msix)
+        var folder = CreateSliceFolder("single-folder", 0x8664, "x64");
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var outputPath = Path.Combine(_tempDirectory.FullName, "output.msixbundle");
+        var args = new[] { folder.FullName, "--output", outputPath, "--skip-pri" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, args);
+
+        // Assert
+        Assert.AreNotEqual(0, exitCode, "Should fail for .msixbundle extension with single package");
+        var output = ConsoleStdErr!.ToString();
+        StringAssert.Contains(output, "Cannot use .msixbundle extension");
     }
 
     private DirectoryInfo CreateSliceFolder(string folderName, ushort machineType, string manifestArchitecture)

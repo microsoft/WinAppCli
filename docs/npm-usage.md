@@ -1,4 +1,6 @@
-<!-- mslearn: true -->
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -287,7 +289,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -295,7 +297,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -1216,7 +1218,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -1224,7 +1226,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |

@@ -163,7 +163,7 @@ winapp pack <input-folder> [input-folder...] [options]
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>_<version>_<arch>.msix`, falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix` when version/arch can't be determined)
+- `--output <filename>` - Output file name. For single packages: `<name>_<version>_<arch>.msix` (falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix`). For bundles: `<name>_<version>_<arch1>_<arch2>.msixbundle`.
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported; default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)

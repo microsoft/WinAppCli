@@ -177,6 +177,20 @@ internal partial class MsixService
                 outputFolder.Create();
             }
 
+            // --- Step 4b: Validate self-contained + neutral combination ---
+            if (selfContained)
+            {
+                var neutralSlices = sliceInfos.Where(s => string.Equals(s.Arch, "neutral", StringComparison.OrdinalIgnoreCase)).ToList();
+                if (neutralSlices.Count > 0)
+                {
+                    var neutralFolders = string.Join(", ", neutralSlices.Select(s => s.Folder.Name));
+                    throw new InvalidOperationException(
+                        $"Cannot use --self-contained with architecture-neutral slices ({neutralFolders}). " +
+                        "Self-contained runtime requires a specific architecture (x64, arm64, x86). " +
+                        "Either remove --self-contained or ensure all input folders contain architecture-specific binaries.");
+                }
+            }
+
             // --- Step 5: Pack each slice serially ---
             var intermediateFiles = new List<FileInfo>();
             var sliceResults = new List<BundleSliceInfo>();
@@ -277,8 +291,10 @@ internal partial class MsixService
             }
         }
 
-        // Last resort: find first .exe in the folder root
-        var firstExe = folder.EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly).FirstOrDefault();
+        // Last resort: find first .exe in the folder root (excluding runtime tools)
+        var firstExe = folder.EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly)
+            .Where(f => !IsRuntimeToolExecutable(f.Name))
+            .FirstOrDefault();
         if (firstExe != null)
         {
             taskContext.AddDebugMessage($"Auto-detected executable: {firstExe.Name} in {folder.Name}");
