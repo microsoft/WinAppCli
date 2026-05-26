@@ -293,6 +293,158 @@ test('can add a Badge Logo visual asset', async () => {
     }
 });
 
+test('can add Wide 310x150 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const addBtn = card.locator('.add-visual-asset-btn');
+    if (await addBtn.count() > 0 && await addBtn.isVisible()) {
+        await addBtn.click();
+        await ctx.page.waitForTimeout(300);
+        const item = card.locator('.add-visual-asset-item:has-text("Wide 310x150 Logo")');
+        if (await item.count() > 0) {
+            await item.click();
+            await ctx.page.waitForTimeout(1_000);
+            const input = card.locator('input[data-field-name="visualElements.wide310x150Logo"]');
+            await expect(input).toBeVisible();
+            await input.fill('Assets\\Wide310x150Logo.png');
+            await input.dispatchEvent('input');
+            await waitForDebounce(ctx.page);
+            await ctx.page.waitForTimeout(1_000);
+            const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+            expect(xml).toContain('Wide310x150Logo.png');
+            expect(xml).toContain('DefaultTile');
+        }
+    }
+});
+
+test('can add Square 71x71 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const addBtn = card.locator('.add-visual-asset-btn');
+    if (await addBtn.count() > 0 && await addBtn.isVisible()) {
+        await addBtn.click();
+        await ctx.page.waitForTimeout(300);
+        const item = card.locator('.add-visual-asset-item:has-text("Square 71x71 Logo")');
+        if (await item.count() > 0) {
+            await item.click();
+            await ctx.page.waitForTimeout(1_000);
+            const input = card.locator('input[data-field-name="visualElements.square71x71Logo"]');
+            await expect(input).toBeVisible();
+            await input.fill('Assets\\Square71x71Logo.png');
+            await input.dispatchEvent('input');
+            await waitForDebounce(ctx.page);
+            await ctx.page.waitForTimeout(1_000);
+            const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+            expect(xml).toContain('Square71x71Logo.png');
+            expect(xml).toContain('DefaultTile');
+        }
+    }
+});
+
+test('can add Square 310x310 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const addBtn = card.locator('.add-visual-asset-btn');
+    if (await addBtn.count() > 0 && await addBtn.isVisible()) {
+        await addBtn.click();
+        await ctx.page.waitForTimeout(300);
+        const item = card.locator('.add-visual-asset-item:has-text("Square 310x310 Logo")');
+        if (await item.count() > 0) {
+            await item.click();
+            await ctx.page.waitForTimeout(1_000);
+            const input = card.locator('input[data-field-name="visualElements.square310x310Logo"]');
+            await expect(input).toBeVisible();
+            await input.fill('Assets\\Square310x310Logo.png');
+            await input.dispatchEvent('input');
+            await waitForDebounce(ctx.page);
+            await ctx.page.waitForTimeout(1_000);
+            const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+            expect(xml).toContain('Square310x310Logo.png');
+            expect(xml).toContain('DefaultTile');
+        }
+    }
+});
+
+test('can remove Badge Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const removeBtn = card.locator('.optional-assets-list .btn-remove-field[data-field-name="visualElements.badgeLogo"]');
+    if (await removeBtn.count() > 0 && await removeBtn.isVisible()) {
+        await removeBtn.click();
+        await ctx.page.waitForTimeout(1_500);
+
+        const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+        expect(xml).not.toContain('BadgeLogo.png');
+        expect(xml).not.toContain('LockScreen');
+
+        // The input should no longer be visible
+        const input = card.locator('input[data-field-name="visualElements.badgeLogo"]');
+        await expect(input).not.toBeVisible();
+    }
+});
+
+test('can remove Wide 310x150 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const removeBtn = card.locator('.optional-assets-list .btn-remove-field[data-field-name="visualElements.wide310x150Logo"]');
+    if (await removeBtn.count() > 0 && await removeBtn.isVisible()) {
+        await removeBtn.click();
+        await ctx.page.waitForTimeout(1_500);
+
+        const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+        expect(xml).not.toContain('Wide310x150Logo');
+
+        const input = card.locator('input[data-field-name="visualElements.wide310x150Logo"]');
+        await expect(input).not.toBeVisible();
+    }
+});
+
+test('can remove Square 71x71 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const removeBtn = card.locator('.optional-assets-list .btn-remove-field[data-field-name="visualElements.square71x71Logo"]');
+    if (await removeBtn.count() > 0 && await removeBtn.isVisible()) {
+        await removeBtn.click();
+        await ctx.page.waitForTimeout(1_500);
+
+        const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+        expect(xml).not.toContain('Square71x71Logo');
+
+        const input = card.locator('input[data-field-name="visualElements.square71x71Logo"]');
+        await expect(input).not.toBeVisible();
+    }
+});
+
+test('can remove Square 310x310 Logo visual asset', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    const removeBtn = card.locator('.optional-assets-list .btn-remove-field[data-field-name="visualElements.square310x310Logo"]');
+    if (await removeBtn.count() > 0 && await removeBtn.isVisible()) {
+        await removeBtn.click();
+        await ctx.page.waitForTimeout(1_500);
+
+        const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+        expect(xml).not.toContain('Square310x310Logo');
+
+        const input = card.locator('input[data-field-name="visualElements.square310x310Logo"]');
+        await expect(input).not.toBeVisible();
+    }
+});
+
 test('can add Splash Screen Background Color', async () => {
     const card = frame.locator('.app-card').first();
     const addBtn = card.locator('#add-app-0-splashbgcolor');

@@ -19,6 +19,7 @@ export function getApplicationsScript(): string {
                         '<div class="browse-row">' +
                         '<input type="text" data-section="applications" data-field-name="visualElements.' + asset.field + '" data-index="' + idx + '" value="' + escapeHtml(val) + '" placeholder="' + escapeHtml(asset.placeholder) + '" />' +
                         '<button class="btn btn-sm browse-image-btn" data-section="applications" data-field-name="visualElements.' + asset.field + '" data-index="' + idx + '">Choose file</button>' +
+                        '<button class="btn-remove-field" type="button" data-section="applications" data-field-name="visualElements.' + asset.field + '" data-index="' + idx + '" title="Remove ' + escapeHtml(asset.label) + '">✕</button>' +
                         '</div>' +
                         '<div class="description">' + escapeHtml(asset.description) + '</div>' +
                         '<div class="validation-msg"></div>' +
@@ -491,6 +492,13 @@ export function getApplicationsScript(): string {
                         const bIdx = btn.getAttribute('data-index');
                         if (bIdx !== null) { msg.index = parseInt(bIdx, 10); }
                         vscode.postMessage(msg);
+                    });
+                });
+                card.querySelectorAll('.optional-assets-list .btn-remove-field').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const field = btn.getAttribute('data-field-name');
+                        const rIdx = parseInt(btn.getAttribute('data-index'), 10);
+                        vscode.postMessage({ type: 'removeVisualAsset', field: field, index: rIdx });
                     });
                 });
 

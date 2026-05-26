@@ -93,6 +93,58 @@ test('can toggle a device capability', async () => {
     await ctx.page.waitForTimeout(1_000);
 });
 
+// ─── System AI capability ────────────────────────────────
+
+test('can add systemAIModels capability', async () => {
+    await toggleCapability(frame, 'systemai:systemAIModels');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    const checked = await isCapabilityChecked(frame, 'systemai:systemAIModels');
+    expect(checked).toBe(true);
+
+    const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+    expect(xml).toContain('systemAIModels');
+    expect(xml).toContain('schemas.microsoft.com/appx/manifest/systemai/windows10');
+});
+
+test('can remove systemAIModels capability', async () => {
+    await toggleCapability(frame, 'systemai:systemAIModels');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    const checked = await isCapabilityChecked(frame, 'systemai:systemAIModels');
+    expect(checked).toBe(false);
+
+    const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+    expect(xml).not.toContain('systemAIModels');
+    // xmlns:systemai should be removed when no longer used
+    expect(xml).not.toContain('xmlns:systemai');
+});
+
+// ─── Namespace cleanup on capability removal ─────────────
+
+test('removing last rescap capability removes xmlns:rescap', async () => {
+    // The fixture has rescap:runFullTrust checked — uncheck it
+    await toggleCapability(frame, 'rescap:runFullTrust');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+    expect(xml).not.toContain('runFullTrust');
+    expect(xml).not.toContain('xmlns:rescap');
+});
+
+test('re-adding rescap capability restores xmlns:rescap', async () => {
+    await toggleCapability(frame, 'rescap:runFullTrust');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+    expect(xml).toContain('runFullTrust');
+    expect(xml).toContain('xmlns:rescap');
+});
+
 // ─── Capability description panel ───────────────────────
 
 test('description panel exists', async () => {

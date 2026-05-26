@@ -794,7 +794,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], 'replace', value);
             if (result !== xml) { return result; }
-            return applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'add', value);
+            const addResult = applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'add', value);
+            if (addResult !== xml) { return addResult; }
+            // No DefaultTile element exists — fall through to create one
         }
 
         // Attributes on LockScreen
@@ -806,7 +808,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, 'replace', value);
             if (result !== xml) { return result; }
-            return applyScopedAttrOp(xml, lsPattern, lockAttr, 'add', value);
+            const addResult = applyScopedAttrOp(xml, lsPattern, lockAttr, 'add', value);
+            if (addResult !== xml) { return addResult; }
+            // No LockScreen element exists — fall through to create one
         }
 
         // Attributes on SplashScreen
@@ -818,7 +822,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, 'replace', value);
             if (result !== xml) { return result; }
-            return applyScopedAttrOp(xml, ssPattern, splashAttr, 'add', value);
+            const addResult = applyScopedAttrOp(xml, ssPattern, splashAttr, 'add', value);
+            if (addResult !== xml) { return addResult; }
+            // No SplashScreen element exists — fall through to create one
         }
 
         // AppListEntry on VisualElements

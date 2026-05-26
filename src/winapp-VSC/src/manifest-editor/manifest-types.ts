@@ -169,6 +169,7 @@ export type WebviewToExtensionMessage =
     | { type: 'updateExtensionField'; appIndex: number; extIndex: number; fieldPath: string; value: string; isTextContent?: boolean }
     | { type: 'browseFile'; appIndex: number; extIndex: number; fieldPath: string }
     | { type: 'browseImage'; section: string; field: string; index?: number }
+    | { type: 'removeVisualAsset'; field: string; index: number }
     | { type: 'browseExe'; section: string; field: string; index?: number }
     | { type: 'movePackageDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addMainPackageDependency'; dependency: MainPackageDependencyData }
@@ -253,6 +254,7 @@ export const KNOWN_CAPABILITIES = {
         { name: 'gazeInput', label: 'Gaze Input', namespace: 'device' },
         { name: 'lowLevelDevices', label: 'Low Level Devices', namespace: 'device' },
         { name: 'lowLevel', label: 'Low Level', namespace: 'device' },
+        { name: 'systemAIModels', label: 'System AI Models', namespace: 'systemai' },
     ],
 } as const;
 
@@ -348,6 +350,7 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
     localSystemServices: 'Allows the app to communicate with local system services.',
     inputForegroundObservation: 'Allows the app to observe foreground input even when not in the foreground.',
     confirmAppClose: 'Allows the app to intercept and confirm close operations.',
+    systemAIModels: 'Grants the app access to system-wide on-device AI models provided by Windows.',
     microphone: 'Provides access to the microphone for audio capture.',
     webcam: 'Provides access to the webcam for video capture.',
     location: 'Provides access to the device location (GPS, Wi-Fi, etc.).',

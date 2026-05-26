@@ -401,10 +401,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 			vscode.window.showInformationMessage(
 				'This file can be opened with the WinApp visual manifest editor for a richer editing experience.',
-				'Open with WinApp Editor',
+				'Open with AppxManifest Editor',
 				"Don't Show Again",
 			).then(choice => {
-				if (choice === 'Open with WinApp Editor') {
+				if (choice === 'Open with AppxManifest Editor') {
 					vscode.commands.executeCommand('vscode.openWith', editor.document.uri, ManifestEditorProvider.viewType);
 				} else if (choice === "Don't Show Again") {
 					context.globalState.update(dismissedKey, true);

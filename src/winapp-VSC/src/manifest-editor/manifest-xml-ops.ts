@@ -11,6 +11,7 @@ import {
     findParentBounds,
     findDirectChildElementBounds,
     ensureNamespace,
+    removeNamespaceIfUnused,
     swapAdjacentElements,
     findNthApplicationRegion,
     detectIndent,
@@ -289,7 +290,15 @@ export function removeCapability(xmlText: string, capability: string): string {
         const childXml = xmlText.substring(child.start, child.end);
         if (!hasNameAttribute(childXml, attrName)) { continue; }
         if (!tagsToTry.some(ns => matchesCapabilityTag(childXml, ns))) { continue; }
-        return removeElementWithWhitespace(xmlText, child.start, child.end, bounds.contentStart);
+        const result = removeElementWithWhitespace(xmlText, child.start, child.end, bounds.contentStart);
+        // Clean up the namespace declaration if no longer used
+        if (capNs && capNs !== 'uap4:custom') {
+            const nsPrefix = capNs.includes(':') ? capNs.split(':')[0] : capNs;
+            if (CAPABILITY_NS_URIS[nsPrefix]) {
+                return removeNamespaceIfUnused(result, nsPrefix);
+            }
+        }
+        return result;
     }
 
     return xmlText;
@@ -346,7 +355,8 @@ export function addMainPackageDependency(xmlText: string, dep: MainPackageDepend
 
 /** Remove a uap3:MainPackageDependency by index. */
 export function removeMainPackageDependency(xmlText: string, index: number): string {
-    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap3:MainPackageDependency\b/, index);
+    const result = removeNthChildByTag(xmlText, 'Dependencies', /^<uap3:MainPackageDependency\b/, index);
+    return result !== xmlText ? removeNamespaceIfUnused(result, 'uap3') : result;
 }
 
 /** Move a uap3:MainPackageDependency up or down by swapping with its neighbor. */
@@ -431,7 +441,7 @@ export function removeDriverConstraint(xmlText: string, index: number): string {
                         }
                     }
                 }
-                return result;
+                                return removeNamespaceIfUnused(result, 'uap5');
             }
             flatIdx++;
         }
@@ -477,7 +487,8 @@ export function addOSPackageDependency(xmlText: string, dep: OSPackageDependency
 
 /** Remove a uap7:OSPackageDependency by index. */
 export function removeOSPackageDependency(xmlText: string, index: number): string {
-    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap7:OSPackageDependency\b/, index);
+    const result = removeNthChildByTag(xmlText, 'Dependencies', /^<uap7:OSPackageDependency\b/, index);
+    return result !== xmlText ? removeNamespaceIfUnused(result, 'uap7') : result;
 }
 
 /** Move a uap7:OSPackageDependency up or down by swapping with its neighbor. */
@@ -499,7 +510,8 @@ export function addHostRuntimeDependency(xmlText: string, dep: HostRuntimeDepend
 
 /** Remove a uap10:HostRuntimeDependency by index. */
 export function removeHostRuntimeDependency(xmlText: string, index: number): string {
-    return removeNthChildByTag(xmlText, 'Dependencies', /^<uap10:HostRuntimeDependency\b/, index);
+    const result = removeNthChildByTag(xmlText, 'Dependencies', /^<uap10:HostRuntimeDependency\b/, index);
+    return result !== xmlText ? removeNamespaceIfUnused(result, 'uap10') : result;
 }
 
 /** Move a uap10:HostRuntimeDependency up or down by swapping with its neighbor. */
@@ -522,7 +534,8 @@ export function addExternalDependency(xmlText: string, dep: ExternalDependencyDa
 
 /** Remove a win32dependencies:ExternalDependency by index. */
 export function removeExternalDependency(xmlText: string, index: number): string {
-    return removeNthChildByTag(xmlText, 'Dependencies', /^<win32dependencies:ExternalDependency\b/, index);
+    const result = removeNthChildByTag(xmlText, 'Dependencies', /^<win32dependencies:ExternalDependency\b/, index);
+    return result !== xmlText ? removeNamespaceIfUnused(result, 'win32dependencies') : result;
 }
 
 /** Move a win32dependencies:ExternalDependency up or down by swapping with its neighbor. */
@@ -584,11 +597,11 @@ export function addPhoneIdentity(xmlText: string): string {
 
 /** Remove the mp:PhoneIdentity element from the manifest. */
 export function removePhoneIdentity(xmlText: string): string {
-    // Match the full self-closing or open+close PhoneIdentity element with optional leading whitespace
     const pattern = /[ \t]*<[a-zA-Z0-9]*:?PhoneIdentity\b[^>]*(?:\/>|>[^<]*<\/[a-zA-Z0-9]*:?PhoneIdentity\s*>)[ \t]*\r?\n?/s;
     const match = pattern.exec(xmlText);
     if (!match) { return xmlText; }
-    return xmlText.substring(0, match.index) + xmlText.substring(match.index + match[0].length);
+    const result = xmlText.substring(0, match.index) + xmlText.substring(match.index + match[0].length);
+    return removeNamespaceIfUnused(result, 'mp');
 }
 
 /** Set the ShowNameOnTiles entries for an application by index.
@@ -705,6 +718,71 @@ export function setShowNameOnTiles(xmlText: string, appIndex: number, tiles: str
     }
 
     return xml;
+}
+
+/**
+ * Remove an optional visual asset from the nth Application.
+ * For DefaultTile attributes (wide310x150Logo, square71x71Logo, square310x310Logo):
+ *   removes the attribute, and if DefaultTile has no remaining attributes, removes the element.
+ * For LockScreen (badgeLogo): removes the entire LockScreen element.
+ * For SplashScreen (splashScreenImage): removes the entire SplashScreen element.
+ */
+export function removeVisualAsset(xmlText: string, appIndex: number, veField: string): string {
+    const appRegion = findNthApplicationRegion(xmlText, appIndex);
+    if (!appRegion) { return xmlText; }
+    const appXml = xmlText.substring(appRegion.start, appRegion.end);
+
+    const defaultTileAttrs: Record<string, string> = {
+        wide310x150Logo: 'Wide310x150Logo',
+        square71x71Logo: 'Square71x71Logo',
+        square310x310Logo: 'Square310x310Logo',
+    };
+
+    if (defaultTileAttrs[veField]) {
+        // Remove the attribute from DefaultTile
+        const dtPattern = /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s;
+        const dtMatch = dtPattern.exec(appXml);
+        if (!dtMatch) { return xmlText; }
+        const attrName = defaultTileAttrs[veField];
+        const attrPattern = new RegExp(`\\s*${attrName}="[^"]*"`);
+        const newDtTag = dtMatch[0].replace(attrPattern, '');
+        let result = xmlText.substring(0, appRegion.start) + appXml.replace(dtMatch[0], newDtTag) + xmlText.substring(appRegion.end);
+        // If DefaultTile has no remaining content attributes, remove the element entirely
+        const cleanDtMatch = dtPattern.exec(result.substring(appRegion.start, appRegion.start + appXml.length + 50));
+        if (cleanDtMatch) {
+            const tagContent = cleanDtMatch[0].replace(/<[a-zA-Z0-9]*:?DefaultTile\b/, '').replace(/\/?>$/, '').trim();
+            if (!tagContent) {
+                // Remove the entire DefaultTile element and its surrounding whitespace
+                const absStart = appRegion.start + cleanDtMatch.index;
+                let removeStart = absStart;
+                while (removeStart > 0 && (result[removeStart - 1] === ' ' || result[removeStart - 1] === '\t')) { removeStart--; }
+                if (removeStart > 0 && result[removeStart - 1] === '\n') { removeStart--; }
+                if (removeStart > 0 && result[removeStart - 1] === '\r') { removeStart--; }
+                result = result.substring(0, removeStart) + result.substring(absStart + cleanDtMatch[0].length);
+            }
+        }
+        return result;
+    }
+
+    if (veField === 'badgeLogo') {
+        // Remove the entire LockScreen element
+        const lsPattern = /[ \t]*<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>[^\n]*\r?\n?/s;
+        const lsMatch = lsPattern.exec(appXml);
+        if (!lsMatch) { return xmlText; }
+        const absPos = appRegion.start + lsMatch.index;
+        return xmlText.substring(0, absPos) + xmlText.substring(absPos + lsMatch[0].length);
+    }
+
+    if (veField === 'splashScreenImage') {
+        // Remove the entire SplashScreen element
+        const ssPattern = /[ \t]*<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>[^\n]*\r?\n?/s;
+        const ssMatch = ssPattern.exec(appXml);
+        if (!ssMatch) { return xmlText; }
+        const absPos = appRegion.start + ssMatch.index;
+        return xmlText.substring(0, absPos) + xmlText.substring(absPos + ssMatch[0].length);
+    }
+
+    return xmlText;
 }
 
 /** Add a new Application element to the manifest. */
@@ -847,6 +925,11 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
 
     const target = children[extIndex];
 
+    // Capture the namespace prefix of the extension being removed
+    const targetXml = xmlText.substring(target.start, target.end);
+    const extNsMatch = /^<([a-zA-Z0-9]+):/.exec(targetXml);
+    const extNsPrefix = extNsMatch ? extNsMatch[1] : null;
+
     // Expand removal range to include leading whitespace (indentation) and trailing newline
     let removeStart = target.start;
     while (removeStart > contentStart && (xmlText[removeStart - 1] === ' ' || xmlText[removeStart - 1] === '\t')) {
@@ -884,6 +967,11 @@ export function removeExtension(xmlText: string, appIndex: number, extIndex: num
                 result = result.substring(0, blockStart) + result.substring(blockEnd);
             }
         }
+    }
+
+    // Clean up namespace if no longer used
+    if (extNsPrefix) {
+        result = removeNamespaceIfUnused(result, extNsPrefix);
     }
 
     return result;

@@ -13,6 +13,7 @@ export const NS = {
     rescap: 'http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities',
     desktop: 'http://schemas.microsoft.com/appx/manifest/desktop/windows10',
     win32dependencies: 'http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10',
+    systemai: 'http://schemas.microsoft.com/appx/manifest/systemai/windows10',
 };
 
 /** Namespace URIs for capability prefixes. */
@@ -26,6 +27,7 @@ export const CAPABILITY_NS_URIS: Record<string, string> = {
     uap7: NS.uap7,
     rescap: NS.rescap,
     iot: 'http://schemas.microsoft.com/appx/manifest/iot/windows10',
+    systemai: NS.systemai,
 };
 
 /** Escape special regex characters in a string. */
@@ -309,7 +311,51 @@ export function ensureNamespace(xmlText: string, prefix: string, uri: string): s
     return xmlText;
 }
 
-/** Swap two adjacent sibling elements in the XML text (preserves whitespace/formatting). */
+/**
+ * Remove an xmlns:prefix declaration from the <Package> tag if the prefix
+ * is no longer used anywhere else in the document body.
+ * Also removes the prefix from IgnorableNamespaces if present.
+ */
+export function removeNamespaceIfUnused(xmlText: string, prefix: string): string {
+    // Check if the prefix is still used anywhere in the document (e.g., <prefix:Something or prefix:attr)
+    const usagePattern = new RegExp(`<${prefix}:|\\b${prefix}:`, 'i');
+    // Search the document body (after <Package ...>) for any usage of this prefix
+    const pkgMatch = /<Package\b[^>]*>/s.exec(xmlText);
+    if (!pkgMatch) { return xmlText; }
+    const bodyStart = pkgMatch.index + pkgMatch[0].length;
+    const body = xmlText.substring(bodyStart);
+    if (usagePattern.test(body)) {
+        return xmlText; // prefix still in use
+    }
+
+    // Remove the xmlns:prefix="..." declaration from the Package tag
+    let result = xmlText;
+    const pkgTag = pkgMatch[0];
+    const declPattern = new RegExp(`\\s*xmlns:${prefix}=["'][^"']*["']`);
+    const declMatch = declPattern.exec(pkgTag);
+    if (!declMatch) { return xmlText; }
+
+    const declStart = pkgMatch.index + declMatch.index;
+    const declEnd = declStart + declMatch[0].length;
+    result = result.substring(0, declStart) + result.substring(declEnd);
+
+    // Also remove prefix from IgnorableNamespaces attribute
+    const ignorablePattern = /IgnorableNamespaces=["']([^"']*)["']/;
+    const ignorableMatch = ignorablePattern.exec(result);
+    if (ignorableMatch) {
+        const namespaces = ignorableMatch[1].split(/\s+/).filter(ns => ns !== prefix);
+        if (namespaces.length === 0) {
+            // Remove the entire IgnorableNamespaces attribute
+            const attrPattern = new RegExp(`\\s*IgnorableNamespaces=["'][^"']*["']`);
+            result = result.replace(attrPattern, '');
+        } else {
+            const newAttr = `IgnorableNamespaces="${namespaces.join(' ')}"`;
+            result = result.replace(ignorablePattern, newAttr);
+        }
+    }
+
+    return result;
+}
 export function swapAdjacentElements(xmlText: string, a: { start: number; end: number }, b: { start: number; end: number }): string {
     // a must come before b
     const first = a.start < b.start ? a : b;

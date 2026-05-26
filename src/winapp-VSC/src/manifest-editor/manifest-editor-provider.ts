@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
-import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverConstraint, removeDriverConstraint, moveDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles, addPhoneIdentity, removePhoneIdentity } from './manifest-parser';
+import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverConstraint, removeDriverConstraint, moveDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles, addPhoneIdentity, removePhoneIdentity, removeVisualAsset } from './manifest-parser';
 import { validateManifest } from './manifest-validator';
 import { getWebviewContent, getParseErrorContent } from './webview-content';
 import { WebviewToExtensionMessage } from './manifest-types';
@@ -243,6 +243,12 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                         case 'fieldChanged':
                             newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
                             break;
+
+                        case 'removeVisualAsset': {
+                            const veField = message.field.replace('visualElements.', '');
+                            newText = removeVisualAsset(text, message.index, veField);
+                            break;
+                        }
 
                         case 'packageTypeChanged': {
                             // Set/clear the three mutually exclusive package type properties

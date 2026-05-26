@@ -13,7 +13,8 @@ function buildCapabilityCheckboxList(
     prefix: string
 ): string {
     return capabilities.map(c => {
-        const capKey = prefix ? `${prefix}:${c.name}` : (c.namespace ? `${c.namespace}:${c.name}` : c.name);
+        const ns = c.namespace || prefix;
+        const capKey = ns ? `${ns}:${c.name}` : c.name;
         return `<label class="cap-item" data-cap="${capKey}">
             <input type="checkbox" data-capability="${capKey}" /><span>${c.label}</span>
         </label>`;
