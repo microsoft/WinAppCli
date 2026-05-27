@@ -643,7 +643,7 @@
       },
       "options": {
         "--config-dir": {
-          "description": "Directory to read/store configuration (default: current directory)",
+          "description": "Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected)",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
@@ -726,7 +726,7 @@
           "recursive": false
         },
         "--use-defaults": {
-          "description": "Do not prompt, and use default of all prompts",
+          "description": "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)",
           "hidden": false,
           "aliases": [
             "--no-prompt"

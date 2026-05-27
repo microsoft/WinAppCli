@@ -71,7 +71,7 @@ Want to inspect or interact with a running app's UI?
 
 5. **Re-run `winapp run` or `create-debug-identity` after manifest or asset changes.** Both commands use the manifest and assets at registration time. Any changes require re-running the command. Use `winapp run` for most frameworks; use `create-debug-identity` only when the exe lives outside your build output folder (e.g., Electron) or when testing sparse package scenarios specifically.
 
-6. **Use `--use-defaults` for non-interactive/CI scenarios.** When running `winapp init` in scripts or CI pipelines, pass `--use-defaults` (alias: `--no-prompt`) to skip interactive prompts and use sensible defaults.
+6. **Use `--use-defaults` for non-interactive/CI scenarios.** When running `winapp init` in scripts or CI pipelines, pass `--use-defaults` with an explicit project directory (e.g., `winapp init . --use-defaults`). Without an explicit directory, `--use-defaults` will search for projects and error out with guidance on which path to provide. This ensures non-interactive usage is always deterministic.
 
 7. **Prefer `winapp package --cert` over separate sign step.** The `package` command can generate the MSIX and sign it in one step with `--cert ./devcert.pfx`. Only use `winapp sign` separately when signing an already-packaged MSIX or a standalone executable.
 
@@ -82,9 +82,11 @@ Want to inspect or interact with a running app's UI?
 ### `winapp init [base-directory]`
 **Purpose:** Add Windows platform support to an existing project. Creates `appxmanifest.xml`, default image assets, `winapp.yaml` config, and optionally downloads Windows SDK / Windows App SDK packages. Does **not** create a new project — the user must already have a project with their chosen framework.
 **When to use:** Adding winapp to an existing project for the first time, to enable MSIX packaging, package identity, and Windows SDK access.
+**Behavior:** Without a directory argument, performs a breadth-first search for compatible projects (Tauri, Electron, Flutter, .NET, Rust, C++). If multiple are found, prompts for selection. If one is found in a subdirectory, confirms with user. Library and test projects (.csproj with OutputType=Library or IsTestProject=true) are excluded from detection.
 **Key options:**
-- `--use-defaults` / `--no-prompt` — skip interactive prompts
+- `--use-defaults` / `--no-prompt` — skip interactive prompts; requires an explicit directory (e.g., `winapp init . --use-defaults`)
 - `--setup-sdks stable|preview|experimental|none` — control SDK installation (default: prompts user)
+- `--config-dir` — directory for `winapp.yaml` (default: the selected project directory)
 - `--config-only` — only create `winapp.yaml`, skip package installation
 - `--no-gitignore` — don't update `.gitignore`
 **Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
