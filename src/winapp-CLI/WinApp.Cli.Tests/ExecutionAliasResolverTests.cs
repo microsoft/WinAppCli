@@ -17,12 +17,21 @@ public class ExecutionAliasResolverTests
     [DataRow("my_app.exe", DisplayName = "underscore")]
     [DataRow("app123.exe", DisplayName = "digits")]
     [DataRow("a.exe", DisplayName = "single letter")]
-    [DataRow("notepad", DisplayName = "no extension still ok (resolver does not require .exe)")]
     [DataRow("file.with.dots.exe", DisplayName = "internal dots")]
     public void IsSafeAliasName_ValidBareFilename_ReturnsTrue(string alias)
     {
         Assert.IsTrue(ExecutionAliasResolver.IsSafeAliasName(alias),
             $"Expected '{alias}' to be accepted as a bare filename");
+    }
+
+    [TestMethod]
+    public void IsSafeAliasName_AtMaxLength_ReturnsTrue()
+    {
+        // 255 characters total (the boundary): 251 'a' + ".exe"
+        var alias = new string('a', 251) + ".exe";
+        Assert.AreEqual(255, alias.Length);
+        Assert.IsTrue(ExecutionAliasResolver.IsSafeAliasName(alias),
+            "Aliases exactly 255 characters long should be accepted");
     }
 
     // ---- IsSafeAliasName: reject empties / dot-names --------------------------
@@ -100,6 +109,52 @@ public class ExecutionAliasResolverTests
             "Aliases longer than 255 characters should be rejected");
     }
 
+    // ---- IsSafeAliasName: reject trailing dot/space (Win32 trims these) -------
+
+    [TestMethod]
+    [DataRow("evil.exe.", DisplayName = "trailing dot")]
+    [DataRow("evil.exe ", DisplayName = "trailing space")]
+    [DataRow("evil.exe..", DisplayName = "two trailing dots")]
+    [DataRow("evil.exe.  ", DisplayName = "trailing dot then spaces")]
+    public void IsSafeAliasName_TrailingDotOrSpace_ReturnsFalse(string alias)
+    {
+        Assert.IsFalse(ExecutionAliasResolver.IsSafeAliasName(alias),
+            $"Expected '{alias}' to be rejected — trailing dot/space is silently trimmed by Win32 path normalization");
+    }
+
+    // ---- IsSafeAliasName: require .exe suffix ---------------------------------
+
+    [TestMethod]
+    [DataRow("notepad", DisplayName = "no extension")]
+    [DataRow("myapp.com", DisplayName = ".com")]
+    [DataRow("myapp.bat", DisplayName = ".bat")]
+    [DataRow("myapp", DisplayName = "stem only")]
+    [DataRow("myapp.exetra", DisplayName = ".exe-like but not .exe")]
+    public void IsSafeAliasName_NonExeExtension_ReturnsFalse(string alias)
+    {
+        Assert.IsFalse(ExecutionAliasResolver.IsSafeAliasName(alias),
+            $"Expected '{alias}' to be rejected — Windows App Execution Aliases must end in .exe");
+    }
+
+    // ---- IsSafeAliasName: reject DOS reserved device names --------------------
+
+    [TestMethod]
+    [DataRow("CON.exe", DisplayName = "CON.exe")]
+    [DataRow("con.exe", DisplayName = "con.exe (lowercase)")]
+    [DataRow("PRN.exe", DisplayName = "PRN.exe")]
+    [DataRow("AUX.exe", DisplayName = "AUX.exe")]
+    [DataRow("NUL.exe", DisplayName = "NUL.exe")]
+    [DataRow("COM1.exe", DisplayName = "COM1.exe")]
+    [DataRow("COM9.exe", DisplayName = "COM9.exe")]
+    [DataRow("LPT1.exe", DisplayName = "LPT1.exe")]
+    [DataRow("LPT9.exe", DisplayName = "LPT9.exe")]
+    [DataRow("CON.txt.exe", DisplayName = "CON.txt.exe (stem still binds to CON)")]
+    public void IsSafeAliasName_ReservedDeviceNames_ReturnsFalse(string alias)
+    {
+        Assert.IsFalse(ExecutionAliasResolver.IsSafeAliasName(alias),
+            $"Expected '{alias}' to be rejected — reserved DOS device names bind to the device regardless of extension");
+    }
+
     // ---- ResolveAliasPath: success + base directory behaviour -----------------
 
     [TestMethod]
@@ -154,6 +209,24 @@ public class ExecutionAliasResolverTests
         Assert.IsNull(result,
             $"Hostile alias '{alias ?? "<null>"}' must not be resolved to a filesystem path");
     }
+
+    // ---- ResolveAliasPath: refuse non-rooted base directories -----------------
+
+    [TestMethod]
+    [DataRow("", DisplayName = "empty base directory")]
+    [DataRow("Microsoft\\WindowsApps", DisplayName = "relative base directory")]
+    [DataRow(".\\WindowsApps", DisplayName = "explicit-current-dir relative")]
+    public void ResolveAliasPath_NonRootedBaseDirectory_ReturnsNull(string baseDir)
+    {
+        // A non-rooted base directory would cause FileInfo to root the resulting
+        // path under the current working directory — reintroducing the very
+        // CWD-search RCE this resolver exists to prevent.
+        var result = ExecutionAliasResolver.ResolveAliasPath("myapp.exe", baseDir);
+
+        Assert.IsNull(result,
+            $"Resolver must refuse non-rooted base directory '{baseDir}' to avoid CWD-relative resolution");
+    }
+
 
     // ---- ResolveAliasPath: Exists reports filesystem state --------------------
 

@@ -561,6 +561,15 @@ internal partial class ManifestService(
             aliasName += ".exe";
         }
 
+        // Validate the alias is a safe bare filename before writing it into
+        // the manifest. The same validator is used on the read side
+        // (RunCommand --with-alias) — see ExecutionAliasResolver for the
+        // RCE class this defends against.
+        if (!Helpers.ExecutionAliasResolver.IsSafeAliasName(aliasName))
+        {
+            return new AddExecutionAliasResult(AddExecutionAliasStatus.InvalidAliasName, AliasName: aliasName);
+        }
+
         // Check if the target Application already has any execution alias
         var targetExtensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
         if (targetExtensions != null)

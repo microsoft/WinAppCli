@@ -569,7 +569,7 @@ internal partial class RunCommand : Command, IShortDescription
             if (!ExecutionAliasResolver.IsSafeAliasName(alias))
             {
                 logger.LogError(
-                    "{UISymbol} Execution alias '{Alias}' is not a valid bare filename. Aliases must be a single .exe filename with no path separators, drive letters, or '..' segments. Fix the <uap5:ExecutionAlias> entry in the manifest.",
+                    "{UISymbol} Execution alias '{Alias}' is not a valid bare .exe filename. Aliases must be a single .exe filename with no path separators, drive letters, '..' segments, trailing dots/spaces, or reserved device names (CON, NUL, COM1-9, LPT1-9). Fix the <uap5:ExecutionAlias> entry in the manifest.",
                     UiSymbols.Error,
                     alias);
                 return 1;

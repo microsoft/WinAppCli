@@ -11,6 +11,7 @@ internal enum AddExecutionAliasStatus
     NoApplicationElement,
     ApplicationIdNotFound,
     CouldNotInferAlias,
+    InvalidAliasName,
     ManifestParseError,
     ManifestEmpty,
 }

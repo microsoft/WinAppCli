@@ -28,6 +28,16 @@ namespace WinApp.Cli.Helpers;
 /// </remarks>
 internal static class ExecutionAliasResolver
 {
+    // Windows reserved device basenames. The OS treats these specially in
+    // path resolution regardless of extension (e.g. "CON.exe" still binds
+    // to the CON device), so they must never appear as an alias filename.
+    private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
     /// <summary>
     /// Returns true when <paramref name="alias"/> is a safe bare filename
     /// suitable for resolving under the WindowsApps alias directory.
@@ -39,7 +49,13 @@ internal static class ExecutionAliasResolver
     /// letters, UNC, leading separators), <c>..</c> path components, the bare
     /// dot/double-dot names, any character in
     /// <see cref="Path.GetInvalidFileNameChars"/> (which includes NUL and
-    /// other control chars on Windows), and names longer than 255 characters.
+    /// other control chars on Windows), names longer than 255 characters,
+    /// names without a <c>.exe</c> suffix (Windows App Execution Aliases are
+    /// always <c>.exe</c> proxies), names ending in a dot or space (Win32
+    /// silently strips these during path normalization, which would make the
+    /// validated string and the launched file diverge), and Windows reserved
+    /// device basenames such as <c>CON</c>, <c>NUL</c>, <c>COM1..9</c>,
+    /// <c>LPT1..9</c>, with or without an extension.
     /// </remarks>
     public static bool IsSafeAliasName(string? alias)
     {
@@ -85,6 +101,39 @@ internal static class ExecutionAliasResolver
             return false;
         }
 
+        // Windows path normalization silently trims trailing dots and spaces
+        // ("evil.exe." resolves to "evil.exe"), which would let an attacker
+        // construct an alias whose validated form differs from the file the
+        // OS actually opens. Reject any such name.
+        var lastChar = alias[^1];
+        if (lastChar == '.' || lastChar == ' ')
+        {
+            return false;
+        }
+
+        // Windows App Execution Aliases are .exe proxy stubs under
+        // %LOCALAPPDATA%\Microsoft\WindowsApps. Anything else cannot
+        // legitimately resolve to a registered alias.
+        if (!alias.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Reserved DOS device names are special-cased by Win32 regardless of
+        // extension or directory ("CON", "CON.exe", "CON.txt.exe" all bind
+        // to the CON device). Reject by checking the basename before the
+        // first '.'.
+        var stem = alias;
+        var firstDot = alias.IndexOf('.');
+        if (firstDot >= 0)
+        {
+            stem = alias[..firstDot];
+        }
+        if (ReservedDeviceNames.Contains(stem))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -102,12 +151,21 @@ internal static class ExecutionAliasResolver
     /// Resolves <paramref name="alias"/> to an absolute <see cref="FileInfo"/>
     /// under the supplied <paramref name="baseDirectory"/> (or the default
     /// WindowsApps location when <paramref name="baseDirectory"/> is null).
-    /// Returns null when the alias is not a safe bare filename.
+    /// Returns null when the alias is not a safe bare filename, or when the
+    /// base directory is not a rooted absolute path.
     /// </summary>
     /// <remarks>
     /// The returned <see cref="FileInfo"/>'s <c>Exists</c> property indicates
     /// whether Windows has actually registered an alias proxy at that path —
     /// callers should check it before launching.
+    /// <para>
+    /// Refusing to resolve when <paramref name="baseDirectory"/> (or
+    /// <c>LocalApplicationData</c>) is empty/relative is critical: a
+    /// CWD-relative base would let <see cref="FileInfo.FullName"/> root the
+    /// resolved path under the (potentially hostile) current working
+    /// directory, reintroducing the very CWD-search RCE this resolver exists
+    /// to prevent.
+    /// </para>
     /// </remarks>
     public static FileInfo? ResolveAliasPath(string? alias, string? baseDirectory = null)
     {
@@ -117,6 +175,11 @@ internal static class ExecutionAliasResolver
         }
 
         var dir = baseDirectory ?? GetDefaultWindowsAppsDirectory();
+        if (string.IsNullOrEmpty(dir) || !Path.IsPathFullyQualified(dir))
+        {
+            return null;
+        }
+
         return new FileInfo(Path.Combine(dir, alias!));
     }
 }

@@ -648,6 +648,70 @@ public class ManifestAddAliasCommandTests : BaseCommandTests
 
     #endregion
 
+    #region Alias name validation tests
+
+    [TestMethod]
+    [DataRow("..\\evil.exe", DisplayName = "parent traversal")]
+    [DataRow("dir\\evil.exe", DisplayName = "path separator")]
+    [DataRow("C:\\Windows\\System32\\calc.exe", DisplayName = "absolute path")]
+    [DataRow("evil:test.exe", DisplayName = "colon / ADS")]
+    [DataRow("evil*.exe", DisplayName = "invalid char (asterisk)")]
+    [DataRow("CON.exe", DisplayName = "reserved DOS device name")]
+    [DataRow("NUL.exe", DisplayName = "reserved DOS device name (NUL)")]
+    [DataRow("COM1.exe", DisplayName = "reserved DOS device name (COM1)")]
+    public async Task AddAlias_UnsafeName_RejectsAndDoesNotModifyManifest(string unsafeAlias)
+    {
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+        var originalContent = await File.ReadAllTextAsync(manifestPath);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--name", unsafeAlias]);
+
+        Assert.AreEqual(1, exitCode, $"Command should fail for unsafe alias '{unsafeAlias}'");
+        var currentContent = await File.ReadAllTextAsync(manifestPath);
+        Assert.AreEqual(originalContent, currentContent, "Manifest must not be modified when alias is rejected");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_UnsafeExecutableInferred_RejectsAndDoesNotModifyManifest()
+    {
+        // Executable attribute itself is the attack vector here — it gets used
+        // as the alias name when --name is not supplied.
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="..\evil.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+        var originalContent = await File.ReadAllTextAsync(manifestPath);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath]);
+
+        Assert.AreEqual(1, exitCode, "Command should fail when inferred alias is unsafe");
+        var currentContent = await File.ReadAllTextAsync(manifestPath);
+        Assert.AreEqual(originalContent, currentContent, "Manifest must not be modified when inferred alias is rejected");
+    }
+
+    #endregion
+
     #region Helper methods
 
     private string CreateManifest(string content)
