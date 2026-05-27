@@ -183,7 +183,7 @@ The `--json` envelope for `ui inspect`, `ui get-focused`, `ui search`, and `ui w
 - `ui search --json` / `ui wait-for --json` may include an `invokableAncestor` field (element-shaped) on each match.
 - Per-element `id`, `parentSelector`, and `windowHandle` are **removed** — use `selector` as the public handle.
 
-Full schemas with examples: [`references/ui-json-envelope.md`](./references/ui-json-envelope.md).
+Full schemas with examples: `references/ui-json-envelope.md`.
 
 ## Related skills
 - `winapp-setup` for adding Windows SDK to your project
