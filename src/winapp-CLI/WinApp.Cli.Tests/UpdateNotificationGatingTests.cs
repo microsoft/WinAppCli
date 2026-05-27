@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Globalization;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
@@ -22,13 +23,22 @@ public class UpdateNotificationGatingTests
     private string? _savedCaller;
     private string? _savedUpdateCheck;
 
+    // All environment variable names checked by CIEnvironmentDetectorForTelemetry
+    private static readonly string[] CiVarNames =
+    [
+        "CI", "GITHUB_ACTIONS", "TF_BUILD", "APPVEYOR", "TRAVIS", "CIRCLECI",
+        "TEAMCITY_VERSION", "JB_SPACE_API_URL",
+        "CODEBUILD_BUILD_ID", "AWS_REGION", "BUILD_ID", "BUILD_URL", "PROJECT_ID"
+    ];
+    private Dictionary<string, string?> _savedCiVars = [];
+
     [TestInitialize]
     public void Setup()
     {
         // Create temp cache directory and seed with a "newer" version
         _tempCacheDir = Path.Combine(Path.GetTempPath(), $"winapp_gating_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempCacheDir);
-        SeedUpdateCheckCache("99.0.0");
+        SeedUpdateCheckCache(GetGuaranteedNewerVersion());
 
         // Create first-run marker so FirstRunService doesn't trigger logging
         File.Create(Path.Combine(_tempCacheDir, ".first-run-complete")).Dispose();
@@ -37,15 +47,17 @@ public class UpdateNotificationGatingTests
         _savedCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
         _savedCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
         _savedUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
+        _savedCiVars = CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
 
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _tempCacheDir);
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", null);
 
         // Clear CI vars to avoid suppression
-        Environment.SetEnvironmentVariable("CI", null);
-        Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
-        Environment.SetEnvironmentVariable("TF_BUILD", null);
+        foreach (var name in CiVarNames)
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
     }
 
     [TestCleanup]
@@ -54,6 +66,10 @@ public class UpdateNotificationGatingTests
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _savedCacheDir);
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", _savedCaller);
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", _savedUpdateCheck);
+        foreach (var (name, value) in _savedCiVars)
+        {
+            Environment.SetEnvironmentVariable(name, value);
+        }
 
         try { Directory.Delete(_tempCacheDir, recursive: true); } catch { /* best effort */ }
     }
@@ -123,6 +139,14 @@ public class UpdateNotificationGatingTests
     {
         var content = $"{DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)}\n{version}\n";
         File.WriteAllText(Path.Combine(_tempCacheDir, ".update-check"), content);
+    }
+
+    private static string GetGuaranteedNewerVersion()
+    {
+        var currentCore = UpdateNotificationService.GetCoreVersion(WinApp.Cli.Helpers.VersionHelper.GetVersionString());
+        return Version.TryParse(currentCore, out var parsed)
+            ? $"{parsed.Major + 1}.0.0"
+            : "5.0.0";
     }
 
     /// <summary>
