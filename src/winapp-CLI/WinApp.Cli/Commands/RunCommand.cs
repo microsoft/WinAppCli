@@ -562,18 +562,47 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            // The alias value is attacker-controlled (it comes verbatim from the manifest,
+            // which may originate from an untrusted repo). Reject any alias that is not a
+            // bare filename before touching the filesystem.
             var alias = aliases[0]; // Use the first alias
+            if (!ExecutionAliasResolver.IsSafeAliasName(alias))
+            {
+                logger.LogError(
+                    "{UISymbol} Execution alias '{Alias}' is not a valid bare filename. Aliases must be a single .exe filename with no path separators, drive letters, or '..' segments. Fix the <uap5:ExecutionAlias> entry in the manifest.",
+                    UiSymbols.Error,
+                    alias);
+                return 1;
+            }
+
+            // Resolve the alias to the canonical Windows App Execution Alias proxy under
+            // %LOCALAPPDATA%\Microsoft\WindowsApps\. Using an absolute path here is the
+            // mitigation for the bare-filename CWD/PATH lookup that CreateProcess would
+            // otherwise perform — passing just "a.exe" would let an attacker-supplied
+            // a.exe in the project folder hijack the launch.
+            var aliasFile = ExecutionAliasResolver.ResolveAliasPath(alias);
+            if (aliasFile is null || !aliasFile.Exists)
+            {
+                logger.LogError(
+                    "{UISymbol} Execution alias proxy for '{Alias}' was not found at the expected location ('{ExpectedPath}'). Windows may not have registered the alias yet, or it has been removed. Try re-running 'winapp run' without --with-alias to launch via AUMID instead.",
+                    UiSymbols.Error,
+                    alias,
+                    aliasFile?.FullName ?? ExecutionAliasResolver.GetDefaultWindowsAppsDirectory());
+                return 1;
+            }
 
             // Build the ProcessStartInfo via a static helper so the argument-forwarding
-            // contract is unit-testable without spawning a real process.
-            var psi = BuildAliasProcessStartInfo(alias, appArgs);
+            // contract is unit-testable without spawning a real process. The FileName is
+            // the fully-qualified WindowsApps path so CreateProcess does not consult CWD
+            // or PATH when launching.
+            var psi = BuildAliasProcessStartInfo(aliasFile.FullName, appArgs);
 
             try
             {
                 using var process = Process.Start(psi);
                 if (process == null)
                 {
-                    logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}'.", UiSymbols.Error, alias);
+                    logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}' ({Path}).", UiSymbols.Error, alias, aliasFile.FullName);
                     return 1;
                 }
 
@@ -602,7 +631,7 @@ internal partial class RunCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}': {Error}", UiSymbols.Error, alias, ex.Message);
+                logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}' ({Path}): {Error}", UiSymbols.Error, alias, aliasFile.FullName, ex.Message);
                 return 1;
             }
         }
