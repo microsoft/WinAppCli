@@ -101,7 +101,7 @@ internal class InitCommand : Command, IShortDescription
                 var detected = projectDetectionService.DetectProjectAt(baseDirectory);
                 if (detected == null)
                 {
-                    logger.LogWarning("{Warning}  No compatible project detected in current directory.",
+                    logger.LogWarning("{Warning}  No known project type detected in current directory. Initializing with winapp.yaml",
                         UiSymbols.Warning);
                 }
                 selectedDirectory = baseDirectory;
@@ -172,7 +172,7 @@ internal class InitCommand : Command, IShortDescription
                     .AutoRefresh(true)
                     .Spinner(Spinner.Known.Dots)
                     .SpinnerStyle(Style.Parse("blue"))
-                    .StartAsync("Searching for compatible projects...", async ctx =>
+                    .StartAsync("Searching for known project types...", async ctx =>
                     {
                         return await projectDetectionService.DetectProjectsAsync(
                             searchRoot, maxProjects, progress: null, cancellationToken);
@@ -227,14 +227,14 @@ internal class InitCommand : Command, IShortDescription
             // No project detected at the specified path
             if (useDefaults)
             {
-                logger.LogWarning("{Warning} No compatible project detected at {Path}. Proceeding anyway (--use-defaults).",
+                logger.LogWarning("{Warning} No known project type detected at {Path}. Initializing with winapp.yaml.",
                     UiSymbols.Warning, targetDirectory.FullName);
                 return targetDirectory;
             }
 
             var proceed = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
-                    $"[yellow]No compatible project was detected at this path.[/] Initialize winapp here anyway?")
+                    $"[yellow]No known project type was detected at this path.[/] Initialize with winapp here anyway?")
                 {
                     DefaultValue = false
                 },
@@ -255,7 +255,7 @@ internal class InitCommand : Command, IShortDescription
         {
             var proceed = await ansiConsole.PromptAsync(
                 new ConfirmationPrompt(
-                    $"[yellow]No compatible projects were found.[/] Initialize winapp here anyway?")
+                    $"[yellow]No known projects type were found.[/] Initialize with winapp.yaml here?")
                 {
                     DefaultValue = false
                 },
