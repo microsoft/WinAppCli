@@ -1,0 +1,117 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console.Testing;
+using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Services;
+using WinApp.Cli.Tools;
+
+namespace WinApp.Cli.Tests;
+
+[TestClass]
+public class BundleServiceTests
+{
+    private DirectoryInfo _tempDir = null!;
+    private CapturingBuildToolsService _buildToolsService = null!;
+    private BundleService _service = null!;
+    private TaskContext _taskContext = null!;
+
+    [TestInitialize]
+    public void Setup()
+    {
+        _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"BundleSvcTest_{Guid.NewGuid():N}"));
+        _tempDir.Create();
+        _buildToolsService = new CapturingBuildToolsService();
+        _service = new BundleService(_buildToolsService, NullLogger<BundleService>.Instance);
+
+        var task = new GroupableTask("test", null);
+        var console = new TestConsole();
+        var logger = NullLogger<BundleService>.Instance;
+        var renderLock = new Lock();
+        _taskContext = new TaskContext(task, null, console, logger, renderLock);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        if (_tempDir.Exists)
+        {
+            _tempDir.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateBundleAsync_EmptyList_ThrowsArgumentException()
+    {
+        var output = new FileInfo(Path.Combine(_tempDir.FullName, "out.msixbundle"));
+
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() =>
+            _service.CreateBundleAsync([], output, _taskContext));
+    }
+
+    [TestMethod]
+    public async Task CreateBundleAsync_MultipleMsixFiles_InvokesMakeappxBundleWithCorrectArgs()
+    {
+        // Arrange
+        var file1 = CreateFakeMsix("app_x64.msix");
+        var file2 = CreateFakeMsix("app_arm64.msix");
+        var output = new FileInfo(Path.Combine(_tempDir.FullName, "output", "app.msixbundle"));
+
+        // Act
+        await _service.CreateBundleAsync([file1, file2], output, _taskContext);
+
+        // Assert
+        Assert.AreEqual(1, _buildToolsService.Invocations.Count);
+        var (toolName, args) = _buildToolsService.Invocations[0];
+        Assert.AreEqual("makeappx.exe", toolName);
+        StringAssert.Contains(args, "bundle");
+        StringAssert.Contains(args, "/p");
+        StringAssert.Contains(args, "app.msixbundle");
+    }
+
+    [TestMethod]
+    public async Task CreateBundleAsync_CreatesOutputDirectory()
+    {
+        // Arrange
+        var file1 = CreateFakeMsix("slice.msix");
+        var outputDir = Path.Combine(_tempDir.FullName, "nested", "dir");
+        var output = new FileInfo(Path.Combine(outputDir, "bundle.msixbundle"));
+
+        // Act
+        await _service.CreateBundleAsync([file1], output, _taskContext);
+
+        // Assert
+        Assert.IsTrue(Directory.Exists(outputDir));
+    }
+
+    private FileInfo CreateFakeMsix(string name)
+    {
+        var path = Path.Combine(_tempDir.FullName, name);
+        File.WriteAllText(path, "fake msix content");
+        return new FileInfo(path);
+    }
+
+    /// <summary>
+    /// Captures build tool invocations without actually running anything.
+    /// </summary>
+    private sealed class CapturingBuildToolsService : IBuildToolsService
+    {
+        public List<(string ToolName, string Arguments)> Invocations { get; } = [];
+
+        public FileInfo? GetBuildToolPath(string toolName) => new(Path.Combine(Path.GetTempPath(), toolName));
+
+        public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
+            => Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
+
+        public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
+            => Task.FromResult<DirectoryInfo?>(null);
+
+        public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
+        {
+            Invocations.Add((tool.ExecutableName, arguments));
+            return Task.FromResult(("", ""));
+        }
+    }
+}

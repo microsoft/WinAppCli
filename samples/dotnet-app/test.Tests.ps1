@@ -158,6 +158,37 @@ Describe ".NET App Guide Workflow" {
                 $msix | Should -Not -BeNullOrEmpty
             }
         }
+
+        Context "Multi-architecture Bundle" {
+            It "Should publish for x64" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-Expression "dotnet publish -c Release -r win-x64 --self-contained false -o publish/x64"
+                    $LASTEXITCODE | Should -Be 0
+                } finally { Pop-Location }
+            }
+
+            It "Should publish for arm64" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-Expression "dotnet publish -c Release -r win-arm64 --self-contained false -o publish/arm64"
+                    $LASTEXITCODE | Should -Be 0
+                } finally { Pop-Location }
+            }
+
+            It "Should create an MSIX bundle from both folders" -Skip:$script:skip {
+                Push-Location $script:projectDir
+                try {
+                    Invoke-WinappCommand -Arguments "pack publish/x64 publish/arm64 --manifest Package.appxmanifest --cert devcert.pfx"
+                } finally { Pop-Location }
+            }
+
+            It "Should have produced an .msixbundle file" -Skip:$script:skip {
+                $bundle = Get-ChildItem -Path $script:projectDir -Filter "*.msixbundle" |
+                    Select-Object -First 1
+                $bundle | Should -Not -BeNullOrEmpty
+            }
+        }
     }
 
     Context "Phase 2: Sample Build Check" {

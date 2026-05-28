@@ -186,7 +186,10 @@ Get-AppxPackage *YourCLI* | Remove-AppxPackage
 
 1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate
 2. The Microsoft Store will sign the MSIX for you, no need to sign before submission.
-3. You might need to create multiple MSIX packages, one for each architecture you support (x64, Arm64)
+3. To create a multi-architecture bundle (`.msixbundle`) for x64 + Arm64, pass multiple input folders:
+   ```powershell
+   winapp pack ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+   ```
 
 ## Next Steps
 
