@@ -873,7 +873,19 @@ internal partial class MsixService
                     Directory.CreateDirectory(destDir);
                 }
 
-                file.CopyTo(destFile, overwrite: true);
+                // Never overwrite existing app files with runtime equivalents. The staging
+                // directory already contains the app's own assets, PRI, and resources — these
+                // must take precedence. In particular, overwriting resources.pri would destroy
+                // the app's MRT mappings (e.g. SplashScreen.png → SplashScreen.scale-200.png)
+                // and cause deployment failure (0x80070002). Similarly, the runtime's placeholder
+                // Assets\StoreLogo.png must not replace the app's branded icons.
+                if (File.Exists(destFile))
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Note} Skipping (app file exists): {relativePath}");
+                    continue;
+                }
+
+                file.CopyTo(destFile, overwrite: false);
 
                 taskContext.AddDebugMessage($"{UiSymbols.Folder} Bundled runtime: {relativePath}");
             }
