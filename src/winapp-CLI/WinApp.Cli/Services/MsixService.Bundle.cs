@@ -40,7 +40,7 @@ internal partial class MsixService
             for (int i = 0; i < inputFolders.Length; i++)
             {
                 var folder = inputFolders[i];
-                var exePath = ResolveExecutableForFolder(folder, executable, taskContext);
+                var exePath = ResolveExecutableForFolder(folder, executable, manifestPath, taskContext);
 
                 if (exePath == null)
                 {
@@ -258,16 +258,17 @@ internal partial class MsixService
     /// If --executable is specified, uses that relative path. Otherwise, reads
     /// the manifest's Application/@Executable for the folder.
     /// </summary>
-    private string? ResolveExecutableForFolder(DirectoryInfo folder, string? executableOption, TaskContext taskContext)
+    private string? ResolveExecutableForFolder(DirectoryInfo folder, string? executableOption, FileInfo? manifestPath, TaskContext taskContext)
     {
         if (executableOption != null)
         {
-            var fullPath = Path.Combine(folder.FullName, executableOption);
-            return File.Exists(fullPath) ? fullPath : null;
+            var fullPath = ResolveAndValidatePathUnderFolder(folder, executableOption);
+            return fullPath != null && File.Exists(fullPath) ? fullPath : null;
         }
 
-        // Auto-detect: find manifest and read Application/@Executable
-        var manifest = FindManifestInDirectory(folder)
+        // Auto-detect: prefer explicit --manifest, then folder-local, then cwd
+        var manifest = manifestPath
+            ?? FindManifestInDirectory(folder)
             ?? FindManifestInDirectory(new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()));
 
         if (manifest != null)
@@ -278,8 +279,8 @@ internal partial class MsixService
                 var appExe = doc.ApplicationExecutable;
                 if (appExe != null)
                 {
-                    var fullPath = Path.Combine(folder.FullName, appExe);
-                    if (File.Exists(fullPath))
+                    var fullPath = ResolveAndValidatePathUnderFolder(folder, appExe);
+                    if (fullPath != null && File.Exists(fullPath))
                     {
                         return fullPath;
                     }
@@ -302,6 +303,33 @@ internal partial class MsixService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves a relative path under a base folder, rejecting rooted paths and path traversal.
+    /// Returns the full path if valid and contained within the folder, or null otherwise.
+    /// </summary>
+    private static string? ResolveAndValidatePathUnderFolder(DirectoryInfo folder, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            return null;
+        }
+
+        if (relativePath.Contains("..", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var fullPath = Path.GetFullPath(Path.Combine(folder.FullName, relativePath));
+        var folderPrefix = folder.FullName.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(folderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return fullPath;
     }
 
     /// <summary>
@@ -386,7 +414,10 @@ internal partial class MsixService
             if (selfContained)
             {
                 var applicationExecutable = manifestDoc.ApplicationExecutable;
-                FileInfo? executablePath = applicationExecutable != null ? new FileInfo(Path.Combine(stagingDir.FullName, applicationExecutable)) : null;
+                var validatedExePath = applicationExecutable != null
+                    ? ResolveAndValidatePathUnderFolder(stagingDir, applicationExecutable)
+                    : null;
+                FileInfo? executablePath = validatedExePath != null ? new FileInfo(validatedExePath) : null;
 
                 if (executablePath != null)
                 {

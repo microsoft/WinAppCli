@@ -76,12 +76,16 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
     {
         Invocations.Add((tool.ExecutableName, arguments));
 
-        var match = OutputPathRegex.Match(arguments);
-        if (match.Success)
+        // Only create fake output files for makeappx (not signtool or other tools)
+        if (tool.ExecutableName.Contains("makeappx", StringComparison.OrdinalIgnoreCase))
         {
-            var outputPath = NormalizeLongPath(match.Groups["path"].Value);
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            File.WriteAllText(outputPath, $"fake {tool.ExecutableName} output");
+            var match = OutputPathRegex.Match(arguments);
+            if (match.Success)
+            {
+                var outputPath = NormalizeLongPath(match.Groups["path"].Value);
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                File.WriteAllText(outputPath, $"fake {tool.ExecutableName} output");
+            }
         }
 
         return Task.FromResult<(string stdout, string stderr)>((string.Empty, string.Empty));
@@ -400,6 +404,87 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         return folder;
     }
 
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_NeutralArchWithSelfContained_ThrowsWithClearError()
+    {
+        // Arrange - create folders with neutral PE (AnyCPU managed IL)
+        var neutralFolder = _tempDirectory.CreateSubdirectory("neutral-slice");
+        File.WriteAllBytes(Path.Combine(neutralFolder.FullName, "TestApp.exe"), BuildManagedAnyCpuPe());
+        File.WriteAllBytes(Path.Combine(neutralFolder.FullName, "logo.png"), []);
+        File.WriteAllText(Path.Combine(neutralFolder.FullName, "Package.appxmanifest"), CreateManifestContent("neutral"));
+
+        var x64Folder = CreateSliceFolder("slice-x64-sc", 0x8664, "x64");
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [neutralFolder, x64Folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                selfContained: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "Cannot use --self-contained with architecture-neutral slices");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_WithAutoSign_InvokesBundleServiceThenSigns()
+    {
+        // Arrange
+        var x64Folder = CreateSliceFolder("sign-x64", 0x8664, "x64");
+        var arm64Folder = CreateSliceFolder("sign-arm64", 0xAA64, "arm64");
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "test.pfx"));
+        const string password = "password";
+
+        // Generate a real self-signed certificate matching the test manifest publisher
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var req = new System.Security.Cryptography.X509Certificates.CertificateRequest(
+            "CN=TestPublisher", rsa, System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.Now, DateTimeOffset.Now.AddDays(1));
+        var pfxBytes = cert.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, password);
+        File.WriteAllBytes(certPath.FullName, pfxBytes);
+
+        // Act
+        var result = await _msixService.CreateMsixBundleAsync(
+            [x64Folder, arm64Folder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            autoSign: true,
+            certificatePath: certPath,
+            certificatePassword: password,
+            cancellationToken: TestContext.CancellationToken);
+
+        // Assert - bundle was created
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.Signed);
+        Assert.AreEqual(1, _fakeBundleService.CallCount);
+        // Signing invokes signtool
+        Assert.IsTrue(_fakeBuildToolsService.Invocations.Any(i =>
+            i.ToolName.Contains("signtool", StringComparison.OrdinalIgnoreCase)),
+            "Expected signtool invocation for bundle signing");
+    }
+
+    [TestMethod]
+    public async Task PackageCommand_MultipleFolders_SuccessfullyCreatesBundleViaCommand()
+    {
+        // Arrange - two valid folders, invoke through PackageCommand
+        var x64Folder = CreateSliceFolder("cmd-x64", 0x8664, "x64");
+        var arm64Folder = CreateSliceFolder("cmd-arm64", 0xAA64, "arm64");
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var args = new[] { x64Folder.FullName, arm64Folder.FullName, "--skip-pri" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, args);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, $"Expected success. Stderr: {ConsoleStdErr}");
+        Assert.AreEqual(1, _fakeBundleService.CallCount, "Bundle service should be called exactly once");
+        Assert.AreEqual(2, _fakeBundleService.LastMsixFiles!.Count, "Should produce two intermediate MSIX files");
+    }
+
     private static string CreateManifestContent(string processorArchitecture)
     {
         return $$"""
@@ -443,5 +528,17 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         BitConverter.GetBytes(optionalHeaderMagic).CopyTo(peBytes, coffHeaderOffset + 20);
 
         return peBytes;
+    }
+
+    /// <summary>
+    /// Builds a minimal managed AnyCPU PE that PeHelper.DetectPeArchitecture returns "neutral" for.
+    /// Uses the test assembly itself as a source of a valid IL-only binary.
+    /// </summary>
+    private static byte[] BuildManagedAnyCpuPe()
+    {
+        // Use the test assembly's DLL as source — it's a valid IL-only managed assembly.
+        // Read it and return its bytes. The test project targets AnyCPU (arm64 runtime but IL-only).
+        var assemblyPath = typeof(MsixServiceBundleOrchestrationTests).Assembly.Location;
+        return File.ReadAllBytes(assemblyPath);
     }
 }
