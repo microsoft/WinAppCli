@@ -254,6 +254,31 @@ winapp pack ./publish/x64 ./publish/arm64 --self-contained --generate-cert
 
 The command auto-detects each folder's architecture from the primary executable's PE header, validates consistency across slices (Identity, Capabilities, Dependencies), and produces a `<Name>_<Version>_<arch1>_<arch2>.msixbundle`.
 
+**Manifest resolution for bundles:**
+
+Each slice in the bundle needs a manifest. The command resolves manifests in this order:
+
+1. **`--manifest <path>`** — If specified, this single manifest is used for all slices. The `ProcessorArchitecture` is automatically updated per-slice to match the detected architecture.
+
+2. **Per-folder manifest** — If each input folder contains a `Package.appxmanifest` (or `appxmanifest.xml`), that folder's manifest is used for its slice.
+
+3. **Current directory fallback** — If a folder has no manifest, the command looks for `Package.appxmanifest` in the current working directory and uses it (with architecture auto-stamped).
+
+In all cases, the manifest is automatically updated: placeholders are resolved, dependencies are injected, and the `ProcessorArchitecture` is force-set to the detected architecture. After resolution, a cross-slice validation ensures that Identity (Name, Version, Publisher), Capabilities, and Dependencies are consistent across all slices — only `ProcessorArchitecture` may differ.
+
+```bash
+# Option 1: Single shared manifest (simplest for most projects)
+# Place Package.appxmanifest in your project root and run from there
+winapp pack ./publish/x64 ./publish/arm64
+
+# Option 2: Explicit manifest path
+winapp pack ./publish/x64 ./publish/arm64 --manifest ./src/Package.appxmanifest
+
+# Option 3: Per-folder manifests (useful if slices have different app extensions)
+# Each folder already contains its own Package.appxmanifest
+winapp pack ./publish/x64 ./publish/arm64
+```
+
 ---
 
 ### create-debug-identity

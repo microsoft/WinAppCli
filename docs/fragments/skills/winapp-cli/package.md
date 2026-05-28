@@ -123,10 +123,18 @@ winapp package ./publish/x64 ./publish/arm64 --self-contained --generate-cert
 
 **How it works:** When multiple input folders are passed, `winapp package`:
 1. Detects the architecture of each folder's primary executable from its PE header
-2. Validates that all slices share the same Identity, Capabilities, and Dependencies
-3. Packs each folder into an intermediate unsigned `.msix`
-4. Bundles them into a single `.msixbundle` using `makeappx bundle`
-5. Signs only the bundle (not individual slices) — the signature covers all packages inside
+2. Resolves a manifest for each slice (see below)
+3. Validates that all slices share the same Identity, Capabilities, and Dependencies
+4. Packs each folder into an intermediate unsigned `.msix`
+5. Bundles them into a single `.msixbundle` using `makeappx bundle`
+6. Signs only the bundle (not individual slices) — the signature covers all packages inside
+
+**Manifest resolution:** Each slice needs a manifest. Resolution order:
+- `--manifest <path>` uses one manifest for all slices (architecture auto-stamped per folder)
+- Per-folder `Package.appxmanifest` if present in the input folder
+- Fallback to `Package.appxmanifest` in the current working directory
+
+The `ProcessorArchitecture` is always force-set to the detected architecture per-slice. All other Identity fields must be consistent across slices.
 
 **Output:** `<Name>_<Version>_<arch1>_<arch2>.msixbundle` (architectures sorted alphabetically).
 
