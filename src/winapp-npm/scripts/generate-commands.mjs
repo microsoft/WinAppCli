@@ -128,6 +128,17 @@ function isBoolFlag(opt) {
   return tsType(opt.valueType, opt.helpName) === 'boolean';
 }
 
+/** Whether a positional argument is variadic (accepts multiple values). */
+function isVariadicArg(argDef) {
+  // Array types (e.g., DirectoryInfo[], String[])
+  if (argDef.valueType && argDef.valueType.endsWith('[]')) return true;
+  // Arity with no maximum or maximum > 1
+  const arity = argDef.arity;
+  if (arity && arity.maximum === undefined) return true;
+  if (arity && arity.maximum > 1) return true;
+  return false;
+}
+
 /**
  * Commands that act as pass-throughs (arbitrary extra args forwarded to
  * an underlying tool). We add a `string[]` property for the extra args.
@@ -284,8 +295,10 @@ function generate(schema) {
     // positional args first
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
+      const variadic = isVariadicArg(arg.def);
+      const type = variadic ? 'string | string[]' : tsType(arg.def.valueType);
       L(`  /** ${cleanDesc(arg.def.description)} */`);
-      L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+      L(`  ${arg.propName}${required ? '' : '?'}: ${type};`);
     }
     // then named options
     for (const opt of opts) {
@@ -314,7 +327,18 @@ function generate(schema) {
     // Positional args
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
-      if (required) {
+      const variadic = isVariadicArg(arg.def);
+      if (variadic) {
+        if (required) {
+          L(`  const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  args.push(...${arg.propName}Arr);`);
+        } else {
+          L(`  if (options.${arg.propName}) {`);
+          L(`    const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`    args.push(...${arg.propName}Arr);`);
+          L('  }');
+        }
+      } else if (required) {
         L(`  args.push(options.${arg.propName});`);
       } else {
         L(`  if (options.${arg.propName}) args.push(options.${arg.propName});`);

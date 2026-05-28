@@ -846,9 +846,9 @@ internal partial class MsixService
     /// <param name="inputFolder">The folder where runtime files should be copied</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the self-contained deployment directory</returns>
-    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken, string? overrideArch = null)
     {
-        var arch = WorkspaceSetupService.GetSystemArchitecture();
+        var arch = overrideArch ?? WorkspaceSetupService.GetSystemArchitecture();
 
         var winappDir = winappDirectoryService.GetLocalWinappDirectory();
 
