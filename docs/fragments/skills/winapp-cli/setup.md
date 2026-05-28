@@ -35,16 +35,17 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ```powershell
 # Interactive — prompts for app name, publisher, SDK channel, etc.
-winapp init .
+# Automatically searches for compatible projects (Tauri, Electron, .NET, Rust, C++, Flutter)
+winapp init
 
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
-winapp init --use-defaults
+winapp init . --use-defaults
 
 # Skip SDK installation (just manifest + config)
-winapp init --use-defaults --setup-sdks none
+winapp init . --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
-winapp init --use-defaults --setup-sdks preview
+winapp init . --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
@@ -121,7 +122,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ## Recommended workflow
 
-1. **Initialize** — `winapp init --use-defaults` in your existing project
+1. **Initialize** — `winapp init . --use-defaults` in your existing project
 2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging

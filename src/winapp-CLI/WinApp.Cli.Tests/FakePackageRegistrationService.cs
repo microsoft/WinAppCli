@@ -84,9 +84,21 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return FakeInstalledVersion;
     }
 
+    /// <summary>
+    /// When set to a non-null exception, <see cref="FindDevPackages"/> throws it
+    /// instead of returning <see cref="FakeDevPackages"/>. Use to exercise the
+    /// non-fatal catch path (and OperationCanceled propagation) in
+    /// <c>MsixService.IsExistingRegistrationUpToDate</c>.
+    /// </summary>
+    public Exception? FindDevPackagesThrows { get; set; }
+
     public List<DevPackageInfo> FindDevPackages(string packageName)
     {
         FindDevPackagesCalls.Add(packageName);
+        if (FindDevPackagesThrows is not null)
+        {
+            throw FindDevPackagesThrows;
+        }
         return FakeDevPackages;
     }
 }

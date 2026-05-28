@@ -69,6 +69,10 @@ winapp sign ./myapp.msix ./devcert.pfx --password MySecurePassword
 winapp sign ./myapp.msix ./production.pfx --timestamp http://timestamp.digicert.com
 ```
 
+### Bundle signing
+
+When packaging multiple architectures into an `.msixbundle`, only the bundle needs to be signed — the signature covers all packages inside. The individual `.msix` slices do not need separate signatures.
+
 Note: The `package` command can sign automatically when you pass `--cert`, so you often don't need `sign` separately.
 
 ## Recommended workflow

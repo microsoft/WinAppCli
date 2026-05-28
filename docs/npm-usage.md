@@ -1,4 +1,6 @@
-<!-- mslearn: true -->
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -27,6 +29,9 @@ await certGenerate({ install: true });
 
 // Package the built app
 await packageApp({ inputFolder: './dist', cert: './devcert.pfx' });
+
+// Create a multi-architecture bundle
+await packageApp({ inputFolder: ['./publish/x64', './publish/arm64'] });
 ```
 
 ## Common types
@@ -287,7 +292,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string \| string[]` | Yes | One or more input folders with package layout. Pass a single string for one package, or an array for a multi-architecture bundle. |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -295,7 +300,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -336,10 +341,12 @@ function run(options: RunOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -596,7 +603,8 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1213,7 +1221,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string \| string[]` | Yes | One or more input folders with package layout. Pass a single string for one package, or an array for a multi-architecture bundle. |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -1221,7 +1229,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
 | `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
@@ -1244,10 +1252,12 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
@@ -1396,7 +1406,8 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
