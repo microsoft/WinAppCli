@@ -95,6 +95,13 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
                     logger.LogError("{UISymbol} Could not infer alias name from Executable attribute. Use --name to specify the alias.", UiSymbols.Error);
                     return 1;
 
+                case AddExecutionAliasStatus.InvalidAliasName:
+                    logger.LogError(
+                        "{UISymbol} Alias name '{Alias}' is not a valid bare .exe filename. Aliases must be a single .exe filename with no path separators, drive letters, '..' segments, trailing dots/spaces, or reserved device names (CON, NUL, COM1-9, LPT1-9).",
+                        UiSymbols.Error,
+                        result.AliasName);
+                    return 1;
+
                 case AddExecutionAliasStatus.ManifestParseError:
                     logger.LogError("{UISymbol} Failed to parse manifest: {Error}", UiSymbols.Error, result.ErrorMessage);
                     return 1;

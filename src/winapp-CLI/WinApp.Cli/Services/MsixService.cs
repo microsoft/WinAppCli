@@ -27,6 +27,8 @@ internal partial class MsixService(
     IWinmdService winmdService,
     IPriService priService,
     IPackageRegistrationService packageRegistrationService,
+    IBundleService bundleService,
+    IBundleValidationService bundleValidationService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {

@@ -559,7 +559,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail for non-existent package input folder.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
         Assert.IsTrue(
-            combinedOutput.Contains("Input folder not found", StringComparison.OrdinalIgnoreCase)
+            combinedOutput.Contains("Input folder(s) not found:", StringComparison.OrdinalIgnoreCase)
                 || combinedOutput.Contains("Directory does not exist", StringComparison.OrdinalIgnoreCase),
             $"Expected package missing-folder error to be surfaced. Output: {combinedOutput}");
     }
