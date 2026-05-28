@@ -710,6 +710,36 @@ public class ManifestAddAliasCommandTests : BaseCommandTests
         Assert.AreEqual(originalContent, currentContent, "Manifest must not be modified when inferred alias is rejected");
     }
 
+    [TestMethod]
+    [DataRow("app\\my-app.exe", "my-app.exe", DisplayName = "backslash subdir (Electron pattern)")]
+    [DataRow("app/my-app.exe", "my-app.exe", DisplayName = "forward slash subdir")]
+    [DataRow("bin\\sub\\nested.exe", "nested.exe", DisplayName = "multi-segment subdir")]
+    public async Task AddAlias_PathPrefixedExecutable_InfersLeafFilenameAsAlias(string executable, string expectedAlias)
+    {
+        // The MSIX manifest's Application/@Executable is a package-relative path
+        // (e.g. "app\my-app.exe" — Electron guide). The inferred alias must be
+        // the leaf filename, not the full path.
+        var manifestPath = CreateManifest($"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     IgnorableNamespaces="">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="{executable}" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath]);
+
+        Assert.AreEqual(0, exitCode, $"Command should succeed for Executable='{executable}'");
+        var content = await File.ReadAllTextAsync(manifestPath);
+        Assert.Contains($"Alias=\"{expectedAlias}\"", content, "Alias should be the leaf filename of Executable");
+    }
+
     #endregion
 
     #region Helper methods

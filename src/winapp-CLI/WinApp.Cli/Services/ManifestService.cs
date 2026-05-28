@@ -540,14 +540,28 @@ internal partial class ManifestService(
             targetApp = applications[0];
         }
 
-        // Infer alias name from Executable attribute if not specified
+        // Infer alias name from Executable attribute if not specified.
+        // The MSIX manifest's Application/@Executable is a package-relative path
+        // (e.g. "app\my-app.exe" — see the Electron guide), so extract the leaf
+        // filename before using it as an alias. Still reject path-traversal
+        // segments defensively so a hostile manifest can't smuggle "..\evil.exe"
+        // through inference.
         var aliasName = options.AliasName;
         if (string.IsNullOrEmpty(aliasName))
         {
             var executable = targetApp.Attribute("Executable")?.Value;
             if (!string.IsNullOrEmpty(executable))
             {
-                aliasName = executable;
+                if (executable.Split('\\', '/').Any(seg => seg == ".."))
+                {
+                    return new AddExecutionAliasResult(AddExecutionAliasStatus.InvalidAliasName, AliasName: executable);
+                }
+
+                aliasName = Path.GetFileName(executable);
+                if (string.IsNullOrEmpty(aliasName))
+                {
+                    return new AddExecutionAliasResult(AddExecutionAliasStatus.CouldNotInferAlias);
+                }
             }
             else
             {
