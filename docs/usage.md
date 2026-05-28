@@ -46,7 +46,28 @@ winapp init [base-directory] [options]
 - Updates .gitignore to exclude generated files
 - Stores shareable files in the global cache directory
 
-**Automatic .NET project detection:**
+**Automatic project detection:**
+
+When `init` is run without a directory argument, it performs a breadth-first search of the current directory tree to find compatible projects (up to 10). Supported project types:
+
+- **Tauri** — `tauri.conf.json` found one level below the directory
+- **Electron** — `package.json` with `electron` in dependencies or devDependencies
+- **Flutter** — `pubspec.yaml` at project root
+- **.NET** — `.csproj` at project root
+- **Rust** — `Cargo.toml` at project root
+- **C++** — `CMakeLists.txt` at project root
+
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
+
+- If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
+- If `--use-defaults` is set without a directory argument, `init` searches for projects and errors with the list of detected projects — pass an explicit directory to use non-interactive mode (e.g., `winapp init . --use-defaults`)
+- If the current directory is a compatible project, `init` proceeds immediately
+- If exactly one project is found elsewhere, you're prompted to confirm
+- If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
+- If no projects are found, you're warned and asked whether to proceed anyway
+- If the search reaches the 10-project limit, a warning suggests providing a directory argument
+
+**Automatic .NET project flow:**
 
 When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
 
@@ -78,7 +99,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ```bash
 # Re-run init to install SDKs - preserves existing files (manifest, etc.)
-winapp init --use-defaults --setup-sdks stable
+winapp init . --use-defaults --setup-sdks stable
 ```
 
 Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions.
