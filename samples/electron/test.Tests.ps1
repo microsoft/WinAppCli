@@ -78,15 +78,16 @@ Describe "Electron Sample" {
                 $script:appDir = Join-Path $script:tempDir "electron-app"
                 $script:appDir | Should -Exist
 
-                # Electron's postinstall binary download can silently fail on newer Node versions.
-                # Explicitly run the install script if the binary is missing.
+                # Electron 42+ no longer auto-downloads its binary during npm install.
+                # Use `npx install-electron` (the supported mechanism) to fetch it.
                 $electronExe = Join-Path $script:appDir "node_modules\electron\dist\electron.exe"
                 if (-not (Test-Path $electronExe)) {
-                    Write-Host "Electron binary not found after scaffold — running explicit install..."
+                    Write-Host "Electron binary not found after scaffold — running npx install-electron..."
                     Push-Location $script:appDir
                     try {
-                        Invoke-Expression "node node_modules/electron/install.js"
-                        $electronExe | Should -Exist -Because "Electron binary should be downloaded after explicit install"
+                        & npx --yes install-electron 2>&1 | ForEach-Object { Write-Host $_ }
+                        $LASTEXITCODE | Should -Be 0 -Because "install-electron must exit cleanly"
+                        $electronExe | Should -Exist -Because "Electron binary should be present after install-electron"
                     } finally { Pop-Location }
                 }
             } finally { Pop-Location }
@@ -159,18 +160,20 @@ Describe "Electron Sample" {
         }
 
         It "Should download the Electron binary" -Skip:$script:skip {
-            # Electron 42+ no longer downloads its binary during `npm install` (see issue #524).
-            # Trigger the download explicitly so `add-electron-debug-identity` can find electron.exe.
-            # `install-electron` was added in Electron 42; older versions auto-download via
-            # postinstall, so the bin is absent and `npx --no-install` exits non-zero. Either
-            # outcome is fine as long as electron.exe ends up on disk — the Should -Exist below
-            # is the real assertion.
-            Push-Location $script:appDir
-            try {
-                & npx --no-install install-electron 2>&1 | ForEach-Object { Write-Host $_ }
-                $exe = Join-Path $script:appDir "node_modules\electron\dist\electron.exe"
-                $exe | Should -Exist
-            } finally { Pop-Location }
+            # Electron 42+ no longer downloads its binary during `npm install`.
+            # Use `npx --yes install-electron` to fetch it reliably in CI.
+            $exe = Join-Path $script:appDir "node_modules\electron\dist\electron.exe"
+            if (Test-Path $exe) {
+                Write-Host "Electron binary already present — skipping download."
+            } else {
+                Push-Location $script:appDir
+                try {
+                    Write-Host "Running npx install-electron to fetch Electron binary..."
+                    & npx --yes install-electron 2>&1 | ForEach-Object { Write-Host $_ }
+                    $LASTEXITCODE | Should -Be 0 -Because "install-electron must succeed"
+                } finally { Pop-Location }
+            }
+            $exe | Should -Exist -Because "Electron binary is required for add-electron-debug-identity"
         }
 
         It "Should add Electron debug identity" -Skip:$script:skip {
