@@ -111,6 +111,40 @@ winapp create-external-catalog "./bin/Release"
 winapp create-external-catalog "./bin/Release" --recursive --output ./catalog/CodeIntegrityExternal.cat
 ```
 
+### Bundling multiple architectures
+
+Create an MSIX bundle from multiple per-architecture build outputs:
+
+```powershell
+# Create unsigned bundle for Store submission (x64 + arm64)
+winapp package ./publish/x64 ./publish/arm64
+
+# Create signed bundle for sideloading
+winapp package ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+
+# Self-contained bundle with Windows App SDK runtime per arch
+winapp package ./publish/x64 ./publish/arm64 --self-contained --generate-cert
+```
+
+**How it works:** When multiple input folders are passed, `winapp package`:
+1. Detects the architecture of each folder's primary executable from its PE header
+2. Resolves a manifest for each slice (see below)
+3. Validates that all slices share the same Identity, Capabilities, and Dependencies
+4. Packs each folder into an intermediate unsigned `.msix`
+5. Bundles them into a single `.msixbundle` using `makeappx bundle`
+6. Signs only the bundle (not individual slices) — the signature covers all packages inside
+
+**Manifest resolution:** Each slice needs a manifest. Resolution order:
+- `--manifest <path>` uses one manifest for all slices (architecture auto-stamped per folder)
+- Per-folder `Package.appxmanifest` if present in the input folder
+- Fallback to `Package.appxmanifest` in the current working directory
+
+The `ProcessorArchitecture` is always force-set to the detected architecture per-slice. All other Identity fields must be consistent across slices.
+
+**Output:** `<Name>_<Version>_<arch1>_<arch2>.msixbundle` (architectures sorted alphabetically).
+
+**Store submission:** An unsigned bundle is valid for Store upload — Partner Center signs it with your reserved identity certificate. For sideloading, pass `--cert` or `--generate-cert`.
+
 This hashes executables in the specified directories so Windows trusts them when running with sparse package identity.
 
 ## CI/CD
@@ -167,7 +201,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | Yes | Input folder with package layout |
+| `<input-folder>` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -180,7 +214,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 | `--install-cert` | Install certificate to machine | (none) |
 | `--manifest` | Path to AppX manifest file (default: auto-detect from input folder or current directory) | (none) |
 | `--name` | Package name (default: from manifest) | (none) |
-| `--output` | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) | (none) |
+| `--output` | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. | (none) |
 | `--publisher` | Publisher name for certificate generation | (none) |
 | `--self-contained` | Bundle Windows App SDK runtime for self-contained deployment | (none) |
 | `--skip-pri` | Skip PRI file generation | (none) |

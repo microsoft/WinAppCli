@@ -102,18 +102,21 @@ Want to inspect or interact with a running app's UI?
 **Key options:** `--setup-sdks stable|preview|experimental|none`
 **Requires:** `winapp.yaml`
 
-### `winapp package <input-folder>` (alias: `winapp pack`)
-**Purpose:** Create an MSIX installer from a built app.
-**When to use:** After building your app, when you want to create a distributable MSIX package.
+### `winapp package <input-folder...>` (alias: `winapp pack`)
+**Purpose:** Create an MSIX package (single folder) or MSIX bundle (multiple folders).
+**When to use:** After building your app, when you want to create a distributable MSIX package or a multi-architecture bundle.
 **Key options:**
-- `--cert <path>` — sign the package in one step
+- `--cert <path>` — sign the package/bundle in one step
 - `--cert-password <pwd>` — certificate password (default: `password`)
 - `--manifest <path>` — explicit manifest path (default: auto-detect from input folder or cwd)
-- `--output <path>` — output `.msix` filename
-- `--self-contained` — bundle Windows App SDK runtime
+- `--output <path>` — output `.msix` or `.msixbundle` filename
+- `--self-contained` — bundle Windows App SDK runtime (arch-aware for bundles)
 - `--generate-cert` — auto-generate a certificate
 - `--install-cert` — also install the certificate on the machine
 - `--skip-pri` — skip PRI resource file generation
+**Bundle usage:** Pass multiple folders to create a bundle:
+  `winapp pack ./publish/x64 ./publish/arm64`
+  Each folder's architecture is auto-detected from the executable PE header.
 **Requires:** Built app output directory + `appxmanifest.xml`
 
 ### `winapp create-debug-identity [entrypoint]`

@@ -63,4 +63,24 @@ internal class FakeMsixService : IMsixService
     {
         return Task.FromResult(new CreateMsixPackageResult(new FileInfo("fake.msix"), false));
     }
+
+    public Task<CreateMsixBundleResult> CreateMsixBundleAsync(
+        DirectoryInfo[] inputFolders,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        string? packageName = null,
+        bool skipPri = false,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        FileInfo? manifestPath = null,
+        bool selfContained = false,
+        string? executable = null,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new CreateMsixBundleResult(new FileInfo("fake.msixbundle"), false, []));
+    }
 }
