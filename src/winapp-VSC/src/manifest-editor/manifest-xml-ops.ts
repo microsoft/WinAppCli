@@ -750,7 +750,8 @@ export function removeVisualAsset(xmlText: string, appIndex: number, veField: st
         // If DefaultTile has no remaining content attributes, remove the element entirely
         const cleanDtMatch = dtPattern.exec(result.substring(appRegion.start, appRegion.start + appXml.length + 50));
         if (cleanDtMatch) {
-            const tagContent = cleanDtMatch[0].replace(/<[a-zA-Z0-9]*:?DefaultTile\b/, '').replace(/\/?>$/, '').trim(); // lgtm[js/incomplete-multi-character-sanitization]
+            const defaultTileTagMatch = /^<[a-zA-Z0-9]*:?DefaultTile\b([^>]*)\/?>$/s.exec(cleanDtMatch[0]);
+            const tagContent = (defaultTileTagMatch?.[1] ?? '').trim();
             if (!tagContent) {
                 // Remove the entire DefaultTile element and its surrounding whitespace
                 const absStart = appRegion.start + cleanDtMatch.index;
