@@ -657,7 +657,7 @@ function applyDependenciesChangeString(xml: string, field: string, value: string
             const removeOnEmpty = cfg.removeOnEmpty?.includes(subField);
             // Ensure namespace if configured for this field
             if (cfg.ensureNamespace && cfg.ensureNamespace.fields.includes(subField) && value) {
-                xml = ensureNamespace(xml, cfg.ensureNamespace.prefix, cfg.ensureNamespace.uri);
+                xml = ensureNamespace(xml, cfg.ensureNamespace.prefix, cfg.ensureNamespace.uri); // lgtm[js/incomplete-multi-character-sanitization]
             }
             return applyNthElementAttrChange(xml, cfg.tagRegex, index, attr, value,
                 removeOnEmpty ? { removeOnEmpty: true } : undefined);

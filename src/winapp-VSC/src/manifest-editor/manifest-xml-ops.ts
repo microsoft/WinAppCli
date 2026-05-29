@@ -586,7 +586,7 @@ export function addPhoneIdentity(xmlText: string): string {
     }
 
     // Fallback: insert before </Package>
-    const pkgClose = result.lastIndexOf('</Package>');
+    const pkgClose = result.lastIndexOf('</Package>'); // lgtm[js/incomplete-multi-character-sanitization]
     if (pkgClose < 0) { return result; }
     const pkgIndent = detectIndent(result, pkgClose);
     const childIndent = pkgIndent + '  ';
@@ -750,7 +750,7 @@ export function removeVisualAsset(xmlText: string, appIndex: number, veField: st
         // If DefaultTile has no remaining content attributes, remove the element entirely
         const cleanDtMatch = dtPattern.exec(result.substring(appRegion.start, appRegion.start + appXml.length + 50));
         if (cleanDtMatch) {
-            const tagContent = cleanDtMatch[0].replace(/<[a-zA-Z0-9]*:?DefaultTile\b/, '').replace(/\/?>$/, '').trim();
+            const tagContent = cleanDtMatch[0].replace(/<[a-zA-Z0-9]*:?DefaultTile\b/, '').replace(/\/?>$/, '').trim(); // lgtm[js/incomplete-multi-character-sanitization]
             if (!tagContent) {
                 // Remove the entire DefaultTile element and its surrounding whitespace
                 const absStart = appRegion.start + cleanDtMatch.index;
