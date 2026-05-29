@@ -83,6 +83,27 @@ Describe "Rust App Sample" {
             } finally { Pop-Location }
         }
 
+        It "Should reject hostile execution alias in manifest" -Skip:$script:skip {
+            # Regression test for MSRC RCE fix: a manifest containing a non-bare /
+            # path-traversal ExecutionAlias must be rejected by `winapp run --with-alias`
+            # before any process is launched.
+            Push-Location $script:rustProjectDir
+            try {
+                $manifestPath = Join-Path $script:rustProjectDir "Package.appxmanifest"
+                $original = Get-Content -Raw -Path $manifestPath
+                try {
+                    $hostile = $original -replace 'Alias="[^"]+"', 'Alias="..\evil.exe"'
+                    Set-Content -Path $manifestPath -Value $hostile -NoNewline
+
+                    $output = & winapp run .\target\debug --with-alias --unregister-on-exit 2>&1
+                    $LASTEXITCODE | Should -Not -Be 0 -Because "hostile alias must be rejected"
+                    ($output -join "`n") | Should -Match '(?i)alias' -Because "error should mention alias validation. Got: $output"
+                } finally {
+                    Set-Content -Path $manifestPath -Value $original -NoNewline
+                }
+            } finally { Pop-Location }
+        }
+
         It "Should build Rust app in release mode" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {

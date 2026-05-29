@@ -174,6 +174,17 @@ winapp ui invoke btn-open-e6f7 -w <dialog-hwnd>
 ```
 Note: The filename input in standard file dialogs typically has AutomationId `1148`. Use `inspect -w <dialog-hwnd> --interactive` to discover the actual slugs.
 
+## JSON output envelopes (v0.3.1+)
+
+The `--json` envelope for `ui inspect`, `ui get-focused`, `ui search`, and `ui wait-for` was reshaped in v0.3.1. Pre-0.3.1 parsers will silently break — most fields were renamed, removed, or moved into envelopes. Highlights:
+
+- `ui inspect --json` now nests elements under `windows[].elements[]` (was a flat `elements[]`).
+- `ui get-focused --json` always emits an envelope — `{ "hasFocus": false }` or `{ "hasFocus": true, "element": {...} }` (was bare `null`).
+- `ui search --json` / `ui wait-for --json` may include an `invokableAncestor` field (element-shaped) on each match.
+- Per-element `id`, `parentSelector`, and `windowHandle` are **removed** — use `selector` as the public handle.
+
+Full schemas with examples: `references/ui-json-envelope.md`.
+
 ## Related skills
 - `winapp-setup` for adding Windows SDK to your project
 - `winapp-package` for packaging apps as MSIX
