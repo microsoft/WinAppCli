@@ -14,15 +14,14 @@ export function getEditorStyles(nonce: string): string {
             color: var(--vscode-editor-foreground);
             background: var(--vscode-editor-background);
         }
-        body { padding: 0; overflow-y: auto; }
+        body { padding: 0; margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 
         /* ─── Tab bar ──────────────────────────────────────── */
         .tab-bar {
             display: flex;
             border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border));
             background: var(--vscode-editor-background);
-            position: sticky;
-            top: 0;
+            flex-shrink: 0;
             z-index: 10;
         }
         .tab-bar-spacer { flex: 1; }
@@ -74,7 +73,7 @@ export function getEditorStyles(nonce: string): string {
         }
 
         /* ─── Tab content ──────────────────────────────────── */
-        .tab-content { display: none; padding: 20px 24px 120px; max-width: 720px; }
+        .tab-content { display: none; padding: 20px 24px 120px; max-width: 720px; flex: 1; overflow-y: auto; }
         .tab-content.active { display: block; }
 
         /* ─── Section header ───────────────────────────────── */
@@ -260,6 +259,14 @@ export function getEditorStyles(nonce: string): string {
         .form-group.has-warning textarea,
         .form-group.has-warning .custom-select-trigger {
             border-color: var(--vscode-editorWarning-foreground, #cca700);
+        }
+        .copy-to-assets-link {
+            color: var(--vscode-textLink-foreground, #3794ff);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .copy-to-assets-link:hover {
+            color: var(--vscode-textLink-activeForeground, #3794ff);
         }
 
         /* ─── Color picker row ─────────────────────────────── */

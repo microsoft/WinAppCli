@@ -4,6 +4,9 @@
  */
 
 import { test, expect, type FrameLocator } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
     switchTab,
     clickButton,
@@ -817,4 +820,246 @@ test('browse executable button is visible', async () => {
     const card = frame.locator('.app-card').first();
     const browseBtn = card.locator('button:has-text("Browse"), .browse-exe-btn').first();
     await expect(browseBtn).toBeVisible();
+});
+
+// ─── Image path warning & copy to assets ────────────────
+
+test('shows warning for image path not in package directory', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // Create a temp image file outside the workspace
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'img-test-'));
+    const externalImg = path.join(tmpDir, 'external-logo.png');
+    // Write a minimal valid PNG (1x1 pixel)
+    const pngBuffer = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64'
+    );
+    fs.writeFileSync(externalImg, pngBuffer);
+
+    // Type the external path into Square 150x150 Logo field
+    const input = card.locator('input[data-field-name="visualElements.square150x150Logo"]');
+    await input.fill(externalImg);
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(2_000);
+
+    // Check the warning appears with "Copy to Assets" link
+    const formGroup = card.locator('.form-group[data-field*="visualElements.square150x150Logo"]');
+    const validationMsg = formGroup.locator('.validation-msg');
+    await expect(validationMsg).toContainText('Image not in package directory.', { timeout: 10_000 });
+    const copyLink = validationMsg.locator('.copy-to-assets-link');
+    await expect(copyLink).toBeVisible();
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('copy to assets copies file and updates field path', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // Create a temp image file outside the workspace
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'img-copy-'));
+    const externalImg = path.join(tmpDir, 'test-asset.png');
+    const pngBuffer = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64'
+    );
+    fs.writeFileSync(externalImg, pngBuffer);
+
+    // Type the external path into Square 150x150 Logo field
+    const input = card.locator('input[data-field-name="visualElements.square150x150Logo"]');
+    await input.fill(externalImg);
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(2_000);
+
+    // Click "Copy to Assets folder" link
+    const formGroup = card.locator('.form-group[data-field*="visualElements.square150x150Logo"]');
+    const copyLink = formGroup.locator('.copy-to-assets-link');
+    if (await copyLink.count() > 0 && await copyLink.isVisible()) {
+        await copyLink.click();
+        await ctx.page.waitForTimeout(2_000);
+
+        // Verify file was copied to Assets folder
+        const assetsDir = path.join(ctx.workspacePath, 'Assets');
+        expect(fs.existsSync(assetsDir)).toBe(true);
+        const copiedFile = path.join(assetsDir, 'test-asset.png');
+        expect(fs.existsSync(copiedFile)).toBe(true);
+
+        // Verify the manifest XML was updated
+        const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+        expect(xml).toContain('Assets\\test-asset.png');
+    }
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('no warning shown for resource key paths', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // Type a resource key (no image extension) into the logo field
+    const input = card.locator('input[data-field-name="visualElements.square150x150Logo"]');
+    await input.fill('ms-appx:///Resources/Logo');
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_500);
+
+    // No warning should appear
+    const formGroup = card.locator('.form-group[data-field*="visualElements.square150x150Logo"]');
+    const validationMsg = formGroup.locator('.validation-msg');
+    await expect(validationMsg).not.toContainText('Image not');
+});
+
+// ─── Aspect ratio validation ────────────────────────────
+
+/** Creates a minimal valid PNG with given dimensions (1-pixel transparency). */
+function createPngWithDimensions(width: number, height: number): Buffer {
+    // PNG signature
+    const signature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    // IHDR chunk: width(4) + height(4) + bitDepth(1) + colorType(1) + compression(1) + filter(1) + interlace(1)
+    const ihdrData = Buffer.alloc(13);
+    ihdrData.writeUInt32BE(width, 0);
+    ihdrData.writeUInt32BE(height, 4);
+    ihdrData[8] = 8;  // bit depth
+    ihdrData[9] = 2;  // color type (RGB)
+    ihdrData[10] = 0; // compression
+    ihdrData[11] = 0; // filter
+    ihdrData[12] = 0; // interlace
+
+    const ihdrLength = Buffer.alloc(4);
+    ihdrLength.writeUInt32BE(13, 0);
+    const ihdrType = Buffer.from('IHDR');
+    const ihdrCrc = crc32(Buffer.concat([ihdrType, ihdrData]));
+
+    // IDAT chunk (minimal — single row of zeroes compressed with zlib)
+    const zlib = require('zlib');
+    const rawData = Buffer.alloc((width * 3 + 1) * height, 0); // filter byte + RGB per pixel per row
+    const compressed = zlib.deflateSync(rawData);
+    const idatLength = Buffer.alloc(4);
+    idatLength.writeUInt32BE(compressed.length, 0);
+    const idatType = Buffer.from('IDAT');
+    const idatCrc = crc32(Buffer.concat([idatType, compressed]));
+
+    // IEND chunk
+    const iendLength = Buffer.from([0, 0, 0, 0]);
+    const iendType = Buffer.from('IEND');
+    const iendCrc = crc32(iendType);
+
+    return Buffer.concat([
+        signature,
+        ihdrLength, ihdrType, ihdrData, ihdrCrc,
+        idatLength, idatType, compressed, idatCrc,
+        iendLength, iendType, iendCrc,
+    ]);
+}
+
+/** CRC32 for PNG chunks. */
+function crc32(buf: Buffer): Buffer {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) {
+        crc ^= buf[i];
+        for (let j = 0; j < 8; j++) {
+            crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+        }
+    }
+    const result = Buffer.alloc(4);
+    result.writeUInt32BE((crc ^ 0xFFFFFFFF) >>> 0, 0);
+    return result;
+}
+
+test('shows aspect ratio warning for non-square image in square field', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // Create a 200x100 (2:1) PNG in the workspace Assets folder
+    const assetsDir = path.join(ctx.workspacePath, 'Assets');
+    if (!fs.existsSync(assetsDir)) { fs.mkdirSync(assetsDir); }
+    const imgPath = path.join(assetsDir, 'wide-test.png');
+    fs.writeFileSync(imgPath, createPngWithDimensions(200, 100));
+
+    // Set the field to the in-package path
+    const input = card.locator('input[data-field-name="visualElements.square150x150Logo"]');
+    await input.fill('Assets\\wide-test.png');
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(2_000);
+
+    // Should show aspect ratio warning
+    const formGroup = card.locator('.form-group[data-field*="visualElements.square150x150Logo"]');
+    const validationMsg = formGroup.locator('.validation-msg');
+    await expect(validationMsg).toContainText('expected 1:1 (square) aspect ratio', { timeout: 10_000 });
+    await expect(validationMsg).toContainText('200×100');
+
+    // Clean up
+    fs.rmSync(imgPath, { force: true });
+});
+
+test('no aspect ratio warning for correct square image', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // Create a 150x150 (1:1) PNG in the workspace Assets folder
+    const assetsDir = path.join(ctx.workspacePath, 'Assets');
+    if (!fs.existsSync(assetsDir)) { fs.mkdirSync(assetsDir); }
+    const imgPath = path.join(assetsDir, 'square-test.png');
+    fs.writeFileSync(imgPath, createPngWithDimensions(150, 150));
+
+    // Set the field to the in-package path
+    const input = card.locator('input[data-field-name="visualElements.square150x150Logo"]');
+    await input.fill('Assets\\square-test.png');
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(2_000);
+
+    // Should NOT show any warning
+    const formGroup = card.locator('.form-group[data-field*="visualElements.square150x150Logo"]');
+    const validationMsg = formGroup.locator('.validation-msg');
+    await expect(validationMsg).not.toContainText('aspect ratio');
+
+    // Clean up
+    fs.rmSync(imgPath, { force: true });
+});
+
+test('shows aspect ratio warning for square image in wide field', async () => {
+    const card = frame.locator('.app-card').first();
+    await switchAppSubTab(frame, 0, 'visual');
+    await ctx.page.waitForTimeout(500);
+
+    // First add the wide310x150 field if not present
+    const addWideBtn = card.locator('button:has-text("Wide 310x150")');
+    if (await addWideBtn.count() > 0 && await addWideBtn.isVisible()) {
+        await addWideBtn.click();
+        await ctx.page.waitForTimeout(1_000);
+    }
+
+    // Create a 100x100 (1:1) PNG — wrong for wide field
+    const assetsDir = path.join(ctx.workspacePath, 'Assets');
+    if (!fs.existsSync(assetsDir)) { fs.mkdirSync(assetsDir); }
+    const imgPath = path.join(assetsDir, 'square-for-wide.png');
+    fs.writeFileSync(imgPath, createPngWithDimensions(100, 100));
+
+    // Set the wide field to this image
+    const input = card.locator('input[data-field-name="visualElements.wide310x150Logo"]');
+    await input.fill('Assets\\square-for-wide.png');
+    await input.dispatchEvent('input');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(2_000);
+
+    // Should show aspect ratio warning
+    const formGroup = card.locator('.form-group[data-field*="visualElements.wide310x150Logo"]');
+    const validationMsg = formGroup.locator('.validation-msg');
+    await expect(validationMsg).toContainText('expected 310:150 (wide) aspect ratio', { timeout: 10_000 });
+
+    // Clean up
+    fs.rmSync(imgPath, { force: true });
 });

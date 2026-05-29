@@ -327,6 +327,12 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                 data.properties.logo,
                 document.getElementById('store-logo-caption')
             );
+            checkImagePathWarning(
+                document.getElementById('props-logo')?.closest('.logo-input-col'),
+                data.properties.logo,
+                'logo',
+                undefined
+            );
 
             // Properties - select fields
             // Package type (derived from framework/resourcePackage/modificationPackage)
@@ -573,6 +579,41 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                     vscode.postMessage({ type: 'changesFlushed', changes, nonce: msg.nonce });
                     break;
                 }
+                case 'imagePathStatus': {
+                    // Find the form-group for this field
+                    let fg = null;
+                    if (msg.field === 'logo') {
+                        fg = document.getElementById('props-logo')?.closest('.logo-input-col');
+                    } else {
+                        const selector = msg.index !== undefined
+                            ? '.form-group[data-field="applications.' + msg.index + '.' + msg.field + '"]'
+                            : '.form-group[data-field*="' + msg.field + '"]';
+                        fg = document.querySelector(selector);
+                    }
+                    if (!fg) break;
+                    const vmsg = fg.querySelector('.validation-msg');
+                    if (!vmsg || vmsg.classList.contains('error')) break;
+
+                    if (msg.status === 'found') {
+                        if (msg.aspectWarning) {
+                            fg.classList.add('has-warning');
+                            vmsg.classList.add('warning');
+                            vmsg.textContent = msg.aspectWarning;
+                        } else {
+                            fg.classList.remove('has-warning');
+                            vmsg.textContent = ''; vmsg.classList.remove('warning'); vmsg.innerHTML = '';
+                        }
+                    } else if (msg.status === 'external') {
+                        fg.classList.add('has-warning');
+                        vmsg.classList.add('warning');
+                        vmsg.innerHTML = 'Image not in package directory. <a href="#" class="copy-to-assets-link" data-source="' + escapeHtml(msg.sourcePath) + '" data-field="' + escapeHtml(msg.field) + '" data-index="' + (msg.index !== undefined ? msg.index : '') + '">Copy to Assets folder?</a>';
+                    } else {
+                        fg.classList.add('has-warning');
+                        vmsg.classList.add('warning');
+                        vmsg.textContent = '⚠ Image not found in package directory';
+                    }
+                    break;
+                }
             }
         });
 
@@ -582,12 +623,15 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        function isImagePath(path) {
+            return /\.(png|jpg|jpeg|gif|bmp|ico|svg|tiff?|webp)$/i.test(path);
+        }
+
         function updateLogoPreview(imgEl, logoPath, captionEl) {
             if (logoPath && manifestDirUri && imgEl) {
-                // Start hidden; only show on successful load
                 imgEl.classList.remove('loaded');
                 imgEl.removeAttribute('alt');
-                if (captionEl) captionEl.textContent = '';
+                if (captionEl) { captionEl.textContent = ''; }
                 imgEl.onload = function() {
                     imgEl.classList.add('loaded');
                     if (captionEl) {
@@ -600,8 +644,20 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             } else if (imgEl) {
                 imgEl.classList.remove('loaded');
                 imgEl.removeAttribute('alt');
-                if (captionEl) captionEl.textContent = '';
+                if (captionEl) { captionEl.textContent = ''; }
             }
+        }
+
+        function checkImagePathWarning(formGroup, logoPath, fieldName, fieldIndex) {
+            if (!formGroup) return;
+            const msg = formGroup.querySelector('.validation-msg');
+            if (!msg) return;
+            if (!logoPath || !isImagePath(logoPath)) {
+                formGroup.classList.remove('has-warning');
+                if (!msg.classList.contains('error')) { msg.textContent = ''; msg.classList.remove('warning'); msg.innerHTML = ''; }
+                return;
+            }
+            vscode.postMessage({ type: 'checkImagePath', imagePath: logoPath, field: fieldName || '', index: fieldIndex });
         }
 
         function toColorValue(str) {
@@ -609,6 +665,24 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
             if (/^#[0-9a-fA-F]{6}$/.test(str)) return str;
             return '#000000';
         }
+
+        // Delegated click handler for "Copy to Assets" links
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('.copy-to-assets-link');
+            if (!link) return;
+            e.preventDefault();
+            const sourcePath = link.getAttribute('data-source');
+            const field = link.getAttribute('data-field');
+            const idx = link.getAttribute('data-index');
+            const section = field === 'logo' ? 'properties' : 'applications';
+            vscode.postMessage({
+                type: 'copyToAssets',
+                sourcePath: sourcePath,
+                section: section,
+                field: field,
+                index: idx !== '' ? parseInt(idx, 10) : undefined
+            });
+        });
 
         // Signal ready
         vscode.postMessage({ type: 'ready' });

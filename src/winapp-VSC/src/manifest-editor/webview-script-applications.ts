@@ -244,6 +244,7 @@ export function getApplicationsScript(): string {
                             <div class="description">Background color for the app tile, use a hex color or 'transparent'</div>
                             <div class="validation-msg"></div>
                         </div>
+                        <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                         <div class="logo-side-by-side mt-12">
                             <div class="logo-input-col">
                                 <div class="form-group" data-field="applications.\${idx}.visualElements.square150x150Logo">
@@ -339,7 +340,6 @@ export function getApplicationsScript(): string {
                             <button class="btn-add-field" type="button" id="add-app-\${idx}-lockscreennotif" data-target="app-\${idx}-lockscreennotif-group" data-section="applications" data-field-name="visualElements.lockScreenNotification" data-index="\${idx}" data-default="badge" title="Add Lock Screen Notification">+ Add Lock Screen Notification</button>
                         </div>
                         </div>
-                        <button class="btn update-assets-btn mt-12">Regenerate Assets</button>
                     </div>
                 \`;
                 container.appendChild(card);
@@ -546,6 +546,16 @@ export function getApplicationsScript(): string {
                 const logoPreview = card.querySelector('.app-logo-preview');
                 const logoCaption = card.querySelector('.app-logo-caption');
                 updateLogoPreview(logoPreview, app.visualElements.square150x150Logo, logoCaption);
+
+                // Check image path warnings for all visual asset fields
+                card.querySelectorAll('.form-group[data-field*="visualElements."]').forEach(fg => {
+                    const input = fg.querySelector('input[data-field-name]');
+                    if (input) {
+                        const fieldName = input.getAttribute('data-field-name');
+                        const fieldIdx = parseInt(input.getAttribute('data-index'), 10);
+                        checkImagePathWarning(fg, input.value, fieldName, isNaN(fieldIdx) ? undefined : fieldIdx);
+                    }
+                });
 
                 // Regenerate Assets button
                 const updateAssetsBtn = card.querySelector('.update-assets-btn');

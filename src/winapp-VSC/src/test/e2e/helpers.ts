@@ -49,10 +49,12 @@ export function createTempWorkspace(fixtureName: string): string {
  * and returns the Electron app + main window page.
  */
 export async function launchVSCode(workspacePath: string): Promise<VSCodeTestContext> {
+    const manifestPath = path.join(workspacePath, 'AppxManifest.xml');
     const app = await electron.launch({
         executablePath: VSCODE_EXE,
         args: [
             workspacePath,
+            manifestPath,
             '--new-window',
             `--extensionDevelopmentPath=${EXTENSION_ROOT}`,
             '--disable-telemetry',
@@ -75,17 +77,8 @@ export async function launchVSCode(workspacePath: string): Promise<VSCodeTestCon
  * custom manifest editor. Then locates and returns the webview FrameLocator.
  */
 export async function openManifestEditor(page: Page): Promise<FrameLocator> {
-    // 1. Open the file via Quick Open (Ctrl+P)
-    await page.keyboard.press('Control+P');
-    await page.waitForTimeout(1_000);
-    await page.keyboard.type('AppxManifest.xml', { delay: 30 });
-    await page.waitForTimeout(1_500);
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(2_000);
-
-    // 2. Reopen with the custom editor via Command Palette.
-    //    Use the full command name including "..." to distinguish from
-    //    "Reopen Editor with Text Editor"
+    // The file is already open from launch args.
+    // Reopen with the custom editor via Command Palette.
     await page.keyboard.press('Control+Shift+P');
     await page.waitForTimeout(1_000);
     await page.keyboard.type('View: Reopen Editor With...', { delay: 30 });

@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { parseManifest, applyFieldChange, addCapability, removeCapability, addPackageDependency, removePackageDependency, addTargetDeviceFamily, removeTargetDeviceFamily, moveTargetDeviceFamily, movePackageDependency, addMainPackageDependency, removeMainPackageDependency, moveMainPackageDependency, addDriverConstraint, removeDriverConstraint, moveDriverConstraint, addOSPackageDependency, removeOSPackageDependency, moveOSPackageDependency, addHostRuntimeDependency, removeHostRuntimeDependency, moveHostRuntimeDependency, addExternalDependency, removeExternalDependency, moveExternalDependency, addApplication, removeApplication, addExtension, removeExtension, updateExtensionField, addResource, removeResource, moveResource, setShowNameOnTiles, addPhoneIdentity, removePhoneIdentity, removeVisualAsset } from './manifest-parser';
@@ -240,6 +241,82 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
                             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
                             return;
 
+                        case 'checkImagePath': {
+                            const imgPath = message.imagePath;
+                            const manifestDirPath = path.dirname(document.uri.fsPath);
+                            const resolved = path.resolve(manifestDirPath, imgPath);
+
+                            // Check if the resolved path is inside the package directory AND exists
+                            const normalizedResolved = resolved.toLowerCase();
+                            const normalizedManifestDir = manifestDirPath.toLowerCase() + path.sep;
+                            if (normalizedResolved.startsWith(normalizedManifestDir) && fs.existsSync(resolved)) {
+                                const dims = getImageDimensions(resolved);
+                                const aspectWarning = dims ? checkAspectRatio(message.field, dims.width, dims.height) : null;
+                                webviewPanel.webview.postMessage({ type: 'imagePathStatus', field: message.field, index: message.index, status: 'found', aspectWarning: aspectWarning || undefined });
+                                return;
+                            }
+
+                            // The path resolves outside the package dir (e.g., ..\..\Downloads\img.png)
+                            // or is an absolute path — check if the file exists at the resolved location
+                            if (fs.existsSync(resolved)) {
+                                webviewPanel.webview.postMessage({ type: 'imagePathStatus', field: message.field, index: message.index, status: 'external', sourcePath: resolved });
+                                return;
+                            }
+
+                            // Check if it's an absolute path that exists
+                            if (path.isAbsolute(imgPath) && fs.existsSync(imgPath)) {
+                                webviewPanel.webview.postMessage({ type: 'imagePathStatus', field: message.field, index: message.index, status: 'external', sourcePath: imgPath });
+                                return;
+                            }
+
+                            // Check relative to workspace folders
+                            if (vscode.workspace.workspaceFolders) {
+                                for (const wf of vscode.workspace.workspaceFolders) {
+                                    const candidate = path.resolve(wf.uri.fsPath, imgPath);
+                                    if (fs.existsSync(candidate) && !candidate.toLowerCase().startsWith(normalizedManifestDir)) {
+                                        webviewPanel.webview.postMessage({ type: 'imagePathStatus', field: message.field, index: message.index, status: 'external', sourcePath: candidate });
+                                        return;
+                                    }
+                                }
+                            }
+
+                            webviewPanel.webview.postMessage({ type: 'imagePathStatus', field: message.field, index: message.index, status: 'notFound' });
+                            return;
+                        }
+
+                        case 'copyToAssets': {
+                            const manifestDirPath2 = path.dirname(document.uri.fsPath);
+                            const assetsDir = path.join(manifestDirPath2, 'Assets');
+                            const sourcePath = message.sourcePath;
+                            const fileName = path.basename(sourcePath);
+
+                            // Create Assets folder if it doesn't exist
+                            if (!fs.existsSync(assetsDir)) {
+                                fs.mkdirSync(assetsDir, { recursive: true });
+                            }
+
+                            // Handle name collision
+                            let destName = fileName;
+                            let destPath = path.join(assetsDir, destName);
+                            if (fs.existsSync(destPath)) {
+                                const ext = path.extname(fileName);
+                                const base = path.basename(fileName, ext);
+                                let counter = 1;
+                                while (fs.existsSync(destPath)) {
+                                    destName = `${base}_${counter}${ext}`;
+                                    destPath = path.join(assetsDir, destName);
+                                    counter++;
+                                }
+                            }
+
+                            fs.copyFileSync(sourcePath, destPath);
+                            const newRelPath = `Assets\\${destName}`;
+
+                            // Apply the field change with the new path
+                            newText = applyFieldChange(text, message.section, message.field, newRelPath, message.index);
+                            break;
+                        }
+
                         case 'fieldChanged':
                             newText = applyFieldChange(text, message.section, message.field, message.value, message.index, message.subIndex);
                             break;
@@ -339,4 +416,71 @@ export class ManifestEditorProvider implements vscode.CustomTextEditorProvider {
             }
         });
     }
+}
+
+/** Reads width/height from PNG or JPEG file headers without loading the full image. */
+function getImageDimensions(filePath: string): { width: number; height: number } | null {
+    try {
+        const fd = fs.openSync(filePath, 'r');
+        const header = Buffer.alloc(32);
+        fs.readSync(fd, header, 0, 32, 0);
+
+        // PNG: bytes 0-7 are signature, IHDR chunk starts at byte 8, width at 16, height at 20
+        if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
+            const width = header.readUInt32BE(16);
+            const height = header.readUInt32BE(20);
+            fs.closeSync(fd);
+            return { width, height };
+        }
+
+        // JPEG: scan for SOF0/SOF2 marker (0xFF 0xC0 or 0xFF 0xC2)
+        if (header[0] === 0xFF && header[1] === 0xD8) {
+            const buf = Buffer.alloc(65536);
+            fs.readSync(fd, buf, 0, buf.length, 0);
+            fs.closeSync(fd);
+            let offset = 2;
+            while (offset < buf.length - 9) {
+                if (buf[offset] !== 0xFF) break;
+                const marker = buf[offset + 1];
+                if (marker === 0xC0 || marker === 0xC2) {
+                    const height = buf.readUInt16BE(offset + 5);
+                    const width = buf.readUInt16BE(offset + 7);
+                    return { width, height };
+                }
+                const len = buf.readUInt16BE(offset + 2);
+                offset += 2 + len;
+            }
+            return null;
+        }
+
+        fs.closeSync(fd);
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/** Expected aspect ratios for manifest image fields (width:height). */
+const EXPECTED_RATIOS: Record<string, { w: number; h: number; label: string }> = {
+    'visualElements.square150x150Logo': { w: 1, h: 1, label: '1:1 (square)' },
+    'visualElements.square44x44Logo': { w: 1, h: 1, label: '1:1 (square)' },
+    'visualElements.square71x71Logo': { w: 1, h: 1, label: '1:1 (square)' },
+    'visualElements.square310x310Logo': { w: 1, h: 1, label: '1:1 (square)' },
+    'visualElements.wide310x150Logo': { w: 310, h: 150, label: '310:150 (wide)' },
+    'visualElements.badgeLogo': { w: 1, h: 1, label: '1:1 (square)' },
+    'visualElements.splashScreenImage': { w: 620, h: 300, label: '620:300 (wide)' },
+    'logo': { w: 1, h: 1, label: '1:1 (square)' },
+};
+
+/** Returns a warning string if the image aspect ratio doesn't match expectations (±5% tolerance). */
+function checkAspectRatio(field: string, width: number, height: number): string | null {
+    const expected = EXPECTED_RATIOS[field];
+    if (!expected || width === 0 || height === 0) { return null; }
+    const actualRatio = width / height;
+    const expectedRatio = expected.w / expected.h;
+    const tolerance = 0.05;
+    if (Math.abs(actualRatio - expectedRatio) / expectedRatio > tolerance) {
+        return `Image is ${width}×${height} — expected ${expected.label} aspect ratio`;
+    }
+    return null;
 }

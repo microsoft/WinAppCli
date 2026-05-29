@@ -170,6 +170,8 @@ export type WebviewToExtensionMessage =
     | { type: 'browseFile'; appIndex: number; extIndex: number; fieldPath: string }
     | { type: 'browseImage'; section: string; field: string; index?: number }
     | { type: 'removeVisualAsset'; field: string; index: number }
+    | { type: 'checkImagePath'; imagePath: string; field: string; index?: number }
+    | { type: 'copyToAssets'; sourcePath: string; section: string; field: string; index?: number }
     | { type: 'browseExe'; section: string; field: string; index?: number }
     | { type: 'movePackageDependency'; index: number; direction: 'up' | 'down' }
     | { type: 'addMainPackageDependency'; dependency: MainPackageDependencyData }
