@@ -522,7 +522,8 @@ function applyAutoUpdateUri(xml: string, value: string): string {
         }
     }
 
-    // No AutoUpdate element — insert one into Properties
+    // No AutoUpdate element — insert one into Properties (guard against duplicate)
+    if (/AutoUpdate/i.test(xml)) { return xml; }
     let workXml = ensureNamespace(xml, 'uap13', 'http://schemas.microsoft.com/appx/manifest/uap/windows/10/13');
     const propsBounds = findParentBounds(workXml, 'Properties');
     if (!propsBounds) { return xml; }
@@ -559,7 +560,8 @@ function applyPackageIntegrityEnforcement(xml: string, value: string): string {
         }
     }
 
-    // No PackageIntegrity element — insert one into Properties
+    // No PackageIntegrity element — insert one into Properties (guard against duplicate)
+    if (/PackageIntegrity/i.test(xml)) { return xml; }
     let workXml = ensureNamespace(xml, 'uap10', NS.uap10);
     const propsBounds = findParentBounds(workXml, 'Properties');
     if (!propsBounds) { return xml; }
@@ -673,7 +675,7 @@ function applyResourcesChangeString(xml: string, field: string, value: string, i
         scale: 'uap:Scale',
         dxFeatureLevel: 'uap:DXFeatureLevel',
     };
-    const attr = attrMap[field];
+    let attr = attrMap[field];
     if (!attr) { return xml; }
 
     const regex = /<Resource\b[^>]*\/?>/gs;
@@ -681,13 +683,32 @@ function applyResourcesChangeString(xml: string, field: string, value: string, i
     let count = 0;
     while ((match = regex.exec(xml)) !== null) {
         if (count === index) {
+            // M4: Detect if the element uses unprefixed variant (Scale vs uap:Scale)
+            if (attr.startsWith('uap:')) {
+                const bareAttr = attr.substring(4);
+                if (match[0].includes(`${bareAttr}=`) && !match[0].includes(`uap:${bareAttr}=`)) {
+                    attr = bareAttr;
+                }
+            }
+
             const elemRegex = new RegExp(escapeRegex(match[0]));
             if (!value) {
                 return removeAttribute(xml, elemRegex, attr);
             }
-            const result = replaceAttribute(xml, elemRegex, attr, value);
+
+            // Ensure uap namespace when adding uap-prefixed attrs
+            let workXml = xml;
+            if (attr.startsWith('uap:')) {
+                workXml = ensureNamespace(workXml, 'uap', NS.uap);
+                // Re-find element after possible namespace insertion shift
+                const reMatch = new RegExp(escapeRegex(match[0])).exec(workXml);
+                if (!reMatch) { return workXml; }
+            }
+
+            const workElemRegex = new RegExp(escapeRegex(match[0]));
+            const result = replaceAttribute(workXml, workElemRegex, attr, value);
             if (result !== null) { return result; }
-            return addAttributeToElement(xml, elemRegex, attr, value);
+            return addAttributeToElement(workXml, workElemRegex, attr, value);
         }
         count++;
     }
@@ -773,7 +794,7 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
                 return removed !== after ? before + removed : fullXml;
             } else if (op === 'replace') {
                 const replaced = replaceAttribute(after, elemRegex, attrName, newValue!);
-                return replaced !== null ? before + replaced : fullXml;
+                return replaced !== null ? before + replaced : null;
             } else {
                 const added = addAttributeToElement(after, elemRegex, attrName, newValue!);
                 return before + added;

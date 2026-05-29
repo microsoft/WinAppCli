@@ -11,10 +11,11 @@ import { getApplicationsScript } from './webview-script-applications';
 import { getResourcesScript } from './webview-script-resources';
 
 export function getEditorScript(nonce: string, manifestDirUri: string): string {
+    const safeManifestDirUri = JSON.stringify(manifestDirUri);
     return `    <script nonce="${nonce}">
     (function() {
         const vscode = acquireVsCodeApi();
-        const manifestDirUri = '${manifestDirUri}';
+        const manifestDirUri = ${safeManifestDirUri};
         let currentData = null;
         const capabilityDescriptions = ${JSON.stringify(CAPABILITY_DESCRIPTIONS)};
         const extensionTemplates = ${JSON.stringify(EXTENSION_TEMPLATES)};
@@ -31,13 +32,20 @@ export function getEditorScript(nonce: string, manifestDirUri: string): string {
                 b.setAttribute('aria-selected', 'false');
                 b.setAttribute('tabindex', '-1');
             });
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => {
+                c.classList.remove('active');
+                c.setAttribute('aria-hidden', 'true');
+            });
             btn.classList.add('active');
             btn.setAttribute('aria-selected', 'true');
             btn.setAttribute('tabindex', '0');
-            btn.focus();
             const tab = btn.getAttribute('data-tab');
-            document.getElementById('tab-' + tab).classList.add('active');
+            const panel = document.getElementById('tab-' + tab);
+            panel.classList.add('active');
+            panel.setAttribute('aria-hidden', 'false');
+            // Move focus into the tab panel's first focusable element
+            const focusable = panel.querySelector('input, select, button, textarea, [tabindex="0"]');
+            if (focusable) { focusable.focus(); } else { btn.focus(); }
         }
 
         document.querySelectorAll('.tab-btn').forEach(btn => {

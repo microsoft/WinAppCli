@@ -116,9 +116,9 @@ ${getEditorStyles(nonce)}
             <div class="validation-msg"></div>
         </div>
         <div class="form-group" data-field="identity.processorArchitecture">
-            <label>Processor Architecture:</label>
+            <label id="arch-label">Processor Architecture:</label>
             <div class="custom-select" id="arch-select">
-                <button class="custom-select-trigger" id="arch-select-trigger" type="button" data-section="identity" data-field-name="processorArchitecture">(select)</button>
+                <button class="custom-select-trigger" id="arch-select-trigger" type="button" aria-labelledby="arch-label" data-section="identity" data-field-name="processorArchitecture">(select)</button>
                 <div class="custom-select-options" id="arch-select-options">
                     ${archOptionItems}
                 </div>
@@ -202,9 +202,9 @@ ${getEditorStyles(nonce)}
         <div class="section-header section-header-spaced">Package Type</div>
         <p class="page-description">Use this section to control what type of package this is. Most packages are Application packages. <a href="https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-properties">Learn more</a></p>
         <div class="form-group" data-field="properties.packageType">
-            <label>Package Type:</label>
+            <label id="pkg-type-label">Package Type:</label>
             <div class="custom-select" id="pkg-type-select">
-                <button class="custom-select-trigger" id="pkg-type-select-trigger" type="button">Application (default)</button>
+                <button class="custom-select-trigger" id="pkg-type-select-trigger" type="button" aria-labelledby="pkg-type-label">Application (default)</button>
                 <div class="custom-select-options" id="pkg-type-select-options">
                     ${buildSelectOptions([
                         { value: 'application', label: 'Application (default)', selected: true },
@@ -220,9 +220,9 @@ ${getEditorStyles(nonce)}
         <div class="section-header section-header-spaced">Advanced Properties</div>
         <p class="page-description">Use this section to configure optional advanced package properties such as user scope, automatic updates, integrity enforcement, and update behavior.</p>
         <div class="form-group" data-field="properties.supportedUsers">
-            <label>Supported Users:</label>
+            <label id="supported-users-label">Supported Users:</label>
             <div class="custom-select" id="props-supportedUsers">
-                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="supportedUsers">(omit)</button>
+                <button class="custom-select-trigger" type="button" aria-labelledby="supported-users-label" data-section="properties" data-field-name="supportedUsers">(omit)</button>
                 <div class="custom-select-options">
                     ${buildSelectOptions([
                         { value: '', label: '(omit)', selected: true },
@@ -234,9 +234,9 @@ ${getEditorStyles(nonce)}
             <div class="description">Whether the app supports multiple user sessions or only a single user</div>
         </div>
         <div class="form-group" data-field="properties.allowExecution">
-            <label>Allow Execution:</label>
+            <label id="allow-exec-label">Allow Execution:</label>
             <div class="custom-select" id="props-allowExecution">
-                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExecution">(omit)</button>
+                <button class="custom-select-trigger" type="button" aria-labelledby="allow-exec-label" data-section="properties" data-field-name="allowExecution">(omit)</button>
                 <div class="custom-select-options">
                     ${buildSelectOptions([
                         { value: '', label: '(omit)', selected: true },
@@ -248,9 +248,9 @@ ${getEditorStyles(nonce)}
             <div class="description">Whether executables in the package can be launched (set to false for content-only packages)</div>
         </div>
         <div class="form-group" data-field="properties.allowExternalContent">
-            <label>Allow External Content:</label>
+            <label id="allow-ext-content-label">Allow External Content:</label>
             <div class="custom-select" id="props-allowExternalContent">
-                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="allowExternalContent">(omit)</button>
+                <button class="custom-select-trigger" type="button" aria-labelledby="allow-ext-content-label" data-section="properties" data-field-name="allowExternalContent">(omit)</button>
                 <div class="custom-select-options">
                     ${buildSelectOptions([
                         { value: '', label: '(omit)', selected: true },
@@ -262,9 +262,9 @@ ${getEditorStyles(nonce)}
             <div class="description">Whether the package allows content outside its install directory to be treated as package content</div>
         </div>
         <div class="form-group" data-field="properties.fileSystemWriteVirtualization">
-            <label>File System Write Virtualization:</label>
+            <label id="fs-write-virt-label">File System Write Virtualization:</label>
             <div class="custom-select" id="props-fsWriteVirt">
-                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="fileSystemWriteVirtualization">(omit)</button>
+                <button class="custom-select-trigger" type="button" aria-labelledby="fs-write-virt-label" data-section="properties" data-field-name="fileSystemWriteVirtualization">(omit)</button>
                 <div class="custom-select-options">
                     ${buildSelectOptions([
                         { value: '', label: '(omit)', selected: true },
@@ -276,9 +276,9 @@ ${getEditorStyles(nonce)}
             <div class="description">Controls whether file system write operations are virtualized or written to the real file system</div>
         </div>
         <div class="form-group" data-field="properties.registryWriteVirtualization">
-            <label>Registry Write Virtualization:</label>
+            <label id="reg-write-virt-label">Registry Write Virtualization:</label>
             <div class="custom-select" id="props-regWriteVirt">
-                <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="registryWriteVirtualization">(omit)</button>
+                <button class="custom-select-trigger" type="button" aria-labelledby="reg-write-virt-label" data-section="properties" data-field-name="registryWriteVirtualization">(omit)</button>
                 <div class="custom-select-options">
                     ${buildSelectOptions([
                         { value: '', label: '(omit)', selected: true },
@@ -302,10 +302,10 @@ ${getEditorStyles(nonce)}
             <div class="validation-msg"></div>
         </div>
         <div class="form-group optional-field" data-field="properties.packageIntegrityEnforcement" id="props-pkgintegrity-group">
-            <label>Package Integrity Content Enforcement:</label>
+            <label id="pkg-integrity-label">Package Integrity Content Enforcement:</label>
             <div class="optional-field-content">
                 <div class="custom-select" id="props-packageIntegrityEnforcement">
-                    <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="packageIntegrityEnforcement">on</button>
+                    <button class="custom-select-trigger" type="button" aria-labelledby="pkg-integrity-label" data-section="properties" data-field-name="packageIntegrityEnforcement">on</button>
                     <div class="custom-select-options">
                         ${buildSelectOptions([
                             { value: 'on', label: 'on', selected: true },
@@ -320,10 +320,10 @@ ${getEditorStyles(nonce)}
             <div class="validation-msg"></div>
         </div>
         <div class="form-group optional-field" data-field="properties.updateWhileInUse" id="props-updatewhileinuse-group">
-            <label>Update While In Use:</label>
+            <label id="update-while-in-use-label">Update While In Use:</label>
             <div class="optional-field-content">
                 <div class="custom-select" id="props-updateWhileInUse">
-                    <button class="custom-select-trigger" type="button" data-section="properties" data-field-name="updateWhileInUse">allow</button>
+                    <button class="custom-select-trigger" type="button" aria-labelledby="update-while-in-use-label" data-section="properties" data-field-name="updateWhileInUse">allow</button>
                     <div class="custom-select-options">
                         ${buildSelectOptions([
                             { value: 'allow', label: 'allow', selected: true },

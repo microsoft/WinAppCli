@@ -77,14 +77,14 @@ describe('replaceAttribute', () => {
         assert.equal(result, '<Root><Identity Name="NewName" Version="1.0.0.0" /></Root>');
     });
 
-    it('returns original when element not found', () => {
+    it('returns null when element not found', () => {
         const result = replaceAttribute(xml, /(<Missing\b[^>]*>)/, 'Name', 'X');
-        assert.equal(result, xml);
+        assert.equal(result, null);
     });
 
-    it('returns original when attribute not found', () => {
+    it('returns null when attribute not found', () => {
         const result = replaceAttribute(xml, pattern, 'NoSuchAttr', 'X');
-        assert.equal(result, xml);
+        assert.equal(result, null);
     });
 
     it('escapes special characters in the new value', () => {
