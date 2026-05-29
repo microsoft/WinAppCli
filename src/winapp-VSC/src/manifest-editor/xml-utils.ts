@@ -45,17 +45,17 @@ export function escapeXmlText(s: string): string {
 }
 
 /** Replace an XML attribute value in-place. Returns the original string if not found. */
-export function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string, newValue: string): string {
+export function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string, newValue: string): string | null {
     const escaped = escapeXmlAttr(newValue);
     // Find the element in the XML
     const elementMatch = elementPattern.exec(xml);
-    if (!elementMatch) { return xml; }
+    if (!elementMatch) { return null; }
 
     // Within the matched element, find and replace the attribute value
     const elementStr = elementMatch[0];
     const attrRegex = new RegExp(`(${escapeRegex(attrName)}\\s*=\\s*)(["'])((?:(?!\\2).)*?)\\2`);
     const attrMatch = attrRegex.exec(elementStr);
-    if (!attrMatch) { return xml; }
+    if (!attrMatch) { return null; }
 
     const newElementStr = elementStr.substring(0, attrMatch.index)
         + attrMatch[1] + attrMatch[2] + escaped + attrMatch[2]

@@ -379,7 +379,7 @@ function applyIdentityChangeString(xml: string, field: string, value: string): s
         return removeAttribute(xml, pattern, attr);
     }
     const result = replaceAttribute(xml, pattern, attr, value);
-    if (result !== xml) { return result; }
+    if (result !== null) { return result; }
 
     // Attribute doesn't exist yet — add it
     return addAttributeToElement(xml, pattern, attr, value);
@@ -401,7 +401,7 @@ function applyPhoneIdentityChangeString(xml: string, field: string, value: strin
     }
 
     const result = replaceAttribute(xml, pattern, attr, value);
-    if (result !== xml) { return result; }
+    if (result !== null) { return result; }
 
     // Attribute doesn't exist yet — add it
     return addAttributeToElement(xml, pattern, attr, value);
@@ -518,7 +518,7 @@ function applyAutoUpdateUri(xml: string, value: string): string {
             const absEnd = absStart + appInstallerMatch[0].length;
             const fullRegex = new RegExp(escapeRegex(xml.substring(absStart, absEnd)));
             const result = replaceAttribute(xml, fullRegex, 'Uri', value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
         }
     }
 
@@ -555,7 +555,7 @@ function applyPackageIntegrityEnforcement(xml: string, value: string): string {
             const absEnd = absStart + contentMatch[0].length;
             const fullRegex = new RegExp(escapeRegex(xml.substring(absStart, absEnd)));
             const result = replaceAttribute(xml, fullRegex, 'Enforcement', value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
         }
     }
 
@@ -590,7 +590,7 @@ function applyNthElementAttrChange(
                 return before + modified + after;
             }
             const replaced = replaceAttribute(elemText, elemRegex, attr, value);
-            if (replaced !== elemText) { return before + replaced + after; }
+            if (replaced !== null) { return before + replaced + after; }
             const added = addAttributeToElement(elemText, elemRegex, attr, value);
             return before + added + after;
         }
@@ -686,7 +686,7 @@ function applyResourcesChangeString(xml: string, field: string, value: string, i
                 return removeAttribute(xml, elemRegex, attr);
             }
             const result = replaceAttribute(xml, elemRegex, attr, value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
             return addAttributeToElement(xml, elemRegex, attr, value);
         }
         count++;
@@ -731,7 +731,7 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
                         if (c2 === index) {
                             const elemRegex2 = new RegExp(escapeRegex(m2[0]));
                             const result = replaceAttribute(xml, elemRegex2, attr, value);
-                            if (result !== xml) { return result; }
+                            if (result !== null) { return result; }
                             return addAttributeToElement(xml, elemRegex2, attr, value);
                         }
                         c2++;
@@ -739,7 +739,7 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
                     return xml;
                 }
                 const result = replaceAttribute(xml, elemRegex, attr, value);
-                if (result !== xml) { return result; }
+                if (result !== null) { return result; }
                 return addAttributeToElement(xml, elemRegex, attr, value);
             }
             count++;
@@ -760,24 +760,24 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         function applyScopedAttrOp(
             fullXml: string, pattern: RegExp, attrName: string,
             op: 'replace' | 'add' | 'remove', newValue?: string
-        ): string {
+        ): string | null {
             const region = fullXml.substring(appStart, appEnd);
             const match = pattern.exec(region);
-            if (!match) { return fullXml; }
+            if (!match) { return null; }
             const absIdx = appStart + match.index;
             const elemRegex = new RegExp(escapeRegex(match[0]));
             const before = fullXml.substring(0, absIdx);
             const after = fullXml.substring(absIdx);
-            let result: string;
             if (op === 'remove') {
-                result = removeAttribute(after, elemRegex, attrName);
+                const removed = removeAttribute(after, elemRegex, attrName);
+                return removed !== after ? before + removed : fullXml;
             } else if (op === 'replace') {
-                result = replaceAttribute(after, elemRegex, attrName, newValue!);
+                const replaced = replaceAttribute(after, elemRegex, attrName, newValue!);
+                return replaced !== null ? before + replaced : fullXml;
             } else {
-                result = addAttributeToElement(after, elemRegex, attrName, newValue!);
+                const added = addAttributeToElement(after, elemRegex, attrName, newValue!);
+                return before + added;
             }
-            if (result === after) { return fullXml; }
-            return before + result;
         }
 
         // Attributes on DefaultTile
@@ -790,12 +790,12 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         if (defaultTileAttrs[veField]) {
             const dtPattern = /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*?\/?>/s;
             if (!value && veField === 'shortName') {
-                return applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'remove');
+                return applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'remove') ?? xml;
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?DefaultTile\b[^>]*>/s, defaultTileAttrs[veField], 'replace', value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
             const addResult = applyScopedAttrOp(xml, dtPattern, defaultTileAttrs[veField], 'add', value);
-            if (addResult !== xml) { return addResult; }
+            if (addResult !== null) { return addResult; }
             // No DefaultTile element exists — fall through to create one
         }
 
@@ -804,12 +804,12 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             const lockAttr = veField === 'badgeLogo' ? 'BadgeLogo' : 'Notification';
             const lsPattern = /<[a-zA-Z0-9]*:?LockScreen\b[^>]*?\/?>/s;
             if (!value && veField === 'lockScreenNotification') {
-                return applyScopedAttrOp(xml, lsPattern, lockAttr, 'remove');
+                return applyScopedAttrOp(xml, lsPattern, lockAttr, 'remove') ?? xml;
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?LockScreen\b[^>]*>/s, lockAttr, 'replace', value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
             const addResult = applyScopedAttrOp(xml, lsPattern, lockAttr, 'add', value);
-            if (addResult !== xml) { return addResult; }
+            if (addResult !== null) { return addResult; }
             // No LockScreen element exists — fall through to create one
         }
 
@@ -818,12 +818,12 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
             const splashAttr = veField === 'splashScreenImage' ? 'Image' : 'BackgroundColor';
             const ssPattern = /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*?\/?>/s;
             if (!value && veField === 'splashScreenBackgroundColor') {
-                return applyScopedAttrOp(xml, ssPattern, splashAttr, 'remove');
+                return applyScopedAttrOp(xml, ssPattern, splashAttr, 'remove') ?? xml;
             }
             const result = applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?SplashScreen\b[^>]*>/s, splashAttr, 'replace', value);
-            if (result !== xml) { return result; }
+            if (result !== null) { return result; }
             const addResult = applyScopedAttrOp(xml, ssPattern, splashAttr, 'add', value);
-            if (addResult !== xml) { return addResult; }
+            if (addResult !== null) { return addResult; }
             // No SplashScreen element exists — fall through to create one
         }
 
@@ -838,9 +838,9 @@ function applyApplicationChangeString(xml: string, field: string, value: string,
         };
         if (attrMap[veField]) {
             if (!value && veField === 'appListEntry') {
-                return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField], 'remove');
+                return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*?\/?>/s, attrMap[veField], 'remove') ?? xml;
             }
-            return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], 'replace', value);
+            return applyScopedAttrOp(xml, /<[a-zA-Z0-9]*:?VisualElements\b[^>]*>/s, attrMap[veField], 'replace', value) ?? xml;
         }
 
         // Fallback: surgically insert new child element inside VisualElements

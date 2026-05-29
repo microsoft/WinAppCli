@@ -176,3 +176,25 @@ test('remove Phone Identity button removes the section', async () => {
     const xml = await readManifestXml(ctx.page, ctx.workspacePath);
     expect(xml).not.toContain('PhoneIdentity');
 });
+
+// ─── Regression: issue #426 (paste same value) ──────────
+
+test('setting name to its current value does not corrupt the XML', async () => {
+    // First set a known value
+    await setInputValue(frame, 'identity-name', 'com.test.SameValue');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    // Now "paste" the same value again (simulates user selecting all + paste)
+    await setInputValue(frame, 'identity-name', 'com.test.SameValue');
+    await waitForDebounce(ctx.page);
+    await ctx.page.waitForTimeout(1_000);
+
+    const xml = await readManifestXml(ctx.page, ctx.workspacePath);
+    // Should have exactly one Name attribute, not a duplicate
+    const nameMatches = xml.match(/Name="com\.test\.SameValue"/g) || [];
+    expect(nameMatches.length).toBe(1);
+    // XML should still parse (no "Attribute Name redefined" error)
+    expect(xml).toContain('<Identity');
+    expect(xml).not.toContain('Name="com.test.SameValue" Name="');
+});
