@@ -100,6 +100,10 @@ add_executable(test-cpp-app main.cpp)
             Invoke-WinappCommand -Arguments "run build\Debug --unregister-on-exit"
         }
 
+        It "runs app via execution alias with winapp run --with-alias" -Skip:$script:skip {
+            Invoke-WinappCommand -Arguments "run build\Debug --with-alias --unregister-on-exit"
+        }
+
         It "CMake builds release successfully" -Skip:$script:skip {
             $output = cmake --build build --config Release 2>&1
             $LASTEXITCODE | Should -Be 0 -Because "CMake build failed: $output"

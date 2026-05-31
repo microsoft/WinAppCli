@@ -397,7 +397,7 @@ export function activate(context: vscode.ExtensionContext) {
 				{ placeHolder: 'Select SDK installation mode' }
 			);
 
-			let command = 'init --use-defaults';
+			let command = 'init . --use-defaults';
 			if (sdkMode && sdkMode !== 'stable') {
 				command += ` --setup-sdks ${sdkMode}`;
 			}

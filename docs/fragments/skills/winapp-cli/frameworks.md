@@ -29,7 +29,7 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults
+npx winapp init . --use-defaults
 npx winapp node create-addon --template cs   # create a C# native addon
 npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
@@ -54,7 +54,7 @@ Additional Electron guides:
 
 Quick start:
 ```powershell
-winapp init --use-defaults
+winapp init . --use-defaults
 dotnet build <path-to-project.csproj> -c Debug -p:Platform=x64
 winapp run bin\x64\Debug\<tfm>\win-x64\
 ```
