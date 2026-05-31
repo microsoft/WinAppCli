@@ -58,6 +58,10 @@ jobs:
       fail-fast: false
       matrix:
         sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app]
+        node-version: ['24']
+        include:
+          - sample: electron
+            node-version: '22'
     runs-on: windows-latest
     name: ${{ matrix.sample }}
 
@@ -127,7 +131,7 @@ jobs:
         contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
-        node-version: '24'
+        node-version: ${{ matrix.node-version }}
 
     - name: Setup Flutter
       if: >-
