@@ -88,6 +88,14 @@ internal class InitCommand : Command, IShortDescription
             var useDefaults = parseResult.GetValue(UseDefaults);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
 
+            // Detect non-interactive environments (piped stdin, CI, etc.) and fall back
+            // to --use-defaults behavior to avoid InvalidOperationException from prompts.
+            if (!useDefaults && !ansiConsole.Profile.Capabilities.Interactive)
+            {
+                logger.LogWarning("{Warning}  Non-interactive environment detected. Using default values.", UiSymbols.Warning);
+                useDefaults = true;
+            }
+
             DirectoryInfo? selectedDirectory;
 
             if (baseDirectoryExplicit)
