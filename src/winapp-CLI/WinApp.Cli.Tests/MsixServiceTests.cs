@@ -1942,4 +1942,81 @@ public class MsixServiceTests
         }
         return count;
     }
+
+    #region MergeRuntimeFilesIntoStaging tests
+
+    [TestMethod]
+    public void MergeRuntimeFilesIntoStaging_DoesNotOverwriteExistingResourcesPri()
+    {
+        // Arrange — staging has the app's resources.pri
+        var stagingDir = _tempDir.CreateSubdirectory("staging");
+        var appPriContent = "APP_PRI_CONTENT"u8.ToArray();
+        File.WriteAllBytes(Path.Combine(stagingDir.FullName, "resources.pri"), appPriContent);
+
+        // Runtime source has its own resources.pri
+        var runtimeDir = _tempDir.CreateSubdirectory("runtime");
+        File.WriteAllBytes(Path.Combine(runtimeDir.FullName, "resources.pri"), "RUNTIME_PRI"u8.ToArray());
+
+        // Act
+        MsixService.MergeRuntimeFilesIntoStaging(runtimeDir, stagingDir);
+
+        // Assert — app's PRI is preserved
+        var resultPri = File.ReadAllBytes(Path.Combine(stagingDir.FullName, "resources.pri"));
+        CollectionAssert.AreEqual(appPriContent, resultPri,
+            "App's resources.pri must not be overwritten by the runtime's");
+    }
+
+    [TestMethod]
+    public void MergeRuntimeFilesIntoStaging_DoesNotOverwriteExistingAssets()
+    {
+        // Arrange — staging has the app's StoreLogo
+        var stagingDir = _tempDir.CreateSubdirectory("staging");
+        var assetsDir = stagingDir.CreateSubdirectory("Assets");
+        var appLogoContent = "APP_STORE_LOGO"u8.ToArray();
+        File.WriteAllBytes(Path.Combine(assetsDir.FullName, "StoreLogo.png"), appLogoContent);
+
+        // Runtime source has its own Assets\StoreLogo.png
+        var runtimeDir = _tempDir.CreateSubdirectory("runtime");
+        var runtimeAssetsDir = runtimeDir.CreateSubdirectory("Assets");
+        File.WriteAllBytes(Path.Combine(runtimeAssetsDir.FullName, "StoreLogo.png"), "RUNTIME_LOGO"u8.ToArray());
+
+        // Act
+        MsixService.MergeRuntimeFilesIntoStaging(runtimeDir, stagingDir);
+
+        // Assert — app's asset is preserved
+        var resultLogo = File.ReadAllBytes(Path.Combine(assetsDir.FullName, "StoreLogo.png"));
+        CollectionAssert.AreEqual(appLogoContent, resultLogo,
+            "App's Assets\\StoreLogo.png must not be overwritten by the runtime's");
+    }
+
+    [TestMethod]
+    public void MergeRuntimeFilesIntoStaging_CopiesNewRuntimeFiles()
+    {
+        // Arrange — staging is empty
+        var stagingDir = _tempDir.CreateSubdirectory("staging");
+
+        // Runtime source has DLLs and PRI
+        var runtimeDir = _tempDir.CreateSubdirectory("runtime");
+        File.WriteAllBytes(Path.Combine(runtimeDir.FullName, "Microsoft.WindowsAppRuntime.dll"), [0x01]);
+        File.WriteAllBytes(Path.Combine(runtimeDir.FullName, "Microsoft.UI.pri"), [0x02]);
+
+        // Act
+        MsixService.MergeRuntimeFilesIntoStaging(runtimeDir, stagingDir);
+
+        // Assert — runtime files are copied
+        Assert.IsTrue(File.Exists(Path.Combine(stagingDir.FullName, "Microsoft.WindowsAppRuntime.dll")));
+        Assert.IsTrue(File.Exists(Path.Combine(stagingDir.FullName, "Microsoft.UI.pri")));
+    }
+
+    [TestMethod]
+    public void MergeRuntimeFilesIntoStaging_ThrowsWhenSourceDirMissing()
+    {
+        var stagingDir = _tempDir.CreateSubdirectory("staging");
+        var missingDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "does-not-exist"));
+
+        Assert.ThrowsExactly<DirectoryNotFoundException>(
+            () => MsixService.MergeRuntimeFilesIntoStaging(missingDir, stagingDir));
+    }
+
+    #endregion
 }
