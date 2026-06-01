@@ -22,7 +22,7 @@ internal class UpdateNotificationService(
     private const string UpdateCheckFileName = ".update-check";
     private const int CheckIntervalHours = 24;
     private const int MaxReasonableFutureMajorDelta = 20;
-    private static readonly TimeSpan FirstRunRefreshTimeout = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan FirstRunRefreshTimeout = TimeSpan.FromMilliseconds(1000);
 
     // For testing only — when true, skips the fire-and-forget background network refresh
     internal bool SkipBackgroundRefreshForTesting;
@@ -80,6 +80,14 @@ internal class UpdateNotificationService(
                     || (DateTimeOffset.UtcNow - cache.LastCheck.Value).TotalHours >= CheckIntervalHours)
                 && Interlocked.CompareExchange(ref _refreshScheduled, Scheduled, NotScheduled) == NotScheduled)
             {
+                // On first run (no cache), write a placeholder synchronously so subsequent
+                // invocations see a valid LastCheck and don't re-race while the network call
+                // is in flight. The actual version will be filled in once the refresh completes.
+                if (!cache.LastCheck.HasValue)
+                {
+                    WriteCacheFile(cacheFile, new UpdateCheckCache(DateTimeOffset.UtcNow, cache.LatestVersion, cache.LastShownDate));
+                }
+
                 var refreshTask = Task.Run(async () =>
                 {
                     try
