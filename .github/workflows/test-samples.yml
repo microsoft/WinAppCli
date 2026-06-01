@@ -127,7 +127,7 @@ jobs:
         contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
-        node-version: '2'
+        node-version: '22'
 
     - name: Setup Flutter
       if: >-
