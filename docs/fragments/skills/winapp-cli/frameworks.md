@@ -25,13 +25,12 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- Commands for generating typed JS bindings (no native build required)
+- Commands for generating JS bindings for Windows App SDK APIs (no native build required)
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults                    # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
-npx winapp node generate-bindings                 # existing project: regenerate JS bindings after editing winapp.jsBindings
+npx winapp init . --use-defaults                  # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
 npx winapp node create-addon --template cs        # create a C# native addon (for what the JS bindings can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
@@ -73,7 +72,7 @@ Additional Electron guides:
 
 Quick start:
 ```powershell
-winapp init --use-defaults
+winapp init . --use-defaults
 dotnet build <path-to-project.csproj> -c Debug -p:Platform=x64
 winapp run bin\x64\Debug\<tfm>\win-x64\
 ```

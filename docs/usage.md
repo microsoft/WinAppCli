@@ -47,7 +47,28 @@ winapp init [base-directory] [options]
 - Stores shareable files in the global cache directory
 - Generates JS bindings for Windows App SDK APIs (npm wrapper only; requires SDK setup)
 
-**Automatic .NET project detection:**
+**Automatic project detection:**
+
+When `init` is run without a directory argument, it performs a breadth-first search of the current directory tree to find compatible projects (up to 10). Supported project types:
+
+- **Tauri** — `tauri.conf.json` found one level below the directory
+- **Electron** — `package.json` with `electron` in dependencies or devDependencies
+- **Flutter** — `pubspec.yaml` at project root
+- **.NET** — `.csproj` at project root
+- **Rust** — `Cargo.toml` at project root
+- **C++** — `CMakeLists.txt` at project root
+
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
+
+- If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
+- If `--use-defaults` is set without a directory argument, `init` searches for projects and errors with the list of detected projects — pass an explicit directory to use non-interactive mode (e.g., `winapp init . --use-defaults`)
+- If the current directory is a compatible project, `init` proceeds immediately
+- If exactly one project is found elsewhere, you're prompted to confirm
+- If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
+- If no projects are found, you're warned and asked whether to proceed anyway
+- If the search reaches the 10-project limit, a warning suggests providing a directory argument
+
+**Automatic .NET project flow:**
 
 When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
 
@@ -79,7 +100,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ```bash
 # Re-run init to install SDKs - preserves existing files (manifest, etc.)
-winapp init --use-defaults --setup-sdks stable
+winapp init . --use-defaults --setup-sdks stable
 ```
 
 Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions.
@@ -152,17 +173,19 @@ winapp update --setup-sdks experimental
 
 Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
 
+Pass multiple input folders to create an `.msixbundle` for multi-architecture distribution (see [Multi-architecture bundles](#multi-architecture-bundles) below).
+
 ```bash
-winapp pack <input-folder> [options]
+winapp pack <input-folder> [input-folder...] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the application files to package
+- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle.
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>_<version>_<arch>.msix`, falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix` when version/arch can't be determined)
+- `--output <filename>` - Output file name. For single packages: `<name>_<version>_<arch>.msix` (falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix`). For bundles: `<name>_<version>_<arch1>_<arch2>.msixbundle`.
 - `--name <name>` - Package name (default: from manifest)
 - `--manifest <path>` - Path to manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported; default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
@@ -213,6 +236,48 @@ winapp pack ./dist --generate-cert --install-cert --self-contained
 
 # Package with explicit executable (resolves $targetnametoken$ in manifest)
 winapp pack ./dist --executable MyApp.exe
+```
+
+#### Multi-architecture bundles
+
+When multiple input folders are passed, `winapp pack` creates an `.msixbundle` containing one `.msix` per architecture:
+
+```bash
+# Create unsigned bundle for Microsoft Store submission
+winapp pack ./publish/x64 ./publish/arm64
+
+# Create signed bundle for sideloading
+winapp pack ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+
+# Self-contained bundle
+winapp pack ./publish/x64 ./publish/arm64 --self-contained --generate-cert
+```
+
+The command auto-detects each folder's architecture from the primary executable's PE header, validates consistency across slices (Identity, Capabilities, Dependencies), and produces a `<Name>_<Version>_<arch1>_<arch2>.msixbundle`.
+
+**Manifest resolution for bundles:**
+
+Each slice in the bundle needs a manifest. The command resolves manifests in this order:
+
+1. **`--manifest <path>`** — If specified, this single manifest is used for all slices. The `ProcessorArchitecture` is automatically updated per-slice to match the detected architecture.
+
+2. **Per-folder manifest** — If each input folder contains a `Package.appxmanifest` (or `appxmanifest.xml`), that folder's manifest is used for its slice.
+
+3. **Current directory fallback** — If a folder has no manifest, the command looks for `Package.appxmanifest` in the current working directory and uses it (with architecture auto-stamped).
+
+In all cases, the manifest is automatically updated: placeholders are resolved, dependencies are injected, and the `ProcessorArchitecture` is force-set to the detected architecture. After resolution, a cross-slice validation ensures that Identity (Name, Version, Publisher), Capabilities, and Dependencies are consistent across all slices — only `ProcessorArchitecture` may differ.
+
+```bash
+# Option 1: Single shared manifest (simplest for most projects)
+# Place Package.appxmanifest in your project root and run from there
+winapp pack ./publish/x64 ./publish/arm64
+
+# Option 2: Explicit manifest path
+winapp pack ./publish/x64 ./publish/arm64 --manifest ./src/Package.appxmanifest
+
+# Option 3: Per-folder manifests (useful if slices have different app extensions)
+# Each folder already contains its own Package.appxmanifest
+winapp pack ./publish/x64 ./publish/arm64
 ```
 
 ---

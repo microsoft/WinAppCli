@@ -9,6 +9,7 @@ namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Tests for the InitCommand including SDK installation mode handling
+/// and project detection/selection behavior
 /// </summary>
 [TestClass]
 public class InitCommandTests : BaseCommandTests
@@ -18,12 +19,34 @@ public class InitCommandTests : BaseCommandTests
         return services;
     }
 
+    /// <summary>
+    /// Pushes keys to answer "yes" to the "no project detected" confirmation prompt.
+    /// The prompt uses DefaultValue=false, so we must push 'y' then Enter.
+    /// </summary>
+    private void PushConfirmYes()
+    {
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Y);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+    }
+
+    /// <summary>
+    /// Pushes keys to answer "no" (the default) to the "no project detected" confirmation prompt.
+    /// </summary>
+    private void PushConfirmNo()
+    {
+        TestAnsiConsole.Input.PushKey(ConsoleKey.N);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+    }
+
     [TestMethod]
     public async Task InitCommand_WithConfigOnly_CreatesConfigFile()
     {
         // Arrange
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { _tempDirectory.FullName, "--config-only" };
+
+        // Explicit directory with no project files triggers a confirmation prompt
+        PushConfirmYes();
 
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
@@ -43,7 +66,7 @@ public class InitCommandTests : BaseCommandTests
     [TestMethod]
     public async Task InitCommand_WithSetupSdksNone_CompletesSuccessfully()
     {
-        // Arrange
+        // Arrange — --no-prompt is an alias for --use-defaults, so no prompts are shown
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { _tempDirectory.FullName, "--setup-sdks", "none", "--no-prompt" };
 
@@ -68,6 +91,9 @@ public class InitCommandTests : BaseCommandTests
         // Use config-only to avoid long-running SDK installation
         var args = new[] { _tempDirectory.FullName, "--config-only", "--no-gitignore" };
 
+        // Explicit directory with no project files triggers a confirmation prompt
+        PushConfirmYes();
+
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
@@ -86,6 +112,9 @@ public class InitCommandTests : BaseCommandTests
         var configDir = _tempDirectory.CreateSubdirectory("config");
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { _tempDirectory.FullName, "--config-dir", configDir.FullName, "--config-only" };
+
+        // Explicit directory with no project files triggers a confirmation prompt
+        PushConfirmYes();
 
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
@@ -111,6 +140,9 @@ public class InitCommandTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { _tempDirectory.FullName, "--config-only" };
 
+        // Explicit directory with existing config but no project triggers a confirmation prompt
+        PushConfirmYes();
+
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
 
@@ -125,7 +157,7 @@ public class InitCommandTests : BaseCommandTests
     [TestMethod]
     public async Task InitCommand_DoesNotGenerateCertificate()
     {
-        // Arrange
+        // Arrange — --no-prompt skips all interactive prompts
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { _tempDirectory.FullName, "--setup-sdks", "none", "--no-prompt" };
 
@@ -138,5 +170,200 @@ public class InitCommandTests : BaseCommandTests
         // Verify that no devcert.pfx was created - init should not generate certificates
         var certPath = Path.Combine(_tempDirectory.FullName, "devcert.pfx");
         Assert.IsFalse(File.Exists(certPath), "Init should not generate devcert.pfx - certificates should be generated separately with 'cert generate'");
+    }
+
+    // --- Project detection & selection behavior tests ---
+
+    [TestMethod]
+    public async Task InitCommand_ExplicitDirectory_SkipsSearchAndInitsDirectly()
+    {
+        // Arrange — create a .csproj in a subdirectory (would be found by search)
+        // but pass the root directory explicitly — search should be skipped
+        var subDir = _tempDirectory.CreateSubdirectory("nested");
+        File.WriteAllText(Path.Combine(subDir.FullName, "MyApp.csproj"), "<Project />");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only" };
+
+        // No project at root → confirmation prompt
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should init in the specified directory (not the nested one)
+        Assert.AreEqual(0, exitCode, "Init should complete successfully");
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath), "winapp.yaml should be created in the explicitly specified directory");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_ExplicitDirectory_NoProject_UserDeclines_ReturnsNonZero()
+    {
+        // Arrange — empty directory, no project
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--config-only" };
+
+        // Decline the "no project detected" confirmation prompt
+        PushConfirmNo();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — user cancelled, should return non-zero
+        Assert.AreEqual(1, exitCode, "Init should return 1 when user cancels");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_UseDefaults_NoProject_NoDirectory_UsesCurrentDirectory()
+    {
+        // Arrange — empty directory, no project markers, no explicit directory argument
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--use-defaults", "--config-only" };
+
+        // Act — --use-defaults without explicit directory uses cwd directly
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should succeed using cwd (preserves pre-existing behavior)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd even when no project is detected");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_ExplicitDirectory_WithProject_NoConfirmationPrompt()
+    {
+        // Arrange — create a .csproj so the project is detected at the explicit path
+        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "MyApp.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // Use --no-prompt to skip workspace setup prompts (TFM update, etc.)
+        var args = new[] { _tempDirectory.FullName, "--config-only", "--no-prompt" };
+
+        // Act — no "no project detected" confirmation prompt since project is found;
+        // --no-prompt skips all subsequent workspace setup prompts
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should succeed without needing the no-project confirmation prompt
+        Assert.AreEqual(0, exitCode, "Init should complete successfully when project is detected");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_UseDefaults_MultipleProjects_UsesCurrentDirectory()
+    {
+        // Arrange — create two project markers in subdirectories so detection would find them
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "App1.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+        </Project>
+        """);
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // --use-defaults without explicit directory — uses cwd directly
+        var args = new[] { "--use-defaults", "--config-only" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should succeed using cwd (no detection gating with --use-defaults)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd regardless of detected projects");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SingleNestedProject_UserAccepts_InitsInProjectDir()
+    {
+        // Arrange — create a Rust project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-rust-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // No explicit directory argument — triggers interactive search
+        var args = new[] { "--config-only" };
+
+        // Accept the single-project confirmation prompt
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should init in the nested project directory
+        Assert.AreEqual(0, exitCode, "Init should complete successfully");
+        var configPath = Path.Combine(subDir.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            $"winapp.yaml should be created in the nested project directory: {subDir.FullName}");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SingleNestedProject_UserDeclines_Returns1()
+    {
+        // Arrange — create a project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Decline the single-project confirmation prompt
+        PushConfirmNo();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — user cancelled
+        Assert.AreEqual(1, exitCode, "Init should return 1 when user declines");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_MultipleProjects_UseDefaults_UsesCurrentDirectory()
+    {
+        // Arrange — create two projects in nested directories; the current dir has no project
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "Cargo.toml"), "[package]\nname = \"app1\"");
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "[package]\nname = \"app2\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--use-defaults", "--config-only" };
+
+        // Act — --use-defaults without explicit dir uses cwd directly
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should succeed using cwd (no detection gating)
+        Assert.AreEqual(0, exitCode, "Init with --use-defaults should succeed using cwd regardless of multiple detected projects");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_NestedProject_ConfigPlacedInProjectDir()
+    {
+        // Arrange — create a project in a nested directory
+        var subDir = _tempDirectory.CreateSubdirectory("my-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Accept the single-project confirmation prompt
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should init in nested dir (config-dir relocated) and show cd reminder
+        Assert.AreEqual(0, exitCode, "Init should complete successfully");
+        var configPath = Path.Combine(subDir.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            "winapp.yaml should be created in the nested project directory (config-dir auto-relocated)");
+        // The cd reminder is emitted via LogInformation → static AnsiConsole (not capturable in TestConsole)
+        // but the key behavior is that config was placed in the nested dir, not the root
+        var rootConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsFalse(File.Exists(rootConfig),
+            "winapp.yaml should NOT be in root when a nested project was selected");
     }
 }

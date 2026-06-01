@@ -643,7 +643,7 @@
       },
       "options": {
         "--config-dir": {
-          "description": "Directory to read/store configuration (default: current directory)",
+          "description": "Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected)",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
@@ -726,7 +726,7 @@
           "recursive": false
         },
         "--use-defaults": {
-          "description": "Do not prompt, and use default of all prompts",
+          "description": "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)",
           "hidden": false,
           "aliases": [
             "--no-prompt"
@@ -1078,14 +1078,13 @@
       ],
       "arguments": {
         "input-folder": {
-          "description": "Input folder with package layout",
+          "description": "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
           "order": 0,
           "hidden": false,
-          "valueType": "System.IO.DirectoryInfo",
+          "valueType": "System.IO.DirectoryInfo[]",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 1,
-            "maximum": 1
+            "minimum": 1
           }
         }
       },
@@ -1181,7 +1180,7 @@
           "recursive": false
         },
         "--output": {
-          "description": "Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined)",
+          "description": "Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles.",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,
