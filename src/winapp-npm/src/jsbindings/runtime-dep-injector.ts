@@ -83,6 +83,27 @@ export function ensureRuntimeDependency(
   return { outcome: 'added', pinnedVersion: version };
 }
 
+/**
+ * Read-only check: is `packageName` declared as a production dependency in
+ * package.json? Used by the passive flows (`restore` / `node generate-bindings`)
+ * which never mutate package.json — they only warn when the runtime the
+ * generated bindings import is missing. Returns false when package.json is
+ * absent or the dep lives only under devDependencies.
+ */
+export function isRuntimeDependencyDeclared(workspaceDir: string, packageName: string): boolean {
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
+    return false;
+  }
+  const deps = doc.parsed.dependencies;
+  return (
+    !!deps &&
+    typeof deps === 'object' &&
+    !Array.isArray(deps) &&
+    typeof (deps as Record<string, unknown>)[packageName] === 'string'
+  );
+}
+
 function insertOrUpdateDependency(
   obj: Record<string, unknown>,
   packageName: string,
@@ -166,7 +187,7 @@ export function getDynWinrtVersionPin(): string {
 export interface RuntimeDependencyHint {
   /** ANSI-friendly message to print. */
   message: string;
-  /** True when the user should run `<pm> install` to materialize a new dep. */
+  /** True when the user should run `<pm> install` to install a newly added dep locally. */
   needsInstall: boolean;
 }
 
@@ -180,7 +201,7 @@ export function formatRuntimeDependencyHint(
   switch (outcome) {
     case 'added':
       return {
-        message: `✅ Added ${packageName}@${pinnedVersion} to your package.json dependencies. Run \`${installCommand}\` to materialize it.`,
+        message: `✅ Added ${packageName}@${pinnedVersion} to your package.json dependencies. Run \`${installCommand}\` to install it locally.`,
         needsInstall: true,
       };
     case 'alreadyPresent':

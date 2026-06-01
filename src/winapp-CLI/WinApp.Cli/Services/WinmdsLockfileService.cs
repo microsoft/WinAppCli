@@ -135,7 +135,7 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
         var winmdsByPackage = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var w in discoveredWinmds)
         {
-            var pkgIdLc = ExtractPackageIdFromPath(w.FullName, nugetCacheDir.FullName);
+            var pkgIdLc = PackageLayoutService.TryGetPackageIdFromPath(nugetCacheDir, w.FullName);
             if (pkgIdLc is null)
             {
                 continue;
@@ -174,21 +174,5 @@ internal sealed class WinmdsLockfileService(ILogger<WinmdsLockfileService> logge
             YamlPackagesHash = yamlPackagesHash,
             Packages = packages,
         };
-    }
-
-    // NuGet cache layout: `<cache>/<package-id-lowercased>/<version>/...`.
-    // Returns null for user-supplied additionalWinmds outside the cache.
-    private static string? ExtractPackageIdFromPath(string winmdFullPath, string nugetCacheDir)
-    {
-        var normCache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(nugetCacheDir));
-        var normWinmd = Path.GetFullPath(winmdFullPath);
-        if (!normWinmd.StartsWith(normCache + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            && !normWinmd.StartsWith(normCache + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        var rel = normWinmd.Substring(normCache.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var firstSep = rel.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
-        return firstSep <= 0 ? null : rel.Substring(0, firstSep).ToLowerInvariant();
     }
 }

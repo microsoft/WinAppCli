@@ -6,6 +6,7 @@ import {
   checkAndInstallPython,
   checkAndInstallVisualStudio as checkAndInstallVisualStudioTools,
 } from './dependency-utils';
+import { mutatePackageJsonDoc } from './jsbindings/package-json-doc';
 
 export interface GenerateCppAddonOptions {
   name?: string;
@@ -206,31 +207,25 @@ async function installRequiredPackages(projectRoot: string, verbose: boolean): P
  * @param verbose - Enable verbose logging
  */
 async function addBuildScript(addonName: string, projectRoot: string, verbose: boolean): Promise<void> {
-  const packageJsonPath = path.join(projectRoot, 'package.json');
-
-  // Read current package.json
-  const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
-  const packageJson = JSON.parse(packageJsonContent);
-
-  // Initialize scripts if it doesn't exist
-  if (!packageJson.scripts) {
-    packageJson.scripts = {};
-  }
-
   // Find a unique script name
   let scriptName = `build-${addonName}`;
-  let counter = 1;
 
-  while (packageJson.scripts[scriptName]) {
-    scriptName = `build-${addonName}${counter}`;
-    counter++;
-  }
+  mutatePackageJsonDoc(projectRoot, (packageJson) => {
+    const scripts =
+      packageJson.scripts && typeof packageJson.scripts === 'object'
+        ? (packageJson.scripts as Record<string, string>)
+        : {};
 
-  // Add the build script
-  packageJson.scripts[scriptName] = `node-gyp clean configure build --directory=${addonName}`;
+    let counter = 1;
+    while (scripts[scriptName]) {
+      scriptName = `build-${addonName}${counter}`;
+      counter++;
+    }
 
-  // Write back to package.json
-  await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf8');
+    // Add the build script
+    scripts[scriptName] = `node-gyp clean configure build --directory=${addonName}`;
+    packageJson.scripts = scripts;
+  });
 
   if (verbose) {
     console.log(`📝 Added build script: ${scriptName}`);

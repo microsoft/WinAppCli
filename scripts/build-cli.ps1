@@ -233,6 +233,25 @@ try
                     Write-Warning "Node CLI compile failed, Node E2E tests will be skipped"
                 } else {
                     Write-Host "[BUILD] Node CLI built successfully" -ForegroundColor Green
+
+                    # Run npm-side TypeScript unit tests (pure-logic jsbindings modules
+                    # + CLI arg parser). Gated on -not $SkipTests like the C# suite.
+                    if (-not $SkipTests) {
+                        Write-Host "[TEST] Running npm unit tests..." -ForegroundColor Blue
+                        npm test
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Warning "npm unit tests failed with exit code $LASTEXITCODE"
+                            if ($FailOnTestFailure) {
+                                Pop-Location
+                                Write-Error "Stopping build due to npm unit test failures (FailOnTestFailure flag set)"
+                                exit 1
+                            } else {
+                                Write-Host "[TEST] Continuing build despite npm unit test failures..." -ForegroundColor Yellow
+                            }
+                        } else {
+                            Write-Host "[TEST] npm unit tests passed!" -ForegroundColor Green
+                        }
+                    }
                 }
             }
         } finally {

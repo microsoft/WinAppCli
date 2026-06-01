@@ -8,7 +8,7 @@ import { askBindingsKind, parseSetupSdksArg } from './jsbindings/init-prompt';
 import { hasJsBindings, ensureJsBindingsBlock } from './jsbindings/package-json-config';
 import { runJsBindingsPipeline } from './jsbindings/orchestrator';
 import { getLockfilePath, LOCKFILE_NAME } from './jsbindings/lockfile-reader';
-import { resolveWorkspaceDir, resolveYamlPath, isVerbose, isQuiet, hasConfigOnly } from './cli-args';
+import { resolveWorkspaceDir, resolveYamlPath, isVerbose, isQuiet, hasConfigOnly, hasNoInstall } from './cli-args';
 import { assertSafeWorkspaceFile } from './jsbindings/path-safety';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -564,6 +564,11 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
  * dynwinrt-codegen. Intended for fast iteration after editing the `winapp.jsBindings`
  * block (packages scope, extraTypes, skip/refOnly/emit overrides).
  *
+ * Passive by design: it only *reads* these two inputs and emits bindings — it
+ * never writes package.json. Adding the `winapp.jsBindings` block and the
+ * `@microsoft/dynwinrt` dependency is `winapp init`'s job; this command fails
+ * fast when the block is absent.
+ *
  * Pre-checks fail fast with an actionable hint when a prerequisite is missing.
  */
 async function handleGenerateBindings(args: string[]): Promise<void> {
@@ -577,12 +582,14 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
     console.log('Regenerate JS/TypeScript bindings from package.json + cached winmds');
     console.log('');
     console.log('This command will:');
-    console.log('  1. Read (or add a default) `winapp.jsBindings` block in package.json');
+    console.log('  1. Read the `winapp.jsBindings` block from package.json');
     console.log('  2. Read the cached winmd inventory from .winapp/winmds.lock.json');
-    console.log('  3. Run dynwinrt-codegen into the configured output directory');
-    console.log('  4. Ensure @microsoft/dynwinrt is listed in package.json dependencies');
+    console.log('  3. Run dynwinrt-codegen into the output directory');
     console.log('');
-    console.log('It does NOT re-run the native restore. If you have never run');
+    console.log('It only reads `winapp.jsBindings` + the cached lockfile and emits bindings —');
+    console.log('it does NOT modify package.json. Run `winapp init` to opt into JS bindings');
+    console.log('(it adds the `winapp.jsBindings` block and the @microsoft/dynwinrt dependency).');
+    console.log('It also does NOT re-run the native restore. If you have never run');
     console.log('`winapp restore` in this workspace (so there is no winmd lockfile yet)');
     console.log('or you changed `winapp.yaml` since the last restore, run `winapp restore`');
     console.log('first, then re-run this command.');
@@ -610,13 +617,17 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // 2. Make sure the `winapp.jsBindings` namespace exists. Running this
-  //    command is itself a strong signal that the user wants bindings —
-  //    refusing on a missing block would force a hand-edit of package.json
-  //    for no real safety benefit. `restore` deliberately does NOT call
-  //    this helper: it stays passive and only acts when the user has
-  //    already declared bindings.
-  ensureJsBindingsBlock(workspaceDir, { quiet });
+  // 2. The `winapp.jsBindings` namespace must already exist. This command is a
+  //    passive regenerator: it only reads `winapp.jsBindings` + the cached
+  //    lockfile and emits bindings — it never writes declarations. Adding the
+  //    block (and the runtime dependency) is `winapp init`'s job, so fail fast
+  //    with an actionable hint instead of silently creating it here.
+  if (!hasJsBindings(workspaceDir)) {
+    console.error('❌ No "winapp.jsBindings" namespace in package.json.');
+    console.error('   Run `winapp init` to opt into JS bindings (it adds the block and the');
+    console.error('   @microsoft/dynwinrt dependency), then re-run this command to regenerate.');
+    process.exit(1);
+  }
 
   // 3. Lockfile from a prior `winapp restore` must be present. (Schema-mismatch
   //    cases get the orchestrator's more detailed message via `lockfileStale`.)
@@ -648,10 +659,32 @@ async function handleInit(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(args);
   const quiet = isQuiet(args);
   const configOnly = hasConfigOnly(args);
+  const noInstall = hasNoInstall(args);
 
   // Re-running init on a configured workspace? Infer the choice rather than
   // re-prompt so we never silently drop the user's prior customizations.
   const existingJsBindings = hasJsBindings(workspaceDir);
+
+  // Native init runs FIRST so all of its own prompts (package name, publisher,
+  // version, SDK setup, …) complete before we ask about JS bindings. Asking
+  // last also lets us gate the question on whether SDK setup actually happened.
+  // Native init runs with the user's literal argv (no flag injection), minus
+  // wrapper-only flags the native CLI doesn't recognize (`--no-install`). We
+  // deliberately do NOT change the child's cwd: native `init` resolves
+  // `base-directory` / `--config-dir` against its own cwd, so changing it would
+  // double-resolve any relative path (`winapp init subdir` → spawn
+  // cwd=/foo/subdir + arg `subdir` → native lands in /foo/subdir/subdir).
+  // Wrapper-side `workspaceDir` is an absolute path we only use for our OWN
+  // bookkeeping (package.json read/write, codegen output, prompts).
+  const nativeArgs = args.filter((a) => a !== '--no-install');
+  await callWinappCli(['init', ...nativeArgs], { exitOnError: true });
+
+  // SDK setup writes .winapp/winmds.lock.json during winmd discovery (Step 5),
+  // so its presence tells us JS bindings have winmds to generate against. When
+  // the user declines SDK setup there's no lockfile — and nothing to bind to.
+  // `--config-only` skips package install (no lockfile) but defers codegen on
+  // purpose, so treat it as "ready" for the opt-in decision below.
+  const lockfilePresent = fs.existsSync(getLockfilePath(workspaceDir));
 
   let outcome;
   try {
@@ -660,6 +693,7 @@ async function handleInit(args: string[]): Promise<void> {
       argv: args,
       isInit: true,
       existingJsBindings,
+      sdksReady: lockfilePresent || configOnly,
     });
   } catch (err) {
     logErrorAndExit(err);
@@ -668,16 +702,6 @@ async function handleInit(args: string[]): Promise<void> {
   if (outcome.silentReason && !quiet) {
     console.log(`ℹ️  ${outcome.silentReason}`);
   }
-
-  // Native init runs with the user's literal argv (no flag injection, no
-  // JS-bindings-aware overrides). We deliberately do NOT change the child's
-  // cwd: native `init` resolves `base-directory` / `--config-dir` against
-  // its own cwd, so changing it would double-resolve any relative path
-  // (`winapp init subdir` → spawn cwd=/foo/subdir + arg `subdir`
-  //  → native lands in /foo/subdir/subdir). Wrapper-side `workspaceDir` is
-  // an absolute path we only use for our OWN bookkeeping (package.json
-  // read/write, codegen output, prompts).
-  await callWinappCli(['init', ...args], { exitOnError: true });
 
   // User opted out — nothing more to do.
   if (outcome.kind === 'no') {
@@ -727,7 +751,24 @@ async function handleInit(args: string[]): Promise<void> {
   // implementation re-ran `winapp restore` here defensively, but that doubled
   // the cost of init and ignored `--config-only`. Hand straight off to the
   // orchestrator instead.
-  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args));
+  //
+  // Guard: an init re-run can infer Yes from existing config even though SDK
+  // setup was skipped this time (no lockfile). Generating against a missing
+  // winmd inventory would fail; inform and defer instead of erroring out.
+  if (!lockfilePresent) {
+    if (!quiet) {
+      console.log(
+        'ℹ️  Windows SDKs were not set up, so JS bindings were not generated. ' +
+          'Run `npx winapp restore` then `npx winapp node generate-bindings` to generate them.'
+      );
+    }
+    return;
+  }
+
+  // init is the onboarding flow: it is the only command that *writes* the
+  // runtime dependency to package.json (manageRuntimeDep) and, unless the user
+  // opted out with --no-install, also installs it into node_modules.
+  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args), !noInstall, true);
 }
 
 /**
@@ -746,6 +787,22 @@ async function handleRestore(args: string[]): Promise<void> {
   if (!hasJsBindings(workspaceDir)) {
     return;
   }
+
+  // Native restore is a no-op success when there's no winapp.yaml or it has no
+  // packages — in those cases it writes no lockfile. Don't regress that contract
+  // into a hard failure: with no lockfile there's simply nothing to generate, so
+  // skip with an informational note instead of erroring out (the orchestrator
+  // would otherwise return `lockfileMissing` → exit 1).
+  if (!fs.existsSync(getLockfilePath(workspaceDir))) {
+    if (!quiet) {
+      console.log(
+        'ℹ️  No winmd inventory found (winapp.yaml has no packages yet), so JS bindings ' +
+          'were not generated. Add packages to `winapp.yaml` and re-run `npx winapp restore`.'
+      );
+    }
+    return;
+  }
+
   await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args));
 }
 
@@ -754,10 +811,19 @@ async function runJsBindingsOrchestrator(
   workspaceDir: string,
   verbose: boolean = false,
   quiet: boolean = false,
-  yamlPath?: string
+  yamlPath?: string,
+  installRuntimeDep: boolean = false,
+  manageRuntimeDep: boolean = false
 ): Promise<void> {
   try {
-    const result = await runJsBindingsPipeline({ workspaceDir, verbose, quiet, yamlPath });
+    const result = await runJsBindingsPipeline({
+      workspaceDir,
+      verbose,
+      quiet,
+      yamlPath,
+      installRuntimeDep,
+      manageRuntimeDep,
+    });
     switch (result.outcome) {
       case 'completed':
         if (!quiet) {

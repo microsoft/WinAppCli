@@ -149,7 +149,11 @@ jobs:
       if: steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0
+        if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+          Register-PSRepository -Default
+        }
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0 -Repository PSGallery
 
     - name: Run ${{ matrix.sample }} test
       if: steps.check.outputs.skip != 'true'

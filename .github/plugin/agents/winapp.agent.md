@@ -218,17 +218,15 @@ Want to inspect or interact with a running app's UI?
 
 ### Electron
 - **Setup:** `winapp init --use-defaults` → choose your Windows API access path:
-  - **JS bindings** — typed `bindings/*.{js,d.ts}` covering the Windows App SDK, called via `@microsoft/dynwinrt` (no native build step).
-    - **Add:** `npx winapp init` (interactive prompt) or `npx winapp node generate-bindings` on an existing project. Both write a default `winapp.jsBindings` namespace into `package.json` if missing, then generate.
-    - **Re-run:** `npx winapp node generate-bindings` after editing `winapp.jsBindings.{packages,extraTypes,additionalWinmds}`. Use `npx winapp restore` instead when you changed `winapp.yaml`.
-    - Codegen injects `@microsoft/dynwinrt` as a production dep — run `npm install` afterwards to materialize it.
+  - **JS bindings:** typed `.winapp/bindings/*.{js,d.ts}` for the Windows App SDK via the `@microsoft/dynwinrt` runtime (no native build step). Opt in at the `winapp init` prompt above.
   - **Native addons:** `winapp node create-addon --template cs` (or `--template cpp`) for C#/C++ addons when you need full WinRT access or stateful native services.
 - **Package:** Build with your packager (e.g., Electron Forge), then `winapp package <dist> --cert .\devcert.pfx`
 - Use `winapp node create-addon` to create native C#/C++ addons for Windows APIs
+- Regenerate bindings after edits: `npx winapp restore` for `winapp.yaml` changes (also refreshes bindings), or the faster `npx winapp node generate-bindings` for `winapp.jsBindings`-only changes.
 - Use `winapp node add-electron-debug-identity` / `clear-electron-debug-identity` for identity management
 - **⚠️ Always run `npx winapp node add-electron-debug-identity` before testing any Windows API that requires package identity** — without this, APIs will fail at runtime
 - Guide: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md
-- JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-bindings.md
+- JS bindings reference: https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-file-picker.md
 
 ### .NET (WPF, WinForms, Console)
 - **Setup:** `winapp init --use-defaults` — but if you already have a `Package.appxmanifest` (e.g., WinUI 3 apps), you likely **don't need `winapp init`**. Just ensure your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package and has the right properties for packaged builds.

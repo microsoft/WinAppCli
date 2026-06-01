@@ -4,9 +4,11 @@
 import { AdditionalWinmd } from './additional-winmds';
 import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
 
+// Fixed, non-configurable codegen output directory (relative to the workspace root).
+// Mirrors the C++ `.winapp/include` convention and is auto-gitignored by `winapp init`.
+export const JS_BINDINGS_OUTPUT_DIR = '.winapp/bindings';
+
 export interface JsBindingsConfig {
-  // Output directory, relative to the workspace root.
-  output: string;
   // Extra .winmd files to feed into codegen, either bulk-emitted or cherry-picked.
   additionalWinmds: AdditionalWinmd[];
   // Extra .winmd files loaded for type resolution only.
@@ -15,7 +17,6 @@ export interface JsBindingsConfig {
 
 export function defaultJsBindingsConfig(): JsBindingsConfig {
   return {
-    output: 'bindings',
     additionalWinmds: [],
     additionalRefs: [],
   };
@@ -68,7 +69,7 @@ export function ensureJsBindingsBlock(
     if (!opts.quiet) {
       console.log(
         'ℹ️  Added "winapp.jsBindings" to package.json. ' +
-          'Edit `output`, `additionalWinmds`, or `additionalRefs` to customize.'
+          'Edit `additionalWinmds` or `additionalRefs` to customize.'
       );
     }
     return 'added';
@@ -117,7 +118,6 @@ function coerceConfig(raw: unknown): JsBindingsConfig {
   const r = raw as Record<string, unknown>;
 
   return {
-    output: typeof r.output === 'string' && r.output.trim() ? r.output.trim() : defaults.output,
     additionalWinmds: coerceAdditionalWinmds(r.additionalWinmds),
     additionalRefs: coerceStringArray(r.additionalRefs),
   };
@@ -172,7 +172,6 @@ function coerceAdditionalWinmds(value: unknown): AdditionalWinmd[] {
 /** Stable key order; empty arrays remain explicit defaults in package.json. */
 function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
   return {
-    output: config.output,
     additionalWinmds: config.additionalWinmds.map((w) => {
       const entry: Record<string, unknown> = {};
       if (w.winmdPath) {

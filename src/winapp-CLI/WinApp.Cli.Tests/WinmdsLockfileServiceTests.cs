@@ -40,7 +40,8 @@ public class WinmdsLockfileServiceTests
     public async Task WriteAsync_ProducesIndentedSchemaVersionedJson()
     {
         var winapp = _temp.CreateSubdirectory("winapp");
-        // ExtractPackageIdFromPath requires the literal "packages" segment.
+        // PackageLayoutService.TryGetPackageIdFromPath keys off the cache root, so the
+        // winmd must live under a `<cache>/<id-lc>/<version>/...` layout.
         var cache = _temp.CreateSubdirectory("packages");
         var winmd = new FileInfo(Path.Combine(
             cache.FullName, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "Microsoft.Windows.AI.winmd"));

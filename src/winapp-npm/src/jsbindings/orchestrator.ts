@@ -10,8 +10,9 @@ import { tryReadLockfile } from './lockfile-reader';
 import { partitionPackageWinmds } from './winmd-policy';
 import { resolveAdditionalWinmds } from './additional-winmds';
 import { runCodegen } from './codegen-runner';
-import { ensureRuntimeDependency, formatRuntimeDependencyHint, getDynWinrtVersionPin } from './runtime-dep-injector';
+import { ensureRuntimeDependency, formatRuntimeDependencyHint, getDynWinrtVersionPin, isRuntimeDependencyDeclared } from './runtime-dep-injector';
 import { detectPackageManager } from './package-manager-detector';
+import { installRuntimeDependency } from './runtime-installer';
 import { startSpinner, Spinner } from './spinner';
 import { computeYamlPackagesHash, readWinappYamlPackages } from './yaml-packages-hash';
 
@@ -39,6 +40,21 @@ export interface OrchestratorOptions {
   verbose?: boolean;
   /** Suppress progress and hints; warnings still go through `log`. */
   quiet?: boolean;
+  /**
+   * When true (the `init` onboarding flow), declare `@microsoft/dynwinrt` in
+   * package.json — the only place the runtime dependency is *written*. The
+   * passive flows (`restore` / `node generate-bindings`) leave it false: they
+   * only read `winapp.jsBindings` + the lockfile and emit bindings, never
+   * mutating package.json. They warn instead when the dep is missing.
+   */
+  manageRuntimeDep?: boolean;
+  /**
+   * When true (the `init` onboarding flow), materialize the runtime dependency
+   * into node_modules via the detected package manager instead of only writing
+   * it to package.json. Best-effort: install failures degrade to a warning.
+   * Only meaningful when `manageRuntimeDep` is also true.
+   */
+  installRuntimeDep?: boolean;
 }
 
 export async function runJsBindingsPipeline(options: OrchestratorOptions): Promise<OrchestratorResult> {
@@ -162,7 +178,6 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   let codegenResult;
   try {
     codegenResult = await runCodegen({
-      config,
       emitWinmds,
       refWinmds,
       cherryPicks,
@@ -174,25 +189,68 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     spinner?.stop();
   }
 
-  // Runtime dep injection is best-effort; codegen output is still useful if it fails.
-  const pinnedVersion = options.versionOverride ?? safeGetVersionPin(log);
-  if (pinnedVersion) {
-    try {
-      const ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
-      const pm = detectPackageManager(workspaceDir);
-      const hint = formatRuntimeDependencyHint(
-        ensureResult.outcome,
-        RUNTIME_PACKAGE_NAME,
-        ensureResult.pinnedVersion,
-        pm.installCommand
-      );
-      if (!options.quiet) {
-        log(hint.message);
+  // Runtime dependency handling differs by flow:
+  //   * init (manageRuntimeDep): declare @microsoft/dynwinrt in package.json
+  //     (best-effort; codegen output is still useful if it fails) and, unless
+  //     opted out, install it.
+  //   * restore / generate-bindings (passive): never mutate package.json — just
+  //     warn if the runtime the generated bindings import isn't declared. init
+  //     is responsible for adding it.
+  if (options.manageRuntimeDep) {
+    const pinnedVersion = options.versionOverride ?? safeGetVersionPin(log);
+    if (pinnedVersion) {
+      try {
+        const ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
+        const pm = detectPackageManager(workspaceDir);
+
+        // The dep is now declared in package.json. On the init onboarding flow,
+        // also install it so the generated bindings are runnable without a manual
+        // second step. Only do this when the dep actually landed in `dependencies`
+        // (added / alreadyPresent) — `noPackageJson` / `presentInDevDependencies`
+        // have nothing installable and fall through to the manual hint below.
+        const dependencyDeclared = ensureResult.outcome === 'added' || ensureResult.outcome === 'alreadyPresent';
+        if (options.installRuntimeDep && dependencyDeclared) {
+          const installVersion = ensureResult.pinnedVersion ?? pinnedVersion;
+          if (!options.quiet) {
+            log(`📦 Installing ${RUNTIME_PACKAGE_NAME}@${installVersion} with ${pm.name}...`);
+          }
+          const install = installRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, installVersion, pm.name);
+          if (install.ok) {
+            if (!options.quiet) {
+              log(`✅ Installed ${RUNTIME_PACKAGE_NAME}@${installVersion}.`);
+            }
+          } else {
+            // Best-effort: bindings are already generated and the dep is in
+            // package.json — surface a warning (even in --quiet) so the user can
+            // finish the install manually.
+            log(
+              `⚠️ Could not auto-install ${RUNTIME_PACKAGE_NAME}@${installVersion}: ${install.error}. ` +
+                `Run \`${pm.installCommand}\` to install it locally.`
+            );
+          }
+        } else {
+          const hint = formatRuntimeDependencyHint(
+            ensureResult.outcome,
+            RUNTIME_PACKAGE_NAME,
+            ensureResult.pinnedVersion,
+            pm.installCommand
+          );
+          if (!options.quiet) {
+            log(hint.message);
+          }
+        }
+      } catch (err) {
+        // Warnings always surface, even in --quiet.
+        log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
       }
-    } catch (err) {
-      // Warnings always surface, even in --quiet.
-      log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
     }
+  } else if (!isRuntimeDependencyDeclared(workspaceDir, RUNTIME_PACKAGE_NAME)) {
+    // Passive flow with the runtime missing — bindings would fail to resolve it
+    // at runtime. Warn (even in --quiet) but don't write: adding is init's job.
+    log(
+      `⚠️ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
+        'Generated bindings import it at runtime — run `winapp init` to add it (or add it manually).'
+    );
   }
 
   return {

@@ -36,12 +36,6 @@ winapp init [base-directory] [options]
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
 
-**JS/TypeScript bindings (npm wrapper only):**
-
-When run via `npx winapp` in a Node / Electron project, `init` adds an interactive prompt — answering **Y** (the default) writes a `"winapp.jsBindings"` namespace to `package.json` and runs codegen.
-
-See the [JS/TypeScript bindings section](#jstypescript-bindings-via-init--restore) below for the full command matrix and the [Electron JS bindings guide](guides/electron/js-bindings.md) for the schema and end-to-end workflow.
-
 **What it does:**
 
 - Creates `winapp.yaml` configuration file (only when SDK packages are managed; skipped with `--setup-sdks none`)
@@ -51,6 +45,7 @@ See the [JS/TypeScript bindings section](#jstypescript-bindings-via-init--restor
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores shareable files in the global cache directory
+- Generates JS bindings for Windows App SDK APIs (npm wrapper only; requires SDK setup)
 
 **Automatic .NET project detection:**
 
@@ -150,25 +145,6 @@ winapp update
 # Update including experimental packages
 winapp update --setup-sdks experimental
 ```
-
----
-
-### JS/TypeScript bindings (via `init` / `restore`)
-
-Declare JS/TS bindings with a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`**. They're generated alongside the workspace lifecycle — no dedicated sub-command.
-
-| Want to … | Command |
-|---|---|
-| Bootstrap a fresh workspace with bindings | `npx winapp init` (answer **Y** at the prompt; default is **Y**) |
-| Add bindings to an existing workspace | `npx winapp node generate-bindings` (adds a default `winapp.jsBindings` block on first use) |
-| Re-run codegen after editing `winapp.jsBindings` | `npx winapp node generate-bindings` — fast, codegen-only |
-| Re-run codegen after editing `winapp.yaml` | `npx winapp restore` — also re-resolves NuGet packages |
-
-Each generation auto-injects `@microsoft/dynwinrt` as a production dependency in your `package.json` so the emitted bindings can `import` it at runtime.
-
-Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them.
-
-> See [JS bindings guide](guides/electron/js-bindings.md) for the full `winapp.jsBindings` schema, the built-in per-package winmd categorization (skip / refOnly / emit), and the `winmds.lock.json` audit artifact.
 
 ---
 
@@ -826,6 +802,42 @@ winapp get-winapp-path [options]
 - Paths to `.winapp` workspace directory
 - Package installation directories
 - Generated header locations
+
+---
+
+### node generate-bindings
+
+*(Available in NPM package only)* Generate JS bindings for Windows App SDK APIs. The bindings are declared by a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`** and written to `.winapp/bindings/`.
+
+```bash
+npx winapp node generate-bindings [options]
+```
+
+**Options:**
+
+- `--verbose`, `-v` - Enable verbose per-file codegen output
+- `--quiet`, `-q` - Suppress progress and informational output
+
+**What it does:**
+
+- Reads the `winapp.jsBindings` block from `package.json` and the `winmds.lock.json` written by the last `winapp restore`, then emits typed `.js` + `.d.ts` bindings into `.winapp/bindings/`
+- Does **not** modify `package.json` — it is a passive regenerator. Adding the `winapp.jsBindings` block and the `@microsoft/dynwinrt` runtime dependency is [`winapp init`](#init)'s job; this command fails fast if the block is absent
+- Warns (but does not write) if `@microsoft/dynwinrt` is missing from your dependencies — run `npm install` after `init` has added it
+
+> [!NOTE]
+> Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them. Run [`winapp init`](#init) first to opt into bindings (it writes the `winapp.jsBindings` block and the `@microsoft/dynwinrt` dependency); this command only regenerates them afterwards. If you edit `winapp.yaml`, run `npx winapp restore` to refresh Windows dependencies before regenerating.
+
+**Examples:**
+
+```bash
+# Regenerate JS bindings in the current project
+npx winapp node generate-bindings
+
+# Regenerate after editing winapp.jsBindings, with verbose output
+npx winapp node generate-bindings --verbose
+```
+
+> See the [JS bindings guide](guides/electron/js-file-picker.md) for the end-to-end workflow and the `winapp.jsBindings` configuration options.
 
 ---
 

@@ -59,6 +59,7 @@ When prompted:
 - **Version**: Press Enter to accept 1.0.0.0
 - **Entry point**: Press Enter to accept the default (my-windows-app.exe)
 - **Setup SDKs**: Select "Stable SDKs"
+- **Add JS/TypeScript bindings**: Press Enter to accept the default (**Yes**) to generate JS bindings for Windows App SDK APIs
 
 ### What Does `winapp init` Do?
 
@@ -78,6 +79,11 @@ This command sets up everything you need for Windows development:
 5. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
 
 6. **Enables Developer Mode in Windows** - Required for debugging our application
+
+7. **Generates JS bindings** *(npm wrapper only)* - When you opt in, it:
+   - Writes the `winapp.jsBindings` block to `package.json`
+   - Generates JS bindings for Windows App SDK APIs into `.winapp/bindings/`
+   - Adds the `@microsoft/dynwinrt` runtime to your dependencies
 
 > [!NOTE]
 > The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
@@ -252,6 +258,7 @@ This restores the original Electron executable without the debug identity.
 
 Now that your development environment is set up, you're ready to create native addons and call Windows APIs:
 
+- **[Calling WinRT APIs from JavaScript](js-file-picker.md)** - Use the JS bindings generated during setup to call Windows APIs directly — no native addon required
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** - Learn how to create a C# addon that calls the Phi Silica AI API
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to create a C# addon that uses Windows Machine Learning
 - **[Packaging for Distribution](packaging.md)** - Create an MSIX package for distribution

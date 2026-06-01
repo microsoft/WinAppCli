@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
-import { JsBindingsConfig } from './package-json-config';
+import { JS_BINDINGS_OUTPUT_DIR } from './package-json-config';
 import { assertSafeWorkspaceOutputDir, isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
 // Authorises later runs to wipe the generated output dir.
@@ -27,7 +27,6 @@ export interface CodegenCherryPick {
 }
 
 export interface CodegenInputs {
-  config: JsBindingsConfig;
   /** Winmds that generate bindings after policy filtering. */
   emitWinmds: readonly string[];
   /** Winmds loaded for type resolution only. */
@@ -58,7 +57,7 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
   const log = inputs.log ?? ((line) => process.stdout.write(line + os.EOL));
   const verbose = inputs.verbose ?? false;
 
-  const outputDir = resolveOutputDir(inputs.workspaceDir, inputs.config.output);
+  const outputDir = resolveOutputDir(inputs.workspaceDir);
   fs.mkdirSync(path.dirname(outputDir), { recursive: true });
 
   const emit = dedupeCaseInsensitive(inputs.emitWinmds);
@@ -93,10 +92,9 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
   return { outputDir, summary };
 }
 
-export function resolveOutputDir(workspaceDir: string, output: string): string {
-  // This directory is wiped each run; keep it inside the workspace and reparse-free.
-  const out = output && output.trim() ? output : 'bindings';
-  return assertSafeWorkspaceOutputDir(workspaceDir, out, 'jsBindings.output');
+export function resolveOutputDir(workspaceDir: string): string {
+  // Fixed output dir; wiped each run, so keep it inside the workspace and reparse-free.
+  return assertSafeWorkspaceOutputDir(workspaceDir, JS_BINDINGS_OUTPUT_DIR, 'jsBindings output');
 }
 
 /** Throws when outputDir contains files we didn't generate. Empty / missing OK. */
@@ -153,6 +151,31 @@ function writeManagedMarker(outputDir: string): void {
   fs.writeFileSync(markerPath, lines.join('\n'), { encoding: 'utf8' });
 }
 
+// Generated bindings are ESM. A sub-package.json `{ "type": "module" }` tells Node
+// to treat them as such, avoiding the MODULE_TYPELESS_PACKAGE_JSON reparse warning
+// (and the perf hit it implies) when they're require()'d. Idempotent: ensures the
+// marker even when the pinned dynwinrt-codegen version doesn't emit one itself.
+export function ensureEsmPackageMarker(outputDir: string): void {
+  fs.mkdirSync(outputDir, { recursive: true });
+  const pkgPath = path.join(outputDir, 'package.json');
+  let pkg: Record<string, unknown> = {};
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (parsed && typeof parsed === 'object') {
+        pkg = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Corrupt/non-JSON: overwrite with the minimal marker below.
+    }
+  }
+  if (pkg.type === 'module') {
+    return;
+  }
+  pkg.type = 'module';
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', { encoding: 'utf8' });
+}
+
 /** Stage → backup-old → swap → drop-backup. Visible for tests. */
 export async function runWithStaging(
   outputDir: string,
@@ -169,6 +192,7 @@ export async function runWithStaging(
   try {
     await generate(stagingDir);
 
+    ensureEsmPackageMarker(stagingDir);
     writeManagedMarker(stagingDir);
 
     validateOutputDirIsWipeable(outputDir);
@@ -251,13 +275,26 @@ export function buildExtraTypeArgs(
   extra: CodegenCherryPick
 ): string[] {
   const args: string[] = [...prefixArgs, 'generate'];
-  const emitSet = new Set<string>(emitWinmds);
+  // refWinmds and emitWinmds are disjoint (runCodegen drops emit from refs).
+  const refSet = new Set<string>(refWinmds);
+
   if (extra.winmdPath) {
+    // Explicit winmd: emit the cherry-picked class from it, alongside the bulk
+    // emit set so types declared across those winmds resolve.
+    const emitSet = new Set<string>(emitWinmds);
     emitSet.add(extra.winmdPath);
-  }
-  if (emitSet.size > 0) {
     args.push('--winmd', Array.from(emitSet).join(';'));
+    refSet.delete(extra.winmdPath);
+  } else {
+    // Path-less cherry-pick: the user is targeting a class in the SDK's
+    // auto-detected Windows.winmd. Passing --winmd here would DISABLE that
+    // auto-detection and hide the Windows.* types the class needs. Omit it and
+    // expose the NuGet emit winmds via --ref so cross-references still resolve.
+    for (const w of emitWinmds) {
+      refSet.add(w);
+    }
   }
+
   args.push(
     '--namespace',
     extra.namespace,
@@ -268,7 +305,8 @@ export function buildExtraTypeArgs(
     '--lang',
     'js'
   );
-  const refs = extra.winmdPath ? refWinmds.filter((r) => r !== extra.winmdPath) : refWinmds;
+
+  const refs = Array.from(refSet);
   if (refs.length > 0) {
     args.push('--ref', refs.join(';'));
   }

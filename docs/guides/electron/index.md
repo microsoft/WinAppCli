@@ -38,13 +38,13 @@ First, you'll set up your development environment with the necessary tools and S
 
 Next, choose how to call Windows APIs from your Electron app:
 
-#### Option A: [JS/TypeScript bindings via dynwinrt](js-bindings.md) ✨ *new*
+#### Option A: [JS bindings](js-file-picker.md) ✨ *new*
 
-The simplest path — typed JS/TypeScript wrappers generated from `.winmd` metadata, no native build step required from your Electron project. Opt in during `npx winapp init` (or pass `--use-defaults` to auto-accept) and a `bindings/` directory is dropped next to your sources. You `import { ChatClient } from './bindings'` and call WinRT directly.
+The simplest path — typed JS bindings generated from `.winmd` metadata, no native build step required from your Electron project. Opt in during `npx winapp init` (or pass `--use-defaults` to auto-accept) and a `.winapp/bindings/` directory is added to your project. You can then add `import { ChatClient } from './.winapp/bindings'` and call WinRT directly.
 
-[Add JS bindings →](js-bindings.md)
+[Add JS bindings →](js-file-picker.md)
 
-> Native addons (Options B–D below) are still the right choice when the API has no WinRT projection — Win32 / pure COM (raw `IFileDialog`, registry, custom COM servers), C++ libraries that ship only headers + a static/shared lib, or vendor SDKs that ship only a managed .NET assembly. For everything that ships in a `.winmd`, jsBindings is the easier on-ramp.
+> Native addons (Options B–D below) are still the right choice when the API has no WinRT projection — Win32 / pure COM (raw `IFileDialog`, registry, custom COM servers), C++ libraries that ship only headers + a static/shared lib, or vendor SDKs that ship only a managed .NET assembly. For everything that ships in a `.winmd`, JS bindings are the easier option.
 
 #### Option B: [Creating a C++ Notification Addon](cpp-notification-addon.md)
 Learn how to create a C++ addon that calls the Windows App SDK notification APIs. This is a great starting point for understanding native addons before diving into more complex scenarios.
@@ -76,7 +76,7 @@ Finally, you'll package your app as an MSIX for distribution. This includes:
 | Phase | Guide | What You'll Learn |
 |-------|-------|-------------------|
 | 1️⃣ | [Setup](setup.md) | Install tools, initialize SDKs, configure build pipeline |
-| 2️⃣ | [JS bindings (dynwinrt)](js-bindings.md) | Generate typed JS/TS WinRT wrappers, no native build step |
+| 2️⃣ | [JS bindings](js-file-picker.md) | Generate typed JS bindings, no native build step |
 | 2️⃣ | [C++ Notification Addon](cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
 | 2️⃣ | [Phi Silica Addon](phi-silica-addon.md) | Create C# addon, call AI APIs, test with debug identity |
 | 2️⃣ | [WinML Addon](winml-addon.md) | Create C# addon, call WinML APIs, run ONNX models, integrate ML |

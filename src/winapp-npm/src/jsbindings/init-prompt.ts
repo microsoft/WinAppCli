@@ -15,6 +15,12 @@ export interface BindingsPromptInputs {
   isInit: boolean;
   /** True when package.json already declares `winapp.jsBindings`. */
   existingJsBindings: boolean;
+  /**
+   * True when the Windows SDKs were set up (a winmd lockfile exists) or codegen
+   * is being deliberately deferred (`--config-only`). When false, a fresh opt-in
+   * is skipped: JS bindings need the Windows App SDK winmds to generate against.
+   */
+  sdksReady: boolean;
 }
 
 export interface BindingsPromptOutcome {
@@ -84,6 +90,18 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     return {
       kind: 'no',
       silentReason: 'no package.json in this workspace — JS bindings only apply to npm/Node projects.',
+    };
+  }
+
+  // JS bindings generate against the Windows App SDK winmds that SDK setup pulls
+  // down. If the user skipped SDK setup, there's nothing to generate against — so
+  // don't even ask. They can add bindings later once the SDKs are in place.
+  if (!inputs.sdksReady) {
+    return {
+      kind: 'no',
+      silentReason:
+        'Windows SDKs were not set up during init, so JS bindings were skipped. ' +
+        'Run `npx winapp restore` then `npx winapp node generate-bindings` to add them later.',
     };
   }
 

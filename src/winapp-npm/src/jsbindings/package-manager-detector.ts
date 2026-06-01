@@ -14,9 +14,31 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export type PackageManagerName = 'npm' | 'yarn' | 'pnpm' | 'bun';
+
 export interface DetectedPackageManager {
-  name: 'npm' | 'yarn' | 'pnpm' | 'bun';
+  name: PackageManagerName;
   installCommand: string;
+}
+
+/**
+ * Build the argv (executable + args, no shell) for adding a single package at an
+ * exact version with the given package manager. The version is pinned exactly
+ * (no `^`/`~`) so the installed runtime always matches the codegen pin.
+ *
+ * `packageSpec` must already be `name@version`.
+ */
+export function buildAddExactCommand(name: PackageManagerName, packageSpec: string): { exe: string; args: string[] } {
+  switch (name) {
+    case 'npm':
+      return { exe: 'npm', args: ['install', packageSpec, '--save-exact'] };
+    case 'pnpm':
+      return { exe: 'pnpm', args: ['add', packageSpec, '--save-exact'] };
+    case 'yarn':
+      return { exe: 'yarn', args: ['add', packageSpec, '--exact'] };
+    case 'bun':
+      return { exe: 'bun', args: ['add', packageSpec, '--exact'] };
+  }
 }
 
 export function detectPackageManager(workspaceDir: string): DetectedPackageManager {

@@ -69,6 +69,11 @@ export function hasConfigOnly(args: readonly string[]): boolean {
   return args.includes('--config-only');
 }
 
+/** Detect `--no-install` — opt out of auto-installing the runtime dependency. */
+export function hasNoInstall(args: readonly string[]): boolean {
+  return args.includes('--no-install');
+}
+
 /** Detect `--use-defaults` / `--no-prompt` / `-y` / `--yes`. */
 export function hasUseDefaults(args: readonly string[]): boolean {
   return args.some((a) => USE_DEFAULTS_FLAGS.has(a));

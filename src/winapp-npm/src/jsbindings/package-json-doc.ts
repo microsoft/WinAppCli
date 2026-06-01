@@ -10,10 +10,13 @@
 //   * atomic temp-file + rename, with copy+unlink fallback for cross-volume
 //     edge cases (AV interference, mapped network shares, etc).
 //
-// Consumers (package-json-config.ts, runtime-dep-injector.ts) should NEVER
-// open-code `fs.readFileSync(packageJson)` / `JSON.parse` / `fs.renameSync`
-// — go through `readPackageJsonDoc` / `mutatePackageJsonDoc` so changes to
-// safety policy land in one place.
+// Consumers should NEVER open-code `fs.readFileSync(packageJson)` /
+// `JSON.parse` / `fs.renameSync`. This is the single chokepoint for EVERY
+// wrapper site that reads or mutates the user's package.json — the jsbindings
+// config + runtime-dep injection (package-json-config.ts, runtime-dep-injector.ts)
+// AND the C#/C++ addon scaffolders (cs-addon-utils.ts, cpp-addon-utils.ts).
+// Go through `readPackageJsonDoc` / `mutatePackageJsonDoc` so path-safety,
+// EOL preservation, and atomic-write policy all land in one place.
 
 import * as fs from 'fs';
 import * as path from 'path';

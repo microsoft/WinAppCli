@@ -1,6 +1,6 @@
 ---
 name: winapp-frameworks
-description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
+description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri, including JS bindings for WinRT APIs and native addons. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
 version: 0.3.2
 ---
 ## When to use
@@ -30,22 +30,22 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- Typed JS/TypeScript WinRT bindings via dynwinrt (no native build required), opt-in during `npx winapp init` or via `npx winapp node generate-bindings`
+- Commands for generating typed JS bindings (no native build required)
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
 npx winapp init --use-defaults                    # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
-npx winapp node generate-bindings                 # existing project: add (or re-run) JS bindings only
-npx winapp node create-addon --template cs        # create a C# native addon (for what dynwinrt can't drive — see below)
+npx winapp node generate-bindings                 # existing project: regenerate JS bindings after editing winapp.jsBindings
+npx winapp node create-addon --template cs        # create a C# native addon (for what the JS bindings can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```
 
-#### Choosing between jsBindings and a native addon
+#### Choosing between JS bindings and a native addon
 
 The decision is about the **shape of the API**, not preference.
 
-**Default — WinRT API (ships in a `.winmd`) → JS bindings.** Covers most of `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, AI like `TextRecognizer` / `LanguageModel`), `Windows.*`, and `Microsoft.WindowsAppSDK.AI`. See [dynwinrt scope](https://github.com/microsoft/dynwinrt#scope).
+**Default — WinRT API (ships in a `.winmd`) → JS bindings.** Covers most of `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, AI like `TextRecognizer` / `LanguageModel`), `Windows.*`, and `Microsoft.WindowsAppSDK.AI`. See [`@microsoft/dynwinrt` scope](https://github.com/microsoft/dynwinrt#scope).
 
 **Fall back to `node create-addon` when there's no `.winmd`:**
 
@@ -58,7 +58,7 @@ The decision is about the **shape of the API**, not preference.
 Mixing both in one app is normal.
 
 Additional Electron guides:
-- [JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-bindings.md) — full `winapp.jsBindings` JSON schema, per-package classification, lockfile
+- [JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-file-picker.md) — end-to-end workflow for calling WinRT from JS/TS, including binding scope configuration
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

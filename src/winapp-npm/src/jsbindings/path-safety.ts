@@ -166,7 +166,7 @@ export function assertSafeWorkspaceOutputDir(workspaceDir: string, outputDir: st
     throw new Error(
       `${label} ('${outputDir}') resolves to '${resolvedOutput}' which is outside the workspace ` +
         `('${resolvedWorkspace}'). The directory is wiped before each run, so it must be a ` +
-        "path strictly inside the workspace. Use a relative path like 'bindings' or an absolute path " +
+        "path strictly inside the workspace. Use a relative path like '.winapp/bindings' or an absolute path " +
         'that descends from the workspace root.'
     );
   }
