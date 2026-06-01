@@ -61,6 +61,7 @@ The search skips commonly ignored directories (node_modules, bin, obj, .git, etc
 
 - If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
 - If `--use-defaults` is set without a directory argument, `init` searches for projects and errors with the list of detected projects — pass an explicit directory to use non-interactive mode (e.g., `winapp init . --use-defaults`)
+- In non-interactive environments (piped stdin, CI, redirected input), `init` automatically uses `--use-defaults` behavior and emits a warning: `Non-interactive environment detected. Using default values.`
 - If the current directory is a compatible project, `init` proceeds immediately
 - If exactly one project is found elsewhere, you're prompted to confirm
 - If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
