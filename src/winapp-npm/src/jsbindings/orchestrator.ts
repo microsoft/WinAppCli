@@ -10,7 +10,12 @@ import { tryReadLockfile } from './lockfile-reader';
 import { partitionPackageWinmds } from './winmd-policy';
 import { resolveAdditionalWinmds } from './additional-winmds';
 import { runCodegen } from './codegen-runner';
-import { ensureRuntimeDependency, formatRuntimeDependencyHint, getDynWinrtVersionPin, isRuntimeDependencyDeclared } from './runtime-dep-injector';
+import {
+  ensureRuntimeDependency,
+  formatRuntimeDependencyHint,
+  getDynWinrtVersionPin,
+  isRuntimeDependencyDeclared,
+} from './runtime-dep-injector';
 import { detectPackageManager } from './package-manager-detector';
 import { installRuntimeDependency } from './runtime-installer';
 import { startSpinner, Spinner } from './spinner';

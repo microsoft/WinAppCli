@@ -35,7 +35,7 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init . --use-defaults                    # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
+npx winapp init . --use-defaults                  # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
 npx winapp node create-addon --template cs        # create a C# native addon (for what the JS bindings can't drive — see below)
 npx winapp node add-electron-debug-identity       # register identity for debugging
 ```

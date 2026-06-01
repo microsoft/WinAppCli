@@ -68,8 +68,7 @@ export function ensureJsBindingsBlock(
     writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
     if (!opts.quiet) {
       console.log(
-        'ℹ️  Added "winapp.jsBindings" to package.json. ' +
-          'Edit `additionalWinmds` or `additionalRefs` to customize.'
+        'ℹ️  Added "winapp.jsBindings" to package.json. ' + 'Edit `additionalWinmds` or `additionalRefs` to customize.'
       );
     }
     return 'added';

@@ -148,7 +148,7 @@ npx winapp node generate-bindings
 
 ## Customizing the binding scope (optional)
 
-By default — the empty `"jsBindings": {}` block that `init` adds — `winapp` generates bindings for the WinAppSDK packages in your `winapp.yaml`, minus a few that can't be driven from a headless Node process (XAML/WinUI and WebView2 are excluded by default). To narrow or extend that, configure the `winapp.jsBindings` namespace in `package.json` (the schema lives in `package.json`, not `winapp.yaml`, the same convention used by `eslint`, `jest`, `prettier`, …):
+When `jsBindings` is `{}` (the default block `init` adds), bindings are generated for all Windows App SDK APIs in your `winapp.yaml`, minus a few that can't be driven from a headless Node process (XAML/WinUI and WebView2 are excluded by default). To narrow or extend that, configure the `winapp.jsBindings` namespace in `package.json` (the schema lives in `package.json`, not `winapp.yaml`, the same convention used by `eslint`, `jest`, `prettier`, …):
 
 ```jsonc
 // package.json
