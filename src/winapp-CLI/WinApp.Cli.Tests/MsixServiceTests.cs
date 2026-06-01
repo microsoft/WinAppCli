@@ -1609,6 +1609,325 @@ public class MsixServiceTests
 
     #endregion
 
+    #region IsExistingRegistrationUpToDate Tests (issue #537)
+
+    private (MsixService Svc, FakePackageRegistrationService Fake, DirectoryInfo OutputDir, FileInfo NewManifest, byte[]? PreviousBytes) CreateSkipRegistrationFixture(
+        string manifestBody,
+        bool isDevelopmentMode = true,
+        string? installLocationOverride = null,
+        int packageCount = 1,
+        bool capturePreviousManifest = true,
+        string? previousManifestBody = null)
+    {
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+
+        // Snapshot a "previous" registration's manifest BEFORE we write the new one — this is
+        // what the production code path captures via TryReadExistingLayoutManifestBytes before
+        // sync/copy overwrites the file.
+        byte[]? previousBytes = null;
+        if (capturePreviousManifest)
+        {
+            previousBytes = Encoding.UTF8.GetBytes(previousManifestBody ?? manifestBody);
+        }
+
+        var newManifestPath = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        File.WriteAllText(newManifestPath.FullName, manifestBody);
+
+        // The "installed" location for the dev package. Defaults to the same directory as the
+        // newly-written manifest (the happy path for skip). Callers can override to simulate
+        // a package registered from a different location.
+        var installLocation = installLocationOverride ?? outputDir.FullName;
+
+        var devPackages = new List<DevPackageInfo>();
+        for (int i = 0; i < packageCount; i++)
+        {
+            devPackages.Add(new DevPackageInfo(
+                FullName: $"MyApp_1.0.0.{i}_x64__abc",
+                Name: "MyApp",
+                Version: $"1.0.0.{i}",
+                InstallLocation: installLocation,
+                IsDevelopmentMode: isDevelopmentMode));
+        }
+
+        var fake = new FakePackageRegistrationService { FakeDevPackages = devPackages };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+        return (svc, fake, outputDir, newManifestPath, previousBytes);
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_MatchingDevPackage_ReturnsTrue()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />");
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsTrue(result, "Identical dev-mode package at the same location should be considered up to date");
+        Assert.AreEqual(1, fixture.Fake.FindDevPackagesCalls.Count);
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_NoPreviousManifestSnapshot_ReturnsFalse()
+    {
+        // First run: no manifest existed in outputAppXDirectory before, so we have nothing
+        // to compare against and must take the unregister+register path.
+        var fixture = CreateSkipRegistrationFixture("<Package />", capturePreviousManifest: false);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result);
+        Assert.AreEqual(0, fixture.Fake.FindDevPackagesCalls.Count, "Should short-circuit before querying packages when there's nothing to compare");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_NoInstalledPackage_ReturnsFalse()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />", packageCount: 0);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Zero installed packages means a fresh registration is needed");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_MultiplePackages_ReturnsFalse()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />", packageCount: 2);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Multiple installed packages must trigger the cleanup path");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_NonDevModePackage_ReturnsFalse()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />", isDevelopmentMode: false);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Non-dev-mode packages must always go through the unregister path");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_DifferentInstallLocation_ReturnsFalse()
+    {
+        var otherLocation = Path.Combine(_tempDir.FullName, "OtherInstall");
+        var fixture = CreateSkipRegistrationFixture(
+            "<Package />",
+            installLocationOverride: otherLocation);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "A package installed from a different location must be re-registered");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_ManifestContentDiffers_ReturnsFalse()
+    {
+        // Simulate: user edited Package.appxmanifest between runs. The previous bytes (what was
+        // registered before) differ from the new manifest now on disk.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody:          "<Package version=\"new\"/>",
+            previousManifestBody:  "<Package version=\"old\"/>");
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Manifest changes must trigger re-registration");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_ManifestSizeMatchesButBytesDiffer_ReturnsFalse()
+    {
+        // Both strings are equal length, different bytes — exercises the byte-level comparison
+        // path past the early size-mismatch shortcut.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody:          "<Package a/>",
+            previousManifestBody:  "<Package b/>");
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Equal-length but byte-different manifests must trigger re-registration");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_InstallLocationMissing_ReturnsFalse()
+    {
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody: "<Package />",
+            installLocationOverride: string.Empty);
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "Empty install location must be treated as unknown");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_FindDevPackagesThrows_ReturnsFalse()
+    {
+        // L4 (PR #542 review): future code changes flipping the fallback to "true" or removing
+        // the debug message shouldn't slip past the test suite.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+        var newManifestPath = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        File.WriteAllText(newManifestPath.FullName, "<Package />");
+        var previousBytes = Encoding.UTF8.GetBytes("<Package />");
+
+        var fake = new FakePackageRegistrationService { FindDevPackagesThrows = new InvalidOperationException("WinRT exploded") };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+        var taskContext = CreateTestTaskContext();
+
+        var result = svc.IsExistingRegistrationUpToDate(
+            "MyApp", previousBytes, newManifestPath, outputDir, taskContext);
+
+        Assert.IsFalse(result, "Exceptions inspecting the existing registration must fall back to the unregister+register path");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_PropagatesOperationCanceled()
+    {
+        // M3 (PR #542 review): cancellation must NOT be swallowed by the generic catch.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+        var newManifestPath = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        File.WriteAllText(newManifestPath.FullName, "<Package />");
+        var previousBytes = Encoding.UTF8.GetBytes("<Package />");
+
+        var fake = new FakePackageRegistrationService { FindDevPackagesThrows = new OperationCanceledException() };
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        Assert.ThrowsExactly<OperationCanceledException>(() =>
+            svc.IsExistingRegistrationUpToDate("MyApp", previousBytes, newManifestPath, outputDir, CreateTestTaskContext()));
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_NoManifest_ReturnsNull()
+    {
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "EmptyAppX"));
+        dir.Create();
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNull(bytes);
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_FindsAppxManifestXml()
+    {
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "PascalAppX"));
+        dir.Create();
+        var content = "<Package id=\"pascal\" />";
+        File.WriteAllText(Path.Combine(dir.FullName, "AppxManifest.xml"), content);
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNotNull(bytes);
+        Assert.AreEqual(content, Encoding.UTF8.GetString(bytes));
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_IgnoresStrayPackageAppxmanifest()
+    {
+        // L1 (PR #542 review): a stray Package.appxmanifest in the output dir is NEVER the
+        // file Windows actually registered — `winapp run` always normalizes to AppxManifest.xml
+        // / appxmanifest.xml. Using it as a snapshot baseline would silently let the skip
+        // path trigger off the wrong artifact.
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "StrayAppX"));
+        dir.Create();
+        File.WriteAllText(Path.Combine(dir.FullName, "Package.appxmanifest"), "<Package stray=\"true\" />");
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNull(bytes, "Package.appxmanifest must not be used as a registration snapshot baseline");
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_NonexistentDirectory_ReturnsNull()
+    {
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "DoesNotExist"));
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNull(bytes);
+    }
+
+    #endregion
+
+    #region TrySkipRegistration Tests (PR #542 review M6 — issue #537)
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenCleanIsTrue_ReturnsNullAndDoesNotQueryPackages()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: true, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result, "--clean must always force the unregister+register path");
+        Assert.AreEqual(0, fixture.Fake.FindDevPackagesCalls.Count,
+            "Should short-circuit before any package enumeration when clean=true");
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenRegistrationUpToDate_ReturnsExistingIdentity()
+    {
+        var fixture = CreateSkipRegistrationFixture("<Package />");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=TestPublisher", "AppId42",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("MyApp", result.PackageName);
+        Assert.AreEqual("CN=TestPublisher", result.Publisher);
+        Assert.AreEqual("AppId42", result.ApplicationId);
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenManifestChanged_ReturnsNull()
+    {
+        // Drives the most important integration assertion: when the helper says
+        // "not up to date", the caller will fall through and call Unregister/Register.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody:         "<Package new=\"true\"/>",
+            previousManifestBody: "<Package old=\"true\"/>");
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result, "Changed manifest must drop through to unregister+register");
+    }
+
+    [TestMethod]
+    public void TrySkipRegistration_WhenFirstRun_ReturnsNull()
+    {
+        // No previous snapshot (e.g. first run on this machine) — must register normally.
+        var fixture = CreateSkipRegistrationFixture("<Package />", capturePreviousManifest: false);
+
+        var result = fixture.Svc.TrySkipRegistration(
+            "MyApp", "CN=Test", "App",
+            fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir,
+            clean: false, CreateTestTaskContext(), CancellationToken.None);
+
+        Assert.IsNull(result);
+    }
+
+    #endregion
+
     private static int CountOccurrences(string text, string pattern)
     {
         int count = 0;
