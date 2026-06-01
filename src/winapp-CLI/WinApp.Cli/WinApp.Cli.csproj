@@ -35,6 +35,9 @@
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>true</EventSourceSupport>
 
+    <!-- Allow test project to access internal types -->
+    <InternalsVisibleTo>WinApp.Cli.Tests</InternalsVisibleTo>
+
     <!-- The *first* DefineConstants is removed during Official Release Builds (.pipelines/Unstub.ps1)-->
     <DefineConstants>TELEMETRYEVENTSOURCE_PUBLIC</DefineConstants>
   </PropertyGroup>
