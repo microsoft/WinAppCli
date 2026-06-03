@@ -72,6 +72,22 @@ test('resolveYamlPath honours --config-dir (space and = forms)', () => {
 });
 
 test('resolveYamlPath defaults to <cwd>/winapp.yaml without --config-dir', () => {
-  // A positional base-dir must NOT change where the yaml is read from.
+  // restore / generate-bindings default the config dir to cwd; a positional
+  // base-dir must NOT change where the yaml is read from for those commands.
   assert.equal(resolveYamlPath(['init', 'someBaseDir']), path.join(process.cwd(), 'winapp.yaml'));
+});
+
+test('resolveYamlPath uses the supplied defaultConfigDir when no --config-dir', () => {
+  // init passes workspaceDir so `winapp init <base-dir>` hashes the yaml native
+  // actually wrote (remapped to the selected directory).
+  const baseDir = path.resolve('someBaseDir');
+  assert.equal(resolveYamlPath(['init', 'someBaseDir'], baseDir), path.join(baseDir, 'winapp.yaml'));
+});
+
+test('resolveYamlPath: explicit --config-dir overrides the defaultConfigDir', () => {
+  assert.equal(resolveYamlPath(['init', 'base'], path.resolve('base')), path.join(path.resolve('base'), 'winapp.yaml'));
+  assert.equal(
+    resolveYamlPath(['--config-dir', 'cfg'], path.resolve('base')),
+    path.join(path.resolve('cfg'), 'winapp.yaml')
+  );
 });

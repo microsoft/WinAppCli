@@ -41,6 +41,56 @@ export function buildAddExactCommand(name: PackageManagerName, packageSpec: stri
   }
 }
 
+/**
+ * Resolve the absolute path to a package manager's launcher by scanning
+ * `process.env.PATH` (and `PATHEXT` on Windows), mirroring the OS executable
+ * lookup. Returns `null` when the executable cannot be found (or `PATH` is
+ * unset), so callers can degrade to a best-effort warning.
+ *
+ * SECURITY (why we don't just spawn a bare `npm`): on Windows the launchers are
+ * `.cmd` shims, and `cmd.exe` (and `node-which`) resolve a bare command name
+ * against the CURRENT DIRECTORY *before* `PATH`. If we spawned `npm` with
+ * `cwd` set to an untrusted workspace, a malicious `npm.cmd` dropped in that
+ * workspace would hijack execution (CWE-426 untrusted search path). We
+ * deliberately scan ONLY `PATH` here — never the workspace / `process.cwd()` —
+ * and hand the resulting ABSOLUTE path to the spawn, which makes `cmd.exe`
+ * skip its current-directory lookup entirely.
+ *
+ * Note: `process.env.PATH` is read through Node's case-insensitive `process.env`
+ * proxy on Windows, so it resolves a `Path`/`path` variable too.
+ */
+export function resolvePackageManagerPath(name: PackageManagerName): string | null {
+  const rawPath = process.env.PATH;
+  if (!rawPath) {
+    return null;
+  }
+  const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
+
+  // On Windows, try each PATHEXT extension (npm → npm.cmd / npm.exe). On other
+  // platforms the launcher has no extension.
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .map((e) => e.trim())
+          .filter((e) => e.length > 0)
+      : [''];
+
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, `${name}${ext}`);
+      try {
+        if (fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // Not present / not accessible — keep scanning.
+      }
+    }
+  }
+  return null;
+}
+
 export function detectPackageManager(workspaceDir: string): DetectedPackageManager {
   // Priority 1: Corepack packageManager field.
   const pkgJson = path.join(workspaceDir, 'package.json');

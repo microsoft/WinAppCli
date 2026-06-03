@@ -8,7 +8,16 @@ import { askBindingsKind, parseSetupSdksArg } from './jsbindings/init-prompt';
 import { hasJsBindings, ensureJsBindingsBlock } from './jsbindings/package-json-config';
 import { runJsBindingsPipeline } from './jsbindings/orchestrator';
 import { getLockfilePath, LOCKFILE_NAME } from './jsbindings/lockfile-reader';
-import { resolveWorkspaceDir, resolveYamlPath, isVerbose, isQuiet, hasConfigOnly, hasNoInstall } from './cli-args';
+import { readWinappYamlPackages } from './jsbindings/yaml-packages-hash';
+import {
+  resolveWorkspaceDir,
+  resolveYamlPath,
+  isVerbose,
+  isQuiet,
+  hasConfigOnly,
+  hasNoInstall,
+  stripWrapperOnlyFlags,
+} from './cli-args';
 import { assertSafeWorkspaceFile } from './jsbindings/path-safety';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -80,6 +89,15 @@ export async function main(): Promise<void> {
       return;
     }
 
+    // `init --help` falls through to native help, which has no knowledge of the
+    // wrapper-only options we add (e.g. --no-install). Run native help, then
+    // append a short addendum so the flag is discoverable.
+    if (command === 'init' && commandArgs.some((a) => HELP_FLAGS.has(a))) {
+      await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
+      printInitWrapperOnlyHelp();
+      return;
+    }
+
     // Intercept init/restore so we can run the JS bindings pre-/post-hooks
     // around the native command. Help / completion flags bypass the hook.
     //
@@ -92,7 +110,9 @@ export async function main(): Promise<void> {
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
         if (parseSetupSdksArg(commandArgs) === 'none') {
-          await callWinappCli(args, { exitOnError: true });
+          // Fast path: no JS bindings to wire up. Still strip wrapper-only
+          // flags (e.g. --no-install) — the native CLI rejects them.
+          await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
           return;
         }
         await handleInit(commandArgs);
@@ -596,6 +616,7 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
     console.log('');
     console.log('Options:');
     console.log('  --verbose             Enable verbose codegen output (default: false)');
+    console.log('  --quiet, -q           Suppress progress and informational output');
     console.log('  --help                Show this help');
     console.log('');
     console.log('Examples:');
@@ -647,6 +668,18 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
 }
 
 /**
+ * Print the npm-wrapper-only options for `init` that the native `--help` output
+ * does not know about. Appended after native help so users can discover them.
+ */
+function printInitWrapperOnlyHelp(): void {
+  console.log('');
+  console.log(`Options (added by the ${CLI_NAME} npm wrapper):`);
+  console.log('  --no-install          Skip auto-installing the @microsoft/dynwinrt runtime');
+  console.log('                        dependency into node_modules after generating JS bindings');
+  console.log('                        (the dependency is still added to package.json).');
+}
+
+/**
  * `init` intercept: ask the JS bindings prompt, run native init, then (when
  * the user wants JS bindings) write the `"winapp.jsBindings"` namespace to
  * package.json, re-run restore so the lockfile is fresh, and orchestrate
@@ -676,7 +709,7 @@ async function handleInit(args: string[]): Promise<void> {
   // cwd=/foo/subdir + arg `subdir` → native lands in /foo/subdir/subdir).
   // Wrapper-side `workspaceDir` is an absolute path we only use for our OWN
   // bookkeeping (package.json read/write, codegen output, prompts).
-  const nativeArgs = args.filter((a) => a !== '--no-install');
+  const nativeArgs = stripWrapperOnlyFlags(args);
   await callWinappCli(['init', ...nativeArgs], { exitOnError: true });
 
   // SDK setup writes .winapp/winmds.lock.json during winmd discovery (Step 5),
@@ -768,7 +801,19 @@ async function handleInit(args: string[]): Promise<void> {
   // init is the onboarding flow: it is the only command that *writes* the
   // runtime dependency to package.json (manageRuntimeDep) and, unless the user
   // opted out with --no-install, also installs it into node_modules.
-  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args), !noInstall, true);
+  //
+  // Native init remaps --config-dir to the selected init directory when not
+  // explicit, so resolve the yaml against workspaceDir (not cwd) — otherwise
+  // `winapp init <base-dir>` would hash the wrong file and report a false
+  // stale-lockfile failure.
+  await runJsBindingsOrchestrator(
+    workspaceDir,
+    isVerbose(args),
+    quiet,
+    resolveYamlPath(args, workspaceDir),
+    !noInstall,
+    true
+  );
 }
 
 /**
@@ -803,7 +848,24 @@ async function handleRestore(args: string[]): Promise<void> {
     return;
   }
 
-  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args));
+  // A *stale* lockfile from a previous restore can linger after the user removes
+  // winapp.yaml or empties its `packages:` block. Native restore treats that as a
+  // no-op success (it writes no fresh lockfile), but the orchestrator would then
+  // report the lingering lockfile as stale → exit 1. Preserve the no-op contract:
+  // when there are no packages to restore, there are no bindings to generate.
+  const restoreYamlPath = resolveYamlPath(args);
+  const yamlPackages = readWinappYamlPackages(workspaceDir, restoreYamlPath);
+  if (!yamlPackages || yamlPackages.length === 0) {
+    if (!quiet) {
+      console.log(
+        'ℹ️  winapp.yaml has no packages, so JS bindings were not generated. ' +
+          'Add packages to `winapp.yaml` and re-run `npx winapp restore`.'
+      );
+    }
+    return;
+  }
+
+  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, restoreYamlPath);
 }
 
 /** Runs the JS bindings pipeline and translates outcomes into exit codes. */

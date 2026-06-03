@@ -74,27 +74,46 @@ export function hasNoInstall(args: readonly string[]): boolean {
   return args.includes('--no-install');
 }
 
+/**
+ * Flags the npm wrapper handles itself and that the native CLI does NOT
+ * recognize. They must be stripped from any argv forwarded to the native CLI,
+ * or it errors out on the unknown option.
+ */
+export const WRAPPER_ONLY_FLAGS: ReadonlySet<string> = new Set(['--no-install']);
+
+/** Remove wrapper-only flags (e.g. `--no-install`) before forwarding to native. */
+export function stripWrapperOnlyFlags(args: readonly string[]): string[] {
+  return args.filter((a) => !WRAPPER_ONLY_FLAGS.has(a));
+}
+
 /** Detect `--use-defaults` / `--no-prompt` / `-y` / `--yes`. */
 export function hasUseDefaults(args: readonly string[]): boolean {
   return args.some((a) => USE_DEFAULTS_FLAGS.has(a));
 }
 
 /**
- * Resolve the effective `winapp.yaml` path the native CLI will read, so the
+ * Resolve the effective `winapp.yaml` path the native CLI reads, so the
  * orchestrator's staleness check (`yaml_packages_hash`) compares against the
- * SAME file native used. Mirrors `InitCommand`/`RestoreCommand` semantics:
+ * SAME file native used. Explicit `--config-dir` always wins:
  *
  *   --config-dir <DIR> / --config-dir=<DIR>  → <DIR>/winapp.yaml
- *   (no --config-dir)                        → <process.cwd()>/winapp.yaml
  *
- * Note: `--config-dir` defaults to **current directory**, NOT to the
- * `base-directory` positional. So a positional base-dir alone does NOT
- * change where the yaml is read from — only `--config-dir` does. Don't
- * derive the yaml location from `workspaceDir`.
+ * Without `--config-dir`, the default differs per command and the caller must
+ * supply the correct `defaultConfigDir`:
+ *
+ *   • `restore` / `node generate-bindings`: native `RestoreCommand` defaults
+ *     ConfigDir to the current directory regardless of any `base-directory`
+ *     positional, so pass `process.cwd()` (the default here).
+ *   • `init`: native `InitCommand` remaps ConfigDir to the *selected* init
+ *     directory when `--config-dir` is not explicit (InitCommand.cs:122-126),
+ *     which the wrapper approximates as `workspaceDir`. So pass `workspaceDir`
+ *     — otherwise `winapp init <base-dir>` hashes the wrong (cwd) yaml and the
+ *     orchestrator reports a false stale-lockfile failure right after a
+ *     successful native init.
  */
-export function resolveYamlPath(args: readonly string[]): string {
+export function resolveYamlPath(args: readonly string[], defaultConfigDir: string = process.cwd()): string {
   const explicit = extractConfigDir(args);
-  const configDir = explicit ? path.resolve(explicit) : process.cwd();
+  const configDir = explicit ? path.resolve(explicit) : path.resolve(defaultConfigDir);
   return path.join(configDir, 'winapp.yaml');
 }
 
