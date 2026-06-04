@@ -157,3 +157,22 @@ test('resolvePackageManagerPath ignores a launcher in the current directory (shi
     fs.rmSync(emptyPathDir, { recursive: true, force: true });
   }
 });
+
+test('resolvePackageManagerPath skips relative PATH entries (workspace-shim defense)', () => {
+  // A relative PATH entry (".", "tools", …) would join to a relative candidate
+  // that fs.statSync resolves against process.cwd(); the resulting relative
+  // path, handed to the installer running with cwd=workspaceDir, would resolve
+  // a workspace-controlled shim (CWE-426). Only absolute PATH dirs are trusted.
+  const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-rel-'));
+  const savedCwd = process.cwd();
+  try {
+    fs.writeFileSync(path.join(cwdDir, `npm${launcherExt}`), '');
+    process.chdir(cwdDir);
+    withEnv({ PATH: '.', PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm'), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(cwdDir, { recursive: true, force: true });
+  }
+});

@@ -571,7 +571,7 @@ function isAcceptableNodeExe(candidate: string): boolean {
   if (!fs.existsSync(resolved)) {
     return false;
   }
-  const driveRoot = path.parse(resolved).root.replace(/[\\/]+$/, '');
+  const driveRoot = path.parse(resolved).root;
   if (driveRoot && hasReparsePointOnPath(resolved, driveRoot)) {
     return false;
   }

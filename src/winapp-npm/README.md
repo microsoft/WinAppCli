@@ -62,6 +62,7 @@ npx winapp --help
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-create-addon) - Generate native C# or C++ addons
+- [`node generate-bindings`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-generate-bindings) - Regenerate JS bindings for Windows App SDK APIs after editing `winapp.jsBindings`
 - [`node add-electron-debug-identity`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 
 The full CLI usage can be found here: [Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md)

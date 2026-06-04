@@ -10,8 +10,6 @@
 // only writes the raw NuGet inventory and the npm wrapper applies policy
 // at codegen time.
 
-import * as path from 'path';
-
 export type WinmdPackageCategory = 'emit' | 'refOnly' | 'skip';
 
 // Built-in denylists. User `winapp.jsBindings` overrides layer on top.
@@ -47,40 +45,6 @@ export function classifyPackage(packageId: string): WinmdPackageCategory {
   return 'emit';
 }
 
-// Given a winmd file path and the NuGet cache root, return the package ID
-// (lowercased) by extracting the first path segment under the cache root.
-// Returns null when the path is not under the cache (e.g. user winmds).
-export function extractPackageIdFromPath(winmdPath: string, nugetCacheRoot?: string): string | null {
-  if (!winmdPath || !winmdPath.trim()) {
-    return null;
-  }
-
-  if (nugetCacheRoot && nugetCacheRoot.trim()) {
-    try {
-      const full = path.resolve(winmdPath);
-      const root = path.resolve(nugetCacheRoot).replace(/[\\/]+$/, '');
-      const rootPrefix = root + path.sep;
-      // Case-insensitive compare for Windows path conventions.
-      if (full.toLowerCase().startsWith(rootPrefix.toLowerCase())) {
-        const rel = full.substring(rootPrefix.length);
-        const firstSep = rel.search(/[\\/]/);
-        return firstSep > 0 ? rel.substring(0, firstSep) : rel;
-      }
-    } catch {
-      // Fall through to legacy heuristic.
-    }
-  }
-
-  // Legacy heuristic: scan for a literal "packages" segment.
-  const segs = winmdPath.split(/[\\/]/).filter((s) => s.length > 0);
-  for (let i = 0; i < segs.length - 1; i++) {
-    if (segs[i].toLowerCase() === 'packages') {
-      return segs[i + 1];
-    }
-  }
-  return null;
-}
-
 export interface WinmdPartition {
   emit: string[];
   refOnly: string[];
@@ -97,9 +61,6 @@ export interface PackageWinmds {
  * Partition a list of `{name, winmds[]}` tuples by category, using the
  * package name directly (no path extraction needed — the lockfile already
  * groups winmds by package on the writer side).
- *
- * Prefer this overload over `partitionByPackageCategory(string[], …)` when
- * the source data is the lockfile — see orchestrator.ts.
  */
 export function partitionPackageWinmds(packages: readonly PackageWinmds[]): WinmdPartition {
   const emit: string[] = [];
@@ -114,38 +75,6 @@ export function partitionPackageWinmds(packages: readonly PackageWinmds[]): Winm
     const bucket = cat === 'skip' ? skipped : cat === 'refOnly' ? refOnly : emit;
     for (const w of pkg.winmds) {
       bucket.push(w);
-    }
-  }
-
-  return { emit, refOnly, skipped };
-}
-
-// Partition a flat list of winmd paths by category. Falls back to
-// `extractPackageIdFromPath` for each entry — needed for loose user-supplied
-// winmds that don't carry their package identity. For lockfile-sourced
-// winmds, use `partitionPackageWinmds` instead.
-export function partitionByPackageCategory(
-  winmds: readonly string[],
-  options?: {
-    nugetCacheRoot?: string;
-  }
-): WinmdPartition {
-  const nugetCacheRoot = options?.nugetCacheRoot;
-
-  const emit: string[] = [];
-  const refOnly: string[] = [];
-  const skipped: string[] = [];
-
-  for (const w of winmds) {
-    const pkg = extractPackageIdFromPath(w, nugetCacheRoot);
-    const cat: WinmdPackageCategory = pkg === null ? 'emit' : classifyPackage(pkg);
-
-    if (cat === 'skip') {
-      skipped.push(w);
-    } else if (cat === 'refOnly') {
-      refOnly.push(w);
-    } else {
-      emit.push(w);
     }
   }
 

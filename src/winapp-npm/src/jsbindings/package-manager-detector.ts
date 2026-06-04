@@ -77,12 +77,28 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
       : [''];
 
   for (const dir of dirs) {
+    // SECURITY: skip non-absolute PATH entries (`.`, `tools`, …). A relative
+    // entry would be joined to a relative candidate that `fs.statSync` resolves
+    // against `process.cwd()`, and the resulting relative path handed to the
+    // installer (which runs with `cwd: workspaceDir`) would resolve a
+    // workspace-controlled shim — the very CWE-426 hijack this function exists
+    // to prevent. Only absolute PATH directories are trusted.
+    if (!path.isAbsolute(dir)) {
+      continue;
+    }
     for (const ext of exts) {
       const candidate = path.join(dir, `${name}${ext}`);
       try {
-        if (fs.statSync(candidate).isFile()) {
-          return candidate;
+        if (!fs.statSync(candidate).isFile()) {
+          continue;
         }
+        // Collapse any symlink/junction to its real location so the spawned
+        // absolute path can't be redirected back into an untrusted directory.
+        const real = fs.realpathSync.native(candidate);
+        if (!path.isAbsolute(real)) {
+          continue;
+        }
+        return real;
       } catch {
         // Not present / not accessible — keep scanning.
       }

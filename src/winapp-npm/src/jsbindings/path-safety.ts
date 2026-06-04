@@ -52,36 +52,43 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     return true;
   }
 
-  // Resolve both paths to absolute, normalized form for containment check.
+  // Resolve both paths to absolute form, then normalize for containment
+  // (trim trailing separators but preserve the root separator on bare drive
+  // designators — see normalizeForContainment).
   let absTarget: string;
   let absBoundary: string;
   try {
-    absTarget = path.resolve(targetPath);
-    absBoundary = path.resolve(boundary).replace(/[\\/]+$/, '');
+    absTarget = normalizeForContainment(path.resolve(targetPath));
+    absBoundary = normalizeForContainment(path.resolve(boundary));
   } catch {
     // If we can't even resolve the paths, treat as unsafe — safer default.
     return true;
   }
 
-  const sep = path.sep;
-  const boundaryWithSep = absBoundary + sep;
-
-  // Containment: target must equal boundary OR be a descendant.
+  // String-only containment. Boundary itself is a valid target; otherwise the
+  // target must live under boundary + a separator.
   const sameAsBoundary = absTarget.toLowerCase() === absBoundary.toLowerCase();
+  const boundaryWithSep = absBoundary.endsWith(path.sep) ? absBoundary : absBoundary + path.sep;
   const insideBoundary = absTarget.toLowerCase().startsWith(boundaryWithSep.toLowerCase());
   if (!sameAsBoundary && !insideBoundary) {
     return true;
   }
 
+  // Check the boundary itself first — a reparse-point boundary would make
+  // every descendant probe silently follow it.
+  if (isReparseSegment(absBoundary)) {
+    return true;
+  }
+  if (sameAsBoundary) {
+    return false;
+  }
+
   // Walk DOWN from boundary to target, checking each existing segment's
   // attributes via lstat (does NOT follow symlinks).
-  const rel = sameAsBoundary ? '' : absTarget.substring(boundaryWithSep.length);
+  const rel = absTarget.substring(absBoundary.length);
   const segments = rel.length === 0 ? [] : rel.split(/[\\/]/).filter((s) => s.length > 0);
 
   let probe = absBoundary;
-  if (isReparseSegment(probe)) {
-    return true;
-  }
   for (const seg of segments) {
     probe = path.join(probe, seg);
     if (isReparseSegment(probe)) {
@@ -89,6 +96,19 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     }
   }
   return false;
+}
+
+// Trim trailing separators but preserve the root separator on bare drive
+// designators. `C:\` collapsed to `C:` would make `path.join` produce
+// drive-relative paths (`C:foo` → resolved against the per-drive CWD),
+// silently bypassing the reparse-point check. Mirrors the native
+// `PathSafety.NormalizeForContainment`.
+function normalizeForContainment(p: string): string {
+  const trimmed = p.replace(/[\\/]+$/, '');
+  if (trimmed.length === 2 && trimmed[1] === ':') {
+    return trimmed + path.sep;
+  }
+  return trimmed;
 }
 
 function isReparseSegment(p: string): boolean {
@@ -157,8 +177,8 @@ export function assertSafeWorkspaceOutputDir(workspaceDir: string, outputDir: st
   }
 
   const resolvedOutput = path.isAbsolute(outputDir) ? path.resolve(outputDir) : path.resolve(workspaceDir, outputDir);
-  const resolvedWorkspace = path.resolve(workspaceDir).replace(/[\\/]+$/, '');
-  const prefix = resolvedWorkspace + path.sep;
+  const resolvedWorkspace = normalizeForContainment(path.resolve(workspaceDir));
+  const prefix = resolvedWorkspace.endsWith(path.sep) ? resolvedWorkspace : resolvedWorkspace + path.sep;
   const insideWorkspace =
     resolvedOutput.length > prefix.length && resolvedOutput.toLowerCase().startsWith(prefix.toLowerCase());
 

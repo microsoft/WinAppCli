@@ -59,7 +59,7 @@ After `init`, your project will contain:
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
 - `.gitignore` update — excludes `.winapp/` and `devcert.pfx`
-- `.winapp/bindings/` — generated JS bindings for WinRT APIs (npm-only, Node / Electron)
+- `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
 - `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
 ### Restore after cloning

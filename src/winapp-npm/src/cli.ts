@@ -664,7 +664,7 @@ async function handleGenerateBindings(args: string[]): Promise<void> {
 
   // 4. Hand off to the shared pipeline. Outcomes are translated to ✅ / ❌ /⚠️
   //    by runJsBindingsOrchestrator.
-  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args));
+  await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args, workspaceDir));
 }
 
 /**

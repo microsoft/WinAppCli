@@ -1,6 +1,6 @@
 ---
 name: winapp-frameworks
-description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri, including JS bindings for WinRT APIs and native addons. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
+description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri, including JS bindings for Windows App SDK APIs and native addons. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
 version: 0.3.2
 ---
 ## When to use
@@ -30,29 +30,25 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- Commands for generating JS bindings for Windows App SDK APIs (no native build required)
+- JS bindings for calling Windows App SDK APIs directly from JavaScript — no native addon required
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init . --use-defaults                  # fresh init: scaffolds winapp.yaml + JS bindings + C++ projections
-npx winapp node create-addon --template cs        # create a C# native addon (for what the JS bindings can't drive — see below)
-npx winapp node add-electron-debug-identity       # register identity for debugging
+npx winapp init . --use-defaults
+npx winapp node create-addon --template cs   # create a C# native addon
+npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
 #### Choosing between JS bindings and a native addon
 
-The decision is about the **shape of the API**, not preference.
-
-**Default — WinRT API (ships in a `.winmd`) → JS bindings.** Covers most of `Microsoft.Windows.*` (Notifications, FilePickers, Sensors, AI like `TextRecognizer` / `LanguageModel`), `Windows.*`, and `Microsoft.WindowsAppSDK.AI`. See [`@microsoft/dynwinrt` scope](https://github.com/microsoft/dynwinrt#scope).
+**Default — Windows App SDK API → JS bindings.** You can call virtually all Windows App SDK APIs (Notifications, FilePickers, AI like `TextRecognizer` / `LanguageModel`, etc.) directly from JavaScript, excluding UI APIs (WinUI / XAML controls). See [`@microsoft/dynwinrt` scope](https://github.com/microsoft/dynwinrt#scope).
 
 **Fall back to `node create-addon` when there's no `.winmd`:**
 
-| Scenario | Template |
-|---|---|
-| Win32 / pure COM (P/Invoke, raw `IFileDialog`, registry, custom COM servers) | `--template cpp` |
-| C++ library (headers + static/shared lib only) | `--template cpp` |
-| Managed .NET assembly only (vendor SDK) | `--template cs` ([node-api-dotnet](https://github.com/microsoft/node-api-dotnet)) |
+- **Win32 / pure COM** (P/Invoke, raw `IFileDialog`, registry, custom COM servers) → `--template cpp`
+- **C++ library** (headers + static/shared lib only) → `--template cpp`
+- **Managed .NET assembly only** (vendor SDK) → `--template cs` ([node-api-dotnet](https://github.com/microsoft/node-api-dotnet))
 
 Mixing both in one app is normal.
 
