@@ -355,6 +355,19 @@ internal sealed class UiSessionService(
                     LogPartialMatch(app, result);
                     return result;
                 }
+
+                if (withWindow.Length > 1)
+                {
+                    var listing = string.Join("\n  ",
+                        withWindow.Select(p =>
+                        {
+                            try { return $"PID {p.Id} ({p.ProcessName}): \"{p.MainWindowTitle}\""; }
+                            catch { return $"PID {p.Id}"; }
+                        }));
+                    throw new InvalidOperationException(
+                        $"Multiple processes matching '{app}' found:\n  {listing}\n" +
+                        "Use --app with a PID or a more specific window title.");
+                }
             }
         }
         finally

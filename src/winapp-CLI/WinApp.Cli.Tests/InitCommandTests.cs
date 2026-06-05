@@ -366,4 +366,50 @@ public class InitCommandTests : BaseCommandTests
         Assert.IsFalse(File.Exists(rootConfig),
             "winapp.yaml should NOT be in root when a nested project was selected");
     }
+
+    [TestMethod]
+    public async Task InitCommand_NonInteractiveShell_UsesDefaultsWithoutPrompting()
+    {
+        // Arrange — simulate a non-interactive environment (piped stdin, CI)
+        TestAnsiConsole.Profile.Capabilities.Interactive = false;
+
+        var initCommand = GetRequiredService<InitCommand>();
+        // No --use-defaults, no explicit directory — would normally prompt interactively
+        var args = new[] { "--config-only" };
+
+        // Do NOT push any keys — if it tries to prompt, it will throw/hang
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — should succeed using defaults (same as --use-defaults behavior)
+        Assert.AreEqual(0, exitCode, "Init should succeed in non-interactive mode without prompting");
+
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            "winapp.yaml should be created using defaults in non-interactive mode");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NonInteractiveShell_WithNestedProject_UsesCurrentDirectory()
+    {
+        // Arrange — non-interactive with a nested project (would normally prompt to confirm)
+        TestAnsiConsole.Profile.Capabilities.Interactive = false;
+
+        var subDir = _tempDirectory.CreateSubdirectory("my-app");
+        File.WriteAllText(Path.Combine(subDir.FullName, "Cargo.toml"), "[package]\nname = \"test\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Act — should not prompt, should use cwd directly
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — uses cwd (--use-defaults behavior), not the nested project
+        Assert.AreEqual(0, exitCode, "Init should succeed in non-interactive mode");
+
+        var configPath = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(configPath),
+            "winapp.yaml should be created in cwd when non-interactive");
+    }
 }
