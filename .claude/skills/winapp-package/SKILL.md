@@ -201,7 +201,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | Yes | Input folder with package layout |
+| `<input-folder>` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -214,7 +214,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 | `--install-cert` | Install certificate to machine | (none) |
 | `--manifest` | Path to AppX manifest file (default: auto-detect from input folder or current directory) | (none) |
 | `--name` | Package name (default: from manifest) | (none) |
-| `--output` | Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) | (none) |
+| `--output` | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. | (none) |
 | `--publisher` | Publisher name for certificate generation | (none) |
 | `--self-contained` | Bundle Windows App SDK runtime for self-contained deployment | (none) |
 | `--skip-pri` | Skip PRI file generation | (none) |

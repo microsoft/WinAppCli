@@ -159,7 +159,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ### `winapp init`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default; automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -171,12 +171,12 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--config-dir` | Directory to read/store configuration (default: current directory) | (none) |
+| `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-| `--use-defaults` | Do not prompt, and use default of all prompts | (none) |
+| `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
 
 ### `winapp restore`
 
