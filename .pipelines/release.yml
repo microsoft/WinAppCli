@@ -388,18 +388,23 @@ extends:
                 Write-Host "Fork synced successfully."
                 
                 # Get the installer URLs from the GitHub release
+                # Order must match the winget manifest: x64 MSIX, arm64 MSIX, x64 portable zip, arm64 portable zip
                 $x64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_x64.msix"
                 $arm64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_arm64.msix"
+                $x64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-x64.zip"
+                $arm64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-arm64.zip"
                 
                 Write-Host "Submitting to WinGet..."
                 Write-Host "Version: $(version)"
                 Write-Host "x64 MSIX: $x64MsixUrl"
                 Write-Host "ARM64 MSIX: $arm64MsixUrl"
+                Write-Host "x64 Portable: $x64ZipUrl"
+                Write-Host "ARM64 Portable: $arm64ZipUrl"
                 
                 # Submit to WinGet repository
                 wingetcreate update Microsoft.WinAppCli `
                   --version $(version) `
-                  --urls $x64MsixUrl $arm64MsixUrl `
+                  --urls $x64MsixUrl $arm64MsixUrl $x64ZipUrl $arm64ZipUrl `
                   --submit
 
     - stage: Release_MSLearn
