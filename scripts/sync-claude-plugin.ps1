@@ -92,8 +92,10 @@ try {
     foreach ($agentFile in Get-ChildItem -LiteralPath $srcAgentsDir -Filter '*.agent.md' -File) {
         $agentName = $agentFile.BaseName -replace '\.agent$',''  # strip trailing .agent
         $cleaned = Remove-InferField -Lines (Get-Content -LiteralPath $agentFile.FullName)
+        # Match generate-llm-docs.ps1 convention: LF + UTF-8 no-BOM (deterministic across PS5/PS7).
+        $cleanedText = ($cleaned -join "`n").TrimEnd("`n") + "`n"
         $destFile = Join-Path $tmpAgents ($agentName + '.md')
-        Set-Content -LiteralPath $destFile -Value $cleaned -Encoding utf8 -NoNewline:$false
+        [System.IO.File]::WriteAllText($destFile, $cleanedText, [System.Text.UTF8Encoding]::new($false))
         Write-Host "agent : $($agentFile.Name) -> .claude/agents/$agentName.md"
     }
 
