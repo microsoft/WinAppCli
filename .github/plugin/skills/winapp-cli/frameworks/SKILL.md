@@ -1,7 +1,7 @@
 ---
 name: winapp-frameworks
 description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
-version: 0.3.3
+version: 0.3.2
 ---
 ## When to use
 
@@ -26,7 +26,7 @@ Each framework has a detailed guide — refer to the links below rather than try
 ## Key differences by framework
 
 ### Electron (npm package)
-Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. The npm package includes:
+Use the **npm package** (`@microsoft/winappcli`), **not** the standalone CLI. The npm package includes:
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`

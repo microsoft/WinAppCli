@@ -306,10 +306,12 @@ version: $CliVersion
 $syncScript = Join-Path $PSScriptRoot 'sync-claude-plugin.ps1'
 if (Test-Path $syncScript) {
     Write-Host "`n[CLAUDE]   syncing .claude/ from .github/plugin/" -ForegroundColor Gray
-    & $syncScript
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "sync-claude-plugin.ps1 failed (exit $LASTEXITCODE)"
-        exit $LASTEXITCODE
+    try {
+        & $syncScript
+    }
+    catch {
+        Write-Error "sync-claude-plugin.ps1 failed: $_"
+        exit 1
     }
 }
 

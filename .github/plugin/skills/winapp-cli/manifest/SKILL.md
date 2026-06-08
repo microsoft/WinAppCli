@@ -1,7 +1,7 @@
 ---
 name: winapp-manifest
 description: Create and edit Windows app manifest files (Package.appxmanifest or appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions.
-version: 0.3.3
+version: 0.3.2
 ---
 ## When to use
 
@@ -101,23 +101,6 @@ winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
 
 > **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
-
-### Add an execution alias
-
-Execution aliases let users launch the app by typing its name in a terminal (e.g. `myapp`).
-
-```powershell
-# Add alias inferred from the Executable attribute in the manifest
-winapp manifest add-alias
-
-# Specify the alias name explicitly
-winapp manifest add-alias --name myapp
-
-# Target a specific manifest file
-winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
-```
-
-This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
 
 ## Manifest structure overview
 

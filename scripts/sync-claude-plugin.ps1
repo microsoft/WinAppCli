@@ -79,10 +79,18 @@ try {
     New-Item -ItemType Directory -Path $tmpSkills, $tmpAgents | Out-Null
 
     # ---- Skills ----
+    $seenSkillNames = @{}
     foreach ($skillDir in Get-ChildItem -LiteralPath $srcSkillsDir -Directory) {
         $skillFile = Join-Path $skillDir.FullName 'SKILL.md'
         if (-not (Test-Path $skillFile)) { continue }
         $skillName = Get-FrontmatterName -Path $skillFile
+        if ($skillName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Invalid skill name '$skillName' in $skillFile (must match ^[A-Za-z0-9][A-Za-z0-9._-]*$). Path-traversal or unusual characters are not allowed."
+        }
+        if ($seenSkillNames.ContainsKey($skillName)) {
+            throw "Duplicate skill name '$skillName' (already seen in $($seenSkillNames[$skillName]); also in $skillFile)."
+        }
+        $seenSkillNames[$skillName] = $skillFile
         $destDir = Join-Path $tmpSkills $skillName
         Copy-Item -LiteralPath $skillDir.FullName -Destination $destDir -Recurse
         Write-Host "skill : $($skillDir.Name) -> .claude/skills/$skillName"
@@ -129,8 +137,7 @@ try {
 
     if ($Check) {
         if ($diff) {
-            Write-Error ".claude/ is out of date. Run: pwsh scripts/sync-claude-plugin.ps1"
-            exit 1
+            throw ".claude/ is out of date. Run: pwsh scripts/sync-claude-plugin.ps1"
         }
         Write-Host ".claude/ is up to date." -ForegroundColor Green
         return
