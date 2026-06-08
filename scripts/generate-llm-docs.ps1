@@ -303,8 +303,11 @@ version: $CliVersion
 # Mirror the regenerated Copilot plugin to .claude/ so Claude Code consumers
 # (and the cc-community plugin marketplace) stay in sync. Source of truth
 # remains .github/plugin/; .claude/ is a generated output of this script.
+# Only sync when writing to the default plugin path — custom -SkillsDir runs
+# should not mutate the canonical .claude/ tree.
+$DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
 $syncScript = Join-Path $PSScriptRoot 'sync-claude-plugin.ps1'
-if (Test-Path $syncScript) {
+if ($SkillsDir -eq $DefaultSkillsPath -and (Test-Path $syncScript)) {
     Write-Host "`n[CLAUDE]   syncing .claude/ from .github/plugin/" -ForegroundColor Gray
     try {
         & $syncScript
@@ -317,7 +320,6 @@ if (Test-Path $syncScript) {
 
 
 # Update plugin.json version to match CLI version (only when outputting to the default skills path)
-$DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
 if ($SkillsDir -eq $DefaultSkillsPath) {
     $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
     if (Test-Path $PluginJsonPath) {

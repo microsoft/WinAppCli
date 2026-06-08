@@ -126,7 +126,7 @@ The following files are auto-generated from `cli-schema.json` via `scripts/gener
 
 - `docs/cli-schema.json` — machine-readable schema
 - `.github/plugin/skills/winapp-cli/*/SKILL.md` — Copilot CLI plugin skills
-- `.claude/skills/<skill-name>/SKILL.md` and `.claude/agents/*.md` — Claude Code mirror of `.github/plugin/`, produced by `scripts/sync-claude-plugin.ps1` (invoked at the end of `generate-llm-docs.ps1`)
+- `.claude/skills/<skill-name>/SKILL.md` and `.claude/agents/*.md` — Claude Code mirror of `.github/plugin/`, produced by `scripts/sync-claude-plugin.ps1` (invoked at the end of `generate-llm-docs.ps1`). Run `pwsh scripts/sync-claude-plugin.ps1 -Check` to verify the mirror is up to date without writing (used by CI / pre-push checks).
 
 **To edit skill content**, modify the hand-written templates in `docs/fragments/skills/winapp-cli/`. Each template file (e.g., `package.md`, `manifest.md`) contains the workflow docs, examples, and troubleshooting content. The auto-generation script appends command reference tables from the CLI schema. Running `scripts/build-cli.ps1` triggers regeneration automatically.
 
