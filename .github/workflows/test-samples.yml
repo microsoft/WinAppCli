@@ -37,7 +37,7 @@ jobs:
         dotnet-version: '10.0.x'
     - uses: actions/setup-node@v5
       with:
-        node-version: '24'
+        node-version: '22'
     - name: Build npm package
       shell: pwsh
       run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix -SkipVsc
@@ -127,7 +127,7 @@ jobs:
         contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
-        node-version: '24'
+        node-version: '22'
 
     - name: Setup Flutter
       if: >-

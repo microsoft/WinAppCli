@@ -34,6 +34,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
     public void SetupBase()
     {
         TestAnsiConsole = new TestConsole();
+        TestAnsiConsole.Profile.Capabilities.Interactive = true;
 
         ConsoleStdOut = new OutputCapture(TestAnsiConsole.Profile.Out.Writer);
         ConsoleStdErr = new OutputCapture(Console.Error);
