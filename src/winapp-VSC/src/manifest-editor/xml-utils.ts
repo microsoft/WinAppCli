@@ -44,7 +44,7 @@ export function escapeXmlText(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Replace an XML attribute value in-place. Returns the original string if not found. */
+/** Replace an XML attribute value in-place. Returns `null` if the element or attribute is not found. */
 export function replaceAttribute(xml: string, elementPattern: RegExp, attrName: string, newValue: string): string | null {
     const escaped = escapeXmlAttr(newValue);
     // Find the element in the XML

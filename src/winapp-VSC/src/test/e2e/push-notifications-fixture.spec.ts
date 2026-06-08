@@ -71,7 +71,7 @@ test('application has extensions', async () => {
     // The extensions sub-tab content should list COM and protocol extensions
     const extItems = card.locator('.ext-item, [data-ext-index]');
     const count = await extItems.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
 });
 
 // ─── Capabilities ───────────────────────────────────────

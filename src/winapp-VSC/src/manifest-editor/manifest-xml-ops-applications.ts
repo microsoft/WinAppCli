@@ -6,6 +6,8 @@
 import {
     NS,
     escapeRegex,
+    escapeXmlAttr,
+    escapeXmlText,
     ensureNamespace,
     findParentBounds,
     findDirectChildElementBounds,
@@ -82,13 +84,18 @@ export function addExtension(xmlText: string, appIndex: number, extensionXml: st
     const appCloseIdx = updatedRegion.end;
 
     // Detect the file's indentation by looking at existing content
-    let indentMatch = result.match(/^( +)<Extensions>/m);
+    let indentMatch = result.match(/^([ \t]+)<Extensions>/m);
     if (!indentMatch) {
-        const appIndentMatch = result.match(/^( +)<Application\b/m);
-        indentMatch = appIndentMatch ? [, appIndentMatch[1] + '  '] as unknown as RegExpMatchArray : null;
+        const appIndentMatch = result.match(/^([ \t]+)<Application\b/m);
+        if (appIndentMatch) {
+            const baseIndent = appIndentMatch[1];
+            const indentChar = baseIndent.includes('\t') ? '\t' : '  ';
+            indentMatch = [, baseIndent + indentChar] as unknown as RegExpMatchArray;
+        }
     }
     const extIndent = indentMatch?.[1] ?? '      ';
-    const childIndent = extIndent + '  ';
+    const indentChar = extIndent.includes('\t') ? '\t' : '  ';
+    const childIndent = extIndent + indentChar;
     const indentedExt = extensionXml.split('\n').map(line => childIndent + line).join('\n');
 
     if (hasExtensions) {
@@ -230,7 +237,7 @@ export function updateExtensionField(
         );
         const match = elemPattern.exec(extXml);
         if (!match) { return xmlText; }
-        extXml = extXml.substring(0, match.index) + match[1] + value + match[3] + extXml.substring(match.index + match[0].length);
+        extXml = extXml.substring(0, match.index) + match[1] + escapeXmlText(value) + match[3] + extXml.substring(match.index + match[0].length);
     } else {
         const dotIdx = fieldPath.indexOf('.');
         if (dotIdx < 0) { return xmlText; }
@@ -248,7 +255,7 @@ export function updateExtensionField(
         if (!attrMatch) { return xmlText; }
 
         const newElem = match[0].substring(0, attrMatch.index)
-            + attrMatch[1] + attrMatch[2] + value + attrMatch[2]
+            + attrMatch[1] + attrMatch[2] + escapeXmlAttr(value) + attrMatch[2]
             + match[0].substring(attrMatch.index + attrMatch[0].length);
         extXml = extXml.substring(0, match.index) + newElem + extXml.substring(match.index + match[0].length);
     }
