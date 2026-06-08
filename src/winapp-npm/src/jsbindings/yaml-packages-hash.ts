@@ -1,25 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// SHA-256 hex over canonicalized `lower(name)|version` lines from the
-// workspace's `winapp.yaml` `packages:` block.
-//
-// Port of native `WinApp.Cli.Services.YamlPackagesHasher` — used as a
-// staleness signal against the lockfile's `yaml_packages_hash`. If the user
-// edits `winapp.yaml` (adds / removes / re-pins an SDK package) without
-// re-running `winapp restore`, the orchestrator detects the drift and asks
-// them to restore before generating bindings — otherwise we'd emit JS
-// bindings for the wrong winmd set.
-//
-// The C# side computes the hash with `SHA256.HashData(UTF8(joined))`; the
-// canonical form is the *exact* string we must reproduce here byte-for-byte:
-//   * each `name` lowercased via OrdinalIgnoreCase semantics
-//     (we use `.toLowerCase()` — both implementations match for ASCII, and
-//      every NuGet package id we accept is ASCII per NuGet's grammar)
-//   * pairs deduped (Ordinal compare)
-//   * sorted Ordinal-ascending
-//   * lines joined with `\n` (no trailing newline)
-//   * UTF-8 encoded, SHA-256, hex (lower-case)
+// SHA-256 hex over canonical `lower(name)|version` lines from `winapp.yaml` packages.
+// Port of native `YamlPackagesHasher`; stale hashes catch package edits before codegen
+// emits against the wrong winmd set. The joined UTF-8 string must match C# byte-for-byte:
+// ASCII lowercase names, Ordinal dedupe/sort, `\n` joins, no trailing newline.
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -32,20 +17,8 @@ export interface PackagePin {
 }
 
 /**
- * Compute the canonical hash for a sequence of name/version pairs.
- * Whitespace-only names are skipped (matching C#'s `IsNullOrWhiteSpace`).
- * `null`/`undefined` versions canonicalize to the empty string.
- *
- * Cross-language parity is pinned by `YamlPackagesHasherTests.Compute_GoldenFixture_PinsHashForCrossLanguageParity`
- * on the C# side. Update both implementations together when changing
- * canonicalization (the test will fail otherwise).
- *
- * Golden fixture (for ad-hoc verification):
- *   packages = [
- *     { name: 'Microsoft.WindowsAppSDK',   version: '2.1.3' },
- *     { name: 'Microsoft.Windows.SDK.CPP', version: '10.0.28000.1839' },
- *   ]
- *   → '8581abfcb53fa04056a066fc7098c5d94064cc275e20f0e547365c1b8b146e54'
+ * Compute the canonical hash. Blank names are skipped; nullish versions become empty.
+ * C# golden tests pin parity; update both implementations if canonicalization changes.
  */
 export function computeYamlPackagesHash(packages: Iterable<PackagePin>): string {
   const lines = new Set<string>();
@@ -62,37 +35,17 @@ export function computeYamlPackagesHash(packages: Iterable<PackagePin>): string 
 }
 
 /**
- * Read `winapp.yaml` and extract its `packages:` pins using a tiny line-based
- * scanner. Mirrors the native CLI's hand-rolled grammar in
- * {@link ../../winapp-CLI/WinApp.Cli/Services/WinappConfigDocument.cs}:
- *
- *   * top-level key with optional inline `# comment`
- *   * list entries via `- name: <scalar>` then `version: <scalar>`
- *   * unknown top-level keys reset the parser (children are ignored)
- *
- * We deliberately do NOT pull in a full YAML parser — this routine runs on
- * every restore / generate-bindings and the grammar is intentionally tiny.
- * Falls back to `null` (rather than throwing) when the file is missing or
- * malformed; the caller treats that as "can't detect drift" and proceeds.
- *
- * Path safety:
- *   * Always reparse-point-guarded. Default location (`<workspaceDir>/winapp.yaml`)
- *     uses the workspace itself as the trust boundary. Explicit `yamlPath`
- *     (e.g. user passed `--config-dir ../other`) uses the file's containing
- *     directory as the boundary — this mirrors the native CLI's
- *     `ConfigService.GuardConfigPath` (boundary = `ConfigPath.DirectoryName`),
- *     so a workspace-internal junction/symlink redirecting to an attacker
- *     path is refused regardless of whether the caller pointed at the
- *     default location or an explicit `--config-dir`.
+ * Read `winapp.yaml` package pins with the native hand-rolled grammar (top-level
+ * `packages`, `- name`, `version`, inline comments). No full YAML parser; missing
+ * or malformed files return null so callers can proceed without drift detection.
+ * Reparse-guarded: default uses workspace boundary; explicit yamlPath uses its
+ * containing directory, matching native `ConfigService.GuardConfigPath`.
  */
 export function readWinappYamlPackages(workspaceDir: string, yamlPath?: string): PackagePin[] | null {
   const defaultPath = path.join(workspaceDir, 'winapp.yaml');
   const resolved = yamlPath ? path.resolve(yamlPath) : defaultPath;
 
-  // Trust boundary: workspace for the default path, file's containing
-  // directory for an explicit path. The latter matches the native
-  // ConfigService's `ConfigPath.DirectoryName` boundary, which is also
-  // the boundary `--config-dir` legitimately escapes out of.
+  // Boundary: workspace for default path; explicit paths use their containing dir like native --config-dir.
   const safetyBoundary = resolved === defaultPath ? workspaceDir : path.dirname(resolved);
   assertSafeWorkspaceFile(safetyBoundary, resolved, 'winapp.yaml');
 
@@ -110,6 +63,9 @@ export function readWinappYamlPackages(workspaceDir: string, yamlPath?: string):
 
 /** Visible for unit tests. */
 export function parsePackagesFromYaml(yaml: string): PackagePin[] {
+  // Section-scoped by design: tooling-written YAML matches native hashes, while
+  // malformed top-level name/version rows aren't mistaken for package pins.
+  // If malformed-input parity is required, change both parsers together.
   const lines = yaml.split(/\r?\n/);
   const packages: PackagePin[] = [];
   let inPackages = false;
@@ -175,12 +131,7 @@ function matchPrefixCaseInsensitive(trimmed: string, prefix: string): string | n
   return null;
 }
 
-/**
- * Strip inline `# comment` from an unquoted scalar; peel a single pair of
- * matching surrounding quotes; un-double `''` inside single-quoted scalars.
- * Port of `WinappConfigDocument.SanitizeScalar` — we only handle what the
- * native renderer actually emits, not the full YAML 1.2 scalar grammar.
- */
+/** Sanitize scalars like native output: inline comments, one quote pair, doubled single quotes. */
 function sanitizeScalar(raw: string): string {
   if (!raw) {
     return '';

@@ -15,11 +15,7 @@ export interface BindingsPromptInputs {
   isInit: boolean;
   /** True when package.json already declares `winapp.jsBindings`. */
   existingJsBindings: boolean;
-  /**
-   * True when the Windows SDKs were set up (a winmd lockfile exists) or codegen
-   * is being deliberately deferred (`--config-only`). When false, a fresh opt-in
-   * is skipped: JS bindings need the Windows App SDK winmds to generate against.
-   */
+  /** True when SDK winmds exist, or codegen is deliberately deferred (`--config-only`). */
   sdksReady: boolean;
 }
 
@@ -64,7 +60,7 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
       };
     }
     if (!process.stdin.isTTY) {
-      // Non-interactive runs preserve existing config unless --use-defaults opts into reset.
+      // Non-interactive runs preserve config unless --use-defaults opts into reset.
       return {
         kind: 'yes',
         silentReason: 'non-TTY stdin — preserving existing winapp.jsBindings.',
@@ -93,9 +89,7 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     };
   }
 
-  // JS bindings generate against the Windows App SDK winmds that SDK setup pulls
-  // down. If the user skipped SDK setup, there's nothing to generate against — so
-  // don't even ask. They can add bindings later once the SDKs are in place.
+  // JS bindings need SDK winmds; if setup was skipped, defer the prompt until they exist.
   if (!inputs.sdksReady) {
     return {
       kind: 'no',
@@ -137,7 +131,7 @@ function detectDotNetProject(workspaceDir: string): boolean {
   return false;
 }
 
-// cli.ts uses this to fast-path `init --setup-sdks none`; native validates values.
+// Used to fast-path `init --setup-sdks none`; native validates values.
 export function parseSetupSdksArg(argv: readonly string[]): string | undefined {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -165,7 +159,7 @@ async function confirmationPrompt(title: string, defaultYes: boolean = true): Pr
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    // Keep retrying to match Spectre's refusal of unrecognized answers.
+    // Retry to match Spectre's refusal of unrecognized answers.
     for (;;) {
       const raw = await question(rl, livePrompt);
       const trimmed = (raw ?? '').trim().toLowerCase();

@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Stage-then-swap keeps previous bindings intact on codegen failure.
-// Output directories are wiped, so workspace containment and reparse checks are security-critical.
-// spawn receives an args array (not a shell string) so paths with spaces or `&` survive unchanged.
+// Stage-then-swap preserves previous bindings on codegen failure.
+// Wiped output dirs require containment/reparse checks; spawn uses argv, not shell text.
+// winmd/ref paths are handed to codegen via newline-separated list files (written to a
+// temp dir, removed in finally) instead of ';'-joined argv, which would overflow the
+// Windows command-line limit when 100+ scattered winmd paths are involved.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,10 +19,18 @@ import { assertSafeWorkspaceOutputDir, isNetworkPath, hasReparsePointOnPath } fr
 export const MANAGED_MARKER_FILE_NAME = '.dynwinrt-managed';
 
 const CODEGEN_PACKAGE_NAME = '@microsoft/dynwinrt-codegen';
+const RUNTIME_PACKAGE_NAME = '@microsoft/dynwinrt';
+const GENERATE_REQUIRED_CODEGEN_CAPABILITIES = ['input.winmd-list', 'input.ref-list'] as const;
+const RUNTIME_REQUIRED_CODEGEN_CAPABILITIES = ['runtime-dependency'] as const;
+
+export interface RuntimeDependencySpec {
+  packageName: string;
+  version: string;
+}
 
 /** One cherry-pick pass derived from `additionalWinmds[i]` with namespace+classes. */
 export interface CodegenCherryPick {
-  /** Omit to rely on dynwinrt-codegen auto-detect (Windows SDK Windows.winmd). */
+  /** Omit when the picked type should resolve from refs or codegen's fallback metadata. */
   winmdPath?: string;
   namespace: string;
   classes: readonly string[];
@@ -40,16 +50,8 @@ export interface CodegenInputs {
   verbose?: boolean;
 }
 
-export interface CodegenSummary {
-  classes: number;
-  interfaces: number;
-  enums: number;
-}
-
 export interface CodegenResult {
   outputDir: string;
-  /** Aggregated counts parsed from codegen stdout. */
-  summary: CodegenSummary;
 }
 
 /** Top-level entry point: stage → spawn passes → swap. */
@@ -62,34 +64,44 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
 
   const emit = dedupeCaseInsensitive(inputs.emitWinmds);
   // File in both sets wins as emit.
-  const refSet = new Set(emit.map((f) => f.toLowerCase()));
-  const refs = dedupeCaseInsensitive(inputs.refWinmds.filter((r) => !refSet.has(r.toLowerCase())));
+  const emitSet = new Set(emit.map((f) => f.toLowerCase()));
+  const refs = dedupeCaseInsensitive(inputs.refWinmds.filter((r) => !emitSet.has(r.toLowerCase())));
 
   const { executable, prefixArgs } = resolveCodegenInvocation();
+  await assertCodegenCapabilities(executable, prefixArgs, inputs.workspaceDir, GENERATE_REQUIRED_CODEGEN_CAPABILITIES);
   if (verbose) {
     log(`Using codegen → ${executable} ${prefixArgs.join(' ')}`);
     log(`Codegen inputs: ${emit.length} emit + ${refs.length} ref winmd(s)`);
   }
 
-  const summary: CodegenSummary = { classes: 0, interfaces: 0, enums: 0 };
-
-  await runWithStaging(outputDir, async (stagingDir) => {
-    if (emit.length > 0) {
-      const args = buildBulkArgs(prefixArgs, emit, stagingDir, refs);
-      const stdout = await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
-      accumulateSummary(summary, parseSummary(stdout));
-    }
-    for (const cp of inputs.cherryPicks) {
-      if (!cp.namespace.trim() || cp.classes.length === 0) {
-        continue;
+  // winmd/ref paths are passed via newline-separated list files rather than ';'-joined
+  // argv: there can be 100+ scattered paths, well past the Windows command-line limit.
+  // The temp dir holds those lists and is removed in `finally`, even on codegen failure.
+  const listDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-codegen-'));
+  try {
+    await runWithStaging(outputDir, async (stagingDir) => {
+      let pass = 0;
+      if (emit.length > 0) {
+        const args = buildBulkArgs(prefixArgs, emit, stagingDir, refs, listDir, pass++);
+        await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
       }
-      const args = buildExtraTypeArgs(prefixArgs, emit, stagingDir, refs, cp);
-      const stdout = await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
-      accumulateSummary(summary, parseSummary(stdout));
+      for (const cp of inputs.cherryPicks) {
+        if (!cp.namespace.trim() || cp.classes.length === 0) {
+          continue;
+        }
+        const args = buildCherryPickArgs(prefixArgs, emit, stagingDir, refs, cp, listDir, pass++);
+        await spawnCodegen(executable, args, inputs.workspaceDir, log, verbose);
+      }
+    });
+  } finally {
+    try {
+      fs.rmSync(listDir, { recursive: true, force: true });
+    } catch {
+      /* orphan temp list dir is harmless */
     }
-  });
+  }
 
-  return { outputDir, summary };
+  return { outputDir };
 }
 
 export function resolveOutputDir(workspaceDir: string): string {
@@ -151,31 +163,6 @@ function writeManagedMarker(outputDir: string): void {
   fs.writeFileSync(markerPath, lines.join('\n'), { encoding: 'utf8' });
 }
 
-// Generated bindings are ESM. A sub-package.json `{ "type": "module" }` tells Node
-// to treat them as such, avoiding the MODULE_TYPELESS_PACKAGE_JSON reparse warning
-// (and the perf hit it implies) when they're require()'d. Idempotent: ensures the
-// marker even when the pinned dynwinrt-codegen version doesn't emit one itself.
-export function ensureEsmPackageMarker(outputDir: string): void {
-  fs.mkdirSync(outputDir, { recursive: true });
-  const pkgPath = path.join(outputDir, 'package.json');
-  let pkg: Record<string, unknown> = {};
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      if (parsed && typeof parsed === 'object') {
-        pkg = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Corrupt/non-JSON: overwrite with the minimal marker below.
-    }
-  }
-  if (pkg.type === 'module') {
-    return;
-  }
-  pkg.type = 'module';
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', { encoding: 'utf8' });
-}
-
 /** Stage → backup-old → swap → drop-backup. Visible for tests. */
 export async function runWithStaging(
   outputDir: string,
@@ -192,7 +179,6 @@ export async function runWithStaging(
   try {
     await generate(stagingDir);
 
-    ensureEsmPackageMarker(stagingDir);
     writeManagedMarker(stagingDir);
 
     validateOutputDirIsWipeable(outputDir);
@@ -245,72 +231,99 @@ export async function runWithStaging(
   }
 }
 
-export function buildBulkArgs(
-  prefixArgs: readonly string[],
+/** Write a newline-separated list file of winmd paths; returns its path. */
+export function writeListFile(listDir: string, name: string, paths: readonly string[]): string {
+  const filePath = path.join(listDir, name);
+  // Trailing newline keeps the file POSIX-friendly; codegen trims each line.
+  fs.writeFileSync(filePath, paths.join('\n') + '\n', { encoding: 'utf8' });
+  return filePath;
+}
+
+/**
+ * Partition cherry-pick inputs into the winmds to load+emit-from vs refs.
+ * Mirrors the bulk pass: an explicit winmd is loaded alongside the bulk emit set
+ * so the picked class resolves. A path-less pick has no root winmd to emit, so
+ * bulk emit winmds move into refs for type resolution without bulk-generating them again.
+ */
+export function computeCherryPickInputs(
   emitWinmds: readonly string[],
-  outputDir: string,
-  refWinmds: readonly string[]
-): string[] {
-  const args: string[] = [
-    ...prefixArgs,
-    'generate',
-    '--winmd',
-    emitWinmds.join(';'),
-    '--output',
-    outputDir,
-    '--lang',
-    'js',
-  ];
-  if (refWinmds.length > 0) {
-    args.push('--ref', refWinmds.join(';'));
+  refWinmds: readonly string[],
+  cp: CodegenCherryPick
+): { winmds: string[]; refs: string[] } {
+  // refWinmds and emitWinmds are disjoint (runCodegen drops emit from refs).
+  const refSet = new Set<string>(refWinmds);
+  if (cp.winmdPath) {
+    const winmdSet = new Set<string>(emitWinmds);
+    winmdSet.add(cp.winmdPath);
+    refSet.delete(cp.winmdPath);
+    return { winmds: Array.from(winmdSet), refs: Array.from(refSet) };
+  }
+  // No root winmd: keep the bulk emit metadata available for type resolution only.
+  for (const w of emitWinmds) {
+    refSet.add(w);
+  }
+  return { winmds: [], refs: Array.from(refSet) };
+}
+
+interface GenerateArgsOptions {
+  winmdListPath?: string | null;
+  refListPath?: string | null;
+  namespace?: string;
+  classes?: readonly string[];
+  outputDir: string;
+}
+
+/** Assemble a `generate` argv from list-file paths and optional cherry-pick selectors. */
+export function buildGenerateArgs(prefixArgs: readonly string[], opts: GenerateArgsOptions): string[] {
+  const args: string[] = [...prefixArgs, 'generate'];
+  if (opts.winmdListPath) {
+    args.push('--winmd-list', opts.winmdListPath);
+  }
+  if (opts.namespace) {
+    args.push('--namespace', opts.namespace);
+  }
+  if (opts.classes && opts.classes.length > 0) {
+    args.push('--class-name', opts.classes.join(','));
+  }
+  args.push('--output', opts.outputDir);
+  if (opts.refListPath) {
+    args.push('--ref-list', opts.refListPath);
   }
   return args;
 }
 
-export function buildExtraTypeArgs(
+export function buildBulkArgs(
   prefixArgs: readonly string[],
   emitWinmds: readonly string[],
   outputDir: string,
   refWinmds: readonly string[],
-  extra: CodegenCherryPick
+  listDir: string,
+  passId: number
 ): string[] {
-  const args: string[] = [...prefixArgs, 'generate'];
-  // refWinmds and emitWinmds are disjoint (runCodegen drops emit from refs).
-  const refSet = new Set<string>(refWinmds);
+  const winmdListPath = emitWinmds.length > 0 ? writeListFile(listDir, `emit-${passId}.txt`, emitWinmds) : null;
+  const refListPath = refWinmds.length > 0 ? writeListFile(listDir, `ref-${passId}.txt`, refWinmds) : null;
+  return buildGenerateArgs(prefixArgs, { winmdListPath, refListPath, outputDir });
+}
 
-  if (extra.winmdPath) {
-    // Explicit winmd: emit the cherry-picked class from it, alongside the bulk
-    // emit set so types declared across those winmds resolve.
-    const emitSet = new Set<string>(emitWinmds);
-    emitSet.add(extra.winmdPath);
-    args.push('--winmd', Array.from(emitSet).join(';'));
-    refSet.delete(extra.winmdPath);
-  } else {
-    // Path-less cherry-pick: the user is targeting a class in the SDK's
-    // auto-detected Windows.winmd. Passing --winmd here would DISABLE that
-    // auto-detection and hide the Windows.* types the class needs. Omit it and
-    // expose the NuGet emit winmds via --ref so cross-references still resolve.
-    for (const w of emitWinmds) {
-      refSet.add(w);
-    }
-  }
-
-  args.push(
-    '--namespace',
-    extra.namespace,
-    '--class-name',
-    extra.classes.join(','),
-    '--output',
+export function buildCherryPickArgs(
+  prefixArgs: readonly string[],
+  emitWinmds: readonly string[],
+  outputDir: string,
+  refWinmds: readonly string[],
+  extra: CodegenCherryPick,
+  listDir: string,
+  passId: number
+): string[] {
+  const { winmds, refs } = computeCherryPickInputs(emitWinmds, refWinmds, extra);
+  const winmdListPath = winmds.length > 0 ? writeListFile(listDir, `emit-${passId}.txt`, winmds) : null;
+  const refListPath = refs.length > 0 ? writeListFile(listDir, `ref-${passId}.txt`, refs) : null;
+  return buildGenerateArgs(prefixArgs, {
+    winmdListPath,
+    refListPath,
+    namespace: extra.namespace,
+    classes: extra.classes,
     outputDir,
-    '--lang',
-    'js'
-  );
-
-  const refs = Array.from(refSet);
-  if (refs.length > 0) {
-    args.push('--ref', refs.join(';'));
-  }
-  return args;
+  });
 }
 
 async function spawnCodegen(
@@ -319,7 +332,52 @@ async function spawnCodegen(
   workspaceDir: string,
   log: (line: string) => void,
   verbose: boolean
-): Promise<string> {
+): Promise<void> {
+  try {
+    const { stdout, stderr } = await spawnCodegenCapture(executable, args, workspaceDir);
+    // Quiet success suppresses codegen's noisy per-file progress; use --verbose for details.
+    if (verbose) {
+      if (stdout) {
+        log(stdout);
+      }
+      if (stderr) {
+        log(stderr);
+      }
+    }
+  } catch (err) {
+    if (err instanceof CodegenExitError) {
+      if (err.stdout) {
+        log(err.stdout);
+      }
+      if (err.stderr) {
+        log(err.stderr);
+      }
+      throw new Error(`${err.message}. See output above for details.`, { cause: err });
+    }
+    throw err;
+  }
+}
+
+interface CodegenProcessOutput {
+  stdout: string;
+  stderr: string;
+}
+
+class CodegenExitError extends Error {
+  constructor(
+    public readonly code: number | null,
+    public readonly stdout: string,
+    public readonly stderr: string
+  ) {
+    super(`dynwinrt-codegen failed (exit ${code ?? 'null'})`);
+  }
+}
+
+async function spawnCodegenCapture(
+  executable: string,
+  args: readonly string[],
+  workspaceDir: string
+): Promise<CodegenProcessOutput> {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args as string[], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -341,56 +399,102 @@ async function spawnCodegen(
       const stdout = Buffer.concat(stdoutChunks).toString('utf8').trimEnd();
       const stderr = Buffer.concat(stderrChunks).toString('utf8').trimEnd();
       if (code !== 0) {
-        if (stdout) {
-          log(stdout);
-        }
-        if (stderr) {
-          log(stderr);
-        }
-        reject(new Error(`dynwinrt-codegen failed (exit ${code ?? 'null'}). See output above for details.`));
+        reject(new CodegenExitError(code, stdout, stderr));
         return;
       }
-      // Quiet success suppresses codegen's noisy per-file progress; use --verbose for details.
-      if (verbose) {
-        if (stdout) {
-          log(stdout);
-        }
-        if (stderr) {
-          log(stderr);
-        }
-      }
-      resolve(stdout);
+      resolve({ stdout, stderr });
     });
   });
 }
 
-const SUMMARY_REGEX =
-  /Done\.\s+(\d+)\s+class\(es\)\s+\+\s+(\d+)\s+interface\(s\)\s+\+\s+(\d+)\s+enum\(s\)\s+generated/i;
-
-/** Parse the trailing "Done. N class(es) + M interface(s) + K enum(s)" line. */
-export function parseSummary(stdout: string): CodegenSummary {
-  const summary: CodegenSummary = { classes: 0, interfaces: 0, enums: 0 };
-  if (!stdout) {
-    return summary;
-  }
-  // Take the last summary if a multi-pass output reaches this function.
-  const re = new RegExp(SUMMARY_REGEX, 'gi');
-  let last: RegExpExecArray | null = null;
-  for (let match = re.exec(stdout); match !== null; match = re.exec(stdout)) {
-    last = match;
-  }
-  if (last) {
-    summary.classes = Number(last[1]);
-    summary.interfaces = Number(last[2]);
-    summary.enums = Number(last[3]);
-  }
-  return summary;
+export function parseCapabilitiesOutput(stdout: string): Set<string> {
+  return new Set(
+    stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'))
+  );
 }
 
-function accumulateSummary(target: CodegenSummary, add: CodegenSummary): void {
-  target.classes += add.classes;
-  target.interfaces += add.interfaces;
-  target.enums += add.enums;
+export function parseRuntimeDependencySpec(stdout: string): RuntimeDependencySpec {
+  const spec = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!spec) {
+    throw new Error('dynwinrt-codegen runtime-dependency returned no output.');
+  }
+
+  const sep = spec.lastIndexOf('@');
+  if (sep <= 0 || sep === spec.length - 1) {
+    throw new Error(`Invalid dynwinrt-codegen runtime dependency spec: '${spec}'.`);
+  }
+
+  const packageName = spec.slice(0, sep);
+  const version = spec.slice(sep + 1);
+  if (packageName !== RUNTIME_PACKAGE_NAME) {
+    throw new Error(
+      `dynwinrt-codegen returned runtime dependency '${packageName}', expected '${RUNTIME_PACKAGE_NAME}'.`
+    );
+  }
+  return { packageName, version };
+}
+
+async function runCodegenQuery(
+  executable: string,
+  prefixArgs: readonly string[],
+  workspaceDir: string,
+  command: string
+): Promise<string> {
+  try {
+    const { stdout } = await spawnCodegenCapture(executable, [...prefixArgs, command], workspaceDir);
+    return stdout;
+  } catch (err) {
+    if (err instanceof CodegenExitError) {
+      const details = [err.stderr, err.stdout].filter(Boolean).join(os.EOL);
+      throw new Error(
+        `dynwinrt-codegen ${command} failed (exit ${err.code ?? 'null'}).` +
+          (details ? `${os.EOL}${details}` : ''),
+        { cause: err }
+      );
+    }
+    throw err;
+  }
+}
+
+async function assertCodegenCapabilities(
+  executable: string,
+  prefixArgs: readonly string[],
+  workspaceDir: string,
+  requiredCapabilities: readonly string[]
+): Promise<void> {
+  let stdout: string;
+  try {
+    stdout = await runCodegenQuery(executable, prefixArgs, workspaceDir, 'capabilities');
+  } catch (err) {
+    throw new Error(
+      `Installed ${CODEGEN_PACKAGE_NAME} does not support required capability negotiation. ` +
+        `Upgrade ${CODEGEN_PACKAGE_NAME} (or reinstall @microsoft/winappcli). ` +
+        `Details: ${(err as Error).message}`,
+      { cause: err }
+    );
+  }
+
+  const capabilities = parseCapabilitiesOutput(stdout);
+  const missing = requiredCapabilities.filter((capability) => !capabilities.has(capability));
+  if (missing.length > 0) {
+    throw new Error(
+      `Installed ${CODEGEN_PACKAGE_NAME} is missing required capabilities: ${missing.join(', ')}. ` +
+        `Upgrade ${CODEGEN_PACKAGE_NAME} (or reinstall @microsoft/winappcli).`
+    );
+  }
+}
+
+export async function getCodegenRuntimeDependency(workspaceDir: string): Promise<RuntimeDependencySpec> {
+  const { executable, prefixArgs } = resolveCodegenInvocation();
+  await assertCodegenCapabilities(executable, prefixArgs, workspaceDir, RUNTIME_REQUIRED_CODEGEN_CAPABILITIES);
+  const stdout = await runCodegenQuery(executable, prefixArgs, workspaceDir, 'runtime-dependency');
+  return parseRuntimeDependencySpec(stdout);
 }
 
 interface CodegenInvocation {
@@ -398,29 +502,20 @@ interface CodegenInvocation {
   prefixArgs: string[];
 }
 
-// Preferred resolution order:
-//   1. Node module resolution from the wrapper directory for npm, pnpm, yarn classic, and PnP.
-//   2. Physical node_modules walking for bundled or patched layouts where require.resolve is stubbed.
+// Resolve via Node first (npm/pnpm/yarn/PnP), then physical node_modules for patched layouts.
 export function resolveCodegenInvocation(): CodegenInvocation {
   const wrapperDir = tryGetWrapperDir();
-  const arch = resolveArchSubdir();
 
   const pkgDirs = resolveCodegenPackageDirs(wrapperDir);
   let lastChecked: string | null = null;
   for (const pkgDir of pkgDirs) {
-    // Refuse any pkgDir under UNC or with a reparse-point ancestor — a hostile
-    // npm install layout (junction'd node_modules) could redirect us to a
-    // victim binary.
+    // Refuse UNC/reparse-backed pkgDirs; junctioned node_modules could redirect to a victim binary.
     if (isNetworkPath(pkgDir) || hasReparsePointOnPath(pkgDir, path.parse(pkgDir).root || pkgDir)) {
       continue;
     }
-    // Prefer the pre-built .exe; cli.js is a defensive fallback.
-    const exePath = path.join(pkgDir, 'bin', arch, 'dynwinrt-codegen.exe');
-    if (fs.existsSync(exePath)) {
-      return { executable: exePath, prefixArgs: [] };
-    }
-
-    // Prefer process.execPath for cli.js so a poisoned PATH cannot substitute node.exe.
+    // Invoke the package CLI, not the internal exe, so npm-package-owned behavior
+    // (output package.json markers, runtime version reporting) stays inside
+    // @microsoft/dynwinrt-codegen instead of being duplicated here.
     const cliJs = path.join(pkgDir, 'cli.js');
     if (fs.existsSync(cliJs)) {
       const nodePath = resolveTrustedNodeInterpreter();
@@ -428,7 +523,7 @@ export function resolveCodegenInvocation(): CodegenInvocation {
         throw new Error(
           `The codegen at '${cliJs}' requires a native Node.js executable (node.exe) on PATH. ` +
             'Install Node 18+ (winget install OpenJS.NodeJS) ' +
-            `or reinstall ${CODEGEN_PACKAGE_NAME} so the pre-built .exe is available.`
+            `or reinstall ${CODEGEN_PACKAGE_NAME}.`
         );
       }
       return { executable: nodePath, prefixArgs: [cliJs] };
@@ -440,8 +535,7 @@ export function resolveCodegenInvocation(): CodegenInvocation {
     ? ` at '${wrapperDir}'`
     : ' (winapp install directory could not be determined; try reinstalling @microsoft/winappcli)';
   const partialHint = lastChecked
-    ? `Found ${CODEGEN_PACKAGE_NAME} at '${lastChecked}' but no executable inside ` +
-      `(expected 'bin/${arch}/dynwinrt-codegen.exe' or 'cli.js'). ` +
+    ? `Found ${CODEGEN_PACKAGE_NAME} at '${lastChecked}' but no cli.js entry point. ` +
       'The npm package may be corrupt; reinstall it.\n\n'
     : `Searched ${CODEGEN_PACKAGE_NAME} from the wrapper install${wrapperHint} — ` +
       `no ${CODEGEN_PACKAGE_NAME} resolvable via Node module resolution.\n\n`;
@@ -456,10 +550,7 @@ export function resolveCodegenInvocation(): CodegenInvocation {
   );
 }
 
-/**
- * Yield package dirs via Node resolution, then physical node_modules fallback.
- * The iterator stops once the caller fully validates the first usable package.
- */
+/** Yield package dirs via Node resolution, then physical node_modules fallback. */
 function* resolveCodegenPackageDirs(wrapperDir: string | null): Generator<string> {
   const seen = new Set<string>();
 
@@ -507,7 +598,7 @@ function parentOrNull(dir: string): string | null {
   return parent === dir ? null : parent;
 }
 
-// Walk up from dist/src jsbindings until package.json names @microsoft/winappcli.
+// Walk up from dist/src jsbindings to the @microsoft/winappcli package root.
 function tryGetWrapperDir(): string | null {
   let dir = __dirname;
   const root = path.parse(dir).root;
@@ -534,12 +625,7 @@ function tryGetWrapperDir(): string | null {
   }
 }
 
-function resolveArchSubdir(): string {
-  return os.arch() === 'arm64' ? 'arm64' : 'x64';
-}
-
-// Trust process.execPath first because npm selected it to load this wrapper.
-// It still must be a native .exe/.com with no UNC or reparse-point ancestor.
+// Trust npm-selected process.execPath first; still require native .exe/.com and no UNC/reparse.
 // PATH fallback is safety-gated and excludes .bat/.cmd re-parsing.
 function resolveTrustedNodeInterpreter(): string | null {
   const execPath = process.execPath;
@@ -553,8 +639,7 @@ function isAcceptableNodeExe(candidate: string): boolean {
   if (!candidate) {
     return false;
   }
-  // Anchor on the drive root so arbitrary system paths are scanned for junctions.
-  // This covers paths like `C:\Program Files\nodejs\node.exe`, not just workspace paths.
+  // Anchor on the drive root so system paths (not just workspace paths) are scanned for junctions.
   if (isNetworkPath(candidate)) {
     return false;
   }
@@ -578,8 +663,8 @@ function isAcceptableNodeExe(candidate: string): boolean {
   return true;
 }
 
-// PATH fallback rejects relative/CWD/UNC/reparse-backed candidates and .bat/.cmd shims.
-// That prevents an attacker-controlled PATH entry from running cli.js.
+// PATH fallback rejects relative/CWD/UNC/reparse-backed candidates and .bat/.cmd shims,
+// preventing attacker-controlled PATH entries from running cli.js.
 function resolveNativeNodeOnPath(): string | null {
   const command = 'node';
   const pathEnv = process.env.PATH ?? '';

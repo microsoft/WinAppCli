@@ -1,14 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Detects which package manager (npm / yarn / pnpm / bun) a workspace uses,
-// so we can print the right install command after mutating package.json.
-//
-// Ported from C# `PackageManagerDetector.cs`. Priority:
-//   1. Corepack `packageManager` field in package.json
-//   2. Lockfile sniffing (pnpm-lock.yaml → pnpm, yarn.lock → yarn, etc.)
-//   3. Fallback: npm
-//
+// Detects npm/yarn/pnpm/bun so hints match the workspace.
+// Ported from C# `PackageManagerDetector.cs`: Corepack field, lockfile sniffing, then npm.
 // Pure synchronous filesystem reads; no spawn.
 
 import * as fs from 'fs';
@@ -21,13 +15,7 @@ export interface DetectedPackageManager {
   installCommand: string;
 }
 
-/**
- * Build the argv (executable + args, no shell) for adding a single package at an
- * exact version with the given package manager. The version is pinned exactly
- * (no `^`/`~`) so the installed runtime always matches the codegen pin.
- *
- * `packageSpec` must already be `name@version`.
- */
+/** Build argv (no shell) for adding exact-pinned `name@version` so runtime matches codegen. */
 export function buildAddExactCommand(name: PackageManagerName, packageSpec: string): { exe: string; args: string[] } {
   switch (name) {
     case 'npm':
@@ -42,22 +30,10 @@ export function buildAddExactCommand(name: PackageManagerName, packageSpec: stri
 }
 
 /**
- * Resolve the absolute path to a package manager's launcher by scanning
- * `process.env.PATH` (and `PATHEXT` on Windows), mirroring the OS executable
- * lookup. Returns `null` when the executable cannot be found (or `PATH` is
- * unset), so callers can degrade to a best-effort warning.
- *
- * SECURITY (why we don't just spawn a bare `npm`): on Windows the launchers are
- * `.cmd` shims, and `cmd.exe` (and `node-which`) resolve a bare command name
- * against the CURRENT DIRECTORY *before* `PATH`. If we spawned `npm` with
- * `cwd` set to an untrusted workspace, a malicious `npm.cmd` dropped in that
- * workspace would hijack execution (CWE-426 untrusted search path). We
- * deliberately scan ONLY `PATH` here — never the workspace / `process.cwd()` —
- * and hand the resulting ABSOLUTE path to the spawn, which makes `cmd.exe`
- * skip its current-directory lookup entirely.
- *
- * Note: `process.env.PATH` is read through Node's case-insensitive `process.env`
- * proxy on Windows, so it resolves a `Path`/`path` variable too.
+ * Resolve a package manager launcher from PATH/PATHEXT, returning null if absent.
+ * Security: never spawn bare `npm`; Windows `.cmd` lookup checks CWD before PATH,
+ * so we pass an absolute PATH-only launcher to avoid workspace hijack (CWE-426).
+ * Node's Windows env proxy also covers `Path`/`path` casing.
  */
 export function resolvePackageManagerPath(name: PackageManagerName): string | null {
   const rawPath = process.env.PATH;
@@ -66,8 +42,7 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
   }
   const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
 
-  // On Windows, try each PATHEXT extension (npm → npm.cmd / npm.exe). On other
-  // platforms the launcher has no extension.
+  // Windows tries PATHEXT variants (npm.cmd/npm.exe); other platforms use no extension.
   const exts =
     process.platform === 'win32'
       ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
@@ -77,12 +52,7 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
       : [''];
 
   for (const dir of dirs) {
-    // SECURITY: skip non-absolute PATH entries (`.`, `tools`, …). A relative
-    // entry would be joined to a relative candidate that `fs.statSync` resolves
-    // against `process.cwd()`, and the resulting relative path handed to the
-    // installer (which runs with `cwd: workspaceDir`) would resolve a
-    // workspace-controlled shim — the very CWE-426 hijack this function exists
-    // to prevent. Only absolute PATH directories are trusted.
+    // Skip relative PATH entries: they resolve through CWD/workspace and enable CWE-426 hijack.
     if (!path.isAbsolute(dir)) {
       continue;
     }
@@ -92,8 +62,7 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
         if (!fs.statSync(candidate).isFile()) {
           continue;
         }
-        // Collapse any symlink/junction to its real location so the spawned
-        // absolute path can't be redirected back into an untrusted directory.
+        // Collapse symlinks/junctions so the spawned absolute path can't redirect to untrusted code.
         const real = fs.realpathSync.native(candidate);
         if (!path.isAbsolute(real)) {
           continue;

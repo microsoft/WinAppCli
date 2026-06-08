@@ -9,12 +9,11 @@ import { readJsBindingsConfig } from './package-json-config';
 import { tryReadLockfile } from './lockfile-reader';
 import { partitionPackageWinmds } from './winmd-policy';
 import { resolveAdditionalWinmds } from './additional-winmds';
-import { runCodegen } from './codegen-runner';
+import { getCodegenRuntimeDependency, runCodegen } from './codegen-runner';
 import {
   ensureRuntimeDependency,
   formatRuntimeDependencyHint,
-  getDynWinrtVersionPin,
-  isRuntimeDependencyDeclared,
+  getRuntimeDependencyVersion,
 } from './runtime-dep-injector';
 import { detectPackageManager } from './package-manager-detector';
 import { installRuntimeDependency } from './runtime-installer';
@@ -37,7 +36,7 @@ export interface OrchestratorOptions {
   workspaceDir: string;
   /** Path native CLI hashed; keeps stale-lockfile checks aligned with --config-dir. */
   yamlPath?: string;
-  /** Override for the npm wrapper's pinned dynwinrt version, used in tests. */
+  /** Override for the codegen-declared dynwinrt version, used in tests. */
   versionOverride?: string;
   /** Sink for codegen progress lines; defaults to console. */
   log?: (line: string) => void;
@@ -46,19 +45,11 @@ export interface OrchestratorOptions {
   /** Suppress progress and hints; warnings still go through `log`. */
   quiet?: boolean;
   /**
-   * When true (the `init` onboarding flow), declare `@microsoft/dynwinrt` in
-   * package.json — the only place the runtime dependency is *written*. The
-   * passive flows (`restore` / `node generate-bindings`) leave it false: they
-   * only read `winapp.jsBindings` + the lockfile and emit bindings, never
-   * mutating package.json. They warn instead when the dep is missing.
+   * Init-only: write `@microsoft/dynwinrt` to package.json.
+   * Passive flows never mutate package.json; they only warn when the dep is missing.
    */
   manageRuntimeDep?: boolean;
-  /**
-   * When true (the `init` onboarding flow), materialize the runtime dependency
-   * into node_modules via the detected package manager instead of only writing
-   * it to package.json. Best-effort: install failures degrade to a warning.
-   * Only meaningful when `manageRuntimeDep` is also true.
-   */
+  /** Init-only: install the runtime dep into node_modules; failures warn. */
   installRuntimeDep?: boolean;
 }
 
@@ -194,25 +185,16 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     spinner?.stop();
   }
 
-  // Runtime dependency handling differs by flow:
-  //   * init (manageRuntimeDep): declare @microsoft/dynwinrt in package.json
-  //     (best-effort; codegen output is still useful if it fails) and, unless
-  //     opted out, install it.
-  //   * restore / generate-bindings (passive): never mutate package.json — just
-  //     warn if the runtime the generated bindings import isn't declared. init
-  //     is responsible for adding it.
+  // Runtime dep policy: init declares/optionally installs (best-effort); passive
+  // restore/generate-bindings never mutate package.json and only warn if missing.
   if (options.manageRuntimeDep) {
-    const pinnedVersion = options.versionOverride ?? safeGetVersionPin(log);
+    const pinnedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir, log));
     if (pinnedVersion) {
       try {
         const ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
         const pm = detectPackageManager(workspaceDir);
 
-        // The dep is now declared in package.json. On the init onboarding flow,
-        // also install it so the generated bindings are runnable without a manual
-        // second step. Only do this when the dep actually landed in `dependencies`
-        // (added / alreadyPresent) — `noPackageJson` / `presentInDevDependencies`
-        // have nothing installable and fall through to the manual hint below.
+        // Install only when the dep is in `dependencies`; noPackageJson/dev-only fall through to hints.
         const dependencyDeclared = ensureResult.outcome === 'added' || ensureResult.outcome === 'alreadyPresent';
         if (options.installRuntimeDep && dependencyDeclared) {
           const installVersion = ensureResult.pinnedVersion ?? pinnedVersion;
@@ -225,9 +207,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
               log(`✅ Installed ${RUNTIME_PACKAGE_NAME}@${installVersion}.`);
             }
           } else {
-            // Best-effort: bindings are already generated and the dep is in
-            // package.json — surface a warning (even in --quiet) so the user can
-            // finish the install manually.
+            // Best-effort: generated bindings remain useful; warn so users can install manually.
             log(
               `⚠️ Could not auto-install ${RUNTIME_PACKAGE_NAME}@${installVersion}: ${install.error}. ` +
                 `Run \`${pm.installCommand}\` to install it locally.`
@@ -249,42 +229,42 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
       }
     }
-  } else if (!isRuntimeDependencyDeclared(workspaceDir, RUNTIME_PACKAGE_NAME)) {
-    // Passive flow with the runtime missing — bindings would fail to resolve it
-    // at runtime. Warn (even in --quiet) but don't write: adding is init's job.
-    log(
-      `⚠️ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
-        'Generated bindings import it at runtime — run `winapp init` to add it (or add it manually).'
-    );
+  } else {
+    // Passive flow: warn if the generated runtime import would be unresolved or stale; init owns writes.
+    const declaredVersion = getRuntimeDependencyVersion(workspaceDir, RUNTIME_PACKAGE_NAME);
+    if (!declaredVersion) {
+      log(
+        `⚠️ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
+          'Generated bindings import it at runtime — run `winapp init` to add it (or add it manually).'
+      );
+    } else {
+      const expectedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir, log));
+      if (expectedVersion && declaredVersion !== expectedVersion) {
+        log(
+          `⚠️ ${RUNTIME_PACKAGE_NAME} is declared as ${declaredVersion}, ` +
+            `but dynwinrt-codegen declares ${expectedVersion}. ` +
+            'Run `winapp init` to update it (or update it manually).'
+        );
+      }
+    }
   }
 
   return {
     outcome: 'completed',
-    message: formatCompletedMessage(codegenResult.outputDir, codegenResult.summary),
+    message: formatCompletedMessage(codegenResult.outputDir),
     outputDir: codegenResult.outputDir,
   };
 }
 
-function formatCompletedMessage(
-  outputDir: string,
-  summary: { classes: number; interfaces: number; enums: number }
-): string {
-  const hasCounts = summary.classes > 0 || summary.interfaces > 0 || summary.enums > 0;
-  if (!hasCounts) {
-    return `Generated JS bindings → ${outputDir}`;
-  }
-  const parts: string[] = [];
-  if (summary.classes > 0) parts.push(`${summary.classes} class${summary.classes === 1 ? '' : 'es'}`);
-  if (summary.interfaces > 0) parts.push(`${summary.interfaces} interface${summary.interfaces === 1 ? '' : 's'}`);
-  if (summary.enums > 0) parts.push(`${summary.enums} enum${summary.enums === 1 ? '' : 's'}`);
-  return `Generated JS bindings → ${outputDir} (${parts.join(', ')})`;
+function formatCompletedMessage(outputDir: string): string {
+  return `Generated JS bindings → ${outputDir}`;
 }
 
-function safeGetVersionPin(log: (line: string) => void): string | null {
+async function safeGetRuntimeVersion(workspaceDir: string, log: (line: string) => void): Promise<string | null> {
   try {
-    return getDynWinrtVersionPin();
+    return (await getCodegenRuntimeDependency(workspaceDir)).version;
   } catch (err) {
-    log(`⚠️ Could not resolve pinned ${RUNTIME_PACKAGE_NAME} version: ${(err as Error).message}`);
+    log(`⚠️ Could not resolve ${RUNTIME_PACKAGE_NAME} version from dynwinrt-codegen: ${(err as Error).message}`);
     return null;
   }
 }

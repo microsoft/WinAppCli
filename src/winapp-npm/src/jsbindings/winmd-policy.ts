@@ -1,30 +1,19 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Categorizes NuGet packages into how their .winmd files should be fed to
-// dynwinrt-codegen: `emit` (--winmd), `refOnly` (--ref for type resolution
-// but no generated bindings), or `skip` (dropped entirely).
-//
-// Ported from C# `JsBindingsPresets.cs`. The classification used to live in
-// the native CLI and was applied as it wrote the lockfile; now the native
-// only writes the raw NuGet inventory and the npm wrapper applies policy
-// at codegen time.
+// Categorizes NuGet .winmds for dynwinrt-codegen: emit, refOnly, or skip.
+// Ported from C# `JsBindingsPresets.cs`; native now writes raw inventory and npm applies policy.
 
 export type WinmdPackageCategory = 'emit' | 'refOnly' | 'skip';
 
-// Built-in denylists. User `winapp.jsBindings` overrides layer on top.
+// Built-in package policy. Ref-only winmds are loaded for type resolution
+// without generating their own bindings.
 const DEFAULT_REF_ONLY_PACKAGES = new Set<string>(
-  ['Microsoft.WindowsAppSDK.InteractiveExperiences'].map((p) => p.toLowerCase())
+  ['Microsoft.Windows.SDK.CPP', 'Microsoft.WindowsAppSDK.InteractiveExperiences'].map((p) => p.toLowerCase())
 );
 
-// Packages whose .winmd files are dropped entirely from the codegen input.
-// These are pulled in transitively by Microsoft.WindowsAppSDK but expose UI /
-// HWND / Composition surfaces that dynwinrt can't usefully drive from a
-// headless Node process:
-//   - Microsoft.WindowsAppSDK.WinUI : XAML composables (Button, Page, ...)
-//   - Microsoft.Web.WebView2        : HWND / Composition-hosted browser
-// Users who need a denylisted package back can list it under
-// `winapp.jsBindings.emitPackages`.
+// Dropped transitive winmds expose UI/HWND/Composition surfaces that headless Node can't drive.
+// Users can force-emit a dropped winmd via `winapp.jsBindings.additionalWinmds` (explicit opt-in).
 const DEFAULT_SKIPPED_PACKAGES = new Set<string>(
   ['Microsoft.WindowsAppSDK.WinUI', 'Microsoft.Web.WebView2'].map((p) => p.toLowerCase())
 );
@@ -57,11 +46,7 @@ export interface PackageWinmds {
   winmds: readonly string[];
 }
 
-/**
- * Partition a list of `{name, winmds[]}` tuples by category, using the
- * package name directly (no path extraction needed — the lockfile already
- * groups winmds by package on the writer side).
- */
+/** Partition package-grouped winmd tuples by policy category. */
 export function partitionPackageWinmds(packages: readonly PackageWinmds[]): WinmdPartition {
   const emit: string[] = [];
   const refOnly: string[] = [];

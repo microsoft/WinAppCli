@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Reads the native restore lockfile; emit/refOnly/skip policy stays in winmd-policy.ts.
+// Reads the native restore lockfile; winmd-policy.ts owns emit/refOnly/skip.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,10 +36,7 @@ export interface ReadLockfileResult {
   reason?: string;
 }
 
-/**
- * Read and validate the workspace lockfile.
- * Hostile `.winapp` junctions are rejected before opening the file.
- */
+/** Read and validate the lockfile, rejecting hostile `.winapp` junctions before open. */
 export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
   const winappDir = path.join(workspaceDir, '.winapp');
   const filePath = getLockfilePath(workspaceDir);
@@ -181,7 +178,7 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
     };
   }
 
-  // Best-effort check that .winapp wasn't swapped after the initial probe.
+  // Best-effort guard against `.winapp` swaps after the initial probe.
   try {
     assertSafeWorkspaceFile(workspaceDir, winappDir, '.winapp');
   } catch (err) {

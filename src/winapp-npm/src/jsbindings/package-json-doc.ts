@@ -1,22 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Shared helper for every wrapper site that reads or writes the user's
-// `package.json`. Centralises:
-//   * path-safety guard (workspace-rooted, UNC / reparse-point refusal);
-//   * JSON parse + structural validation (root must be an object);
-//   * EOL detection + trailing-newline preservation (matching the file's
-//     existing convention rather than forcing LF on a CRLF checkout);
-//   * atomic temp-file + rename, with copy+unlink fallback for cross-volume
-//     edge cases (AV interference, mapped network shares, etc).
-//
-// Consumers should NEVER open-code `fs.readFileSync(packageJson)` /
-// `JSON.parse` / `fs.renameSync`. This is the single chokepoint for EVERY
-// wrapper site that reads or mutates the user's package.json — the jsbindings
-// config + runtime-dep injection (package-json-config.ts, runtime-dep-injector.ts)
-// AND the C#/C++ addon scaffolders (cs-addon-utils.ts, cpp-addon-utils.ts).
-// Go through `readPackageJsonDoc` / `mutatePackageJsonDoc` so path-safety,
-// EOL preservation, and atomic-write policy all land in one place.
+// Single chokepoint for package.json reads/writes across wrapper sites.
+// Centralizes path-safety, object validation, EOL/trailing-newline preservation,
+// and atomic sibling-temp writes with copy+unlink fallback for AV/cross-volume cases.
+// Use these helpers so JS bindings and addon scaffolders share the same policy.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,15 +26,8 @@ export interface PackageJsonDoc {
 }
 
 /**
- * Path-safety-guarded existence check. Returns false when:
- *   * package.json doesn't exist in the workspace,
- *   * OR the workspace itself / package.json path is UNC / reparse-backed
- *     (we treat unsafe paths as "not present" so callers fall through to
- *     their "no package.json" branch without leaking that we even probed).
- *
- * Use the boolean form when you just need to gate behaviour (`hasJsBindings`,
- * "should I trigger codegen?"). Use `readPackageJsonDoc` when you need the
- * parsed contents — that helper *throws* on safety violations.
+ * Path-safety-guarded existence check. Unsafe paths return false without probing;
+ * use `readPackageJsonDoc` when safety violations should throw.
  */
 export function packageJsonExists(workspaceDir: string): boolean {
   const filePath = path.join(workspaceDir, PACKAGE_JSON_FILENAME);
@@ -59,19 +40,8 @@ export function packageJsonExists(workspaceDir: string): boolean {
 }
 
 /**
- * Read + parse package.json. Returns `null` when the file does not exist.
- *
- * Throws when:
- *   * the workspace / file path is UNC or has a reparse-point ancestor
- *     (defence-in-depth against hostile workspace layouts);
- *   * the file is not valid JSON;
- *   * the top-level JSON value is not an object.
- *
- * Callers that need a "missing-or-malformed → silent fall-through" semantic
- * should call `packageJsonExists` first and then handle parse errors
- * themselves; the default behaviour here is "fail loud" so a malformed
- * package.json surfaces the real parse error instead of being silently
- * swallowed.
+ * Read + parse package.json, returning `null` when absent. Throws on unsafe paths,
+ * invalid JSON, or non-object roots so malformed package.json fails loud.
  */
 export function readPackageJsonDoc(workspaceDir: string): PackageJsonDoc | null {
   const filePath = path.join(workspaceDir, PACKAGE_JSON_FILENAME);
@@ -107,13 +77,8 @@ export function readPackageJsonDoc(workspaceDir: string): PackageJsonDoc | null 
 }
 
 /**
- * Read package.json, apply `mutate` to the parsed object, then atomically
- * write the result back. `mutate` may either:
- *   * mutate the object in place (returning `void`), or
- *   * return a new object (e.g. when reordering keys to preserve layout).
- *
- * Throws if package.json doesn't exist — callers that want a no-op when the
- * file is missing should branch on `packageJsonExists` first.
+ * Read package.json, apply `mutate`, then atomically write it back.
+ * `mutate` may edit in place or return a replacement object; absence throws.
  */
 export function mutatePackageJsonDoc(
   workspaceDir: string,
@@ -136,19 +101,8 @@ export function mutatePackageJsonDoc(
 }
 
 /**
- * Atomically write `content` to `filePath`. Strategy:
- *   1. Write to a sibling temp file in the same directory (same-volume).
- *   2. `fsync` to flush kernel buffers to disk (best-effort — some FUSE /
- *      network filesystems don't implement it; ignore the error).
- *   3. `renameSync` over the destination. On NTFS / ext4 this is atomic at
- *      the directory-entry level: readers see either the old file or the new
- *      file, never a half-written one.
- *   4. On rename failure (cross-volume, AV interference, sharing violation),
- *      fall back to `copyFileSync` + `unlinkSync` — non-atomic, but at least
- *      we don't leave the destination empty.
- *
- * Exported so future workspace writers (other config files, lockfile-writer
- * mirrors, etc.) can use the same primitive instead of re-implementing.
+ * Atomic-ish write: sibling temp + best-effort fsync + rename, so readers see old or new.
+ * If rename fails (cross-volume/AV/share), copy+unlink avoids emptying the target.
  */
 export function atomicWriteFile(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
@@ -175,8 +129,7 @@ export function atomicWriteFile(filePath: string, content: string): void {
     return;
   } catch (renameErr) {
     if (staged) {
-      // Fallback: copy then unlink. Not atomic, but better than leaving the
-      // destination empty or the user's package.json half-written.
+      // Non-atomic fallback, but avoids empty or half-written package.json.
       try {
         fs.copyFileSync(tmpPath, filePath);
         try {

@@ -4,12 +4,11 @@
 import { AdditionalWinmd } from './additional-winmds';
 import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
 
-// Fixed, non-configurable codegen output directory (relative to the workspace root).
-// Mirrors the C++ `.winapp/include` convention and is auto-gitignored by `winapp init`.
+// Fixed codegen output dir, mirroring C++ `.winapp/include` and auto-gitignored by init.
 export const JS_BINDINGS_OUTPUT_DIR = '.winapp/bindings';
 
 export interface JsBindingsConfig {
-  // Extra .winmd files to feed into codegen, either bulk-emitted or cherry-picked.
+  // Extra .winmds to bulk-emit or cherry-pick.
   additionalWinmds: AdditionalWinmd[];
   // Extra .winmd files loaded for type resolution only.
   additionalRefs: string[];
@@ -83,10 +82,7 @@ export function ensureJsBindingsBlock(
   return 'unchanged';
 }
 
-/**
- * Write or update the `winapp.jsBindings` namespace in package.json.
- * `mutatePackageJsonDoc` preserves JSON layout and performs the atomic write.
- */
+/** Write/update `winapp.jsBindings`; shared helper preserves layout and atomic writes. */
 export function writeJsBindingsConfig(workspaceDir: string, config: JsBindingsConfig): void {
   if (!packageJsonExists(workspaceDir)) {
     throw new Error(

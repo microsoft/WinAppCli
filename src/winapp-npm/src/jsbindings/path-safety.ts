@@ -1,17 +1,9 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Filesystem-safety helpers ported from the C# `PathSafety` helper. Used by
-// every site that writes into the user's workspace (package.json, winapp.yaml,
-// codegen output) and by additional-winmds resolution.
-//
-// Invariants matching the C# original:
-//   * `isNetworkPath` rejects UNC / `\\?\UNC\…` / `\\.\UNC\…`. Local DOS device
-//     paths (`\\?\C:\…`) are NOT network.
-//   * `hasReparsePointOnPath` walks DOWN from `boundary` to `path`. Walking up
-//     would force the OS to traverse junctions/symlinks in `path` to read the
-//     leaf's attributes, which on Windows would trigger SMB negotiation /
-//     NTLM leak before we ever saw the reparse-point flag.
+// Filesystem-safety helpers ported from C# `PathSafety` for workspace writes and winmd paths.
+// Match native invariants: reject UNC (`\\?\UNC\…`, `\\.\UNC\…`) but not local DOS devices,
+// and walk DOWN from boundary to avoid SMB/NTLM leaks before detecting reparse points.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -40,10 +32,8 @@ export function isNetworkPath(p: string): boolean {
   return /^UNC\\/i.test(afterPrefix);
 }
 
-// True if `targetPath` is not safely contained under `boundary`, or if any
-// segment from `boundary` down to `targetPath` is a reparse point, or if
-// either side is a UNC path. Used to refuse rewriting files that a hostile
-// workspace could redirect via a symlink/junction to a victim location.
+// True when target escapes boundary, either side is UNC, or any segment is reparse-backed.
+// Refuses hostile symlink/junction redirects to victim locations.
 export function hasReparsePointOnPath(targetPath: string, boundary: string): boolean {
   if (!targetPath || !boundary) {
     return false;
@@ -52,9 +42,7 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     return true;
   }
 
-  // Resolve both paths to absolute form, then normalize for containment
-  // (trim trailing separators but preserve the root separator on bare drive
-  // designators — see normalizeForContainment).
+  // Resolve absolute paths, then normalize for containment without collapsing drive roots.
   let absTarget: string;
   let absBoundary: string;
   try {
@@ -65,8 +53,7 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     return true;
   }
 
-  // String-only containment. Boundary itself is a valid target; otherwise the
-  // target must live under boundary + a separator.
+  // String-only containment: boundary itself, or boundary + separator.
   const sameAsBoundary = absTarget.toLowerCase() === absBoundary.toLowerCase();
   const boundaryWithSep = absBoundary.endsWith(path.sep) ? absBoundary : absBoundary + path.sep;
   const insideBoundary = absTarget.toLowerCase().startsWith(boundaryWithSep.toLowerCase());
@@ -74,8 +61,7 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     return true;
   }
 
-  // Check the boundary itself first — a reparse-point boundary would make
-  // every descendant probe silently follow it.
+  // Check boundary first; a reparse boundary would make descendants silently follow it.
   if (isReparseSegment(absBoundary)) {
     return true;
   }
@@ -83,8 +69,7 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
     return false;
   }
 
-  // Walk DOWN from boundary to target, checking each existing segment's
-  // attributes via lstat (does NOT follow symlinks).
+  // Walk DOWN via lstat so symlinks/junctions aren't followed.
   const rel = absTarget.substring(absBoundary.length);
   const segments = rel.length === 0 ? [] : rel.split(/[\\/]/).filter((s) => s.length > 0);
 
@@ -98,11 +83,8 @@ export function hasReparsePointOnPath(targetPath: string, boundary: string): boo
   return false;
 }
 
-// Trim trailing separators but preserve the root separator on bare drive
-// designators. `C:\` collapsed to `C:` would make `path.join` produce
-// drive-relative paths (`C:foo` → resolved against the per-drive CWD),
-// silently bypassing the reparse-point check. Mirrors the native
-// `PathSafety.NormalizeForContainment`.
+// Trim trailing separators but preserve drive roots: `C:\` → `C:` would make
+// `path.join` produce drive-relative `C:foo`, bypassing reparse checks.
 function normalizeForContainment(p: string): string {
   const trimmed = p.replace(/[\\/]+$/, '');
   if (trimmed.length === 2 && trimmed[1] === ':') {
@@ -116,9 +98,7 @@ function isReparseSegment(p: string): boolean {
   try {
     stat = fs.lstatSync(p);
   } catch (err) {
-    // Missing leaf is fine — caller will create it. Permission denied /
-    // other unexpected error: treat as safe so we don't refuse the whole
-    // workspace; the subsequent write will surface the real error.
+    // Missing leaf is fine; permission/other errors surface on the later write.
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       return false;
@@ -129,14 +109,8 @@ function isReparseSegment(p: string): boolean {
 }
 
 /**
- * Throw if `filePath` (or any segment from `workspaceDir` down to it) is a
- * reparse point or UNC path. Single chokepoint for every file we read or
- * write inside the user's workspace (`package.json`, `winapp.yaml`,
- * `.winapp/winmds.lock.json`, codegen output). Mirrors the native side's
- * `IsLockfilePathUnsafe()` / `PathSafety.AssertSafeWrite`.
- *
- * `label` is woven into the error message so the user can tell which file
- * tripped the guard (`'package.json'`, `'winmds.lock.json'`, …).
+ * Throw if a workspace file or any ancestor is UNC/reparse-backed.
+ * Single chokepoint mirroring native lockfile/write guards; `label` names the failing file.
  */
 export function assertSafeWorkspaceFile(workspaceDir: string, filePath: string, label: string): void {
   if (isNetworkPath(workspaceDir) || isNetworkPath(filePath)) {
@@ -155,15 +129,8 @@ export function assertSafeWorkspaceFile(workspaceDir: string, filePath: string, 
 }
 
 /**
- * Stricter variant for directories that the wrapper will RECURSIVELY DELETE
- * before each run (e.g. dynwinrt-codegen output). Requires:
- *   * `outputDir` is strictly *inside* the workspace (not equal to it);
- *   * neither end of the path is UNC / network;
- *   * no segment from workspace down to outputDir is a reparse point;
- *   * if `outputDir` already exists, it is itself not a reparse point.
- *
- * Throws a labelled error on any violation. Returns the resolved absolute
- * path on success.
+ * Guard recursively deleted output dirs: must be strictly inside the workspace,
+ * non-UNC, and reparse-free from workspace through existing output dir.
  */
 export function assertSafeWorkspaceOutputDir(workspaceDir: string, outputDir: string, label: string): string {
   if (!outputDir || !outputDir.trim()) {

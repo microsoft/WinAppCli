@@ -1,13 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Installs the `@microsoft/dynwinrt` runtime dependency into node_modules by
-// invoking the workspace's package manager. Used by the `init` onboarding flow so
-// freshly generated bindings are runnable without a manual second step.
-//
-// Best-effort by design: codegen has already succeeded and written the dependency
-// into package.json, so an install failure (offline, private registry, missing
-// package manager) degrades to a warning rather than failing the command.
+// Installs `@microsoft/dynwinrt` during init so generated bindings run immediately.
+// Best-effort: codegen and package.json already succeeded, so install failures warn.
 
 import { spawnSync, SpawnSyncOptions } from 'child_process';
 import { PackageManagerName, buildAddExactCommand, resolvePackageManagerPath } from './package-manager-detector';
@@ -21,11 +16,8 @@ export interface RuntimeInstallResult {
 }
 
 /**
- * Build the `cmd.exe /d /s /c` command line for launching an absolute-path `.cmd`
- * shim. The ENTIRE command (quoted-exe + args) is wrapped in an extra outer pair
- * of quotes: with `/s`, cmd.exe strips the first and last quote of the string,
- * leaving the inner `"C:\...\npm.cmd" <args>` intact so a path containing spaces
- * still resolves. This mirrors the cross-spawn / @npmcli/promise-spawn pattern.
+ * Build `cmd.exe /d /s /c` for an absolute `.cmd` shim.
+ * Outer quotes survive `/s` stripping so spaced paths still resolve (cross-spawn pattern).
  */
 /** Visible for unit tests. */
 export function buildWindowsCmdLine(exePath: string, args: string[]): string {
@@ -33,12 +25,7 @@ export function buildWindowsCmdLine(exePath: string, args: string[]): string {
   return `"${inner}"`;
 }
 
-/**
- * Quote a single argument for a `cmd.exe /c "<cmdline>"` string. Our args are
- * controlled constants (`install`, `<name>@<version>`, `--save-exact`), so this
- * only needs to guard the rare case of a version/name containing whitespace or
- * cmd metacharacters — it is not a general-purpose shell escaper.
- */
+/** Quote controlled cmd args; guards whitespace/metachars, not a general shell escaper. */
 function quoteForCmd(arg: string): string {
   if (!/[\s"^&|<>()%!]/.test(arg)) {
     return arg;
@@ -48,17 +35,9 @@ function quoteForCmd(arg: string): string {
 }
 
 /**
- * Install `<pm> add <packageName>@<version>` (exact-pinned) into `workspaceDir`.
- *
- * Runs synchronously so the caller can map the exit code directly. SECURITY: we
- * resolve the package manager to an ABSOLUTE path from `PATH` first
- * (`resolvePackageManagerPath`), never spawning a bare command name. On Windows
- * the launchers are `.cmd` shims; spawning `cmd.exe` with the absolute `.cmd`
- * path (rather than `{ shell: true }` + a bare name) is the pattern recommended
- * by the Node docs post-CVE-2024-27980 — it avoids the EINVAL that `.cmd` +
- * `shell: false` would raise, and because the path is absolute, `cmd.exe` does
- * NOT perform its current-directory-first lookup, so a malicious `npm.cmd` in
- * `workspaceDir` cannot hijack execution.
+ * Install exact-pinned runtime into `workspaceDir`, synchronously for exit-code mapping.
+ * Security: resolve an absolute PATH-only launcher; on Windows, run `.cmd` via cmd.exe
+ * per post-CVE-2024-27980 guidance, avoiding EINVAL and CWD-first hijack.
  */
 export function installRuntimeDependency(
   workspaceDir: string,

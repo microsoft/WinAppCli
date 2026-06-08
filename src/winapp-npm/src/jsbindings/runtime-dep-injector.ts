@@ -1,24 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Mutates the user's package.json to declare `@microsoft/dynwinrt` as a
-// production dependency. Returns a structured outcome so the caller can
-// print the right hint.
-//
-// Ported from C# `UserPackageJsonService.cs`. Key invariants:
-//   * Refuse to write through reparse-point ancestors (symlinks / junctions)
-//     — same protection the native side enforced via PathSafety. Provided
-//     transitively by `package-json-doc.ts`.
-//   * Preserve unrelated keys exactly. Insert "dependencies" right after
-//     "version" when creating the block from scratch.
-//   * Atomic write via sibling tmp + fs.renameSync (Windows: same-volume rename
-//     is atomic; fall back to copy+unlink if the rename fails). Provided by
-//     `package-json-doc.atomicWriteFile`.
-//   * Don't auto-promote a dev→prod dep — the user pinned it under dev for a
-//     reason; report `PresentInDevDependencies` instead.
+// Declares `@microsoft/dynwinrt` as a prod dependency and returns hint-friendly outcomes.
+// Ported from C# `UserPackageJsonService.cs`: shared package-json-doc guards reparse paths,
+// preserves unrelated keys/layout, writes atomically, and never auto-promotes dev→prod pins.
 
-import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
 import { readPackageJsonDoc, mutatePackageJsonDoc } from './package-json-doc';
 
@@ -58,10 +44,7 @@ export function ensureRuntimeDependency(
       return { outcome: 'alreadyPresent' };
     }
     if (typeof existing === 'string') {
-      // Different version pinned — overwrite so codegen and the runtime stay
-      // version-locked. Stale pins cause hard-to-diagnose ABI mismatches
-      // (e.g. dynwinrt panics on TypeKind variants the older runtime can't
-      // marshal).
+      // Overwrite stale pins so codegen/runtime stay ABI-locked; mismatches can panic.
       mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
       return { outcome: 'added', pinnedVersion: version };
     }
@@ -74,34 +57,32 @@ export function ensureRuntimeDependency(
     }
   }
 
-  // Mutate + atomic write through the shared helper. mutatePackageJsonDoc
-  // re-reads the file to avoid TOCTOU windows; it also re-runs the safety
-  // guard so a race that swaps in a reparse point between read and write is
-  // still refused.
+  // Shared helper re-reads + rechecks safety to close TOCTOU/reparse races before atomic write.
   mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
 
   return { outcome: 'added', pinnedVersion: version };
 }
 
 /**
- * Read-only check: is `packageName` declared as a production dependency in
- * package.json? Used by the passive flows (`restore` / `node generate-bindings`)
- * which never mutate package.json — they only warn when the runtime the
- * generated bindings import is missing. Returns false when package.json is
- * absent or the dep lives only under devDependencies.
+ * Read-only prod dependency check for passive flows, which warn but never mutate.
+ * Returns false when package.json is absent or the dep is dev-only.
  */
 export function isRuntimeDependencyDeclared(workspaceDir: string, packageName: string): boolean {
+  return getRuntimeDependencyVersion(workspaceDir, packageName) !== null;
+}
+
+/** Read the declared production dependency version without mutating package.json. */
+export function getRuntimeDependencyVersion(workspaceDir: string, packageName: string): string | null {
   const doc = readPackageJsonDoc(workspaceDir);
   if (!doc) {
-    return false;
+    return null;
   }
   const deps = doc.parsed.dependencies;
-  return (
-    !!deps &&
-    typeof deps === 'object' &&
-    !Array.isArray(deps) &&
-    typeof (deps as Record<string, unknown>)[packageName] === 'string'
-  );
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
+    return null;
+  }
+  const version = (deps as Record<string, unknown>)[packageName];
+  return typeof version === 'string' && version.trim() ? version : null;
 }
 
 function insertOrUpdateDependency(
@@ -132,55 +113,6 @@ function insertOrUpdateDependency(
     rebuilt.dependencies = newDeps;
   }
   return rebuilt;
-}
-
-// Resolves the pinned `@microsoft/dynwinrt` version by reading the winapp-npm
-// package's own dependencies (the wrapper bundles dynwinrt-codegen, and
-// dynwinrt shares the same pin). Mirrors the C# `NpmWrapperVersionProvider`.
-export function getDynWinrtVersionPin(): string {
-  // The dist/jsbindings/runtime-dep-injector.js → resolve back to package.json.
-  // __dirname is dist/jsbindings/ in prod, src/jsbindings/ in test/dev.
-  // Walk up looking for the winapp-npm package.json.
-  const start = __dirname;
-  let dir = start;
-  const root = path.parse(dir).root;
-  for (;;) {
-    const candidate = path.join(dir, 'package.json');
-    if (fs.existsSync(candidate)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8')) as Record<string, unknown>;
-        if (parsed.name === '@microsoft/winappcli') {
-          const deps = parsed.dependencies;
-          if (deps && typeof deps === 'object') {
-            const v = (deps as Record<string, unknown>)['@microsoft/dynwinrt-codegen'];
-            if (typeof v === 'string' && v.trim()) {
-              return v;
-            }
-          }
-          throw new Error(
-            `${candidate} is the @microsoft/winappcli package.json but has no @microsoft/dynwinrt-codegen pin.`
-          );
-        }
-      } catch (err) {
-        // Wrong package.json; keep walking.
-        if (err instanceof Error && err.message.includes('@microsoft/dynwinrt-codegen pin')) {
-          throw err;
-        }
-      }
-    }
-    if (dir === root) {
-      break;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      break;
-    }
-    dir = parent;
-  }
-  throw new Error(
-    `Could not locate the @microsoft/winappcli package.json near ${start}. ` +
-      'This typically means the npm wrapper is running outside its install layout.'
-  );
 }
 
 // Hint formatting helper — keeps cli-side glue free of switch statements.

@@ -241,7 +241,7 @@ export async function getWinappPath(options: GetWinappPathOptions = {}): Promise
 export interface InitOptions extends CommonOptions {
   /** Base/root directory for the winapp workspace, for consumption or installation. */
   baseDirectory?: string;
-  /** Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) */
+  /** Directory to read/store configuration (default: current directory) */
   configDir?: string;
   /** Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. */
   configOnly?: boolean;
@@ -251,7 +251,7 @@ export interface InitOptions extends CommonOptions {
   noGitignore?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
-  /** Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) */
+  /** Do not prompt, and use default of all prompts */
   useDefaults?: boolean;
 }
 
@@ -365,8 +365,8 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 // ---------------------------------------------------------------------------
 
 export interface PackageOptions extends CommonOptions {
-  /** One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
-  inputFolder: string | string[];
+  /** Input folder with package layout */
+  inputFolder: string;
   /** Path to signing certificate (will auto-sign if provided) */
   cert?: string;
   /** Certificate password (default: password) */
@@ -381,7 +381,7 @@ export interface PackageOptions extends CommonOptions {
   manifest?: string;
   /** Package name (default: from manifest) */
   name?: string;
-  /** Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. */
+  /** Output msix file name for the generated package (defaults to <name>_<version>_<arch>.msix, falling back to <name>_<version>.msix, <name>_<arch>.msix, or <name>.msix when version/arch can't be determined) */
   output?: string;
   /** Publisher name for certificate generation */
   publisher?: string;
@@ -396,8 +396,7 @@ export interface PackageOptions extends CommonOptions {
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];
-  const inputFolderArr = Array.isArray(options.inputFolder) ? options.inputFolder : [options.inputFolder];
-  args.push(...inputFolderArr);
+  args.push(options.inputFolder);
   if (options.cert) args.push('--cert', options.cert);
   if (options.certPassword) args.push('--cert-password', options.certPassword);
   if (options.executable) args.push('--executable', options.executable);
@@ -441,7 +440,7 @@ export interface RunOptions extends CommonOptions {
   /** Input folder containing the app to run */
   inputFolder: string;
   /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
-  appArgs?: string | string[];
+  appArgs?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
@@ -474,10 +473,7 @@ export interface RunOptions extends CommonOptions {
 export async function run(options: RunOptions): Promise<WinappResult> {
   const args: string[] = ['run'];
   args.push(options.inputFolder);
-  if (options.appArgs) {
-    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
-    args.push(...appArgsArr);
-  }
+  if (options.appArgs) args.push(options.appArgs);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
   if (options.debugOutput) args.push('--debug-output');

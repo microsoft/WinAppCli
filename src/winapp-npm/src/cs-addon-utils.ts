@@ -3,7 +3,6 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { checkAndInstallDotnetSdk, checkAndInstallVisualStudio } from './dependency-utils';
-import { mutatePackageJsonDoc } from './jsbindings/package-json-doc';
 
 export interface GenerateCsAddonOptions {
   name?: string;
@@ -322,42 +321,47 @@ async function installNodeApiDotnet(projectRoot: string, verbose: boolean): Prom
  * @param verbose - Enable verbose logging
  */
 async function addCsBuildScripts(addonName: string, projectRoot: string, verbose: boolean): Promise<void> {
+  const packageJsonPath = path.join(projectRoot, 'package.json');
+
+  // Read current package.json
+  const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+  const packageJson = JSON.parse(packageJsonContent);
+
+  // Initialize scripts if it doesn't exist
+  if (!packageJson.scripts) {
+    packageJson.scripts = {};
+  }
+
   // Add build script - use publish to generate .node file
   const buildScriptName = `build-${addonName}`;
   // Use dotnet publish - RuntimeIdentifier is set in the .csproj with a default
   // Can be overridden with: npm run build-csAddon -- /p:RuntimeIdentifier=win-arm64
   const buildCommand = `dotnet publish ./${addonName}/${addonName}.csproj -c Release`;
 
+  if (packageJson.scripts[buildScriptName]) {
+    if (verbose) {
+      console.log(`⚠️  Build script '${buildScriptName}' already exists, skipping`);
+    }
+  } else {
+    packageJson.scripts[buildScriptName] = buildCommand;
+    if (verbose) {
+      console.log(`📝 Added build script: ${buildScriptName}`);
+    }
+  }
+
   // Add clean script (without cs- prefix)
   const cleanScriptName = `clean-${addonName}`;
   const cleanCommand = `dotnet clean ./${addonName}/${addonName}.csproj`;
 
-  mutatePackageJsonDoc(projectRoot, (packageJson) => {
-    const scripts =
-      packageJson.scripts && typeof packageJson.scripts === 'object'
-        ? (packageJson.scripts as Record<string, string>)
-        : {};
-
-    if (scripts[buildScriptName]) {
-      if (verbose) {
-        console.log(`⚠️  Build script '${buildScriptName}' already exists, skipping`);
-      }
-    } else {
-      scripts[buildScriptName] = buildCommand;
-      if (verbose) {
-        console.log(`📝 Added build script: ${buildScriptName}`);
-      }
+  if (!packageJson.scripts[cleanScriptName]) {
+    packageJson.scripts[cleanScriptName] = cleanCommand;
+    if (verbose) {
+      console.log(`📝 Added clean script: ${cleanScriptName}`);
     }
+  }
 
-    if (!scripts[cleanScriptName]) {
-      scripts[cleanScriptName] = cleanCommand;
-      if (verbose) {
-        console.log(`📝 Added clean script: ${cleanScriptName}`);
-      }
-    }
-
-    packageJson.scripts = scripts;
-  });
+  // Write back to package.json
+  await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf8');
 }
 
 /**

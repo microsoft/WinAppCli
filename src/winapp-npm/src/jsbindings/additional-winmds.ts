@@ -1,18 +1,14 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Reject UNC paths before probing to avoid SMB/NTLM leakage.
-// Reject reparse-point ancestors; workspace paths use workspace as boundary,
-// and absolute paths outside the workspace use the drive root.
+// Reject UNC before probing to avoid SMB/NTLM leakage, and reject reparse ancestors.
+// Workspace paths use the workspace boundary; external absolute paths use the drive root.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { isNetworkPath, hasReparsePointOnPath } from './path-safety';
 
-/**
- * Package.json entry; `winmdPath` alone bulk-emits,
- * while namespace+classes cherry-picks.
- */
+/** package.json entry: `winmdPath` bulk-emits; namespace+classes cherry-picks. */
 export interface AdditionalWinmd {
   winmdPath?: string;
   namespace?: string;
@@ -56,9 +52,8 @@ export function resolveAdditionalWinmds(
       ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
       : [];
 
-    // Path-less entry: rely on dynwinrt-codegen auto-detect (Windows.winmd in
-    // the Windows SDK) — requires namespace+classes to be useful, otherwise
-    // the entry has no actionable content.
+    // Path-less entry: rely on SDK Windows.winmd auto-detect.
+    // Without namespace+classes, there's nothing actionable.
     if (!rawPath) {
       if (!ns || classes.length === 0) {
         warnings.push(
