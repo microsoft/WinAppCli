@@ -95,3 +95,37 @@ test('tryReadLockfile refuses winmd paths outside the recorded nuget cache', () 
     assert.match(reason ?? '', /outside the recorded/i);
   });
 });
+
+test('tryReadLockfile refuses missing winmd paths inside the recorded nuget cache', () => {
+  withWorkspace((dir) => {
+    const cacheDir = path.join(dir, 'cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const missingWinmd = path.join(cacheDir, 'Missing.winmd');
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: cacheDir,
+      packages: [{ name: 'Pkg', version: '1.0', winmds: [missingWinmd] }],
+    });
+
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(lockfile, null);
+    assert.match(reason ?? '', /missing/i);
+  });
+});
+
+test('tryReadLockfile refuses winmd paths that resolve to directories', () => {
+  withWorkspace((dir) => {
+    const cacheDir = path.join(dir, 'cache');
+    const directoryWinmd = path.join(cacheDir, 'Directory.winmd');
+    fs.mkdirSync(directoryWinmd, { recursive: true });
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: cacheDir,
+      packages: [{ name: 'Pkg', version: '1.0', winmds: [directoryWinmd] }],
+    });
+
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(lockfile, null);
+    assert.match(reason ?? '', /not files/i);
+  });
+});

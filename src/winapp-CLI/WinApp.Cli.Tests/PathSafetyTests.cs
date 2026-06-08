@@ -6,13 +6,8 @@ using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
 
-// Direct tests for the shared PathSafety helper. Pre-r3 the helper was
-// only covered indirectly (through ConfigService / WinmdsLockfileService),
-// which made it easy for the helper to drift: e.g. the
-// pre-r3 implementation used FileInfo.Exists internally, which probes the
-// filesystem before the reparse-point flag check — defeating the helper's
-// stated purpose. These tests pin the API directly so future edits can't
-// silently regress the contract.
+// Direct coverage for the shared PathSafety contract: reject UNC/reparse paths
+// before any filesystem probe can follow attacker-controlled redirects.
 [TestClass]
 public class PathSafetyTests
 {
@@ -209,10 +204,7 @@ public class PathSafetyTests
         }
     }
 
-    // Spawns `cmd /c mklink /J` to create a junction (the only reparse-
-    // point creation that does NOT require Developer Mode / admin on a
-    // typical CI box). Returns false on any failure so callers can mark
-    // the test inconclusive instead of failing.
+    // Creates a junction when the host permits it; callers mark false as inconclusive.
     private static bool TryCreateJunction(string link, string target)
     {
         try
@@ -241,18 +233,13 @@ public class PathSafetyTests
     }
 
     // ---------------------------------------------------------------------
-    // Drive-root boundary regression (round-4 M1)
+    // Drive-root boundary
     // ---------------------------------------------------------------------
 
     [TestMethod]
     public void HasReparsePointOnPath_DriveRootBoundary_StillRejectsJunctionDescendant()
     {
-        // If the boundary is a bare drive root (`C:\`) the descent loop
-        // must still call Path.Combine with a rooted prefix — otherwise
-        // Path.Combine("C:", "foo") yields a drive-relative "C:foo"
-        // (resolved against the per-drive CWD), the wrong inode is
-        // probed, and the reparse-point flag is missed. This test pins
-        // that the drive-root path is normalized to keep the separator.
+        // Drive-root boundaries must remain rooted so descendant junctions are probed.
         var junctionDir = Path.Combine(_tempDir.FullName, "boundary-drive-root-junction");
         if (!TryCreateJunction(junctionDir, Path.GetTempPath()))
         {
@@ -262,8 +249,7 @@ public class PathSafetyTests
 
         try
         {
-            // Boundary = drive root (e.g. `C:\`). Path is a junction
-            // descendant. Pre-r4 this silently returned false (allowed).
+            // Boundary = drive root (e.g. `C:\`). Path is a junction descendant.
             var drive = Path.GetPathRoot(_tempDir.FullName)!;
             var leaf = Path.Combine(junctionDir, "victim.yaml");
             bool unsafePath = PathSafety.HasReparsePointOnPath(leaf, drive);
@@ -276,7 +262,7 @@ public class PathSafetyTests
     }
 
     // ---------------------------------------------------------------------
-    // AtomicWriteAllTextAsync (round-4 M3)
+    // AtomicWriteAllTextAsync
     // ---------------------------------------------------------------------
 
     [TestMethod]
@@ -308,11 +294,7 @@ public class PathSafetyTests
     [TestMethod]
     public async Task AtomicWriteAllTextAsync_DestinationDirMissing_ThrowsAndCleansSiblingTemp()
     {
-        // Stage failure: the sibling temp creation calls FileStream with
-        // FileMode.CreateNew under a non-existent parent dir, throwing
-        // DirectoryNotFoundException. The cleanup branch must still run
-        // so we don't leak the .tmp sibling (or in this case, prove that
-        // nothing was ever written to the missing dir's parent).
+        // Failing before temp-file creation must not leave sibling temp files behind.
         var missingDir = Path.Combine(_tempDir.FullName, "no-such-dir");
         var target = Path.Combine(missingDir, "out.yaml");
 

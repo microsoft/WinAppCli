@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// SHA-256 hex over canonical `lower(name)|version` lines from `winapp.yaml` packages.
-// Port of native `YamlPackagesHasher`; stale hashes catch package edits before codegen
-// emits against the wrong winmd set. The joined UTF-8 string must match C# byte-for-byte:
-// ASCII lowercase names, Ordinal dedupe/sort, `\n` joins, no trailing newline.
+// SHA-256 hex over canonical `lower(name)|version` lines; must match native hashing.
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -34,13 +31,7 @@ export function computeYamlPackagesHash(packages: Iterable<PackagePin>): string 
   return crypto.createHash('sha256').update(joined, 'utf8').digest('hex');
 }
 
-/**
- * Read `winapp.yaml` package pins with the native hand-rolled grammar (top-level
- * `packages`, `- name`, `version`, inline comments). No full YAML parser; missing
- * or malformed files return null so callers can proceed without drift detection.
- * Reparse-guarded: default uses workspace boundary; explicit yamlPath uses its
- * containing directory, matching native `ConfigService.GuardConfigPath`.
- */
+/** Read package pins from the subset of winapp.yaml needed for stale-lockfile checks. */
 export function readWinappYamlPackages(workspaceDir: string, yamlPath?: string): PackagePin[] | null {
   const defaultPath = path.join(workspaceDir, 'winapp.yaml');
   const resolved = yamlPath ? path.resolve(yamlPath) : defaultPath;

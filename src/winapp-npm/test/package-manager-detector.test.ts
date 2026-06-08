@@ -159,10 +159,7 @@ test('resolvePackageManagerPath ignores a launcher in the current directory (shi
 });
 
 test('resolvePackageManagerPath skips relative PATH entries (workspace-shim defense)', () => {
-  // A relative PATH entry (".", "tools", …) would join to a relative candidate
-  // that fs.statSync resolves against process.cwd(); the resulting relative
-  // path, handed to the installer running with cwd=workspaceDir, would resolve
-  // a workspace-controlled shim (CWE-426). Only absolute PATH dirs are trusted.
+  // Relative PATH entries could resolve to workspace-controlled shims.
   const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-rel-'));
   const savedCwd = process.cwd();
   try {

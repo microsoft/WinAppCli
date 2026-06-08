@@ -42,6 +42,23 @@ test('computeCherryPickInputs with explicit winmdPath adds it to emit and drops 
   assert.deepEqual(out.refs, ['r1.winmd']);
 });
 
+test('computeCherryPickInputs dedupes paths case-insensitively', () => {
+  const explicit = computeCherryPickInputs(['e1.winmd', 'PICK.winmd'], ['r1.winmd', 'pick.winmd'], {
+    winmdPath: 'pick.winmd',
+    namespace: 'Foo.Bar',
+    classes: ['Baz'],
+  });
+  assert.deepEqual(explicit.winmds, ['e1.winmd', 'PICK.winmd']);
+  assert.deepEqual(explicit.refs, ['r1.winmd']);
+
+  const pathless = computeCherryPickInputs(['e1.winmd'], ['E1.winmd', 'r1.winmd'], {
+    namespace: 'Foo.Bar',
+    classes: ['Baz'],
+  });
+  assert.deepEqual(pathless.winmds, []);
+  assert.deepEqual(pathless.refs, ['E1.winmd', 'r1.winmd']);
+});
+
 test('computeCherryPickInputs without winmdPath emits nothing and pushes emit winmds into refs', () => {
   const out = computeCherryPickInputs(['e1.winmd', 'e2.winmd'], ['r1.winmd'], {
     namespace: 'Foo.Bar',

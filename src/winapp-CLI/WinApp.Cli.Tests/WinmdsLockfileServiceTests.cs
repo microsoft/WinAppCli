@@ -229,17 +229,13 @@ public class WinmdsLockfileServiceTests
     }
 
     // ---------------------------------------------------------------------
-    // M9 — IsLockfilePathUnsafe rejects reparse-point ancestors silently
+    // Reparse-point ancestors
     // ---------------------------------------------------------------------
 
     [TestMethod]
     public async Task WriteAsync_WinappDirIsJunction_LogsAndSkipsWithoutWriting()
     {
-        // The lockfile is an optimization, not correctness. When `.winapp/`
-        // is itself (or under) a junction/symlink, refuse to write rather
-        // than throw — otherwise a malicious workspace could redirect the
-        // write to a victim file. Skipping is still safe because codegen
-        // falls back to the full discovery path on next run.
+        // Refuse unsafe lockfile targets without writing through the junction.
         var realDir = _temp.CreateSubdirectory("real-winapp");
         var winappJunction = Path.Combine(_temp.FullName, ".winapp");
         if (!TryCreateJunction(winappJunction, realDir.FullName))

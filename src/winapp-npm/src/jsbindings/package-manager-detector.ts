@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 //
 // Detects npm/yarn/pnpm/bun so hints match the workspace.
-// Ported from C# `PackageManagerDetector.cs`: Corepack field, lockfile sniffing, then npm.
-// Pure synchronous filesystem reads; no spawn.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,12 +27,7 @@ export function buildAddExactCommand(name: PackageManagerName, packageSpec: stri
   }
 }
 
-/**
- * Resolve a package manager launcher from PATH/PATHEXT, returning null if absent.
- * Security: never spawn bare `npm`; Windows `.cmd` lookup checks CWD before PATH,
- * so we pass an absolute PATH-only launcher to avoid workspace hijack (CWE-426).
- * Node's Windows env proxy also covers `Path`/`path` casing.
- */
+/** Resolve a package-manager launcher from trusted absolute PATH entries. */
 export function resolvePackageManagerPath(name: PackageManagerName): string | null {
   const rawPath = process.env.PATH;
   if (!rawPath) {

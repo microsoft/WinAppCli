@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Single chokepoint for package.json reads/writes across wrapper sites.
-// Centralizes path-safety, object validation, EOL/trailing-newline preservation,
-// and atomic sibling-temp writes with copy+unlink fallback for AV/cross-volume cases.
-// Use these helpers so JS bindings and addon scaffolders share the same policy.
+// Safe package.json read/write helpers for the JS bindings flow.
 
 import * as fs from 'fs';
 import * as path from 'path';

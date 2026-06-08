@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Runs after native restore writes the lockfile and package.json opts into JS bindings.
-// Returns structured outcomes so callers can decide what to print.
+// Orchestrates package config, lockfile policy, codegen, and runtime dependency hints.
 
 import * as path from 'path';
 import { readJsBindingsConfig } from './package-json-config';

@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 //
 // Categorizes NuGet .winmds for dynwinrt-codegen: emit, refOnly, or skip.
-// Ported from C# `JsBindingsPresets.cs`; native now writes raw inventory and npm applies policy.
 
 export type WinmdPackageCategory = 'emit' | 'refOnly' | 'skip';
 

@@ -80,15 +80,8 @@ public class YamlPackagesHasherTests
     [TestMethod]
     public void Compute_GoldenFixture_PinsHashForCrossLanguageParity()
     {
-        // PINNED REFERENCE FIXTURE — the TS implementation in
-        // src/winapp-npm/src/jsbindings/yaml-packages-hash.ts must produce
-        // EXACTLY this hex for the same logical input. If the two drift,
-        // stale-lockfile detection silently breaks (TS sees a different
-        // hash than what restore wrote, but reports no change).
-        //
-        // When updating either side, recompute on both and update this hex
-        // together. Sample inputs taken from a realistic Electron workspace
-        // (lowercase normalization, ordinal sort by `lower(name)|version`).
+        // Keep this fixture in sync with the TS implementation in
+        // src/winapp-npm/src/jsbindings/yaml-packages-hash.ts.
         var packages = new[]
         {
             new PackagePin { Name = "Microsoft.WindowsAppSDK", Version = "2.1.3" },

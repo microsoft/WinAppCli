@@ -571,11 +571,7 @@ internal class WorkspaceSetupService(
                             return (2, "No .winmd files found for C++/WinRT projection.");
                         }
 
-                        // Write the winmds lockfile alongside the cppwinrt outputs so the
-                        // npm wrapper's jsBindings orchestrator can replay the same winmd
-                        // inventory without re-walking the NuGet cache. Hash captures the
-                        // winapp.yaml `packages:` block (SDK_PACKAGES-filtered for fresh init,
-                        // config.Packages for restore) so the wrapper can detect yaml drift.
+                        // Cache the WinMD inventory for the npm JS-bindings pipeline.
                         var yamlHash = (options.RequireExistingConfig && config?.Packages.Count > 0)
                             ? YamlPackagesHasher.Compute(config.Packages)
                             : YamlPackagesHasher.ComputeFromVersions(usedVersions

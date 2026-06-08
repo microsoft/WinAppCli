@@ -17,11 +17,7 @@ internal sealed class PackageLayoutService : IPackageLayoutService
     }
 
     /// <summary>
-    /// Reverse of <see cref="GetPackageDir"/>: given a full path under the NuGet global
-    /// cache, returns the lowercased package-id segment from the
-    /// <c>&lt;cache&gt;/&lt;id-lc&gt;/&lt;version&gt;/...</c> layout, or <c>null</c> when the
-    /// path is outside the cache (e.g. user-supplied additionalWinmds). Single owner of the
-    /// cache layout convention so callers (lockfile writer) don't re-encode it.
+    /// Returns the package-id segment for a path under the NuGet cache, or null if outside it.
     /// </summary>
     public static string? TryGetPackageIdFromPath(DirectoryInfo nugetCacheDir, string fullPath)
     {
@@ -32,6 +28,7 @@ internal sealed class PackageLayoutService : IPackageLayoutService
         {
             return null;
         }
+
         var rel = normPath.Substring(normCache.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var firstSep = rel.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
         return firstSep <= 0 ? null : rel.Substring(0, firstSep).ToLowerInvariant();

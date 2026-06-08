@@ -1,11 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Stage-then-swap preserves previous bindings on codegen failure.
-// Wiped output dirs require containment/reparse checks; spawn uses argv, not shell text.
-// winmd/ref paths are handed to codegen via newline-separated list files (written to a
-// temp dir, removed in finally) instead of ';'-joined argv, which would overflow the
-// Windows command-line limit when 100+ scattered winmd paths are involved.
+// Runs dynwinrt-codegen with stage/swap output safety and temp winmd/ref list files.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -240,29 +236,22 @@ export function writeListFile(listDir: string, name: string, paths: readonly str
 }
 
 /**
- * Partition cherry-pick inputs into the winmds to load+emit-from vs refs.
- * Mirrors the bulk pass: an explicit winmd is loaded alongside the bulk emit set
- * so the picked class resolves. A path-less pick has no root winmd to emit, so
- * bulk emit winmds move into refs for type resolution without bulk-generating them again.
+ * Partition cherry-pick inputs into emit roots and type-resolution refs.
  */
 export function computeCherryPickInputs(
   emitWinmds: readonly string[],
   refWinmds: readonly string[],
   cp: CodegenCherryPick
 ): { winmds: string[]; refs: string[] } {
-  // refWinmds and emitWinmds are disjoint (runCodegen drops emit from refs).
-  const refSet = new Set<string>(refWinmds);
   if (cp.winmdPath) {
-    const winmdSet = new Set<string>(emitWinmds);
-    winmdSet.add(cp.winmdPath);
-    refSet.delete(cp.winmdPath);
-    return { winmds: Array.from(winmdSet), refs: Array.from(refSet) };
+    const pickPath = cp.winmdPath;
+    return {
+      winmds: dedupeCaseInsensitive([...emitWinmds, pickPath]),
+      refs: dedupeCaseInsensitive(refWinmds.filter((r) => !samePathCaseInsensitive(r, pickPath))),
+    };
   }
   // No root winmd: keep the bulk emit metadata available for type resolution only.
-  for (const w of emitWinmds) {
-    refSet.add(w);
-  }
-  return { winmds: [], refs: Array.from(refSet) };
+  return { winmds: [], refs: dedupeCaseInsensitive([...refWinmds, ...emitWinmds]) };
 }
 
 interface GenerateArgsOptions {
@@ -518,6 +507,9 @@ export function resolveCodegenInvocation(): CodegenInvocation {
     // @microsoft/dynwinrt-codegen instead of being duplicated here.
     const cliJs = path.join(pkgDir, 'cli.js');
     if (fs.existsSync(cliJs)) {
+      if (hasReparsePointOnPath(cliJs, path.parse(cliJs).root || pkgDir)) {
+        continue;
+      }
       const nodePath = resolveTrustedNodeInterpreter();
       if (!nodePath) {
         throw new Error(
@@ -719,4 +711,8 @@ function dedupeCaseInsensitive(items: readonly string[]): string[] {
     }
   }
   return out;
+}
+
+function samePathCaseInsensitive(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
 }

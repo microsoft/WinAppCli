@@ -5,21 +5,11 @@ using System.IO;
 
 namespace WinApp.Cli.Helpers;
 
-// Filesystem-safety helpers shared by every "write into the user's workspace"
-// site (e.g. WinmdsLockfileService).
+// Filesystem-safety helpers for workspace writes and lockfiles.
 internal static class PathSafety
 {
-    // True if `path` is not safely contained under `boundary`, if any segment
-    // from `boundary` down to `path` is a reparse point, or if either side is
-    // a UNC path.
-    //
-    // Walks DOWN from `boundary` (not UP from `path`): walking up forces the
-    // OS to traverse symlinks/junctions in `path` to look up the leaf's
-    // attributes, which on Windows can trigger SMB negotiation (and NTLM
-    // leak) before the reparse-point flag is visible. Uses File.GetAttributes
-    // (FileInfo.Exists / DirectoryInfo.Exists call FindFirstFile internally,
-    // same SMB-probe hazard). Missing segments are skipped — callers about to
-    // create the file still pass the guard.
+    // Rejects paths outside boundary, UNC paths, and reparse points below boundary.
+    // Walks downward so symlinks/junctions are detected before they can be followed.
     public static bool HasReparsePointOnPath(string path, string boundary)
     {
         string fullPath;
@@ -126,10 +116,7 @@ internal static class PathSafety
         return false;
     }
 
-    // Trims trailing separators but preserves the root separator on bare
-    // drive designators. `C:\` collapsed to `C:` would make Path.Combine
-    // produce drive-relative paths (`C:foo` → resolved against the per-drive
-    // CWD), silently bypassing the reparse-point check.
+    // Preserve `C:\`; `C:` is drive-relative and would probe the wrong path.
     private static string NormalizeForContainment(string path)
     {
         var trimmed = TrimTrailingSeparators(path);

@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Tiny dependency-free spinner for codegen, using existing ANSI cursor escapes.
-// TTY animates/clears; non-TTY prints once; SIGINT restores the cursor before re-raising.
+// Tiny dependency-free spinner for codegen progress.
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const FRAME_INTERVAL_MS = 80;

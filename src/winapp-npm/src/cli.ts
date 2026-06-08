@@ -75,15 +75,7 @@ export async function main(): Promise<void> {
       return;
     }
 
-    // Intercept init/restore so we can run the JS bindings pre-/post-hooks
-    // around the native command. Help / completion flags bypass the hook.
-    //
-    // Fast-path: `init --setup-sdks none` has no JS bindings to wire up
-    // (the dynwinrt codegen needs SDK winmds to compile against), so we
-    // pass it straight through to the native CLI. This preserves the
-    // pre-wrapper UX exactly — no extra yaml read, no informational log
-    // line, no behaviour change. Users who want to refresh existing JS
-    // bindings should run `winapp restore` (which is still intercepted).
+    // JS-binding hooks wrap init/restore; help/completion and SDK-less init pass through.
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
         if (parseSetupSdksArg(commandArgs) === 'none') {

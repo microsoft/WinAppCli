@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// JS bindings intercept hooks for the npm wrapper. The native CLI is unaware of
-// JS bindings; these handlers wrap native `init` / `restore` (and add the
-// standalone `node generate-bindings` command) with the dynwinrt-codegen flow.
-// Extracted from the cli.ts dispatcher to keep it a thin router.
+// JS-binding hooks layered around native init/restore.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,12 +25,7 @@ import {
 import { assertSafeWorkspaceFile } from './path-safety';
 import { evaluateGenerateBindingsPreflight } from './generate-bindings-preflight';
 
-/**
- * `node generate-bindings`: re-run dynwinrt-codegen from the cached
- * `winapp.jsBindings` block + `.winapp/winmds.lock.json`, skipping the heavy
- * native restore. Passive — only reads those two inputs, never writes
- * package.json; preflight fails fast when a prerequisite is missing.
- */
+/** Passive `node generate-bindings`: read package config + lockfile, then run codegen. */
 export async function handleGenerateBindings(args: string[]): Promise<void> {
   const options = parseArgs(args, {
     verbose: false,
@@ -94,11 +86,7 @@ export function printInitWrapperOnlyHelp(): void {
   console.log('                        (the dependency is still added to package.json).');
 }
 
-/**
- * `init` intercept: run native init, prompt for JS bindings, then (on opt-in)
- * write the `winapp.jsBindings` block and orchestrate dynwinrt-codegen. The
- * native CLI is unaware of JS bindings — its behavior is identical either way.
- */
+/** `init` hook: run native init, then optionally add and generate JS bindings. */
 export async function handleInit(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(args);
   const quiet = isQuiet(args);

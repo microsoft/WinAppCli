@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Declares `@microsoft/dynwinrt` as a prod dependency and returns hint-friendly outcomes.
-// Ported from C# `UserPackageJsonService.cs`: shared package-json-doc guards reparse paths,
-// preserves unrelated keys/layout, writes atomically, and never auto-promotes dev→prod pins.
+// Declares `@microsoft/dynwinrt` as a production dependency.
 
 import * as os from 'os';
 import { readPackageJsonDoc, mutatePackageJsonDoc } from './package-json-doc';
@@ -44,7 +42,7 @@ export function ensureRuntimeDependency(
       return { outcome: 'alreadyPresent' };
     }
     if (typeof existing === 'string') {
-      // Overwrite stale pins so codegen/runtime stay ABI-locked; mismatches can panic.
+      // Keep the runtime package aligned with the codegen-declared dependency.
       mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
       return { outcome: 'added', pinnedVersion: version };
     }

@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Installs `@microsoft/dynwinrt` during init so generated bindings run immediately.
-// Best-effort: codegen and package.json already succeeded, so install failures warn.
+// Best-effort runtime dependency installer for init.
 
 import { spawnSync, SpawnSyncOptions } from 'child_process';
 import { PackageManagerName, buildAddExactCommand, resolvePackageManagerPath } from './package-manager-detector';
@@ -15,10 +14,6 @@ export interface RuntimeInstallResult {
   error?: string;
 }
 
-/**
- * Build `cmd.exe /d /s /c` for an absolute `.cmd` shim.
- * Outer quotes survive `/s` stripping so spaced paths still resolve (cross-spawn pattern).
- */
 /** Visible for unit tests. */
 export function buildWindowsCmdLine(exePath: string, args: string[]): string {
   const inner = `"${exePath}" ${args.map(quoteForCmd).join(' ')}`;
@@ -34,11 +29,7 @@ function quoteForCmd(arg: string): string {
   return `"${arg.replace(/"/g, '""')}"`;
 }
 
-/**
- * Install exact-pinned runtime into `workspaceDir`, synchronously for exit-code mapping.
- * Security: resolve an absolute PATH-only launcher; on Windows, run `.cmd` via cmd.exe
- * per post-CVE-2024-27980 guidance, avoiding EINVAL and CWD-first hijack.
- */
+/** Install the exact-pinned runtime dependency into `workspaceDir`. */
 export function installRuntimeDependency(
   workspaceDir: string,
   packageName: string,
@@ -63,11 +54,15 @@ export function installRuntimeDependency(
 
   const result =
     process.platform === 'win32'
-      ? spawnSync('cmd.exe', ['/d', '/s', '/c', buildWindowsCmdLine(exePath, args)], {
-          ...spawnOptions,
-          shell: false,
-          windowsVerbatimArguments: true,
-        })
+      ? spawnSync(
+          process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+          ['/d', '/s', '/c', buildWindowsCmdLine(exePath, args)],
+          {
+            ...spawnOptions,
+            shell: false,
+            windowsVerbatimArguments: true,
+          }
+        )
       : spawnSync(exePath, args, { ...spawnOptions, shell: false });
 
   if (result.error) {

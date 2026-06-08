@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Small constants/utilities shared between the CLI dispatcher (`cli.ts`) and
-// the intercept hooks (`jsbindings/cli-hooks.ts`). Lives in its own module so
-// the two can depend on it without forming an import cycle.
+// Shared constants/utilities for the CLI dispatcher and JS-binding hooks.
 
 // CLI name - change this to rebrand the tool
 export const CLI_NAME = 'winapp';

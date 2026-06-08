@@ -37,10 +37,7 @@ test('isNetworkPath flags DOS-device UNC paths (\\\\?\\UNC\\ and \\\\.\\UNC\\)',
 });
 
 test('hasReparsePointOnPath accepts an absolute path contained under its drive root (regression: C:\\ boundary)', () => {
-  // Before the drive-root normalization fix, a drive-root boundary collapsed
-  // to a bare `C:` whose `path.resolve()` yields the per-drive CWD, so a
-  // legitimate same-drive absolute path was wrongly reported as "outside
-  // boundary". The temp dir is a normal directory under the drive root.
+  // Drive-root boundaries must stay rooted (`C:\`) instead of becoming drive-relative (`C:`).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-ps-'));
   try {
     const root = path.parse(dir).root; // e.g. "C:\\" or "/"

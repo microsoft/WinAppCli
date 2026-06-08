@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Filesystem-safety helpers ported from C# `PathSafety` for workspace writes and winmd paths.
-// Match native invariants: reject UNC (`\\?\UNC\…`, `\\.\UNC\…`) but not local DOS devices,
-// and walk DOWN from boundary to avoid SMB/NTLM leaks before detecting reparse points.
+// Filesystem-safety helpers for workspace writes and winmd paths.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -98,12 +96,12 @@ function isReparseSegment(p: string): boolean {
   try {
     stat = fs.lstatSync(p);
   } catch (err) {
-    // Missing leaf is fine; permission/other errors surface on the later write.
+    // Missing leaf is fine; unknown/permission errors mean we cannot prove safety.
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       return false;
     }
-    return false;
+    return true;
   }
   return stat.isSymbolicLink();
 }

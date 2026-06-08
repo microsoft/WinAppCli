@@ -160,6 +160,17 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
         droppedPaths.push(w);
         continue;
       }
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(resolved);
+      } catch {
+        droppedPaths.push(w);
+        continue;
+      }
+      if (!stat.isFile()) {
+        droppedPaths.push(w);
+        continue;
+      }
       winmdsArr.push(w);
     }
     packages.push({ name, version, winmds: winmdsArr });
@@ -173,7 +184,7 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
       lockfile: null,
       reason:
         `Lockfile ${filePath} contains ${droppedPaths.length} winmd path(s) outside the recorded ` +
-        `nuget_cache_dir or via UNC / reparse points: ${head}${suffix}. ` +
+        `nuget_cache_dir, missing, not files, or via UNC / reparse points: ${head}${suffix}. ` +
         'Re-run `winapp restore` to regenerate from a trusted NuGet cache.',
     };
   }

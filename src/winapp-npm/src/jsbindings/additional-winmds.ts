@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Reject UNC before probing to avoid SMB/NTLM leakage, and reject reparse ancestors.
-// Workspace paths use the workspace boundary; external absolute paths use the drive root.
+// Resolve user winmd entries with UNC/reparse guards.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,7 +15,7 @@ export interface AdditionalWinmd {
 }
 
 export interface ResolvedAdditionalWinmd {
-  /** Absolute path after UNC/reparse checks; undefined for auto-detect entries. */
+  /** Absolute path after UNC/reparse checks; undefined for path-less cherry-pick entries. */
   winmdPath?: string;
   namespace?: string;
   classes?: string[];
@@ -52,7 +51,7 @@ export function resolveAdditionalWinmds(
       ? entry.classes.map((c) => (typeof c === 'string' ? c.trim() : '')).filter((c) => c.length > 0)
       : [];
 
-    // Path-less entry: rely on SDK Windows.winmd auto-detect.
+    // Path-less entries resolve from codegen metadata already present in the generation pass.
     // Without namespace+classes, there's nothing actionable.
     if (!rawPath) {
       if (!ns || classes.length === 0) {
