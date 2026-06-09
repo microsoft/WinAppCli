@@ -127,6 +127,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
 
                 // Human-readable output with metadata
                 var fgHwnd = (nint)Windows.Win32.PInvoke.GetForegroundWindow();
+                var displayedCount = 0;
                 foreach (var w in windows)
                 {
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
@@ -137,6 +138,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                         continue;
                     }
 
+                    displayedCount++;
                     var procName = Markup.Escape(GetProcessNameSafe(w.Pid));
                     var titleDisplay = string.IsNullOrEmpty(w.Title)
                         ? "Untitled window"
@@ -148,7 +150,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                     ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: {titleDisplay} [grey]({label}, {info.Width}x{info.Height}{fg}{owner}) [[{className}]] ({procName}, PID {w.Pid})[/]");
                 }
 
-                logger.LogInformation("Found {Count} windows", windows.Count);
+                logger.LogInformation("Found {Count} windows", displayedCount);
                 return 0;
             }
             catch (Exception ex)
