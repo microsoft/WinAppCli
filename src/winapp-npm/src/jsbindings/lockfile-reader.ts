@@ -30,6 +30,12 @@ export function getLockfilePath(workspaceDir: string): string {
   return path.join(workspaceDir, '.winapp', LOCKFILE_NAME);
 }
 
+export function lockfileExists(workspaceDir: string): boolean {
+  const filePath = getLockfilePath(workspaceDir);
+  assertSafeWorkspaceFile(workspaceDir, filePath, LOCKFILE_NAME);
+  return fs.existsSync(filePath);
+}
+
 export interface ReadLockfileResult {
   lockfile: WinmdsLockfile | null;
   /** Human-readable reason when null and a file existed or was unsafe. */

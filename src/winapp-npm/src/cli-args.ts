@@ -8,8 +8,7 @@ import * as path from 'path';
 /** Options that consume the next argv token as a value (space-separated form). */
 const VALUE_TAKING_OPTIONS = new Set(['--config-dir', '--config', '--setup-sdks']);
 
-/** `--use-defaults` / `-y` / `--yes`. */
-const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '--no-prompt', '-y', '--yes']);
+const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '--no-prompt']);
 
 /** Resolve the workspace root used for package.json, .winapp, and bindings output. */
 export function resolveWorkspaceDir(args: readonly string[]): string {
@@ -54,24 +53,7 @@ export function hasConfigOnly(args: readonly string[]): boolean {
   return args.includes('--config-only');
 }
 
-/** Detect `--no-install` — opt out of auto-installing the runtime dependency. */
-export function hasNoInstall(args: readonly string[]): boolean {
-  return args.includes('--no-install');
-}
-
-/**
- * Flags the npm wrapper handles itself and that the native CLI does NOT
- * recognize. They must be stripped from any argv forwarded to the native CLI,
- * or it errors out on the unknown option.
- */
-export const WRAPPER_ONLY_FLAGS: ReadonlySet<string> = new Set(['--no-install']);
-
-/** Remove wrapper-only flags (e.g. `--no-install`) before forwarding to native. */
-export function stripWrapperOnlyFlags(args: readonly string[]): string[] {
-  return args.filter((a) => !WRAPPER_ONLY_FLAGS.has(a));
-}
-
-/** Detect `--use-defaults` / `--no-prompt` / `-y` / `--yes`. */
+/** Detect `--use-defaults` / `--no-prompt`. */
 export function hasUseDefaults(args: readonly string[]): boolean {
   return args.some((a) => USE_DEFAULTS_FLAGS.has(a));
 }

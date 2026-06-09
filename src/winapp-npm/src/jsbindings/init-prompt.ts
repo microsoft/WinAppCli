@@ -27,7 +27,7 @@ export interface BindingsPromptOutcome {
   overwriteExistingConfig?: boolean;
 }
 
-const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '--no-prompt', '-y', '--yes']);
+const USE_DEFAULTS_FLAGS = new Set(['--use-defaults', '--no-prompt']);
 
 export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<BindingsPromptOutcome> {
   // Restore never re-prompts: respect whatever the workspace already declares.
@@ -101,11 +101,11 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
 
   const useDefaults = inputs.argv.some((a) => USE_DEFAULTS_FLAGS.has(a));
   if (useDefaults) {
-    return { kind: 'yes', silentReason: '--use-defaults — opting in to JS bindings.' };
+    return { kind: 'no', silentReason: '--use-defaults — skipping JS bindings.' };
   }
 
   if (!process.stdin.isTTY) {
-    return { kind: 'yes', silentReason: 'non-TTY stdin — defaulting to Yes.' };
+    return { kind: 'no', silentReason: 'non-TTY stdin — skipping JS bindings.' };
   }
 
   const answer = await confirmationPrompt('Add JS/TypeScript bindings to this project?');

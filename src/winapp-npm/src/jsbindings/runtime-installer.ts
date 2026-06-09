@@ -40,7 +40,7 @@ export function installRuntimeDependency(
   const { exe, args } = buildAddExactCommand(pmName, spec);
   const command = `${exe} ${args.join(' ')}`;
 
-  const exePath = resolvePackageManagerPath(pmName);
+  const exePath = resolvePackageManagerPath(pmName, workspaceDir);
   if (!exePath) {
     return { ok: false, command, error: `${pmName} was not found on PATH` };
   }
@@ -55,7 +55,7 @@ export function installRuntimeDependency(
   const result =
     process.platform === 'win32'
       ? spawnSync(
-          process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+          'C:\\Windows\\System32\\cmd.exe',
           ['/d', '/s', '/c', buildWindowsCmdLine(exePath, args)],
           {
             ...spawnOptions,

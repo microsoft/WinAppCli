@@ -5,6 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { hasReparsePointOnPath, isNetworkPath } from './path-safety';
 
 export type PackageManagerName = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
@@ -28,12 +29,14 @@ export function buildAddExactCommand(name: PackageManagerName, packageSpec: stri
 }
 
 /** Resolve a package-manager launcher from trusted absolute PATH entries. */
-export function resolvePackageManagerPath(name: PackageManagerName): string | null {
+export function resolvePackageManagerPath(name: PackageManagerName, workspaceDir?: string): string | null {
   const rawPath = process.env.PATH;
   if (!rawPath) {
     return null;
   }
   const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
+  const workspaceFull = workspaceDir ? path.resolve(workspaceDir) : null;
+  const cwdFull = path.resolve(process.cwd());
 
   // Windows tries PATHEXT variants (npm.cmd/npm.exe); other platforms use no extension.
   const exts =
@@ -44,20 +47,31 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
           .filter((e) => e.length > 0)
       : [''];
 
-  for (const dir of dirs) {
+  for (const dirRaw of dirs) {
+    const dir = dirRaw.replace(/^"|"$/g, '').trim();
     // Skip relative PATH entries: they resolve through CWD/workspace and enable CWE-426 hijack.
-    if (!path.isAbsolute(dir)) {
+    if (!dir || !path.isAbsolute(dir) || isNetworkPath(dir)) {
+      continue;
+    }
+    const resolvedDir = path.resolve(dir);
+    if (isPathUnderOrEqual(resolvedDir, cwdFull) || (workspaceFull && isPathUnderOrEqual(resolvedDir, workspaceFull))) {
       continue;
     }
     for (const ext of exts) {
-      const candidate = path.join(dir, `${name}${ext}`);
+      const candidate = path.join(resolvedDir, `${name}${ext}`);
       try {
         if (!fs.statSync(candidate).isFile()) {
           continue;
         }
         // Collapse symlinks/junctions so the spawned absolute path can't redirect to untrusted code.
         const real = fs.realpathSync.native(candidate);
-        if (!path.isAbsolute(real)) {
+        if (
+          !path.isAbsolute(real) ||
+          isNetworkPath(real) ||
+          hasReparsePointOnPath(candidate, path.parse(candidate).root || resolvedDir) ||
+          isPathUnderOrEqual(real, cwdFull) ||
+          (workspaceFull && isPathUnderOrEqual(real, workspaceFull))
+        ) {
           continue;
         }
         return real;
@@ -67,6 +81,12 @@ export function resolvePackageManagerPath(name: PackageManagerName): string | nu
     }
   }
   return null;
+}
+
+function isPathUnderOrEqual(candidate: string, root: string): boolean {
+  const c = path.resolve(candidate).toLowerCase();
+  const r = path.resolve(root).replace(/[\\/]+$/, '').toLowerCase();
+  return c === r || c.startsWith(r + path.sep.toLowerCase());
 }
 
 export function detectPackageManager(workspaceDir: string): DetectedPackageManager {

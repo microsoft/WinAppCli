@@ -5,7 +5,6 @@ import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { parseSetupSdksArg } from './jsbindings/init-prompt';
-import { stripWrapperOnlyFlags } from './cli-args';
 import { CLI_NAME, parseArgs, logErrorAndExit } from './cli-shared';
 import { handleInit, handleRestore, handleGenerateBindings, printInitWrapperOnlyHelp } from './jsbindings/cli-hooks';
 import { spawn } from 'child_process';
@@ -66,11 +65,9 @@ export async function main(): Promise<void> {
       return;
     }
 
-    // `init --help` falls through to native help, which has no knowledge of the
-    // wrapper-only options we add (e.g. --no-install). Run native help, then
-    // append a short addendum so the flag is discoverable.
+    // `init --help` falls through to native help; append wrapper notes after it.
     if (command === 'init' && commandArgs.some((a) => HELP_FLAGS.has(a))) {
-      await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
+      await callWinappCli(args, { exitOnError: true });
       printInitWrapperOnlyHelp();
       return;
     }
@@ -79,9 +76,7 @@ export async function main(): Promise<void> {
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
         if (parseSetupSdksArg(commandArgs) === 'none') {
-          // Fast path: no JS bindings to wire up. Still strip wrapper-only
-          // flags (e.g. --no-install) — the native CLI rejects them.
-          await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
+          await callWinappCli(args, { exitOnError: true });
           return;
         }
         await handleInit(commandArgs);

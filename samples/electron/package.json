@@ -22,6 +22,7 @@
   "author": "Sample Author",
   "license": "MIT",
   "dependencies": {
+    "@microsoft/dynwinrt": "0.1.0-preview.6",
     "electron-squirrel-startup": "^1.0.1",
     "node-api-dotnet": "^0.9.18"
   },

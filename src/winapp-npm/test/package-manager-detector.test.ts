@@ -173,3 +173,25 @@ test('resolvePackageManagerPath skips relative PATH entries (workspace-shim defe
     fs.rmSync(cwdDir, { recursive: true, force: true });
   }
 });
+
+test('resolvePackageManagerPath skips launchers under the workspace', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-workspace-'));
+  try {
+    const launcher = path.join(workspace, `npm${launcherExt}`);
+    fs.writeFileSync(launcher, '');
+    withEnv({ PATH: workspace, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm', workspace), null);
+    });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath skips UNC PATH entries', () => {
+  if (!isWin) {
+    return;
+  }
+  withEnv({ PATH: '\\\\server\\share', PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+    assert.equal(resolvePackageManagerPath('npm'), null);
+  });
+});

@@ -11,7 +11,6 @@ import {
   isVerbose,
   isQuiet,
   hasConfigOnly,
-  hasNoInstall,
   hasUseDefaults,
   resolveYamlPath,
 } from '../src/cli-args';
@@ -55,14 +54,14 @@ test('boolean flag helpers detect their flags anywhere in argv', () => {
   assert.equal(hasConfigOnly(['--config-only']), true);
   assert.equal(hasConfigOnly([]), false);
 
-  assert.equal(hasNoInstall(['init', '--no-install']), true);
-  assert.equal(hasNoInstall(['init']), false);
 });
 
 test('hasUseDefaults recognises every accepted spelling', () => {
-  for (const flag of ['--use-defaults', '--no-prompt', '-y', '--yes']) {
+  for (const flag of ['--use-defaults', '--no-prompt']) {
     assert.equal(hasUseDefaults(['init', flag]), true, `expected ${flag} to count as use-defaults`);
   }
+  assert.equal(hasUseDefaults(['init', '-y']), false);
+  assert.equal(hasUseDefaults(['init', '--yes']), false);
   assert.equal(hasUseDefaults(['init']), false);
 });
 

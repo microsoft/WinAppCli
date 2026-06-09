@@ -7,7 +7,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { tryReadLockfile, getLockfilePath, LOCKFILE_SCHEMA_VERSION } from '../src/jsbindings/lockfile-reader';
+import {
+  getLockfilePath,
+  lockfileExists,
+  LOCKFILE_SCHEMA_VERSION,
+  tryReadLockfile,
+} from '../src/jsbindings/lockfile-reader';
 
 function withWorkspace(fn: (dir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-lock-'));
@@ -29,6 +34,7 @@ test('tryReadLockfile returns null with no reason when the lockfile is absent', 
     const result = tryReadLockfile(dir);
     assert.equal(result.lockfile, null);
     assert.equal(result.reason, undefined);
+    assert.equal(lockfileExists(dir), false);
   });
 });
 
@@ -48,6 +54,7 @@ test('tryReadLockfile parses a valid schema-3 lockfile', () => {
     const { lockfile, reason } = tryReadLockfile(dir);
     assert.equal(reason, undefined);
     assert.ok(lockfile);
+    assert.equal(lockfileExists(dir), true);
     assert.equal(lockfile!.schemaVersion, LOCKFILE_SCHEMA_VERSION);
     assert.equal(lockfile!.yamlPackagesHash, 'abc123');
     assert.deepEqual(lockfile!.packages, [{ name: 'Pkg', version: '1.0', winmds: [winmd] }]);
