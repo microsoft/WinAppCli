@@ -461,6 +461,7 @@ List all visible windows with their HWND, title, process, and size. Use -a to fi
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
+| `--show-hidden` | Include untitled zero-size windows that are hidden by default | (none) |
 
 ### `winapp ui get-focused`
 

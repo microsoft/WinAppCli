@@ -348,6 +348,36 @@ public class UiCommandTests : BaseCommandTests
         StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
     }
 
+    [TestMethod]
+    public async Task ListWindows_ExcludesUntitledZeroSizeByDefault()
+    {
+        _fakeUia.WindowsByTitleResult = [
+            (1001, 1234, "Visible Window"),
+            (1002, 1234, "")
+        ];
+
+        var command = GetRequiredService<UiListWindowsCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("\"hwnd\": 1002"), "Untitled zero-size window should be excluded");
+    }
+
+    [TestMethod]
+    public async Task ListWindows_ShowHiddenIncludesUntitledZeroSize()
+    {
+        _fakeUia.WindowsByTitleResult = [
+            (1001, 1234, "Visible Window"),
+            (1002, 1234, "")
+        ];
+
+        var command = GetRequiredService<UiListWindowsCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--show-hidden", "--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1002");
+    }
+
     // ---------------------------------------------------------------------
     // Tree-shape edge cases (M9): ensure BuildWindows/NestElements parse
     // unusual but realistic flat lists into the right window/root layout.
