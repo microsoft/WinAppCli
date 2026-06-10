@@ -11,8 +11,10 @@ import {
   isVerbose,
   isQuiet,
   hasConfigOnly,
+  hasAddJsBindings,
   hasUseDefaults,
   resolveYamlPath,
+  stripWrapperOnlyFlags,
 } from '../src/cli-args';
 
 test('firstPositional returns the first non-option token', () => {
@@ -54,6 +56,8 @@ test('boolean flag helpers detect their flags anywhere in argv', () => {
   assert.equal(hasConfigOnly(['--config-only']), true);
   assert.equal(hasConfigOnly([]), false);
 
+  assert.equal(hasAddJsBindings(['init', '--add-js-bindings']), true);
+  assert.equal(hasAddJsBindings(['init']), false);
 });
 
 test('hasUseDefaults recognises every accepted spelling', () => {
@@ -63,6 +67,10 @@ test('hasUseDefaults recognises every accepted spelling', () => {
   assert.equal(hasUseDefaults(['init', '-y']), false);
   assert.equal(hasUseDefaults(['init', '--yes']), false);
   assert.equal(hasUseDefaults(['init']), false);
+});
+
+test('stripWrapperOnlyFlags removes wrapper-only init flags', () => {
+  assert.deepEqual(stripWrapperOnlyFlags(['.', '--add-js-bindings']), ['.']);
 });
 
 test('resolveYamlPath honours --config-dir (space and = forms)', () => {

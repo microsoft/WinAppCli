@@ -62,7 +62,7 @@ When prompted:
 - **Add JS/TypeScript bindings**: Press Enter to accept the default (**Yes**) to generate JS bindings for Windows App SDK APIs
 
 > [!NOTE]
-> `--use-defaults` and non-interactive init skip JS bindings. Run interactive `npx winapp init .` to opt in at the prompt, or add `winapp.jsBindings` later and run `npx winapp restore`.
+> `--use-defaults` and non-interactive init skip JS bindings unless you pass `--add-js-bindings`. Run interactive `npx winapp init .` to opt in at the prompt, or use `npx winapp init . --use-defaults --add-js-bindings` for automation.
 
 ### What Does `winapp init` Do?
 

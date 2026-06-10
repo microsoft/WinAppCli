@@ -17,6 +17,8 @@ export interface BindingsPromptInputs {
   existingJsBindings: boolean;
   /** True when SDK winmds exist, or codegen is deliberately deferred (`--config-only`). */
   sdksReady: boolean;
+  /** True when init was explicitly asked to add JS bindings without prompting. */
+  addJsBindings?: boolean;
 }
 
 export interface BindingsPromptOutcome {
@@ -97,6 +99,10 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
         'Windows SDKs were not set up during init, so JS bindings were skipped. ' +
         'Run `npx winapp restore` then `npx winapp node generate-bindings` to add them later.',
     };
+  }
+
+  if (inputs.addJsBindings) {
+    return { kind: 'yes', silentReason: '--add-js-bindings — opting in to JS bindings.' };
   }
 
   const useDefaults = inputs.argv.some((a) => USE_DEFAULTS_FLAGS.has(a));

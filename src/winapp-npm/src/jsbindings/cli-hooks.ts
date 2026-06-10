@@ -23,6 +23,9 @@ import {
   isVerbose,
   isQuiet,
   hasConfigOnly,
+  hasAddJsBindings,
+  hasUseDefaults,
+  stripWrapperOnlyFlags,
   firstPositional,
 } from '../cli-args';
 import { assertSafeWorkspaceFile } from './path-safety';
@@ -83,7 +86,9 @@ export async function handleGenerateBindings(args: string[]): Promise<void> {
 /** Append the wrapper-specific `init` notes the native `--help` doesn't know about. */
 export function printInitWrapperOnlyHelp(): void {
   console.log('');
-  console.log(`The ${CLI_NAME} npm wrapper can prompt for JS/TypeScript bindings after init.`);
+  console.log(`Options (added by the ${CLI_NAME} npm wrapper):`);
+  console.log('  --add-js-bindings    Add winapp.jsBindings and generate JS/TypeScript bindings');
+  console.log('                       (useful with --use-defaults or non-interactive init)');
 }
 
 /** `init` hook: run native init, then optionally add and generate JS bindings. */
@@ -91,7 +96,9 @@ export async function handleInit(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(args);
   const quiet = isQuiet(args);
   const configOnly = hasConfigOnly(args);
+  const addJsBindings = hasAddJsBindings(args);
   const explicitWorkspace = firstPositional(args) !== undefined;
+  const useDefaults = hasUseDefaults(args);
   const packageJsonExistedBeforeInit = packageJsonExists(workspaceDir);
 
   // Re-running on a configured workspace: infer the choice, don't re-prompt.
@@ -99,7 +106,17 @@ export async function handleInit(args: string[]): Promise<void> {
 
   // Native init runs first (its prompts finish, and we can gate on SDK setup).
   // Don't change child cwd: native resolves paths against its own cwd.
-  await callWinappCli(['init', ...args], { exitOnError: true });
+  await callWinappCli(['init', ...stripWrapperOnlyFlags(args)], { exitOnError: true });
+
+  if (!explicitWorkspace && !useDefaults) {
+    if (!quiet) {
+      console.log(
+        'ℹ️  JS bindings setup skipped because init may have selected a project directory. ' +
+          'Run `npx winapp restore` from that project to generate bindings.'
+      );
+    }
+    return;
+  }
 
   if (!explicitWorkspace && !packageJsonExistedBeforeInit && !packageJsonExists(workspaceDir)) {
     if (!quiet) {
@@ -122,6 +139,7 @@ export async function handleInit(args: string[]): Promise<void> {
       isInit: true,
       existingJsBindings,
       sdksReady: lockfilePresent || configOnly,
+      addJsBindings,
     });
   } catch (err) {
     logErrorAndExit(err);

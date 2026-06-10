@@ -5,6 +5,7 @@ import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { parseSetupSdksArg } from './jsbindings/init-prompt';
+import { stripWrapperOnlyFlags } from './cli-args';
 import { CLI_NAME, parseArgs, logErrorAndExit } from './cli-shared';
 import { handleInit, handleRestore, handleGenerateBindings, printInitWrapperOnlyHelp } from './jsbindings/cli-hooks';
 import { spawn } from 'child_process';
@@ -67,7 +68,7 @@ export async function main(): Promise<void> {
 
     // `init --help` falls through to native help; append wrapper notes after it.
     if (command === 'init' && commandArgs.some((a) => HELP_FLAGS.has(a))) {
-      await callWinappCli(args, { exitOnError: true });
+      await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
       printInitWrapperOnlyHelp();
       return;
     }
@@ -76,7 +77,7 @@ export async function main(): Promise<void> {
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
         if (parseSetupSdksArg(commandArgs) === 'none') {
-          await callWinappCli(args, { exitOnError: true });
+          await callWinappCli(['init', ...stripWrapperOnlyFlags(commandArgs)], { exitOnError: true });
           return;
         }
         await handleInit(commandArgs);
