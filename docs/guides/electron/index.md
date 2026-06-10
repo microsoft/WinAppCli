@@ -40,7 +40,7 @@ Next, choose how to call Windows APIs from your Electron app:
 
 #### Option A: [JS bindings](js-file-picker.md) ✨ *new*
 
-The simplest path — typed JS bindings generated from `.winmd` metadata, no native build step required from your Electron project. Opt in during `npx winapp init` (or pass `--use-defaults` to auto-accept) and a `.winapp/bindings/` directory is added to your project. You can then add `import { ChatClient } from './.winapp/bindings'` and call WinRT directly.
+The simplest path — typed JS bindings generated from `.winmd` metadata, no native build step required from your Electron project. Opt in during interactive `npx winapp init` and a `.winapp/bindings/` directory is added to your project. You can then add `import { ChatClient } from './.winapp/bindings'` and call WinRT directly.
 
 [Add JS bindings →](js-file-picker.md)
 

@@ -41,14 +41,14 @@ The sample is a default Electron Forge generated application with the following 
    
    The `.winapp` folder is added to `.gitignore` to ensure it is not committed to git. Running `npx winapp restore` will restore it (this is added as a postinstall script in `package.json`).
 
-2. **Generated JS bindings** when running `npx winapp init`. The generated bindings let you call Windows App SDK APIs directly from JavaScript, with no native addon build step. The `.winapp/bindings/` folder contains a typed `.js` + `.d.ts` pair per WinRT class alongside an `index.js` that re-exports them all. Re-run `npx winapp node generate-bindings` to regenerate them after editing `winapp.jsBindings`.
+2. **Generated JS bindings** by opting in during `npx winapp init`. The generated bindings let you call Windows App SDK APIs directly from JavaScript, with no native addon build step. The `.winapp/bindings/` folder contains a typed `.js` + `.d.ts` pair per WinRT class alongside an `index.js` that re-exports them all. Re-run `npx winapp node generate-bindings` to regenerate them after editing `winapp.jsBindings`.
 
 3. **Generated a native addon** using `npx winapp node generate-addon` to call APIs from the Windows SDK and Windows App SDK. The addon folder contains the generated addon alongside the `build-addon` script added to `package.json`. The addon contains a function to raise a Windows notification, and the JavaScript code has been modified to call this function.
 
 4. **Generated a C# addon** using `npx winapp node create-addon --template cs`.  This generates a simple c# addon using the node-api-dotnet project.  When you build the C# addon, this will use NAOT to produce
 a .node file that is trimmed and doesn't require the .net runtime to be installed on the target machine.
 
-5. **Modified `forge.config.js`** to ignore the `.winapp` and `winapp.yaml` files from the final package, and to copy the `appxmanifest.xml` and `Assets` folder to the final package.
+5. **Modified `forge.config.js`** to ignore `winapp.yaml` and unmanaged `.winapp` contents while keeping `.winapp/bindings` in the final package. The app also copies the `appxmanifest.xml` and `Assets` folder to the final package.
 
 ## Prerequisites
 
