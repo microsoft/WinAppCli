@@ -39,12 +39,18 @@ internal partial class CertificateService(
         // Ensure output directory exists
         outputPath.Directory?.Create();
 
-        // Clean up the publisher name to ensure proper CN format
-        // Remove any existing CN= prefix and clean up quotes
-        var cleanPublisher = publisher.Replace("CN=", "").Replace("\"", "").Replace("'", "");
-
-        // Ensure we have a proper CN format
-        var subjectName = $"CN={cleanPublisher}";
+        // Normalize the publisher to a valid X.500 distinguished name.
+        // If it already contains "CN=", treat it as a full DN; otherwise wrap with CN=.
+        var trimmedPublisher = publisher.Trim().Trim('"', '\'');
+        string subjectName;
+        if (trimmedPublisher.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+        {
+            subjectName = trimmedPublisher;
+        }
+        else
+        {
+            subjectName = $"CN={trimmedPublisher}";
+        }
 
         try
         {
@@ -102,7 +108,7 @@ internal partial class CertificateService(
             return new CertificateResult(
                 CertificatePath: outputPath,
                 Password: password,
-                Publisher: cleanPublisher,
+                Publisher: subjectName,
                 SubjectName: subjectName,
                 UpdatedGitignore: false,
                 PublicCertificatePath: publicCertPath
@@ -412,19 +418,8 @@ internal partial class CertificateService(
                 throw new InvalidOperationException("Certificate has no subject information");
             }
 
-            // Extract CN from the subject (format: "CN=Publisher, O=Organization, ...")
-            var cnMatch = CnFieldRegex().Match(subject);
-            if (!cnMatch.Success)
-            {
-                throw new InvalidOperationException($"Certificate subject does not contain CN field: {subject}");
-            }
-
-            var publisher = cnMatch.Groups[1].Value.Trim();
-
-            // Remove any quotes that might be present
-            publisher = publisher.Trim('"', '\'');
-
-            return publisher;
+            // Return the full subject DN (e.g., "CN=Publisher, L=City, S=State, C=Country")
+            return subject;
         }
         catch (Exception ex) when (!(ex is FileNotFoundException || ex is InvalidOperationException))
         {
@@ -444,22 +439,22 @@ internal partial class CertificateService(
     {
         try
         {
-            // Extract publisher from certificate
+            // Extract full subject DN from certificate
             var certPublisher = ExtractPublisherFromCertificate(certificatePath, password);
 
             // Extract publisher from manifest
             var manifestIdentity = await MsixService.ParseAppxManifestFromPathAsync(manifestPath, cancellationToken);
             var manifestPublisher = manifestIdentity.Publisher;
 
-            // Normalize both publishers for comparison (remove CN= prefix and quotes)
-            var normalizedCertPublisher = ManifestTemplateService.StripCnPrefix(certPublisher);
-            var normalizedManifestPublisher = ManifestTemplateService.StripCnPrefix(manifestPublisher);
+            // Compare as X.500 distinguished names for semantic equality
+            // This handles differences in spacing, ordering normalization, etc.
+            var certDn = new X500DistinguishedName(certPublisher);
+            var manifestDn = new X500DistinguishedName(manifestPublisher);
 
-            // Compare publishers (case-insensitive)
-            if (!string.Equals(normalizedCertPublisher, normalizedManifestPublisher, StringComparison.OrdinalIgnoreCase))
+            if (!certDn.RawData.AsSpan().SequenceEqual(manifestDn.RawData.AsSpan()))
             {
                 throw new InvalidOperationException(
-                    $"Publisher in {manifestPath} (CN={normalizedManifestPublisher}) does not match the publisher in the certificate {certificatePath} (CN={normalizedCertPublisher}).");
+                    $"Publisher in {manifestPath} ({manifestPublisher}) does not match the publisher in the certificate {certificatePath} ({certPublisher}).");
             }
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
@@ -525,9 +520,6 @@ internal partial class CertificateService(
         taskContext.AddStatusMessage($"No manifest found, using default publisher: {defaultPublisher}");
         return defaultPublisher;
     }
-
-    [GeneratedRegex(@"CN=([^,]+)", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex CnFieldRegex();
 
     [GeneratedRegex(@"^error\s+0x[0-9A-Fa-f]+:\s*", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex EventLogHexErrorRegex();
