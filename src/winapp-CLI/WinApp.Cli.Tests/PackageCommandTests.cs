@@ -72,7 +72,16 @@ public class PackageCommandTests : BaseCommandTests
             "CN=TestCertificatePublisher",
             "CN=PasswordTestPublisher",
             "CN=CommonValidationPublisher",
-            "CN=CertificatePublisher"
+            "CN=CertificatePublisher",
+            "CN=SimplePublisher",
+            "CN=SimpleName",
+            "CN=Trimmed",
+            "CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF",
+            "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN",
+            "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+            "CN=Publisher, O=MyOrg",
+            "CN=Publisher, C=US",
+            "CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US",
         };
 
         foreach (var publisher in testCertificatePublishers)

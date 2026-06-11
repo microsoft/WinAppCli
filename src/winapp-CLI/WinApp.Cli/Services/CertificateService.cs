@@ -105,10 +105,17 @@ internal partial class CertificateService(
 
             outputPath.Refresh();
 
+            // For the Publisher field, strip "CN=" prefix if it's a simple CN-only subject
+            // to preserve backward compatibility in JSON output (e.g., "TestPublisher" not "CN=TestPublisher").
+            // Multi-component DNs keep their full form (e.g., "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN").
+            var publisherDisplay = subjectName.Contains(',')
+                ? subjectName
+                : ManifestTemplateService.StripCnPrefix(subjectName);
+
             return new CertificateResult(
                 CertificatePath: outputPath,
                 Password: password,
-                Publisher: subjectName,
+                Publisher: publisherDisplay,
                 SubjectName: subjectName,
                 UpdatedGitignore: false,
                 PublicCertificatePath: publicCertPath
