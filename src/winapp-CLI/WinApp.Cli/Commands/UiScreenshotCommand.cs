@@ -97,6 +97,11 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 var pngBytes = EncodePng(pixels, w, h);
 
                 var filePath = output ?? "screenshot.png";
+                var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+                if (dir is not null)
+                {
+                    Directory.CreateDirectory(dir);
+                }
                 await File.WriteAllBytesAsync(filePath, pngBytes, cancellationToken);
                 var absolutePath = Path.GetFullPath(filePath);
 
@@ -217,6 +222,11 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             // Compose all captures side-by-side into single image
             var pngBytes = ComposeSideBySide(captures);
+            var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+            if (dir is not null)
+            {
+                Directory.CreateDirectory(dir);
+            }
             await File.WriteAllBytesAsync(filePath, pngBytes, ct);
             var absolutePath = Path.GetFullPath(filePath);
 
