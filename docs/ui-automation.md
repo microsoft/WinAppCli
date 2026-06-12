@@ -323,10 +323,12 @@ winapp ui get-focused -a myapp
 
 ### list-windows
 List all visible windows for an app, including popups and dialogs.
+By default, untitled windows with zero size (invisible system windows) are excluded.
 ```bash
 winapp ui list-windows -a imageresizer
 winapp ui list-windows -a Terminal
 winapp ui list-windows                                      # all windows (no filter)
+winapp ui list-windows --show-hidden                        # include invisible zero-size windows
 ```
 
 ## Framework Support

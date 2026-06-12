@@ -55,7 +55,7 @@ Want to inspect or interact with a running app's UI?
 ├─ Read element properties → winapp ui get-property <selector> -a <appname>
 ├─ Set a value on an element → winapp ui set-value <selector> "value" -a <appname>
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
-└─ List app windows → winapp ui list-windows -a <appname>
+└─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 ```
 
 ## Critical rules — always follow these
@@ -215,7 +215,7 @@ Want to inspect or interact with a running app's UI?
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)
 - `ui wait-for <selector> -a <app> --timeout <ms> [--gone] [--value Y] [--property X --value Y]` — wait for element value or property match
-- `ui list-windows -a <app>` — list windows, popups, and dialogs with HWNDs
+- `ui list-windows -a <app> [--show-hidden]` — list windows, popups, and dialogs with HWNDs (untitled zero-size windows hidden by default)
 - `ui get-focused -a <app>` — show the element with keyboard focus
 
 ## Framework-specific guidance
