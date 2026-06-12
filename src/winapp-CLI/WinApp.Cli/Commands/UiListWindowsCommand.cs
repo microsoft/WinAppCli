@@ -31,6 +31,17 @@ internal class UiListWindowsCommand : Command, IShortDescription
         Description = "Include untitled zero-size windows that are hidden by default"
     };
 
+    /// <summary>
+    /// Determines whether a window should be included in list-windows output.
+    /// An untitled window is only excluded when it also has zero size (not a real visible window).
+    /// </summary>
+    internal static bool ShouldIncludeWindow(string? title, int width, int height, bool showHidden)
+    {
+        if (showHidden) return true;
+        if (!string.IsNullOrEmpty(title)) return true;
+        return width > 0 && height > 0;
+    }
+
     public class Handler(
         IUiAutomationService uiAutomation,
         IAnsiConsole ansiConsole,
@@ -106,7 +117,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                         var info = UiSessionService.GetWindowInfo(w.Hwnd);
                         return (w, info);
                     })
-                    .Where(x => showHidden || !string.IsNullOrEmpty(x.w.Title) || (x.info.Width > 0 && x.info.Height > 0))
+                    .Where(x => ShouldIncludeWindow(x.w.Title, x.info.Width, x.info.Height, showHidden))
                     .Select(x => new WindowInfo
                     {
                         Hwnd = x.w.Hwnd,
@@ -132,8 +143,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 {
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
 
-                    // Skip untitled windows that aren't actually visible (zero size)
-                    if (!showHidden && string.IsNullOrEmpty(w.Title) && (info.Width <= 0 || info.Height <= 0))
+                    if (!ShouldIncludeWindow(w.Title, info.Width, info.Height, showHidden))
                     {
                         continue;
                     }
