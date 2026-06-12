@@ -37,8 +37,16 @@ internal class UiListWindowsCommand : Command, IShortDescription
     /// </summary>
     internal static bool ShouldIncludeWindow(string? title, int width, int height, bool showHidden)
     {
-        if (showHidden) return true;
-        if (!string.IsNullOrEmpty(title)) return true;
+        if (showHidden)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(title))
+        {
+            return true;
+        }
+
         return width > 0 && height > 0;
     }
 
