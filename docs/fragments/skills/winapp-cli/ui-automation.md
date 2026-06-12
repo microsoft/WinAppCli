@@ -162,6 +162,7 @@ winapp ui invoke btn-openfilebtn-a2b3 -a myapp
 # 2. Find the dialog window
 winapp ui list-windows -a myapp
 # → Shows the main window + the dialog HWND
+# Note: untitled zero-size windows are hidden by default; use --show-hidden to include them
 
 # 3. Target the dialog, type the file path, and confirm
 winapp ui set-value txt-1148-c4d5 "C:\path\to\file.png" -w <dialog-hwnd>
