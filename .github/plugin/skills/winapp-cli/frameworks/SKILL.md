@@ -41,6 +41,7 @@ npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
 Windows integration guidance:
+
 - Use **JS bindings** for Windows App SDK APIs that can be called from JavaScript (for example notifications, file pickers, and AI APIs). They are generated into `.winapp/bindings` and use `@microsoft/dynwinrt` at runtime.
 - Use **native addons** for APIs outside the generated Windows App SDK binding surface: `--template cpp` for Win32 / pure COM / C++ libraries, or `--template cs` for managed .NET assemblies.
 - Mixing JS bindings and native addons in one Electron app is fine.
