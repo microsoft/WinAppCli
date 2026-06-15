@@ -5,6 +5,8 @@
 .DESCRIPTION
     This script generates docs/cli-schema.json and SKILL.md files
     from the CLI's --cli-schema output. Run after building the CLI to keep documentation in sync.
+    Also mirrors the regenerated .github/plugin/ tree to .claude/ for Claude Code compatibility
+    via scripts/sync-claude-plugin.ps1.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
 .PARAMETER DocsPath
@@ -298,8 +300,26 @@ version: $CliVersion
     Write-Host "[SKILLS]   $skillName - generated" -ForegroundColor Gray
 }
 
-# Update plugin.json version to match CLI version (only when outputting to the default skills path)
+# Mirror the regenerated Copilot plugin to .claude/ so Claude Code consumers
+# (and the cc-community plugin marketplace) stay in sync. Source of truth
+# remains .github/plugin/; .claude/ is a generated output of this script.
+# Only sync when writing to the default plugin path — custom -SkillsDir runs
+# should not mutate the canonical .claude/ tree.
 $DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+$syncScript = Join-Path $PSScriptRoot 'sync-claude-plugin.ps1'
+if ($SkillsDir -eq $DefaultSkillsPath -and (Test-Path $syncScript)) {
+    Write-Host "`n[CLAUDE]   syncing .claude/ from .github/plugin/" -ForegroundColor Gray
+    try {
+        & $syncScript
+    }
+    catch {
+        Write-Error "sync-claude-plugin.ps1 failed: $_"
+        exit 1
+    }
+}
+
+
+# Update plugin.json version to match CLI version (only when outputting to the default skills path)
 if ($SkillsDir -eq $DefaultSkillsPath) {
     $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
     if (Test-Path $PluginJsonPath) {

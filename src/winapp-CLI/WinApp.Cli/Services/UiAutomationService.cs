@@ -29,7 +29,7 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery)
     {
         return EnumerateWindows((pid, title) =>
-            title.Length > 0 && title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase));
+            string.IsNullOrEmpty(titleQuery) || (title.Length > 0 && title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase)));
     }
 
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int targetPid)

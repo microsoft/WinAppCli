@@ -126,7 +126,7 @@ public class ManifestCommandTests : BaseCommandTests
         Assert.IsTrue(File.Exists(manifestPath), "Package.appxmanifest should be created");
         var manifestContent = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
         Assert.Contains("uap10:AllowExternalContent", manifestContent, "Sparse manifest should contain AllowExternalContent");
-        Assert.Contains("packagedClassicApp", manifestContent, "Sparse manifest should contain packagedClassicApp");
+        Assert.Contains("EntryPoint=\"Windows.FullTrustApplication\"", manifestContent, "Sparse manifest should contain FullTrustApplication entry point");
     }
 
     [TestMethod]

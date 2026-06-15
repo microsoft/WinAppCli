@@ -2483,6 +2483,19 @@
               "required": false,
               "recursive": false
             },
+            "--show-hidden": {
+              "description": "Include untitled zero-size windows that are hidden by default",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--verbose": {
               "description": "Enable verbose output",
               "hidden": false,

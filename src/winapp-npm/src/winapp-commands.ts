@@ -777,6 +777,8 @@ export interface UiListWindowsOptions extends CommonOptions {
   app?: string;
   /** Format output as JSON */
   json?: boolean;
+  /** Include untitled zero-size windows that are hidden by default */
+  showHidden?: boolean;
 }
 
 /**
@@ -786,6 +788,7 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
   const args: string[] = ['ui', 'list-windows'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
+  if (options.showHidden) args.push('--show-hidden');
   return execCommand(args, options);
 }
 
