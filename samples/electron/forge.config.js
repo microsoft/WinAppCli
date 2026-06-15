@@ -7,7 +7,7 @@ module.exports = {
   packagerConfig: {
     asar: true,
     ignore: [
-      /^\/\.winapp($|\/)/,
+      /^\/\.winapp\/(?!bindings($|\/))/,
       /^\/winapp\.yaml$/,
       /\.pfx$/,
       /\.pdb$/,      
