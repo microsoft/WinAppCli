@@ -138,9 +138,11 @@ test('resolvePackageManagerPath returns the absolute path of a launcher found on
     fs.writeFileSync(launcher, '');
     withEnv({ PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
       const resolved = resolvePackageManagerPath('npm');
-      // On Windows the returned extension casing follows PATHEXT (.CMD) while the
-      // file is npm.cmd; both refer to the same file on a case-insensitive FS.
-      assert.equal(resolved?.toLowerCase(), launcher.toLowerCase());
+      // resolvePackageManagerPath calls fs.realpathSync.native to collapse 8.3 short
+      // names and symlinks; CI runners ship TEMP as a short path (RUNNER~1) so the
+      // expected value must go through the same canonicalisation.
+      const expected = fs.realpathSync.native(launcher);
+      assert.equal(resolved?.toLowerCase(), expected.toLowerCase());
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
