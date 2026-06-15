@@ -77,6 +77,16 @@ export async function main(): Promise<void> {
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
         if (parseSetupSdksArg(commandArgs) === 'none') {
+          // JS bindings need SDK winmds; SDK-less init can't generate them.
+          if (commandArgs.includes('--add-js-bindings')) {
+            console.error(
+              '❌ --add-js-bindings is incompatible with --setup-sdks none ' +
+                '(JS bindings need SDK winmds). ' +
+                'Re-run as `winapp init . --add-js-bindings --setup-sdks stable` ' +
+                '(or omit --setup-sdks to be prompted).'
+            );
+            process.exit(1);
+          }
           await callWinappCli(['init', ...stripWrapperOnlyFlags(commandArgs)], { exitOnError: true });
           return;
         }
@@ -84,6 +94,16 @@ export async function main(): Promise<void> {
         return;
       }
       if (command === 'restore') {
+        // `--add-js-bindings` is init-only opt-in; restore reads the persisted
+        // `winapp.jsBindings`. Reject loudly instead of silently stripping.
+        if (commandArgs.includes('--add-js-bindings')) {
+          console.error(
+            '❌ --add-js-bindings is only valid on `winapp init`. ' +
+              'restore uses the existing `winapp.jsBindings` configuration in package.json. ' +
+              'To enable JS bindings, run `winapp init . --add-js-bindings`.'
+          );
+          process.exit(1);
+        }
         await handleRestore(commandArgs);
         return;
       }
@@ -179,6 +199,12 @@ async function handleComplete(args: string[]): Promise<void> {
       if (sub.startsWith(partial)) {
         nativeCompletions.push(sub);
       }
+    }
+  } else if (tokens[1] === 'init') {
+    // Surface wrapper-only --add-js-bindings alongside native init flags.
+    const partial = !hasTrailingSpace ? tokens[tokens.length - 1] : '';
+    if ('--add-js-bindings'.startsWith(partial) && !nativeCompletions.includes('--add-js-bindings')) {
+      nativeCompletions.push('--add-js-bindings');
     }
   }
 

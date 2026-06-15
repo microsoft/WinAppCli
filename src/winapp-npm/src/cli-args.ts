@@ -49,6 +49,11 @@ export function isQuiet(args: readonly string[]): boolean {
   return args.includes('--quiet') || args.includes('-q');
 }
 
+/** Detect `--json` — wrapper hooks must suppress spinners/prompts under this flag. */
+export function isJson(args: readonly string[]): boolean {
+  return args.includes('--json');
+}
+
 /** Detect `--config-only` — init's "skip package installation" mode. */
 export function hasConfigOnly(args: readonly string[]): boolean {
   return args.includes('--config-only');

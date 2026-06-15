@@ -35,6 +35,7 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**
 
@@ -45,7 +46,7 @@ winapp init [base-directory] [options]
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores shareable files in the global cache directory
-- Generates JS bindings for Windows App SDK APIs when enabled by the npm wrapper
+- Generates JS bindings for Windows App SDK APIs when enabled (npm only)
 
 **Automatic project detection:**
 

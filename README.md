@@ -129,6 +129,11 @@ Checkout our getting started guides for step by step instructions of how to setu
 
 Additional guides:
 - [Packaging an EXE/CLI](/docs/guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- **Electron JS/TypeScript bindings** *(npm only)*: opt into auto-generated WinRT bindings via `winapp init --add-js-bindings`. See task-focused guides:
+  - [File picker](/docs/guides/electron/js-file-picker.md) — open native Windows file/folder pickers from the renderer
+  - [Toast notifications](/docs/guides/electron/js-notification.md) — show Windows toasts with actions
+  - [Phi Silica (on-device LLM)](/docs/guides/electron/js-phi-silica.md) — local text generation via Windows AI
+  - [WinML inference](/docs/guides/electron/js-winml.md) — run ONNX models with the Windows ML runtime
 
 ## 📦 Installation
 

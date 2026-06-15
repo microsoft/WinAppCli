@@ -19,6 +19,8 @@ export interface BindingsPromptInputs {
   sdksReady: boolean;
   /** True when init was explicitly asked to add JS bindings without prompting. */
   addJsBindings?: boolean;
+  /** When true (e.g. --json), refuse to prompt and behave like non-TTY. */
+  nonInteractive?: boolean;
 }
 
 export interface BindingsPromptOutcome {
@@ -45,14 +47,6 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
 
   // Init re-runs mirror native overwrite prompts; default Yes preserves UX parity.
   if (inputs.existingJsBindings) {
-    const isDotNet = detectDotNetProject(inputs.workspaceDir);
-    if (isDotNet) {
-      return {
-        kind: 'yes',
-        silentReason: '.NET project detected — preserving existing winapp.jsBindings without prompting.',
-        overwriteExistingConfig: false,
-      };
-    }
     const useDefaults = inputs.argv.some((a) => USE_DEFAULTS_FLAGS.has(a));
     if (useDefaults) {
       return {
@@ -61,26 +55,18 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
         overwriteExistingConfig: true,
       };
     }
-    if (!process.stdin.isTTY) {
+    if (inputs.nonInteractive || !process.stdin.isTTY) {
       // Non-interactive runs preserve config unless --use-defaults opts into reset.
       return {
         kind: 'yes',
-        silentReason: 'non-TTY stdin — preserving existing winapp.jsBindings.',
+        silentReason: inputs.nonInteractive
+          ? '--json — preserving existing winapp.jsBindings without prompting.'
+          : 'non-TTY stdin — preserving existing winapp.jsBindings.',
         overwriteExistingConfig: false,
       };
     }
     const overwrite = await confirmationPrompt('package.json already has winapp.jsBindings. Overwrite?');
     return { kind: 'yes', overwriteExistingConfig: overwrite };
-  }
-
-  const isDotNet = detectDotNetProject(inputs.workspaceDir);
-  if (isDotNet) {
-    // dynwinrt bindings target Node/Electron; .NET already gets WinRT via CsWinRT.
-    return {
-      kind: 'no',
-      silentReason:
-        '.NET project detected — JS bindings target Node/Electron via dynwinrt; .NET projects already get WinRT via CsWinRT.',
-    };
   }
 
   // Without package.json we have nowhere to write `winapp.jsBindings` or the runtime dep.
@@ -110,31 +96,15 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     return { kind: 'no', silentReason: '--use-defaults — skipping JS bindings.' };
   }
 
-  if (!process.stdin.isTTY) {
-    return { kind: 'no', silentReason: 'non-TTY stdin — skipping JS bindings.' };
+  if (inputs.nonInteractive || !process.stdin.isTTY) {
+    return {
+      kind: 'no',
+      silentReason: inputs.nonInteractive ? '--json — skipping JS bindings.' : 'non-TTY stdin — skipping JS bindings.',
+    };
   }
 
   const answer = await confirmationPrompt('Add JS/TypeScript bindings to this project?');
   return { kind: answer ? 'yes' : 'no' };
-}
-
-function detectDotNetProject(workspaceDir: string): boolean {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-  for (const e of entries) {
-    if (!e.isFile()) {
-      continue;
-    }
-    const ext = path.extname(e.name).toLowerCase();
-    if (ext === '.csproj' || ext === '.fsproj' || ext === '.vbproj') {
-      return true;
-    }
-  }
-  return false;
 }
 
 // Used to fast-path `init --setup-sdks none`; native validates values.

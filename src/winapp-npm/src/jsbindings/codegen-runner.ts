@@ -63,7 +63,7 @@ export async function runCodegen(inputs: CodegenInputs): Promise<CodegenResult> 
   const emitSet = new Set(emit.map((f) => f.toLowerCase()));
   const refs = dedupeCaseInsensitive(inputs.refWinmds.filter((r) => !emitSet.has(r.toLowerCase())));
 
-  const { executable, prefixArgs } = resolveCodegenInvocation();
+  const { executable, prefixArgs } = resolveCodegenInvocation(inputs.workspaceDir);
   await assertCodegenCapabilities(executable, prefixArgs, inputs.workspaceDir, GENERATE_REQUIRED_CODEGEN_CAPABILITIES);
   if (verbose) {
     log(`Using codegen → ${executable} ${prefixArgs.join(' ')}`);
@@ -479,7 +479,7 @@ async function assertCodegenCapabilities(
 }
 
 export async function getCodegenRuntimeDependency(workspaceDir: string): Promise<RuntimeDependencySpec> {
-  const { executable, prefixArgs } = resolveCodegenInvocation();
+  const { executable, prefixArgs } = resolveCodegenInvocation(workspaceDir);
   await assertCodegenCapabilities(executable, prefixArgs, workspaceDir, RUNTIME_REQUIRED_CODEGEN_CAPABILITIES);
   const stdout = await runCodegenQuery(executable, prefixArgs, workspaceDir, 'runtime-dependency');
   return parseRuntimeDependencySpec(stdout);
@@ -490,11 +490,11 @@ interface CodegenInvocation {
   prefixArgs: string[];
 }
 
-// Resolve via Node first (npm/pnpm/yarn/PnP), then physical node_modules for patched layouts.
-export function resolveCodegenInvocation(): CodegenInvocation {
+/** Resolve via Node first (npm/pnpm/yarn/PnP), then physical node_modules for patched layouts. */
+export function resolveCodegenInvocation(workspaceDir?: string): CodegenInvocation {
   const wrapperDir = tryGetWrapperDir();
 
-  const pkgDirs = resolveCodegenPackageDirs(wrapperDir);
+  const pkgDirs = resolveCodegenPackageDirs(workspaceDir ?? null, wrapperDir);
   let lastChecked: string | null = null;
   for (const pkgDir of pkgDirs) {
     // Refuse UNC/reparse-backed pkgDirs; junctioned node_modules could redirect to a victim binary.
@@ -542,7 +542,7 @@ export function resolveCodegenInvocation(): CodegenInvocation {
 }
 
 /** Yield package dirs via Node resolution, then physical node_modules fallback. */
-function* resolveCodegenPackageDirs(wrapperDir: string | null): Generator<string> {
+function* resolveCodegenPackageDirs(workspaceDir: string | null, wrapperDir: string | null): Generator<string> {
   const seen = new Set<string>();
 
   const yieldUnique = function* (dir: string | null): Generator<string> {
@@ -553,20 +553,25 @@ function* resolveCodegenPackageDirs(wrapperDir: string | null): Generator<string
     yield dir;
   };
 
-  // Node's resolver handles hoisted, isolated, and PnP package layouts.
-  yield* yieldUnique(resolveViaRequireResolve(wrapperDir));
+  // Node's resolver handles hoisted, isolated, and PnP package layouts. Workspace
+  // wins so global/npx installs find user-project devDeps before falling back.
+  yield* yieldUnique(resolveViaRequireResolve(workspaceDir, wrapperDir));
 
   // Physical walk preserves the legacy fallback for patched/bundled installs.
-  for (let probe: string | null = wrapperDir; probe; probe = parentOrNull(probe)) {
-    const pkgDir = path.join(probe, 'node_modules', '@microsoft', 'dynwinrt-codegen');
-    if (fs.existsSync(pkgDir)) {
-      yield* yieldUnique(pkgDir);
+  for (const start of [workspaceDir, wrapperDir]) {
+    for (let probe: string | null = start; probe; probe = parentOrNull(probe)) {
+      const pkgDir = path.join(probe, 'node_modules', '@microsoft', 'dynwinrt-codegen');
+      if (fs.existsSync(pkgDir)) {
+        yield* yieldUnique(pkgDir);
+      }
     }
   }
 }
 
-function resolveViaRequireResolve(wrapperDir: string | null): string | null {
+function resolveViaRequireResolve(workspaceDir: string | null, wrapperDir: string | null): string | null {
   const searchPaths: string[] = [];
+  // Workspace first: user-project devDep should win over a wrapper-bundled copy.
+  if (workspaceDir) searchPaths.push(workspaceDir);
   if (wrapperDir) searchPaths.push(wrapperDir);
   // Global installs still need to resolve the bundled codegen.
   searchPaths.push(__dirname);

@@ -177,7 +177,7 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
         droppedPaths.push(w);
         continue;
       }
-      winmdsArr.push(w);
+      winmdsArr.push(resolved);
     }
     packages.push({ name, version, winmds: winmdsArr });
   }

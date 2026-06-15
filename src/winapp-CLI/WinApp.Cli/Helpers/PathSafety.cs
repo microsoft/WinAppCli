@@ -51,8 +51,7 @@ internal static class PathSafety
 
         // Check boundary itself first — a reparse-point boundary would make
         // every descendant probe silently follow it.
-        if (TryGetAttributes(normalizedBoundary, out var boundaryAttr)
-            && boundaryAttr.HasFlag(FileAttributes.ReparsePoint))
+        if (IsReparseOrProbeUnknown(normalizedBoundary))
         {
             return true;
         }
@@ -71,8 +70,7 @@ internal static class PathSafety
         foreach (var seg in segments)
         {
             current = Path.Combine(current, seg);
-            if (TryGetAttributes(current, out var segAttr)
-                && segAttr.HasFlag(FileAttributes.ReparsePoint))
+            if (IsReparseOrProbeUnknown(current))
             {
                 return true;
             }
@@ -130,27 +128,28 @@ internal static class PathSafety
     private static string TrimTrailingSeparators(string path) =>
         path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-    private static bool TryGetAttributes(string path, out FileAttributes attributes)
+    // True if the path is a reparse point, OR if attributes cannot be probed
+    // for an unknown reason (access denied, IO error). FileNotFound /
+    // DirectoryNotFound return false — genuinely absent paths have no reparse
+    // metadata to follow. Any other failure biases callers to "unsafe".
+    private static bool IsReparseOrProbeUnknown(string path)
     {
         try
         {
-            attributes = File.GetAttributes(path);
-            return true;
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
         }
         catch (FileNotFoundException)
         {
-            attributes = default;
             return false;
         }
         catch (DirectoryNotFoundException)
         {
-            attributes = default;
             return false;
         }
         catch
         {
-            attributes = default;
-            return false;
+            // Access denied / IO error — bias to unsafe so callers refuse to follow.
+            return true;
         }
     }
 

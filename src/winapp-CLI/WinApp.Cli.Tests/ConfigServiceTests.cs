@@ -105,6 +105,39 @@ public class ConfigServiceTests
     }
 
     [TestMethod]
+    public void Parse_NameVersionOutsidePackagesBlock_IsIgnored()
+    {
+        // Regression for hash drift: only the `packages:` block contributes pins.
+        // A `name:`/`version:` row that appears at indent 0 (or inside another
+        // top-level section) must not bleed into the package list — otherwise
+        // the C#-computed hash would diverge from the TS-computed one and
+        // every `winapp restore` after a JS-bindings init would re-run.
+        var yaml = "workspace:\n" +
+                   "  name: ProjectFoo\n" +
+                   "  version: 9.9.9\n" +
+                   "packages:\n" +
+                   "  - name: Microsoft.WindowsAppSDK\n" +
+                   "    version: 2.1.3\n";
+        var cfg = ConfigService.Parse(yaml);
+        Assert.AreEqual(1, cfg.Packages.Count);
+        Assert.AreEqual("Microsoft.WindowsAppSDK", cfg.Packages[0].Name);
+        Assert.AreEqual("2.1.3", cfg.Packages[0].Version);
+    }
+
+    [TestMethod]
+    public void Parse_PackagesAfterAnotherSection_StillParsed()
+    {
+        var yaml = "metadata:\n" +
+                   "  name: outer\n" +
+                   "packages:\n" +
+                   "  - name: Foo\n" +
+                   "    version: 1\n";
+        var cfg = ConfigService.Parse(yaml);
+        Assert.AreEqual(1, cfg.Packages.Count);
+        Assert.AreEqual("Foo", cfg.Packages[0].Name);
+    }
+
+    [TestMethod]
     public void SanitizeScalar_EmptyInputs_ReturnEmptyString()
     {
         Assert.AreEqual(string.Empty, ConfigService.SanitizeScalar(""));

@@ -199,7 +199,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
   // Runtime dep policy: init declares/optionally installs (best-effort); passive
   // restore/generate-bindings never mutate package.json and only warn if missing.
   if (options.manageRuntimeDep) {
-    const pinnedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir, log));
+    const pinnedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir));
     if (pinnedVersion) {
       try {
         let ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
@@ -214,7 +214,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
             try {
               updateRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
             } catch (err) {
-              log(`⚠️ Failed to update ${RUNTIME_PACKAGE_NAME} version pin: ${(err as Error).message}`);
+              console.warn(`⚠️ Failed to update ${RUNTIME_PACKAGE_NAME} version pin: ${(err as Error).message}`);
               throw err;
             }
             bumpedFrom = existing;
@@ -287,7 +287,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
             if (installSpinner) {
               installSpinner.fail(failureMessage);
             } else {
-              log(`⚠️ ${failureMessage}`);
+              console.warn(`⚠️ ${failureMessage}`);
             }
           }
         } else {
@@ -303,21 +303,21 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         }
       } catch (err) {
         // Warnings always surface, even in --quiet.
-        log(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
+        console.warn(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
       }
     }
   } else {
     // Passive flow: warn if the generated runtime import would be unresolved or stale; init owns writes.
     const declaredVersion = getRuntimeDependencyVersion(workspaceDir, RUNTIME_PACKAGE_NAME);
     if (!declaredVersion) {
-      log(
+      console.warn(
         `⚠️ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
           'Generated bindings import it at runtime — run `winapp init` to add it (or add it manually).'
       );
     } else {
-      const expectedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir, log));
+      const expectedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir));
       if (expectedVersion && declaredVersion !== expectedVersion) {
-        log(
+        console.warn(
           `⚠️ ${RUNTIME_PACKAGE_NAME} is declared as ${declaredVersion}, ` +
             `but dynwinrt-codegen declares ${expectedVersion}. ` +
             'Run `winapp init` to update it (or update it manually).'
@@ -338,11 +338,13 @@ function formatCompletedMessage(outputDir: string): string {
   return `Generated JS bindings → ${outputDir}`;
 }
 
-async function safeGetRuntimeVersion(workspaceDir: string, log: (line: string) => void): Promise<string | null> {
+async function safeGetRuntimeVersion(workspaceDir: string): Promise<string | null> {
   try {
     return (await getCodegenRuntimeDependency(workspaceDir)).version;
   } catch (err) {
-    log(`⚠️ Could not resolve ${RUNTIME_PACKAGE_NAME} version from dynwinrt-codegen: ${(err as Error).message}`);
+    console.warn(
+      `⚠️ Could not resolve ${RUNTIME_PACKAGE_NAME} version from dynwinrt-codegen: ${(err as Error).message}`
+    );
     return null;
   }
 }

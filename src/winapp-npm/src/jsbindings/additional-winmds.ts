@@ -110,6 +110,20 @@ export function resolveAdditionalWinmds(
       continue;
     }
 
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(fullPath);
+    } catch (err) {
+      warnings.push(
+        `jsBindings.${fieldName} entry not readable, skipping: ${rawPath} → ${fullPath} (${(err as Error).message})`
+      );
+      continue;
+    }
+    if (!stat.isFile()) {
+      warnings.push(`jsBindings.${fieldName} entry is not a regular file, skipping: ${rawPath} → ${fullPath}`);
+      continue;
+    }
+
     const dedupeKey = `${fullPath.toLowerCase()}|${ns}`;
     const existingIdx = seenIndex.get(dedupeKey);
     if (existingIdx !== undefined) {

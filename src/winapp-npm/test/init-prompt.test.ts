@@ -47,3 +47,36 @@ test('askBindingsKind opts in when --add-js-bindings is explicit', async () => {
     assert.equal(result.kind, 'yes');
   });
 });
+
+test('askBindingsKind skips JS bindings under --json (nonInteractive=true) when no existing config', async () => {
+  await withWorkspace(async (dir) => {
+    const result = await askBindingsKind({
+      workspaceDir: dir,
+      argv: [],
+      isInit: true,
+      existingJsBindings: false,
+      sdksReady: true,
+      nonInteractive: true,
+    });
+
+    assert.equal(result.kind, 'no');
+    assert.match(result.silentReason ?? '', /--json/);
+  });
+});
+
+test('askBindingsKind preserves existing JS bindings under --json (no overwrite prompt)', async () => {
+  await withWorkspace(async (dir) => {
+    const result = await askBindingsKind({
+      workspaceDir: dir,
+      argv: [],
+      isInit: true,
+      existingJsBindings: true,
+      sdksReady: true,
+      nonInteractive: true,
+    });
+
+    assert.equal(result.kind, 'yes');
+    assert.equal(result.overwriteExistingConfig, false);
+    assert.match(result.silentReason ?? '', /--json/);
+  });
+});

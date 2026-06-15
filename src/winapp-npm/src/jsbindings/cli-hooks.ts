@@ -28,6 +28,7 @@ import {
   resolveYamlPath,
   isVerbose,
   isQuiet,
+  isJson,
   hasConfigOnly,
   hasAddJsBindings,
   hasUseDefaults,
@@ -121,7 +122,7 @@ export async function handleGenerateBindings(args: string[]): Promise<void> {
   }
 
   const workspaceDir = resolveWorkspaceDir(args);
-  const quiet = isQuiet(args);
+  const quiet = isQuiet(args) || isJson(args);
 
   // Preflight: package.json + `winapp.jsBindings` + cached restore lockfile.
   // (Schema mismatches surface later as `lockfileStale`.)
@@ -140,7 +141,7 @@ export async function handleGenerateBindings(args: string[]): Promise<void> {
 /** Append the wrapper-specific `init` notes the native `--help` doesn't know about. */
 export function printInitWrapperOnlyHelp(): void {
   console.log('');
-  console.log(`Options (added by the ${CLI_NAME} npm wrapper):`);
+  console.log(`Options (added by ${CLI_NAME}, npm only):`);
   console.log('  --add-js-bindings    Add winapp.jsBindings and generate JS/TypeScript bindings');
   console.log('                       (useful with --use-defaults or non-interactive init)');
 }
@@ -165,7 +166,9 @@ export function shouldSkipBindingsAfterInit(opts: {
 /** `init` hook: run native init, then optionally add and generate JS bindings. */
 export async function handleInit(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(args);
-  const quiet = isQuiet(args);
+  // --json: suppress wrapper spinners/prompts so we never corrupt downstream parsers.
+  const jsonMode = isJson(args);
+  const quiet = isQuiet(args) || jsonMode;
   const configOnly = hasConfigOnly(args);
   const addJsBindings = hasAddJsBindings(args);
   const explicitWorkspace = firstPositional(args) !== undefined;
@@ -208,6 +211,7 @@ export async function handleInit(args: string[]): Promise<void> {
       existingJsBindings,
       sdksReady: lockfilePresent || configOnly,
       addJsBindings,
+      nonInteractive: jsonMode,
     });
   } catch (err) {
     logErrorAndExit(err);
@@ -334,10 +338,19 @@ export async function handleInit(args: string[]): Promise<void> {
       settleGroup('success', 'JS bindings setup completed successfully');
     } catch (err) {
       settleGroup('failure', `JS bindings setup failed: ${(err as Error).message}`);
+      // Tag so the outer catch knows the user already saw the message.
+      try {
+        (err as { _settled?: boolean })._settled = true;
+      } catch {
+        /* primitive throw — ignore */
+      }
       throw err;
     }
   } catch (err) {
-    console.error(`Failed to update package.json: ${(err as Error).message}`);
+    // Path-safety / fs probe failures hit here before the inner spinner exists.
+    if (!(err as { _settled?: boolean })?._settled) {
+      console.error(`JS bindings setup failed: ${(err as Error).message}`);
+    }
     process.exit(1);
   }
 }
@@ -358,7 +371,7 @@ async function ensureCodegenInstalledForInit(workspaceDir: string, ui: ProgressU
   const isDeclared = isPackageDeclared(workspaceDir, CODEGEN_PACKAGE_NAME);
   let codegenReachable = false;
   try {
-    resolveCodegenInvocation();
+    resolveCodegenInvocation(workspaceDir);
     codegenReachable = true;
   } catch {
     // Fall through and install.
@@ -368,10 +381,17 @@ async function ensureCodegenInstalledForInit(workspaceDir: string, ui: ProgressU
   }
 
   const pm = detectPackageManager(workspaceDir);
-
+  // `latest` (not pinned) on purpose: codegen ships independently of winappcli and
+  // the ABI-lockstep step then queries its `runtime-dependency` capability for the
+  // matching runtime pin. Trust boundary is unchanged — `@microsoft/dynwinrt-codegen`
+  // is published by the same Microsoft scope as winappcli, and the install runs via
+  // the user's own pm so their `.npmrc` (registry, audit-signatures, lockfile
+  // integrity) still applies. Install is gated by explicit opt-in (interactive
+  // prompt or `--add-js-bindings`); users wanting a hard pin can declare the
+  // package themselves in `devDependencies` (this branch then skips via `isDeclared`).
   const progress = isDeclared
     ? `Installing declared ${CODEGEN_PACKAGE_NAME} with ${pm.name}...`
-    : `Installing ${CODEGEN_PACKAGE_NAME}@latest with ${pm.name}...`;
+    : `Installing ${CODEGEN_PACKAGE_NAME} with ${pm.name}...`;
 
   // Best-effort: install failures must warn but never abort (generated bindings
   // are still useful and users can install the dep manually). So we manage the
@@ -445,7 +465,8 @@ async function ensureRuntimeDependencyForInit(
  */
 export async function handleRestore(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(args);
-  const quiet = isQuiet(args);
+  // --json: suppress wrapper logs to keep stdout machine-readable.
+  const quiet = isQuiet(args) || isJson(args);
 
   // See handleInit: do NOT set child cwd (avoids double-resolving a relative arg).
   // Strip wrapper-only flags so System.CommandLine doesn't reject the forwarded argv.

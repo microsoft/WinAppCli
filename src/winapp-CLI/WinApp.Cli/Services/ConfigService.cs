@@ -43,10 +43,14 @@ internal sealed class ConfigService : IConfigService
     // internal for direct unit-test coverage of the scalar sanitization rules.
     internal static WinappConfig Parse(string yaml)
     {
+        // Section-scoped: only the `packages:` block contributes pins, so unrelated
+        // top-level sections with `name:`/`version:` keys don't get misread. Mirrors
+        // the TS parsePackagesFromYaml in jsbindings/yaml-packages-hash.ts.
         var cfg = new WinappConfig();
         using var sr = new StringReader(yaml);
         string? line;
         string? currentName = null;
+        bool inPackages = false;
         while ((line = sr.ReadLine()) != null)
         {
             var t = line.Trim();
@@ -55,7 +59,20 @@ internal sealed class ConfigService : IConfigService
                 continue;
             }
 
-            if (t.Equals("packages:", StringComparison.OrdinalIgnoreCase))
+            // Track top-level key boundaries (no leading whitespace).
+            int indent = 0;
+            while (indent < line.Length && line[indent] == ' ')
+            {
+                indent++;
+            }
+            if (indent == 0)
+            {
+                inPackages = IsTopLevelKey(t, "packages:");
+                currentName = null;
+                continue;
+            }
+
+            if (!inPackages)
             {
                 continue;
             }
@@ -76,6 +93,21 @@ internal sealed class ConfigService : IConfigService
             }
         }
         return cfg;
+    }
+
+    private static bool IsTopLevelKey(string trimmed, string key)
+    {
+        if (!trimmed.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (trimmed.Length == key.Length)
+        {
+            return true;
+        }
+        // Either the value is on the same line after `key:` or there's a comment marker.
+        var next = trimmed[key.Length];
+        return next == ' ' || next == '\t' || next == '#';
     }
 
     // Sanitize a YAML scalar following `name:` / `version:`:
