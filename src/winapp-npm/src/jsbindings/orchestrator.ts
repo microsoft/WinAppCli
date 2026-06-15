@@ -13,10 +13,12 @@ import {
   ensureRuntimeDependency,
   formatRuntimeDependencyHint,
   getRuntimeDependencyVersion,
+  updateRuntimeDependency,
 } from './runtime-dep-injector';
 import { detectPackageManager } from './package-manager-detector';
-import { installRuntimeDependency } from './runtime-installer';
+import { installPackageDependency } from './runtime-installer';
 import { startSpinner, Spinner } from './spinner';
+import { GroupedSpinner, GroupedChildSpinner } from './grouped-spinner';
 import { computeYamlPackagesHash, readWinappYamlPackages } from './yaml-packages-hash';
 
 export const RUNTIME_PACKAGE_NAME = '@microsoft/dynwinrt';
@@ -29,6 +31,8 @@ export interface OrchestratorResult {
   message: string;
   /** Output dir written by codegen when completed. */
   outputDir?: string;
+  /** True when an in-place spinner has already shown the success line; wrappers should skip the duplicate. */
+  uiAlreadyAnnounced?: boolean;
 }
 
 export interface OrchestratorOptions {
@@ -50,6 +54,10 @@ export interface OrchestratorOptions {
   manageRuntimeDep?: boolean;
   /** Init-only: install the runtime dep into node_modules; failures warn. */
   installRuntimeDep?: boolean;
+  /** Indent prepended to every spinner line emitted by this pipeline. */
+  progressPrefix?: string;
+  /** When set, per-step progress renders as children of this grouped spinner. */
+  group?: GroupedSpinner;
 }
 
 export async function runJsBindingsPipeline(options: OrchestratorOptions): Promise<OrchestratorResult> {
@@ -156,18 +164,19 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     };
   }
 
-  // Spinner covers quiet child output; skip it for verbose output or injected log sinks.
-  // Tests inject logs, so avoid interleaving ANSI spinner output with assertions.
   const progressText =
     `Generating JS bindings from ${emitWinmds.length} winmd${emitWinmds.length === 1 ? '' : 's'}` +
     (refWinmds.length > 0 ? ` (+${refWinmds.length} ref)` : '') +
     `...`;
-  const useSpinner = !options.log && !options.verbose && !options.quiet;
-  let spinner: Spinner | null = null;
+  const useSpinner = !options.verbose && !options.quiet;
+  let spinner: Spinner | GroupedChildSpinner | null = null;
   if (useSpinner) {
-    spinner = startSpinner(progressText);
-  } else if (!options.quiet) {
-    log(`🔨 ${progressText}`);
+    spinner = options.group
+      ? options.group.addChild(progressText)
+      : startSpinner(progressText, {
+          prefix: options.progressPrefix ?? '',
+          nonTtyLog: log,
+        });
   }
 
   let codegenResult;
@@ -180,9 +189,12 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
       log,
       verbose: options.verbose,
     });
-  } finally {
-    spinner?.stop();
+  } catch (err) {
+    spinner?.fail(`Generating JS bindings failed: ${(err as Error).message}`);
+    throw err;
   }
+  const completionMessage = formatCompletedMessage(codegenResult.outputDir);
+  spinner?.succeed(completionMessage);
 
   // Runtime dep policy: init declares/optionally installs (best-effort); passive
   // restore/generate-bindings never mutate package.json and only warn if missing.
@@ -190,27 +202,93 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     const pinnedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir, log));
     if (pinnedVersion) {
       try {
-        const ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
+        let ensureResult = ensureRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
+
+        // ABI lockstep: auto-update on mismatch. When an install will follow
+        // immediately, defer the UI and merge it with the install spinner.
+        let bumpedFrom: string | null = null;
+        if (ensureResult.outcome === 'versionMismatch') {
+          const existing = ensureResult.existingVersion ?? '';
+          const willInstall = options.installRuntimeDep;
+          if (willInstall) {
+            try {
+              updateRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
+            } catch (err) {
+              log(`⚠️ Failed to update ${RUNTIME_PACKAGE_NAME} version pin: ${(err as Error).message}`);
+              throw err;
+            }
+            bumpedFrom = existing;
+          } else {
+            const bumpProgress = `Bumping ${RUNTIME_PACKAGE_NAME} ${existing} → ${pinnedVersion} (ABI lockstep)...`;
+            const bumpSpinner: Spinner | GroupedChildSpinner | null = useSpinner
+              ? options.group
+                ? options.group.addChild(bumpProgress)
+                : startSpinner(bumpProgress, {
+                    prefix: options.progressPrefix ?? '',
+                    nonTtyLog: log,
+                  })
+              : null;
+            try {
+              updateRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
+            } catch (err) {
+              bumpSpinner?.fail(`Bumping ${RUNTIME_PACKAGE_NAME} failed: ${(err as Error).message}`);
+              throw err;
+            }
+            const bumpMessage =
+              `Bumped ${RUNTIME_PACKAGE_NAME} ${existing} → ${pinnedVersion} ` +
+              'to match the installed @microsoft/dynwinrt-codegen (ABI lockstep).';
+            if (bumpSpinner) {
+              bumpSpinner.succeed(bumpMessage);
+            } else if (!options.quiet) {
+              log(`⬆️  ${bumpMessage}`);
+            }
+          }
+          ensureResult = { outcome: 'added', pinnedVersion };
+        }
+
         const pm = detectPackageManager(workspaceDir);
 
         // Install only when the dep is in `dependencies`; noPackageJson/dev-only fall through to hints.
         const dependencyDeclared = ensureResult.outcome === 'added' || ensureResult.outcome === 'alreadyPresent';
         if (options.installRuntimeDep && dependencyDeclared) {
           const installVersion = ensureResult.pinnedVersion ?? pinnedVersion;
-          if (!options.quiet) {
-            log(`📦 Installing ${RUNTIME_PACKAGE_NAME}@${installVersion} with ${pm.name}...`);
+          const installProgress = bumpedFrom
+            ? `Updating ${RUNTIME_PACKAGE_NAME} ${bumpedFrom} → ${installVersion} with ${pm.name} (ABI lockstep)...`
+            : `Installing ${RUNTIME_PACKAGE_NAME}@${installVersion} with ${pm.name}...`;
+          const installSpinner: Spinner | GroupedChildSpinner | null = useSpinner
+            ? options.group
+              ? options.group.addChild(installProgress)
+              : startSpinner(installProgress, {
+                  prefix: options.progressPrefix ?? '',
+                  nonTtyLog: log,
+                })
+            : null;
+          if (!installSpinner && !options.quiet) {
+            log(`📦 ${installProgress}`);
           }
-          const install = installRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, installVersion, pm.name);
+          const install = installPackageDependency(workspaceDir, RUNTIME_PACKAGE_NAME, installVersion, pm.name);
           if (install.ok) {
-            if (!options.quiet) {
-              log(`✅ Installed ${RUNTIME_PACKAGE_NAME}@${installVersion}.`);
+            const installedMessage = bumpedFrom
+              ? `Updated ${RUNTIME_PACKAGE_NAME} ${bumpedFrom} → ${installVersion} with ${pm.name} (ABI lockstep).`
+              : `Installed ${RUNTIME_PACKAGE_NAME}@${installVersion}.`;
+            if (installSpinner) {
+              installSpinner.succeed(installedMessage);
+            } else if (!options.quiet) {
+              log(`✅ ${installedMessage}`);
             }
           } else {
-            // Best-effort: generated bindings remain useful; warn so users can install manually.
-            log(
-              `⚠️ Could not auto-install ${RUNTIME_PACKAGE_NAME}@${installVersion}: ${install.error}. ` +
+            // Best-effort: warn so users can install manually.
+            const failureMessage = bumpedFrom
+              ? `Updated package.json to ${RUNTIME_PACKAGE_NAME}@${installVersion} (ABI lockstep) ` +
+                `but could not auto-install: ${install.error}. ` +
                 `Run \`${pm.installCommand}\` to install it locally.`
-            );
+              : `Could not auto-install ${RUNTIME_PACKAGE_NAME}@${installVersion}: ${install.error}. ` +
+                `Run \`${pm.installCommand}\` to install it locally.`;
+            if (installSpinner) {
+              installSpinner.fail(failureMessage);
+            } else {
+              log(`⚠️ ${failureMessage}`);
+            }
           }
         } else {
           const hint = formatRuntimeDependencyHint(
@@ -252,6 +330,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     outcome: 'completed',
     message: formatCompletedMessage(codegenResult.outputDir),
     outputDir: codegenResult.outputDir,
+    uiAlreadyAnnounced: useSpinner,
   };
 }
 

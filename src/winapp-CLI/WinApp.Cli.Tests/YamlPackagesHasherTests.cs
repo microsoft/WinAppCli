@@ -92,4 +92,23 @@ public class YamlPackagesHasherTests
             YamlPackagesHasher.Compute(packages),
             "Hash drift detected — update yaml-packages-hash.ts to match (or vice-versa).");
     }
+
+    [TestMethod]
+    public void Compute_YamlWithInlineComments_ProducesGoldenHashAfterParse()
+    {
+        // End-to-end parity guard: a yaml file that has the same logical
+        // package pins as the golden fixture — plus inline `#` comments — must
+        // round-trip to the same hash. This is what fails the npm preflight
+        // when ConfigService.Parse and the TS parser disagree on comment handling.
+        var yaml = "packages:\n" +
+                   "  - name: Microsoft.WindowsAppSDK   # bumped 2026-04\n" +
+                   "    version: '2.1.3'                # latest stable\n" +
+                   "  - name: Microsoft.Windows.SDK.CPP # C++ headers\n" +
+                   "    version: 10.0.28000.1839\n";
+        var cfg = ConfigService.Parse(yaml);
+        Assert.AreEqual(
+            "8581abfcb53fa04056a066fc7098c5d94064cc275e20f0e547365c1b8b146e54",
+            YamlPackagesHasher.Compute(cfg.Packages),
+            "Hash must be identical to the comment-free golden — inline `#` comments are not part of the scalar value.");
+    }
 }

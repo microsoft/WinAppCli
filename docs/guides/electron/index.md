@@ -7,7 +7,8 @@ This guide walks you through adding Windows-native capabilities to an Electron a
 
 By the end of this guide, you'll have an Electron app that:
 - ✅ Calls modern Windows APIs (Windows SDK and Windows App SDK)
-- ✅ Uses a native addon with AI capabilities (Phi Silica or WinML)
+- ✅ Uses Windows AI capabilities from JavaScript (Phi Silica or WinML)
+- ✅ Optionally uses a native addon when an API needs native code
 - ✅ Runs with app identity for testing protected APIs
 - ✅ Packages as a signed MSIX for distribution
 
@@ -22,7 +23,7 @@ Before starting, ensure you have:
 
 ## The Process
 
-Building a Windows-enabled Electron app involves three main phases:
+Follow these guides to set up your Electron app, call modern Windows APIs, and package it for distribution:
 
 ### 1. [Setting Up the Development Environment](setup.md)
 
@@ -34,34 +35,35 @@ First, you'll set up your development environment with the necessary tools and S
 
 [Get Started with Setup →](setup.md)
 
-### 2. Calling Windows APIs
+### 2. Call Windows APIs from JavaScript
 
-Next, choose how to call Windows APIs from your Electron app:
+If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs (and any Windows SDK APIs you opt into through `winapp.jsBindings`). Import those wrappers from your Electron main process to call the APIs directly from JavaScript.
 
-#### Option A: [JS bindings](js-file-picker.md) ✨ *new*
+- **[Show a Notification from JavaScript →](js-notification.md)** — call the same Windows App SDK notification surface without a native addon.
+- **[Call Windows APIs from JavaScript →](js-file-picker.md)** — pick a file with Windows App SDK and inspect it with Windows SDK imaging APIs.
+- **[Call Phi Silica from JavaScript →](js-phi-silica.md)** — summarize text with the local language model on Copilot+ PCs.
+- **[Run WinML from JavaScript →](js-winml.md)** — use Windows App SDK ML provider discovery with `onnxruntime-node`.
 
-The simplest path — typed JS bindings generated from `.winmd` metadata, no native build step required from your Electron project. Opt in during interactive `npx winapp init` and a `.winapp/bindings/` directory is added to your project. You can then add `import { ChatClient } from './.winapp/bindings'` and call WinRT directly.
+### 3. Optional: Create a Native Addon
 
-[Add JS bindings →](js-file-picker.md)
+Skip this step if generated JS bindings cover the Windows App SDK API you need. Create a native addon only when you need a native boundary, such as Win32, pure COM, native C/C++ libraries, or managed .NET assemblies.
 
-> Native addons (Options B–D below) are still the right choice when the API has no WinRT projection — Win32 / pure COM (raw `IFileDialog`, registry, custom COM servers), C++ libraries that ship only headers + a static/shared lib, or vendor SDKs that ship only a managed .NET assembly. For everything that ships in a `.winmd`, JS bindings are the easier option.
-
-#### Option B: [Creating a C++ Notification Addon](cpp-notification-addon.md)
+#### Option A: [Creating a C++ Notification Addon](cpp-notification-addon.md)
 Learn how to create a C++ addon that calls the Windows App SDK notification APIs. This is a great starting point for understanding native addons before diving into more complex scenarios.
 
 [Create a C++ Notification Addon →](cpp-notification-addon.md)
 
-#### Option C: [Creating a Phi Silica Addon](phi-silica-addon.md)
+#### Option B: [Creating a Phi Silica Addon](phi-silica-addon.md)
 Learn how to create a C# addon that uses the Phi Silica AI model to summarize text on-device. Phi Silica is a small language model that runs locally on Windows 11 devices with NPUs.
 
 [Create a Phi Silica Addon →](phi-silica-addon.md)
 
-#### Option D: [Creating a WinML Addon](winml-addon.md)
+#### Option C: [Creating a WinML Addon](winml-addon.md)
 Learn how to create a C# addon that uses Windows Machine Learning (WinML) to run custom ONNX models for image classification, object detection, and more.
 
 [Create a WinML Addon →](winml-addon.md)
 
-### 3. [Packaging for Distribution](packaging.md)
+### 4. [Packaging for Distribution](packaging.md)
 
 Finally, you'll package your app as an MSIX for distribution. This includes:
 - Building your app for production
@@ -76,11 +78,14 @@ Finally, you'll package your app as an MSIX for distribution. This includes:
 | Phase | Guide | What You'll Learn |
 |-------|-------|-------------------|
 | 1️⃣ | [Setup](setup.md) | Install tools, initialize SDKs, configure build pipeline |
-| 2️⃣ | [JS bindings](js-file-picker.md) | Generate typed JS bindings, no native build step |
-| 2️⃣ | [C++ Notification Addon](cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
-| 2️⃣ | [Phi Silica Addon](phi-silica-addon.md) | Create C# addon, call AI APIs, test with debug identity |
-| 2️⃣ | [WinML Addon](winml-addon.md) | Create C# addon, call WinML APIs, run ONNX models, integrate ML |
-| 3️⃣ | [Packaging](packaging.md) | Build production app, create MSIX, distribute |
+| 2️⃣ | [Notification JS bindings](js-notification.md) | Show a Windows App SDK notification directly from JavaScript |
+| 2️⃣ | [Windows APIs JS bindings](js-file-picker.md) | Call a Windows App SDK API, then extend bindings to Windows SDK APIs |
+| 2️⃣ | [Phi Silica JS bindings](js-phi-silica.md) | Call the local language model directly from JavaScript |
+| 2️⃣ | [WinML JS bindings](js-winml.md) | Register WinML execution providers and run ONNX Runtime from JavaScript |
+| 3️⃣ | [C++ Notification Addon](cpp-notification-addon.md) | Create C++ addon, call notification APIs, test with debug identity |
+| 3️⃣ | [Phi Silica Addon](phi-silica-addon.md) | Create a C# addon alternative for AI APIs |
+| 3️⃣ | [WinML Addon](winml-addon.md) | Create a C# addon alternative for WinML |
+| 4️⃣ | [Packaging](packaging.md) | Build production app, create MSIX, distribute |
 
 ## Additional Resources
 

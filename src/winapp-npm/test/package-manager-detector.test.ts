@@ -32,6 +32,32 @@ test('buildAddExactCommand pins exact versions per package manager', () => {
   });
 });
 
+test('buildAddExactCommand adds dev-install flag when target is devDependencies', () => {
+  assert.deepEqual(buildAddExactCommand('npm', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'npm',
+    args: ['install', 'pkg@1.2.3', '--save-exact', '--save-dev'],
+  });
+  assert.deepEqual(buildAddExactCommand('pnpm', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'pnpm',
+    args: ['add', 'pkg@1.2.3', '--save-exact', '-D'],
+  });
+  assert.deepEqual(buildAddExactCommand('yarn', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'yarn',
+    args: ['add', 'pkg@1.2.3', '--exact', '--dev'],
+  });
+  assert.deepEqual(buildAddExactCommand('bun', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'bun',
+    args: ['add', 'pkg@1.2.3', '--exact', '--dev'],
+  });
+});
+
+test('buildAddExactCommand accepts a version-less spec (registry resolves the latest tag)', () => {
+  assert.deepEqual(buildAddExactCommand('npm', 'pkg', 'devDependencies'), {
+    exe: 'npm',
+    args: ['install', 'pkg', '--save-exact', '--save-dev'],
+  });
+});
+
 function withTempWorkspace(files: Record<string, string>, fn: (dir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-pm-'));
   try {

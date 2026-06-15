@@ -6,12 +6,19 @@
 import * as os from 'os';
 import { readPackageJsonDoc, mutatePackageJsonDoc } from './package-json-doc';
 
-export type RuntimeDependencyOutcome = 'added' | 'alreadyPresent' | 'presentInDevDependencies' | 'noPackageJson';
+export type RuntimeDependencyOutcome =
+  | 'added'
+  | 'alreadyPresent'
+  | 'presentInDevDependencies'
+  | 'noPackageJson'
+  | 'versionMismatch';
 
 export interface EnsureRuntimeDependencyResult {
   outcome: RuntimeDependencyOutcome;
   /** When `outcome === 'added'`, the value that was written. */
   pinnedVersion?: string;
+  /** When `outcome === 'versionMismatch'`, the version currently pinned in `dependencies`. */
+  existingVersion?: string;
 }
 
 export function ensureRuntimeDependency(
@@ -26,8 +33,7 @@ export function ensureRuntimeDependency(
     throw new Error('version must not be empty');
   }
 
-  // Single round-trip: readPackageJsonDoc enforces the path-safety guard and
-  // returns null when package.json is missing.
+  // readPackageJsonDoc enforces the path-safety guard and returns null when package.json is missing.
   const doc = readPackageJsonDoc(workspaceDir);
   if (!doc) {
     return { outcome: 'noPackageJson' };
@@ -42,9 +48,8 @@ export function ensureRuntimeDependency(
       return { outcome: 'alreadyPresent' };
     }
     if (typeof existing === 'string') {
-      // Keep the runtime package aligned with the codegen-declared dependency.
-      mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
-      return { outcome: 'added', pinnedVersion: version };
+      // Defer the write — let the caller decide whether to overwrite via updateRuntimeDependency.
+      return { outcome: 'versionMismatch', existingVersion: existing, pinnedVersion: version };
     }
   }
 
@@ -59,6 +64,17 @@ export function ensureRuntimeDependency(
   mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
 
   return { outcome: 'added', pinnedVersion: version };
+}
+
+/** Force-write `packageName@version` into `dependencies`, replacing any prior value. */
+export function updateRuntimeDependency(workspaceDir: string, packageName: string, version: string): void {
+  if (!packageName.trim()) {
+    throw new Error('packageName must not be empty');
+  }
+  if (!version.trim()) {
+    throw new Error('version must not be empty');
+  }
+  mutatePackageJsonDoc(workspaceDir, (parsed) => insertOrUpdateDependency(parsed, packageName, version));
 }
 
 /**
@@ -81,6 +97,28 @@ export function getRuntimeDependencyVersion(workspaceDir: string, packageName: s
   }
   const version = (deps as Record<string, unknown>)[packageName];
   return typeof version === 'string' && version.trim() ? version : null;
+}
+
+/** Read the declared devDependency version without mutating package.json. */
+export function getDevDependencyVersion(workspaceDir: string, packageName: string): string | null {
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
+    return null;
+  }
+  const devDeps = doc.parsed.devDependencies;
+  if (!devDeps || typeof devDeps !== 'object' || Array.isArray(devDeps)) {
+    return null;
+  }
+  const version = (devDeps as Record<string, unknown>)[packageName];
+  return typeof version === 'string' && version.trim() ? version : null;
+}
+
+/** True when the package is declared in either dependencies or devDependencies. */
+export function isPackageDeclared(workspaceDir: string, packageName: string): boolean {
+  return (
+    getRuntimeDependencyVersion(workspaceDir, packageName) !== null ||
+    getDevDependencyVersion(workspaceDir, packageName) !== null
+  );
 }
 
 function insertOrUpdateDependency(
@@ -147,6 +185,11 @@ export function formatRuntimeDependencyHint(
     case 'noPackageJson':
       return {
         message: `⚠️ No package.json found in workspace. Generated bindings will fail to resolve ${packageName} at runtime.${eol}    Run \`npm init -y\` first, then re-run \`winapp restore\` to add the dependency.`,
+        needsInstall: false,
+      };
+    case 'versionMismatch':
+      return {
+        message: `⚠️ ${packageName} version drift detected between package.json and the installed dynwinrt-codegen. Run \`winapp init\` to resync.`,
         needsInstall: false,
       };
     default: {

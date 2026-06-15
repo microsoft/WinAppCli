@@ -1,64 +1,106 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 //
-// Tiny dependency-free spinner for codegen progress.
+// Dependency-free single-task spinner. Animates `⠋⠙⠹⠸…` in place on TTY and
+// degrades to plain log lines on non-TTY streams.
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const FRAME_INTERVAL_MS = 80;
 
 export interface Spinner {
-  /** Clears the spinner line (TTY) or no-op (non-TTY). Idempotent. */
+  succeed: (text?: string) => void;
+  fail: (text?: string) => void;
   stop: () => void;
 }
 
 export interface SpinnerOptions {
-  /** Defaults to process.stdout. */
   stream?: NodeJS.WriteStream;
+  /** Prefix prepended to every spinner / completion line (e.g. indent for child tasks). */
+  prefix?: string;
+  /** Sink for the static line in non-TTY mode. Defaults to `stream.write(...)`. */
+  nonTtyLog?: (line: string) => void;
 }
 
-/** Start a spinner; pair `stop()` in `finally`. Non-TTY streams get one static line. */
+/**
+ * Start a spinner. ALWAYS call exactly one of `succeed()` / `fail()` / `stop()`,
+ * preferably from a `finally` block.
+ */
 export function startSpinner(text: string, options: SpinnerOptions = {}): Spinner {
   const stream = options.stream ?? process.stdout;
+  const prefix = options.prefix ?? '';
+  const nonTtyLog = options.nonTtyLog;
 
   if (!stream.isTTY) {
-    stream.write(`${text}\n`);
-    return { stop: () => {} };
+    if (nonTtyLog) {
+      nonTtyLog(`${text}`);
+    } else {
+      stream.write(`${prefix}${text}\n`);
+    }
+    let done = false;
+    const finishStatic = (marker: string, finalText: string | undefined): void => {
+      if (done) return;
+      done = true;
+      const t = finalText ?? text;
+      if (nonTtyLog) {
+        nonTtyLog(`${marker} ${t}`);
+      } else {
+        stream.write(`${prefix}${marker} ${t}\n`);
+      }
+    };
+    return {
+      succeed: (t) => finishStatic('✅', t),
+      fail: (t) => finishStatic('❌', t),
+      stop: () => {
+        done = true;
+      },
+    };
   }
 
   let frame = 0;
-  let stopped = false;
+  let done = false;
 
-  // Hide cursor for the duration of the spinner.
   stream.write('\x1b[?25l');
 
   const render = (): void => {
-    // Carriage return + clear-line overwrites the previous frame without leftovers.
-    stream.write(`\r\x1b[2K${FRAMES[frame % FRAMES.length]} ${text}`);
+    stream.write(`\r\x1b[2K${prefix}${FRAMES[frame % FRAMES.length]} ${text}`);
     frame++;
   };
 
   render();
   const handle = setInterval(render, FRAME_INTERVAL_MS);
 
-  // Ctrl+C cleanup: restore the terminal, then re-raise for conventional exit 130.
-  const onSigint = (): void => {
-    if (stopped) return;
-    stopped = true;
+  const teardown = (): void => {
+    clearInterval(handle);
+    stream.write('\x1b[?25h');
+    process.removeListener('SIGINT', onSigint);
+  };
+
+  const finishLive = (marker: string, finalText: string | undefined): void => {
+    if (done) return;
+    done = true;
+    teardown();
+    stream.write(`\r\x1b[2K${prefix}${marker} ${finalText ?? text}\n`);
+  };
+
+  // Ctrl+C: restore terminal and re-raise so exit code stays 130.
+  function onSigint(): void {
+    if (done) return;
+    done = true;
     clearInterval(handle);
     stream.write('\r\x1b[2K\x1b[?25h');
     process.removeListener('SIGINT', onSigint);
     process.kill(process.pid, 'SIGINT');
-  };
+  }
   process.once('SIGINT', onSigint);
 
   return {
+    succeed: (t) => finishLive('✅', t),
+    fail: (t) => finishLive('❌', t),
     stop: () => {
-      if (stopped) return;
-      stopped = true;
-      clearInterval(handle);
-      // Clear current line + show cursor again.
-      stream.write('\r\x1b[2K\x1b[?25h');
-      process.removeListener('SIGINT', onSigint);
+      if (done) return;
+      done = true;
+      teardown();
+      stream.write('\r\x1b[2K');
     },
   };
 }

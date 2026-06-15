@@ -45,7 +45,7 @@ winapp init [base-directory] [options]
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores shareable files in the global cache directory
-- Generates JS bindings for Windows App SDK APIs (npm wrapper only; requires SDK setup)
+- Generates JS bindings for Windows App SDK APIs when enabled by the npm wrapper
 
 **Automatic project detection:**
 
@@ -887,11 +887,11 @@ npx winapp node generate-bindings [options]
 **What it does:**
 
 - Reads the `winapp.jsBindings` block from `package.json` and the `winmds.lock.json` written by the last `winapp restore`, then emits typed `.js` + `.d.ts` bindings into `.winapp/bindings/`
-- Does **not** modify `package.json` — it is a passive regenerator. Adding the `winapp.jsBindings` block and the `@microsoft/dynwinrt` runtime dependency is [`winapp init`](#init)'s job; this command fails fast if the block is absent
+- Does **not** modify `package.json` — it is a passive regenerator. Adding the `winapp.jsBindings` block and the `@microsoft/dynwinrt` runtime dependency happens during [`winapp init`](#init) when JS bindings are enabled; this command fails fast if the block is absent
 - Warns (but does not write) if `@microsoft/dynwinrt` is missing from your dependencies — run `npm install` after `init` has added it
 
 > [!NOTE]
-> Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them. Run [`winapp init`](#init) first to opt into bindings (it writes the `winapp.jsBindings` block and the `@microsoft/dynwinrt` dependency); this command only regenerates them afterwards. If you edit `winapp.yaml`, run `npx winapp restore` to refresh Windows dependencies before regenerating.
+> Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them. Run [`winapp init`](#init) interactively and opt in, or use `winapp init . --use-defaults --add-js-bindings`, before using this command to regenerate bindings. If you edit `winapp.yaml`, run `npx winapp restore` to refresh Windows dependencies before regenerating.
 
 **Examples:**
 

@@ -30,7 +30,7 @@ Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- JS bindings for calling Windows App SDK APIs directly from JavaScript — no native addon required
+- JS bindings for calling Windows App SDK APIs directly from JavaScript, powered by `@microsoft/dynwinrt`
 
 Quick start:
 ```powershell
@@ -40,20 +40,16 @@ npx winapp node create-addon --template cs   # create a C# native addon
 npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
-#### Choosing between JS bindings and a native addon
-
-**Default — Windows App SDK API → JS bindings.** You can call virtually all Windows App SDK APIs (Notifications, FilePickers, AI like `TextRecognizer` / `LanguageModel`, etc.) directly from JavaScript, excluding UI APIs (WinUI / XAML controls). See [`@microsoft/dynwinrt` scope](https://github.com/microsoft/dynwinrt#scope).
-
-**Fall back to `node create-addon` when there's no `.winmd`:**
-
-- **Win32 / pure COM** (P/Invoke, raw `IFileDialog`, registry, custom COM servers) → `--template cpp`
-- **C++ library** (headers + static/shared lib only) → `--template cpp`
-- **Managed .NET assembly only** (vendor SDK) → `--template cs` ([node-api-dotnet](https://github.com/microsoft/node-api-dotnet))
-
-Mixing both in one app is normal.
+Windows integration guidance:
+- Use **JS bindings** for Windows App SDK APIs that can be called from JavaScript (for example notifications, file pickers, and AI APIs). They are generated into `.winapp/bindings` and use `@microsoft/dynwinrt` at runtime.
+- Use **native addons** for APIs outside the generated Windows App SDK binding surface: `--template cpp` for Win32 / pure COM / C++ libraries, or `--template cs` for managed .NET assemblies.
+- Mixing JS bindings and native addons in one Electron app is fine.
 
 Additional Electron guides:
-- [JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-file-picker.md) — end-to-end workflow for calling WinRT from JS/TS, including binding scope configuration
+- [Notification JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-notification.md)
+- [Windows APIs JS bindings guide (file picker + imaging)](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-file-picker.md)
+- [Phi Silica JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-phi-silica.md)
+- [WinML JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-winml.md)
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)

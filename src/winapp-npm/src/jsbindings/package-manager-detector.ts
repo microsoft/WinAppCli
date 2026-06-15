@@ -14,17 +14,24 @@ export interface DetectedPackageManager {
   installCommand: string;
 }
 
+export type PackageDependencyTarget = 'dependencies' | 'devDependencies';
+
 /** Build argv (no shell) for adding exact-pinned `name@version` so runtime matches codegen. */
-export function buildAddExactCommand(name: PackageManagerName, packageSpec: string): { exe: string; args: string[] } {
+export function buildAddExactCommand(
+  name: PackageManagerName,
+  packageSpec: string,
+  target: PackageDependencyTarget = 'dependencies'
+): { exe: string; args: string[] } {
+  const dev = target === 'devDependencies';
   switch (name) {
     case 'npm':
-      return { exe: 'npm', args: ['install', packageSpec, '--save-exact'] };
+      return { exe: 'npm', args: ['install', packageSpec, '--save-exact', ...(dev ? ['--save-dev'] : [])] };
     case 'pnpm':
-      return { exe: 'pnpm', args: ['add', packageSpec, '--save-exact'] };
+      return { exe: 'pnpm', args: ['add', packageSpec, '--save-exact', ...(dev ? ['-D'] : [])] };
     case 'yarn':
-      return { exe: 'yarn', args: ['add', packageSpec, '--exact'] };
+      return { exe: 'yarn', args: ['add', packageSpec, '--exact', ...(dev ? ['--dev'] : [])] };
     case 'bun':
-      return { exe: 'bun', args: ['add', packageSpec, '--exact'] };
+      return { exe: 'bun', args: ['add', packageSpec, '--exact', ...(dev ? ['--dev'] : [])] };
   }
 }
 
@@ -85,7 +92,10 @@ export function resolvePackageManagerPath(name: PackageManagerName, workspaceDir
 
 function isPathUnderOrEqual(candidate: string, root: string): boolean {
   const c = path.resolve(candidate).toLowerCase();
-  const r = path.resolve(root).replace(/[\\/]+$/, '').toLowerCase();
+  const r = path
+    .resolve(root)
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
   return c === r || c.startsWith(r + path.sep.toLowerCase());
 }
 

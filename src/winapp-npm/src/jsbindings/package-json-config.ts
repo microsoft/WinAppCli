@@ -55,6 +55,8 @@ export interface EnsureJsBindingsOptions {
   reset?: boolean;
   /** Suppress the informational banner printed to stdout. */
   quiet?: boolean;
+  /** Override the log sink (e.g. to indent under a parent task header). */
+  log?: (line: string) => void;
 }
 
 /** Ensure package.json declares `winapp.jsBindings`; explicit opt-in only, never restore. */
@@ -62,20 +64,19 @@ export function ensureJsBindingsBlock(
   workspaceDir: string,
   opts: EnsureJsBindingsOptions = {}
 ): EnsureJsBindingsOutcome {
+  const log = opts.log ?? ((line: string) => console.log(line));
   const current = readJsBindingsConfig(workspaceDir);
   if (!current.jsBindings) {
     writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
     if (!opts.quiet) {
-      console.log(
-        'ℹ️  Added "winapp.jsBindings" to package.json. ' + 'Edit `additionalWinmds` or `additionalRefs` to customize.'
-      );
+      log('ℹ️  Added "winapp.jsBindings" to package.json. Edit `additionalWinmds` or `additionalRefs` to customize.');
     }
     return 'added';
   }
   if (opts.reset) {
     writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
     if (!opts.quiet) {
-      console.log('ℹ️  Reset "winapp.jsBindings" in package.json to defaults.');
+      log('ℹ️  Reset "winapp.jsBindings" in package.json to defaults.');
     }
     return 'reset';
   }

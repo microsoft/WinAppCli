@@ -442,8 +442,7 @@ async function runCodegenQuery(
     if (err instanceof CodegenExitError) {
       const details = [err.stderr, err.stdout].filter(Boolean).join(os.EOL);
       throw new Error(
-        `dynwinrt-codegen ${command} failed (exit ${err.code ?? 'null'}).` +
-          (details ? `${os.EOL}${details}` : ''),
+        `dynwinrt-codegen ${command} failed (exit ${err.code ?? 'null'}).` + (details ? `${os.EOL}${details}` : ''),
         { cause: err }
       );
     }
@@ -534,9 +533,9 @@ export function resolveCodegenInvocation(): CodegenInvocation {
 
   throw new Error(
     partialHint +
-      'To enable JS bindings, install via your package manager:\n' +
-      '  npm i -D @microsoft/winappcli\n' +
-      `(bundles ${CODEGEN_PACKAGE_NAME} as a transitive dependency.)\n\n` +
+      'To enable JS bindings, install codegen via your package manager:\n' +
+      `  npm i -D @microsoft/dynwinrt-codegen\n` +
+      `(or re-run \`npx winapp init . --add-js-bindings\`, which installs it automatically).\n\n` +
       'pnpm and yarn (classic / Berry / PnP) are supported via Node module resolution.\n\n' +
       'See https://github.com/microsoft/WinAppCli#electron--nodejs for setup details.'
   );

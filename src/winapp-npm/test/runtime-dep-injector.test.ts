@@ -9,8 +9,12 @@ import * as path from 'path';
 
 import {
   ensureRuntimeDependency,
+  updateRuntimeDependency,
+  formatRuntimeDependencyHint,
   getRuntimeDependencyVersion,
+  getDevDependencyVersion,
   isRuntimeDependencyDeclared,
+  isPackageDeclared,
 } from '../src/jsbindings/runtime-dep-injector';
 
 const PKG = '@microsoft/dynwinrt';
@@ -56,11 +60,27 @@ test('ensureRuntimeDependency leaves a matching version untouched', () => {
   assert.deepEqual(ensureRuntimeDependency(dir, PKG, '0.2.0'), { outcome: 'alreadyPresent' });
 });
 
-test('ensureRuntimeDependency overwrites a stale pinned version', () => {
+test('ensureRuntimeDependency surfaces versionMismatch without mutating package.json', () => {
+  // ensureRuntimeDependency never silently overwrites a user-pinned version.
+  // Callers (the orchestrator + init hook) auto-apply updateRuntimeDependency
+  // because codegen <-> runtime ABI parity is non-negotiable.
   const dir = makeWorkspace({ name: 'app', version: '1.0.0', dependencies: { [PKG]: '0.1.0' } });
   const result = ensureRuntimeDependency(dir, PKG, '0.2.0');
-  assert.deepEqual(result, { outcome: 'added', pinnedVersion: '0.2.0' });
+  assert.deepEqual(result, { outcome: 'versionMismatch', existingVersion: '0.1.0', pinnedVersion: '0.2.0' });
+  // Critical: existing pin must remain on disk until the caller opts in.
+  assert.equal(readDeps(dir)[PKG], '0.1.0');
+});
+
+test('updateRuntimeDependency overwrites the existing pin', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0', dependencies: { [PKG]: '0.1.0' } });
+  updateRuntimeDependency(dir, PKG, '0.2.0');
   assert.equal(readDeps(dir)[PKG], '0.2.0');
+});
+
+test('updateRuntimeDependency rejects empty package name or version', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
+  assert.throws(() => updateRuntimeDependency(dir, '   ', '1.0.0'), /packageName must not be empty/);
+  assert.throws(() => updateRuntimeDependency(dir, PKG, '  '), /version must not be empty/);
 });
 
 test('ensureRuntimeDependency does not auto-promote a devDependency', () => {
@@ -90,4 +110,39 @@ test('getRuntimeDependencyVersion returns the production dependency version only
 
   const none = makeWorkspace();
   assert.equal(getRuntimeDependencyVersion(none, PKG), null);
+});
+
+test('getDevDependencyVersion returns the devDependencies version only', () => {
+  const devOnly = makeWorkspace({ name: 'app', version: '1.0.0', devDependencies: { [PKG]: '0.2.0' } });
+  assert.equal(getDevDependencyVersion(devOnly, PKG), '0.2.0');
+
+  const prod = makeWorkspace({ name: 'app', version: '1.0.0', dependencies: { [PKG]: '0.2.0' } });
+  assert.equal(getDevDependencyVersion(prod, PKG), null);
+
+  const none = makeWorkspace();
+  assert.equal(getDevDependencyVersion(none, PKG), null);
+});
+
+test('isPackageDeclared spans both dependencies and devDependencies', () => {
+  const prod = makeWorkspace({ name: 'app', version: '1.0.0', dependencies: { [PKG]: '0.2.0' } });
+  assert.equal(isPackageDeclared(prod, PKG), true);
+
+  const devOnly = makeWorkspace({ name: 'app', version: '1.0.0', devDependencies: { [PKG]: '0.2.0' } });
+  assert.equal(isPackageDeclared(devOnly, PKG), true);
+
+  const empty = makeWorkspace({ name: 'app', version: '1.0.0' });
+  assert.equal(isPackageDeclared(empty, PKG), false);
+
+  const none = makeWorkspace();
+  assert.equal(isPackageDeclared(none, PKG), false);
+});
+
+test('formatRuntimeDependencyHint surfaces versionMismatch as a drift warning', () => {
+  // Defensive: live orchestrator + init flows now auto-update on mismatch, so
+  // this branch should be unreachable in practice. Keep the helper to handle
+  // any future passive flow that needs a "run init to resync" hint.
+  const hint = formatRuntimeDependencyHint('versionMismatch', PKG, '0.2.0', 'npm install');
+  assert.equal(hint.needsInstall, false);
+  assert.match(hint.message, /version drift detected/i);
+  assert.match(hint.message, /winapp init/);
 });

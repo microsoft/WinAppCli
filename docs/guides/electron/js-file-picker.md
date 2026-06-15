@@ -1,7 +1,7 @@
 <!-- mslearn: true -->
-# Call a Windows File Picker from JavaScript (JS bindings)
+# Call Windows APIs from JavaScript (JS bindings)
 
-This guide shows you how to call a Windows Runtime (WinRT) API — the native Windows file picker — directly from your Electron app's JavaScript, with no native addon and no `node-gyp` / MSBuild step. It's a great starting point for calling any `Windows.*` or `Microsoft.WindowsAppSDK.*` API from JS/TS with full IntelliSense.
+This guide shows you how to call Windows APIs — both Windows App SDK and Windows SDK — directly from your Electron app's JavaScript, with no native addon and no `node-gyp` / MSBuild step. You'll open a native file picker (Windows App SDK), then inspect the picked image with Windows SDK file and imaging APIs added through `winapp.jsBindings`.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Before starting this guide, make sure you've:
 
 ## Step 1: Confirm your bindings
 
-Setup generated a `.winapp/bindings/` directory next to your sources — one `.js` + `.d.ts` pair per WinRT class, plus an `index.js` that re-exports them all:
+Setup generated a `.winapp/bindings/` directory next to your sources — one `.js` + `.d.ts` pair per emitted Windows App SDK class, plus an `index.js` that re-exports them all:
 
 ```
 .winapp/bindings/
@@ -23,20 +23,59 @@ Setup generated a `.winapp/bindings/` directory next to your sources — one `.j
 └── …
 ```
 
-## Step 2: Call a WinRT API from your Electron code
+## Step 2: Add Windows SDK APIs to your bindings
 
-Load classes from the generated `index.js` — you don't need to know which file inside `.winapp/bindings/` a class lives in. Here's a native file picker (`Microsoft.Windows.Storage.Pickers.FileOpenPicker`) opened from your Electron main process. This API works on any Windows 11 machine once you've wired up debug identity in [Step 3](#step-3-run-it):
+The default bindings cover Windows App SDK APIs only. To open and decode the picked image, we also need two Windows SDK classes:
+
+- `Windows.Storage.StorageFile` — to wrap a file path.
+- `Windows.Graphics.Imaging.BitmapDecoder` — to read its dimensions.
+
+Open `package.json` and add an `additionalWinmds` array inside the `winapp.jsBindings` block that `winapp init` created:
+
+```jsonc
+// package.json
+{
+  "winapp": {
+    "jsBindings": {
+      "additionalWinmds": [
+        { "namespace": "Windows.Storage", "classes": ["StorageFile"] },
+        { "namespace": "Windows.Graphics.Imaging", "classes": ["BitmapDecoder"] }
+      ]
+    }
+  }
+}
+```
+
+Then regenerate the bindings:
+
+```bash
+npx winapp node generate-bindings
+```
+
+`StorageFile.js`, `BitmapDecoder.js`, and the enum files they depend on (`FileAccessMode.js`, `BitmapPixelFormat.js`, …) now appear in `.winapp/bindings/`.
+
+> [!NOTE]
+> dynwinrt-codegen automatically pulls in dependent types you need to call these classes (for example `IRandomAccessStream`, returned by `StorageFile.openAsync`), so cherry-picking just the entry-point classes is usually enough.
+
+## Step 3: Call Windows APIs from your Electron code
+
+Load classes from the generated `index.js` — you don't need to know which file inside `.winapp/bindings/` a class lives in. Here we open the native file picker (`Microsoft.Windows.Storage.Pickers.FileOpenPicker` from Windows App SDK), then use `Windows.Storage.StorageFile` and `Windows.Graphics.Imaging.BitmapDecoder` (from Windows SDK) to read the picked image's dimensions. All of this runs from the Electron main process and works on any Windows 11 machine once you've wired up debug identity in [Step 4](#step-4-run-it):
 
 ```js
 // src/index.js (Electron main, CommonJS)
 const { app, BrowserWindow, ipcMain } = require('electron');
 const {
+  // Windows App SDK (default bindings)
   FileOpenPicker,
   PickerLocationId,
   PickerViewMode,
+  // Windows SDK (added via additionalWinmds in Step 2)
+  StorageFile,
+  FileAccessMode,
+  BitmapDecoder,
 } = require('../.winapp/bindings/index.js');
 
-async function pickAnImage(mainWindow) {
+async function pickAndInspectImage(mainWindow) {
   // FileOpenPicker needs the parent window's HWND wrapped in a WindowId struct.
   // Electron's getNativeWindowHandle() returns an 8-byte buffer on 64-bit Windows.
   const hwnd = mainWindow.getNativeWindowHandle().readBigUInt64LE(0);
@@ -47,13 +86,24 @@ async function pickAnImage(mainWindow) {
   picker.fileTypeFilter.replaceAll(['.png', '.jpg', '.jpeg', '.gif']);
 
   const result = await picker.pickSingleFileAsync();
-  return result?.path; // string with the chosen path, or undefined if the user cancelled
+  if (!result?.path) return null; // User cancelled.
+
+  // Use Windows SDK APIs to inspect the picked image.
+  const file = await StorageFile.getFileFromPathAsync(result.path);
+  const stream = await file.openAsync(FileAccessMode.Read);
+  const decoder = await BitmapDecoder.createAsync(stream);
+
+  return {
+    path: result.path,
+    width: decoder.pixelWidth,
+    height: decoder.pixelHeight,
+  };
 }
 
-// Expose it to the renderer via IPC so a button click can trigger the picker.
-ipcMain.handle('pick-image', (event) => {
+// Expose it to the renderer via IPC so a button click can trigger the flow.
+ipcMain.handle('pick-and-inspect-image', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  return pickAnImage(win);
+  return pickAndInspectImage(win);
 });
 ```
 
@@ -64,11 +114,11 @@ Then bridge it into the renderer through your preload script:
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('winapp', {
-  pickImage: () => ipcRenderer.invoke('pick-image'),
+  pickAndInspectImage: () => ipcRenderer.invoke('pick-and-inspect-image'),
 });
 ```
 
-Finally, add a button to your renderer and call `window.winapp.pickImage()` when it's clicked:
+Finally, add a button to your renderer and call `window.winapp.pickAndInspectImage()` when it's clicked:
 
 ```html
 <!-- src/index.html -->
@@ -77,40 +127,15 @@ Finally, add a button to your renderer and call `window.winapp.pickImage()` when
 
 <script>
   document.getElementById('pick').addEventListener('click', async () => {
-    const filePath = await window.winapp.pickImage();
-    document.getElementById('result').textContent = filePath ?? 'Cancelled';
+    const info = await window.winapp.pickAndInspectImage();
+    document.getElementById('result').textContent = info
+      ? `${info.path} (${info.width}×${info.height})`
+      : 'Cancelled';
   });
 </script>
 ```
 
-> [!NOTE]
-> These examples are CommonJS (`require`). In an ESM project (`"type": "module"` or TypeScript), use a top-level `import` instead:
-> ```js
-> import { FileOpenPicker, PickerLocationId, PickerViewMode } from '../.winapp/bindings/index.js';
-> ```
-
-> [!IMPORTANT]
-> Using **Vite**? Externalize `@microsoft/dynwinrt` in `vite.main.config.mjs`:
-> ```js
-> import { defineConfig } from 'vite';
->
-> export default defineConfig({
->   build: {
->     rollupOptions: {
->       external: ['@microsoft/dynwinrt'],
->     },
->   },
-> });
-> ```
-
-A few conventions the example shows:
-
-- **Members are camelCase** (`ViewMode` → `viewMode`); names colliding with JS keywords get a trailing underscore (`default_`, `delete_`).
-- **Construct via static factories, not `new`** — `FileOpenPicker.createInstance(windowId)`.
-- **`UInt64` / `Int64` are `bigint`** — use `buffer.readBigUInt64LE(0)` for raw handles, and pass struct wrappers literally (`{ value: hwnd }`).
-- **Async methods return a `Promise`**, and collections expose helpers like `replaceAll(...)`, `toArray()`, `for…of`, and `.size`.
-
-## Step 3: Run it
+## Step 4: Run it
 
 Before the file picker will work, you need to ensure your app runs with identity. Run:
 
@@ -127,61 +152,19 @@ Now start the app:
 npm start
 ```
 
-Click the button and the native Windows file picker appears! 🎉 Importing from `.winapp/bindings/` loads `@microsoft/dynwinrt`, which dispatches each call into the underlying WinRT API — transparent to your code.
-
-## Step 4 (optional): Regenerate after a metadata change
-
-The generated `.winapp/bindings/` files are build artifacts — `.winapp/` is added to `.gitignore` by `init`, so you regenerate them rather than committing. Re-run codegen whenever you change `winapp.yaml` (`packages`, `sdkVersion`, …) or `winapp.jsBindings` in `package.json`:
-
-```bash
-# Full restore — refreshes the lockfile (NuGet + cppwinrt headers) and re-runs codegen.
-# Use whenever you change `winapp.yaml`.
-npx winapp restore
-
-# Fast path — only re-runs dynwinrt-codegen against the cached lockfile.
-# Use after editing only `winapp.jsBindings`.
-npx winapp node generate-bindings
-```
-
-> [!WARNING]
-> Treat the output directory (`.winapp/bindings/`) as fully managed by `winapp` — never put hand-written files there. Each regeneration wipes the directory, keeping only the `.dynwinrt-managed` marker `winapp` uses to recognize it as safe to overwrite.
-
-## Customizing the binding scope (optional)
-
-When `jsBindings` is `{}` (the default block `init` adds), bindings are generated for all Windows App SDK APIs in your `winapp.yaml`, minus a few that can't be driven from a headless Node process (XAML/WinUI and WebView2 are excluded by default). To narrow or extend that, configure the `winapp.jsBindings` namespace in `package.json` (the schema lives in `package.json`, not `winapp.yaml`, the same convention used by `eslint`, `jest`, `prettier`, …):
-
-```jsonc
-// package.json
-{
-  "winapp": {
-    "jsBindings": {
-      // Extra .winmd files to generate bindings from. Each entry is one of:
-      //   { "winmdPath": "..." }                                       emit the whole winmd
-      //   { "winmdPath": "...", "namespace": "...", "classes": [...] }  cherry-pick from it
-      //   { "namespace": "Windows.Storage", "classes": [...] }         cherry-pick from the Windows SDK
-      // Paths are relative to the workspace root, or absolute.
-      "additionalWinmds": [
-        { "winmdPath": "vendor/MyCompany.Foo.winmd" },
-        { "namespace": "Windows.Storage", "classes": ["StorageFile"] }
-      ],
-
-      // Extra .winmd files loaded for type resolution only — never emitted.
-      "additionalRefs": ["vendor/BigVendor.Common.winmd"]
-    }
-  }
-}
-```
-
-Re-run `npx winapp node generate-bindings` after editing the block. XAML namespaces (`Microsoft.UI.Xaml.*`, `Windows.UI.Xaml.*`) are always out of scope — the codegen can't host them, so no JS is emitted regardless of which packages are installed.
+Click the button: the native Windows file picker appears, and once you pick an image its path and pixel dimensions show up below the button. 🎉 Importing from `.winapp/bindings/` loads `@microsoft/dynwinrt`, which dispatches each call into the underlying WinRT API — transparent to your code.
 
 ## Next Steps
 
-Congratulations! You're now calling WinRT APIs directly from JavaScript — no native addon, no `node-gyp` build step. 🎉
+Congratulations! You're now calling Windows APIs — Windows App SDK and Windows SDK — directly from JavaScript, with no native addon and no `node-gyp` build step. 🎉
 
 Now you're ready to:
 - **[Package Your App for Distribution](packaging.md)** — produce an MSIX you can ship (the `@microsoft/dynwinrt` runtime is already in your `dependencies`).
 
 Or explore other guides:
+- **[Show a Notification from JavaScript](js-notification.md)** — show a Windows App SDK notification through JS bindings.
+- **[Call Phi Silica from JavaScript](js-phi-silica.md)** — summarize text with Windows App SDK AI through JS bindings.
+- **[Run WinML from JavaScript](js-winml.md)** — use Windows App SDK ML provider discovery with `onnxruntime-node`.
 - **[Creating a C++ Native Addon](cpp-notification-addon.md)** — for Win32 / pure-COM APIs that have no WinRT projection.
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** — Windows AI APIs from a C# addon.
 - **[Getting Started Overview](index.md)** — return to the main guide.
