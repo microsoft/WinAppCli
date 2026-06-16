@@ -59,7 +59,7 @@ npx winapp node generate-bindings
 
 ## Step 3: Call Windows APIs from your Electron code
 
-Load classes from the generated `index.js` — you don't need to know which file inside `.winapp/bindings/` a class lives in. Here we open the native file picker (`Microsoft.Windows.Storage.Pickers.FileOpenPicker` from Windows App SDK), then use `Windows.Storage.StorageFile` and `Windows.Graphics.Imaging.BitmapDecoder` (from Windows SDK) to read the picked image's dimensions. All of this runs from the Electron main process and works on any Windows 11 machine once you've wired up debug identity in [Step 4](#step-4-run-it):
+All generated classes are exported from `.winapp/bindings/index.js`:
 
 ```js
 // src/index.js (Electron main, CommonJS)

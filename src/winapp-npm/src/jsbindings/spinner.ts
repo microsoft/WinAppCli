@@ -61,12 +61,18 @@ export function startSpinner(text: string, options: SpinnerOptions = {}): Spinne
 
   stream.write('\x1b[?25l');
 
+  // Write the full line once, then on each frame only overwrite the spinner character.
+  const spinnerCol = prefix.length; // column where the spinner character sits
   const render = (): void => {
-    stream.write(`\r\x1b[2K${prefix}${FRAMES[frame % FRAMES.length]} ${text}`);
+    const ch = FRAMES[frame % FRAMES.length];
+    // Move cursor to the spinner column and overwrite just that character
+    stream.write(`\r\x1b[${spinnerCol + 1}G${ch}`);
     frame++;
   };
 
-  render();
+  // Initial full-line write
+  stream.write(`\r\x1b[2K${prefix}${FRAMES[0]} ${text}`);
+  frame = 1;
   const handle = setInterval(render, FRAME_INTERVAL_MS);
 
   const teardown = (): void => {

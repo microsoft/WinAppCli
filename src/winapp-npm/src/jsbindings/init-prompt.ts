@@ -96,14 +96,18 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
     return { kind: 'no', silentReason: '--use-defaults — skipping JS bindings.' };
   }
 
-  if (inputs.nonInteractive || !process.stdin.isTTY) {
+  if (inputs.nonInteractive || !process.stdin.isTTY || process.env.CI) {
     return {
       kind: 'no',
-      silentReason: inputs.nonInteractive ? '--json — skipping JS bindings.' : 'non-TTY stdin — skipping JS bindings.',
+      silentReason: inputs.nonInteractive
+        ? '--json — skipping JS bindings.'
+        : !process.stdin.isTTY
+          ? 'non-TTY stdin — skipping JS bindings.'
+          : 'CI environment detected — skipping JS bindings.',
     };
   }
 
-  const answer = await confirmationPrompt('Add JS/TypeScript bindings to this project?');
+  const answer = await confirmationPrompt('Add JS bindings to call Windows App SDK APIs directly from JavaScript?');
   return { kind: answer ? 'yes' : 'no' };
 }
 

@@ -140,10 +140,56 @@ export async function handleGenerateBindings(args: string[]): Promise<void> {
 
 /** Append the wrapper-specific `init` notes the native `--help` doesn't know about. */
 export function printInitWrapperOnlyHelp(): void {
+  // On TTY: move cursor up one line to eat the trailing blank line from native help.
+  // On pipe: skip ANSI escape, accept the blank line (harmless in piped output).
+  if (process.stdout.isTTY) {
+    process.stdout.write('\x1B[1A\x1B[2K');
+  }
+  console.log(
+    wrapHelpLine(
+      '  --add-js-bindings                                ',
+      'Generate Windows App SDK JS bindings under .winapp/bindings/ for direct JavaScript access to WinRT APIs'
+    )
+  );
   console.log('');
-  console.log(`Options (added by ${CLI_NAME}, npm only):`);
-  console.log('  --add-js-bindings    Add winapp.jsBindings and generate JS/TypeScript bindings');
-  console.log('                       (useful with --use-defaults or non-interactive init)');
+}
+
+/**
+ * Word-wrap a help description to the terminal width, indenting continuation
+ * lines to align with the description start column (matching System.CommandLine).
+ */
+export function wrapHelpLine(prefix: string, description: string): string {
+  const width = process.stdout.columns || 120;
+  const descCol = prefix.length;
+  const budget = width - descCol;
+  if (budget < 20) return prefix + description;
+
+  const words = description.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (current.length + word.length + 1 > budget && current.length > 0) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + ' ' + word : word;
+    }
+  }
+  if (current) lines.push(current);
+
+  const indent = ' '.repeat(descCol);
+  return (
+    prefix +
+    lines[0] +
+    (lines.length > 1
+      ? '\n' +
+        lines
+          .slice(1)
+          .map((l) => indent + l)
+          .join('\n')
+      : '')
+  );
 }
 
 /**

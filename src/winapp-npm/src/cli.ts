@@ -7,7 +7,13 @@ import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLE
 import { parseSetupSdksArg } from './jsbindings/init-prompt';
 import { stripWrapperOnlyFlags } from './cli-args';
 import { CLI_NAME, parseArgs, logErrorAndExit } from './cli-shared';
-import { handleInit, handleRestore, handleGenerateBindings, printInitWrapperOnlyHelp } from './jsbindings/cli-hooks';
+import {
+  handleInit,
+  handleRestore,
+  handleGenerateBindings,
+  printInitWrapperOnlyHelp,
+  wrapHelpLine,
+} from './jsbindings/cli-hooks';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 
@@ -66,7 +72,8 @@ export async function main(): Promise<void> {
       return;
     }
 
-    // `init --help` falls through to native help; append wrapper notes after it.
+    // `init --help` — let native write directly to terminal (preserves wrap/indent),
+    // then append wrapper option. Eat the trailing blank line only when on a real TTY.
     if (command === 'init' && commandArgs.some((a) => HELP_FLAGS.has(a))) {
       await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
       printInitWrapperOnlyHelp();
@@ -261,7 +268,12 @@ async function showCombinedHelp(): Promise<void> {
   console.log('  node create-addon         Generate native addon files for Electron');
   console.log('  node add-electron-debug-identity  Add package identity to Electron debug process');
   console.log('  node clear-electron-debug-identity  Remove package identity from Electron debug process');
-  console.log('  node generate-bindings    Regenerate JS/TypeScript bindings from package.json + cached winmds');
+  console.log(
+    wrapHelpLine(
+      '  node generate-bindings    ',
+      'Regenerate JS bindings after updating only winapp.jsBindings config (if winapp.yaml changed, use restore instead)'
+    )
+  );
   console.log('');
   console.log('Examples:');
   console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
@@ -327,7 +339,12 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('  create-addon                   Generate native addon files for Electron');
     console.log('  add-electron-debug-identity    Add package identity to Electron debug process');
     console.log('  clear-electron-debug-identity  Remove package identity from Electron debug process');
-    console.log('  generate-bindings              Regenerate JS/TypeScript bindings (no NuGet/cppwinrt restore)');
+    console.log(
+      wrapHelpLine(
+        '  generate-bindings              ',
+        'Regenerate JS bindings after updating only winapp.jsBindings config (if winapp.yaml changed, use restore instead)'
+      )
+    );
     console.log('');
     console.log('Examples:');
     console.log(`  ${CLI_NAME} node create-addon --help`);

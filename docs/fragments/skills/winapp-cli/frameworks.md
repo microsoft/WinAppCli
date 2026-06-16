@@ -25,20 +25,20 @@ Use the **npm package** (`@microsoft/winappcli`), **not** the standalone CLI. Th
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
-- JS bindings for calling Windows App SDK APIs directly from JavaScript, powered by `@microsoft/dynwinrt`
+- Generated JS bindings (`.winapp/bindings/`) for direct JavaScript access to Windows App SDK APIs
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init . --use-defaults
+npx winapp init . --use-defaults --add-js-bindings
 npx winapp node create-addon --template cs   # create a C# native addon
 npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
 Windows integration guidance:
 
-- Use **JS bindings** for Windows App SDK APIs that can be called from JavaScript (for example notifications, file pickers, and AI APIs). They are generated into `.winapp/bindings` and use `@microsoft/dynwinrt` at runtime.
-- Use **native addons** for APIs outside the generated Windows App SDK binding surface: `--template cpp` for Win32 / pure COM / C++ libraries, or `--template cs` for managed .NET assemblies.
+- Use **JS bindings** to call Windows App SDK APIs directly from JavaScript without native addons (for example AI APIs, notifications, and file pickers). Custom WinRT components with .winmd metadata can also be added via `winapp.jsBindings.additionalWinmds` in package.json.
+- Use **native addons** when you need Win32/COM APIs, third-party C++ libraries, or .NET assemblies: `--template cpp` for C++ (node-gyp), or `--template cs` for C#.
 - Mixing JS bindings and native addons in one Electron app is fine.
 
 Additional Electron guides:
