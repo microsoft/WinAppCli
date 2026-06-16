@@ -79,6 +79,15 @@ Describe "flutter-app sample" {
 
         It "Should build Flutter app for Windows" {
             Set-Location $script:projectDir
+            # MSVC 14.51+ hard-errors on <experimental/coroutine>; suppress until Flutter updates its runner.
+            $cmakeFile = Join-Path $script:projectDir "windows\runner\CMakeLists.txt"
+            if (Test-Path $cmakeFile) {
+                $content = Get-Content $cmakeFile -Raw
+                if ($content -notlike '*_SILENCE_EXPERIMENTAL_COROUTINE*') {
+                    $content = $content -replace '(target_compile_definitions\(\$\{BINARY_NAME\} PRIVATE[^)]*)', "`$1`n  _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+                    Set-Content $cmakeFile $content -NoNewline
+                }
+            }
             flutter build windows
             $LASTEXITCODE | Should -Be 0
             $script:buildOutput = Join-Path $script:projectDir "build\windows\x64\runner\Release"
@@ -117,6 +126,16 @@ Describe "flutter-app sample" {
             if ($LASTEXITCODE -ne 0) { throw "flutter pub get failed" }
 
             Invoke-WinappCommand -Arguments "restore"
+
+            # MSVC 14.51+ hard-errors on <experimental/coroutine>; suppress until Flutter updates its runner.
+            $cmakeFile = Join-Path $script:sampleDir "windows\runner\CMakeLists.txt"
+            if (Test-Path $cmakeFile) {
+                $content = Get-Content $cmakeFile -Raw
+                if ($content -notlike '*_SILENCE_EXPERIMENTAL_COROUTINE*') {
+                    $content = $content -replace '(target_compile_definitions\(\$\{BINARY_NAME\} PRIVATE[^)]*)', "`$1`n  _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+                    Set-Content $cmakeFile $content -NoNewline
+                }
+            }
 
             flutter build windows
             if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
