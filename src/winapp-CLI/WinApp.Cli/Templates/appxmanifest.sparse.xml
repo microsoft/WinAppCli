@@ -35,8 +35,7 @@
   <Applications>
     <Application Id="{ApplicationId}"
       Executable="$targetnametoken$.exe"
-      uap10:TrustLevel="mediumIL"
-      uap10:RuntimeBehavior="packagedClassicApp">
+      EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         AppListEntry="none"
         DisplayName="{PackageName}"
