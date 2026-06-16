@@ -245,6 +245,19 @@ export async function handleInit(args: string[]): Promise<void> {
     return;
   }
 
+  // Native init may have auto-selected a subdirectory (no positional arg, interactive mode).
+  // If .winapp/ wasn't created in our workspaceDir, native worked elsewhere — skip mutation.
+  // Exception: --config-only skips restore so .winapp/ won't exist yet — don't false-positive.
+  if (!explicitWorkspace && !configOnly && !fs.existsSync(path.join(workspaceDir, '.winapp'))) {
+    if (!quiet) {
+      console.log(
+        'ℹ️  JS bindings setup skipped: native init selected a different directory. ' +
+          'Run `npx winapp init . --add-js-bindings` from your project directory to enable JS bindings.'
+      );
+    }
+    return;
+  }
+
   // Lockfile (from SDK winmd discovery) = winmds to bind against; --config-only defers.
   const lockfilePresent = lockfileExists(workspaceDir);
 

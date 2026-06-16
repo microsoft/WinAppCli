@@ -61,6 +61,7 @@ export function parsePackagesFromYaml(yaml: string): PackagePin[] {
   const packages: PackagePin[] = [];
   let inPackages = false;
   let currentName: string | null = null;
+  let currentVersion: string | null = null;
   for (const rawLine of lines) {
     const indent = leadingSpaces(rawLine);
     const t = rawLine.trim();
@@ -71,6 +72,7 @@ export function parsePackagesFromYaml(yaml: string): PackagePin[] {
       // Top-level key boundary.
       inPackages = isTopLevelKey(t, 'packages:');
       currentName = null;
+      currentVersion = null;
       continue;
     }
     if (!inPackages) {
@@ -80,17 +82,20 @@ export function parsePackagesFromYaml(yaml: string): PackagePin[] {
     const dashName = matchPrefixCaseInsensitive(t, '- name:');
     if (dashName !== null) {
       currentName = sanitizeScalar(dashName);
-      continue;
     }
-    const bareName = matchPrefixCaseInsensitive(t, 'name:');
+    const bareName = dashName === null ? matchPrefixCaseInsensitive(t, 'name:') : null;
     if (bareName !== null) {
       currentName = sanitizeScalar(bareName);
-      continue;
     }
     const version = matchPrefixCaseInsensitive(t, 'version:');
-    if (version !== null && currentName !== null) {
-      packages.push({ name: currentName, version: sanitizeScalar(version) });
+    if (version !== null) {
+      currentVersion = sanitizeScalar(version);
+    }
+    // Commit once both name and version are collected (order-independent).
+    if (currentName !== null && currentVersion !== null) {
+      packages.push({ name: currentName, version: currentVersion });
       currentName = null;
+      currentVersion = null;
     }
   }
   return packages;

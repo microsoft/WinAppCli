@@ -50,6 +50,7 @@ internal sealed class ConfigService : IConfigService
         using var sr = new StringReader(yaml);
         string? line;
         string? currentName = null;
+        string? currentVersion = null;
         bool inPackages = false;
         while ((line = sr.ReadLine()) != null)
         {
@@ -69,6 +70,7 @@ internal sealed class ConfigService : IConfigService
             {
                 inPackages = IsTopLevelKey(t, "packages:");
                 currentName = null;
+                currentVersion = null;
                 continue;
             }
 
@@ -85,11 +87,21 @@ internal sealed class ConfigService : IConfigService
             {
                 currentName = SanitizeScalar(t.Substring("name:".Length));
             }
-            else if (t.StartsWith("version:", StringComparison.OrdinalIgnoreCase) && currentName is not null)
+            else if (t.StartsWith("- version:", StringComparison.OrdinalIgnoreCase))
             {
-                var version = SanitizeScalar(t.Substring("version:".Length));
-                cfg.Packages.Add(new PackagePin { Name = currentName, Version = version });
+                currentVersion = SanitizeScalar(t.Substring("- version:".Length));
+            }
+            else if (t.StartsWith("version:", StringComparison.OrdinalIgnoreCase))
+            {
+                currentVersion = SanitizeScalar(t.Substring("version:".Length));
+            }
+
+            // Commit once both name and version are collected (order-independent).
+            if (currentName is not null && currentVersion is not null)
+            {
+                cfg.Packages.Add(new PackagePin { Name = currentName, Version = currentVersion });
                 currentName = null;
+                currentVersion = null;
             }
         }
         return cfg;

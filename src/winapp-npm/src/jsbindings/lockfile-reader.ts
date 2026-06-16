@@ -136,6 +136,19 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
         : undefined;
 
   const cacheBoundary = path.resolve(nugetCacheDir).replace(/[\\/]+$/, '');
+
+  // Reject suspiciously broad boundaries — a tampered lockfile setting nuget_cache_dir
+  // to a drive root (e.g. "C:\") would make every path pass containment.
+  // Real NuGet caches are always at least 3 levels deep (e.g. C:\Users\x\.nuget\packages).
+  const boundaryDepth = cacheBoundary.split(path.sep).filter(Boolean).length;
+  if (boundaryDepth < 3 || isNetworkPath(cacheBoundary)) {
+    return {
+      lockfile: null,
+      reason:
+        `Lockfile ${filePath} contains a suspiciously broad nuget_cache_dir ("${nugetCacheDir}"). ` +
+        `Re-run \`winapp restore\` to regenerate with a valid NuGet cache path.`,
+    };
+  }
   const droppedPaths: string[] = [];
   const packages: WinmdsLockfilePackage[] = [];
   for (const entry of packagesRaw) {

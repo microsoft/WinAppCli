@@ -37,7 +37,7 @@ First, you'll set up your development environment with the necessary tools and S
 
 ### 2. Call Windows APIs from JavaScript
 
-If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs (and any Windows SDK APIs you opt into through `winapp.jsBindings`). Import those wrappers from your Electron main process to call the APIs directly from JavaScript.
+If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs. Require `.winapp/bindings/index.js` to access all exported classes.
 
 - **[Show a Notification from JavaScript →](js-notification.md)** — call the same Windows App SDK notification surface without a native addon.
 - **[Call Windows APIs from JavaScript →](js-file-picker.md)** — pick a file with Windows App SDK and inspect it with Windows SDK imaging APIs.
