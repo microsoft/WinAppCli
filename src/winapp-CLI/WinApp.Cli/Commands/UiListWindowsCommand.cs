@@ -23,6 +23,31 @@ internal class UiListWindowsCommand : Command, IShortDescription
     {
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(WinAppRootCommand.JsonOption);
+        Options.Add(ShowHiddenOption);
+    }
+
+    internal static Option<bool> ShowHiddenOption { get; } = new("--show-hidden")
+    {
+        Description = "Include untitled zero-size windows that are hidden by default"
+    };
+
+    /// <summary>
+    /// Determines whether a window should be included in list-windows output.
+    /// An untitled window is only excluded when it also has zero size (not a real visible window).
+    /// </summary>
+    internal static bool ShouldIncludeWindow(string? title, int width, int height, bool showHidden)
+    {
+        if (showHidden)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(title))
+        {
+            return true;
+        }
+
+        return width > 0 && height > 0;
     }
 
     public class Handler(
@@ -34,6 +59,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var showHidden = parseResult.GetValue(ShowHiddenOption);
 
             try
             {
@@ -97,19 +123,21 @@ internal class UiListWindowsCommand : Command, IShortDescription
                     var results = windows.Select(w =>
                     {
                         var info = UiSessionService.GetWindowInfo(w.Hwnd);
-                        return new WindowInfo
-                        {
-                            Hwnd = w.Hwnd,
-                            ProcessId = w.Pid,
-                            ProcessName = GetProcessNameSafe(w.Pid),
-                            Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
-                            Label = info.Label,
-                            Width = info.Width,
-                            Height = info.Height,
-                            OwnerHwnd = (long)info.OwnerHwnd,
-                            ClassName = info.ClassName,
-                            IsForeground = w.Hwnd == foregroundHwnd
-                        };
+                        return (w, info);
+                    })
+                    .Where(x => ShouldIncludeWindow(x.w.Title, x.info.Width, x.info.Height, showHidden))
+                    .Select(x => new WindowInfo
+                    {
+                        Hwnd = x.w.Hwnd,
+                        ProcessId = x.w.Pid,
+                        ProcessName = GetProcessNameSafe(x.w.Pid),
+                        Title = string.IsNullOrEmpty(x.w.Title) ? null : x.w.Title,
+                        Label = x.info.Label,
+                        Width = x.info.Width,
+                        Height = x.info.Height,
+                        OwnerHwnd = (long)x.info.OwnerHwnd,
+                        ClassName = x.info.ClassName,
+                        IsForeground = x.w.Hwnd == foregroundHwnd
                     }).ToArray();
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(results, UiJsonContext.Default.WindowInfoArray));
@@ -118,19 +146,29 @@ internal class UiListWindowsCommand : Command, IShortDescription
 
                 // Human-readable output with metadata
                 var fgHwnd = (nint)Windows.Win32.PInvoke.GetForegroundWindow();
+                var displayedCount = 0;
                 foreach (var w in windows)
                 {
-                    var procName = Markup.Escape(GetProcessNameSafe(w.Pid));
-                    var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : Markup.Escape(w.Title);
                     var info = UiSessionService.GetWindowInfo(w.Hwnd);
+
+                    if (!ShouldIncludeWindow(w.Title, info.Width, info.Height, showHidden))
+                    {
+                        continue;
+                    }
+
+                    displayedCount++;
+                    var procName = Markup.Escape(GetProcessNameSafe(w.Pid));
+                    var titleDisplay = string.IsNullOrEmpty(w.Title)
+                        ? "Untitled window"
+                        : $"\"{Markup.Escape(w.Title)}\"";
                     var label = Markup.Escape(info.Label);
                     var className = Markup.Escape(info.ClassName);
                     var fg = w.Hwnd == fgHwnd ? ", [green]foreground[/]" : "";
                     var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-                    ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: \"{title}\" [grey]({label}, {info.Width}x{info.Height}{fg}{owner}) [[{className}]] ({procName}, PID {w.Pid})[/]");
+                    ansiConsole.MarkupLine($"  HWND [cyan]{w.Hwnd}[/]: {titleDisplay} [grey]({label}, {info.Width}x{info.Height}{fg}{owner}) [[{className}]] ({procName}, PID {w.Pid})[/]");
                 }
 
-                logger.LogInformation("Found {Count} windows", windows.Count);
+                logger.LogInformation("Found {Count} windows", displayedCount);
                 return 0;
             }
             catch (Exception ex)
