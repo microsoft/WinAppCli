@@ -59,7 +59,7 @@ jobs:
             //     the source run id (never the artifact's pr-context.json),
             //   * resolve the PR number from the GitHub API by trusted
             //     head_sha and verify the PR's current head still matches,
-            //   * whitelist all keys we render into the Markdown body so a
+            //   * allowlist all keys we render into the Markdown body so a
             //     malicious build can't inject table breaks, mentions,
             //     hidden HTML, or links.
 
