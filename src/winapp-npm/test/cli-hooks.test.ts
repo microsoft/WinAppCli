@@ -87,7 +87,7 @@ test('makeIndentedLog passes empty messages through untouched', () => {
   assert.deepEqual(captured, ['']);
 });
 
-test('printInitWrapperOnlyHelp documents --add-js-bindings under a wrapper-only section', () => {
+test('printInitWrapperOnlyHelp documents --add-js-bindings', () => {
   const captured: string[] = [];
   const original = console.log;
   console.log = (line: string) => captured.push(line);
@@ -97,8 +97,8 @@ test('printInitWrapperOnlyHelp documents --add-js-bindings under a wrapper-only 
     console.log = original;
   }
   const joined = captured.join('\n');
-  assert.match(joined, /npm only/);
   assert.match(joined, /--add-js-bindings/);
+  assert.match(joined, /JS bindings/);
 });
 
 test('handleGenerateBindings --help prints command help (no fs probe, no exit)', async () => {
