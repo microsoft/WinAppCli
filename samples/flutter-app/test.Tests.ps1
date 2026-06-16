@@ -151,6 +151,7 @@ Describe "flutter-app sample" {
                     Set-Content $cmakeFile $originalCmake -Encoding utf8
                 }
             }
+        }
 
         It "Should build flutter_app.exe" {
             Join-Path $script:sampleDir "build\windows\x64\runner\Release\flutter_app.exe" | Should -Exist
