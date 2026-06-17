@@ -79,6 +79,15 @@ Describe "flutter-app sample" {
 
         It "Should build Flutter app for Windows" {
             Set-Location $script:projectDir
+            # MSVC 14.51+ hard-errors on <experimental/coroutine>; suppress until Flutter updates its runner.
+            $cmakeFile = Join-Path $script:projectDir "windows\runner\CMakeLists.txt"
+            if (Test-Path $cmakeFile) {
+                $content = Get-Content $cmakeFile -Raw
+                if ($content -notlike '*_SILENCE_EXPERIMENTAL_COROUTINE*') {
+                    $content = $content -replace '(target_compile_definitions\(\$\{BINARY_NAME\} PRIVATE[^)]*)', "`$1`n  _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+                    Set-Content $cmakeFile $content -NoNewline
+                }
+            }
             flutter build windows
             $LASTEXITCODE | Should -Be 0
             $script:buildOutput = Join-Path $script:projectDir "build\windows\x64\runner\Release"
@@ -118,8 +127,30 @@ Describe "flutter-app sample" {
 
             Invoke-WinappCommand -Arguments "restore"
 
-            flutter build windows
-            if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
+            # MSVC 14.51+ hard-errors on <experimental/coroutine>; suppress until Flutter updates its runner.
+            $cmakeFile = Join-Path $script:sampleDir "windows\runner\CMakeLists.txt"
+            $originalCmake = $null
+            $cmakePatched = $false
+            try {
+                if (Test-Path $cmakeFile) {
+                    $originalCmake = Get-Content $cmakeFile -Raw -Encoding utf8
+                    if ($originalCmake -notlike '*_SILENCE_EXPERIMENTAL_COROUTINE*') {
+                        $patched = $originalCmake -replace '(target_compile_definitions\(\$\{BINARY_NAME\} PRIVATE[^)]*)', "`$1`n  _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+                        if ($patched -ne $originalCmake) {
+                            Set-Content $cmakeFile $patched -Encoding utf8
+                            $cmakePatched = $true
+                        }
+                    }
+                }
+
+                flutter build windows
+                if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed" }
+            }
+            finally {
+                if ($cmakePatched -and $null -ne $originalCmake) {
+                    Set-Content $cmakeFile $originalCmake -Encoding utf8
+                }
+            }
         }
 
         It "Should build flutter_app.exe" {
