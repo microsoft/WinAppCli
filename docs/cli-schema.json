@@ -149,7 +149,7 @@
               "recursive": false
             },
             "--publisher": {
-              "description": "Publisher name for the generated certificate. If not specified, will be inferred from manifest.",
+              "description": "Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -921,7 +921,7 @@
               "recursive": false
             },
             "--publisher-name": {
-              "description": "Publisher CN (default: CN=<current user>)",
+              "description": "Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1192,7 +1192,7 @@
           "recursive": false
         },
         "--publisher": {
-          "description": "Publisher name for certificate generation",
+          "description": "Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>.",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
