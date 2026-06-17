@@ -30,7 +30,7 @@ internal class CertGenerateCommand : Command, IShortDescription
     {
         PublisherOption = new Option<string>("--publisher")
         {
-            Description = "Publisher name for the generated certificate. If not specified, will be inferred from manifest."
+            Description = "Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>."
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {

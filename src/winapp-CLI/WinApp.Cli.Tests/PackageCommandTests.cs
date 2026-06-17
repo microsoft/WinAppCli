@@ -818,6 +818,24 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("CN=SimplePublisher", "SimplePublisher", DisplayName = "Simple CN → bare name")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "Multi-component → full DN")]
+    [DataRow("OU=Finance, DC=corp, DC=com", "OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN → full DN")]
+    public async Task CertificateService_GenerateDevCertificate_PublisherDisplayField_MatchesExpected(string publisherDN, string expectedDisplay)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"display_test_{publisherDN.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Act
+        var result = await _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Assert - Publisher field is the display name
+        Assert.AreEqual(expectedDisplay, result.Publisher);
+    }
+
+    [TestMethod]
     public void CertificateService_ExtractPublisherFromCertificate_WithNonExistentFile_ShouldThrow()
     {
         // Arrange
@@ -894,6 +912,29 @@ public class PackageCommandTests : BaseCommandTests
         // Verify error message format matches requirement
         Assert.Contains($"Publisher in {manifestPath} (CN=ManifestPublisher)", ex.Message);
         Assert.Contains($"does not match the publisher in the certificate {certPath} (CN=CertificatePublisher)", ex.Message);
+    }
+
+    [TestMethod]
+    public async Task CertificateService_ValidatePublisherMatch_WithMalformedManifestPublisher_ShouldThrowWrappedError()
+    {
+        // Arrange - Create a valid cert but a manifest with an unparsable publisher DN
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest_cert.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest.xml"));
+        const string testPassword = "testpassword123";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            "CN=TestPublisher", certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Create manifest with an invalid publisher string that X500DistinguishedName cannot parse
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", "=InvalidDN=");
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should throw a wrapped InvalidOperationException
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            async () => await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken));
+
+        Assert.Contains("Failed to validate publisher match", ex.Message);
     }
 
     [TestMethod]

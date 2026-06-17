@@ -40,17 +40,7 @@ internal partial class CertificateService(
         outputPath.Directory?.Create();
 
         // Normalize the publisher to a valid X.500 distinguished name.
-        // If it's already a valid DN, use it as-is; otherwise wrap with CN=.
-        var trimmedPublisher = publisher.Trim().Trim('"', '\'');
-        string subjectName;
-        if (ManifestTemplateService.IsDistinguishedName(trimmedPublisher))
-        {
-            subjectName = trimmedPublisher;
-        }
-        else
-        {
-            subjectName = $"CN={trimmedPublisher}";
-        }
+        var subjectName = PublisherDnHelper.Normalize(publisher);
 
         try
         {
@@ -105,12 +95,7 @@ internal partial class CertificateService(
 
             outputPath.Refresh();
 
-            // For the Publisher field, strip "CN=" prefix if it's a simple CN-only subject
-            // to preserve backward compatibility in JSON output (e.g., "TestPublisher" not "CN=TestPublisher").
-            // Multi-component DNs keep their full form (e.g., "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN").
-            var publisherDisplay = subjectName.Contains(',')
-                ? subjectName
-                : ManifestTemplateService.StripCnPrefix(subjectName);
+            var publisherDisplay = PublisherDnHelper.GetDisplayName(subjectName);
 
             return new CertificateResult(
                 CertificatePath: outputPath,
@@ -461,7 +446,8 @@ internal partial class CertificateService(
             if (!certDn.RawData.AsSpan().SequenceEqual(manifestDn.RawData.AsSpan()))
             {
                 throw new InvalidOperationException(
-                    $"Publisher in {manifestPath} ({manifestPublisher}) does not match the publisher in the certificate {certificatePath} ({certPublisher}).");
+                    $"Publisher in {manifestPath} ({manifestPublisher}) does not match the publisher in the certificate {certificatePath} ({certPublisher}). " +
+                    $"Regenerate the certificate with 'winapp cert generate --manifest \"{manifestPath.Name}\"' or update the manifest Identity Publisher to match the certificate subject.");
             }
         }
         catch (Exception ex) when (ex is not InvalidOperationException)

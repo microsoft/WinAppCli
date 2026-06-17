@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Reflection;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
@@ -62,32 +61,14 @@ internal partial class ManifestTemplateService : IManifestTemplateService
     }
 
     /// <summary>
-    /// Strips CN= prefix from publisher name if present
+    /// Strips CN= prefix from publisher name if present.
+    /// For non-CN DNs, returns the input unchanged.
     /// </summary>
     /// <param name="publisher">Publisher string</param>
     /// <returns>Publisher without CN= prefix</returns>
     public static string StripCnPrefix(string publisher)
     {
-        var trimmed = publisher.Trim().Trim('"', '\'');
-        return trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase)
-            ? trimmed[3..]
-            : trimmed;
-    }
-
-    /// <summary>
-    /// Ensures publisher input is a valid X.500 distinguished name.
-    /// Bare names (without an attribute type prefix) get wrapped with CN=.
-    /// </summary>
-    /// <param name="publisher">Publisher string</param>
-    /// <returns>Publisher as a valid distinguished name</returns>
-    private static string NormalizePublisher(string publisher)
-    {
-        var trimmed = publisher.Trim().Trim('"', '\'');
-        if (IsDistinguishedName(trimmed))
-        {
-            return trimmed;
-        }
-        return "CN=" + trimmed;
+        return PublisherDnHelper.GetDisplayName(publisher);
     }
 
     /// <summary>
@@ -96,19 +77,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
     /// </summary>
     internal static bool IsDistinguishedName(string input)
     {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return false;
-        }
-        try
-        {
-            _ = new X500DistinguishedName(input);
-            return true;
-        }
-        catch (System.Security.Cryptography.CryptographicException)
-        {
-            return false;
-        }
+        return PublisherDnHelper.IsDistinguishedName(input);
     }
 
     /// <summary>
@@ -149,7 +118,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         var result = template
             .Replace("{PackageName}", packageName)
             .Replace("{ApplicationId}", applicationId)
-            .Replace("{PublisherDN}", publisherDN)
+            .Replace("{PublisherDN}", PublisherDnHelper.XmlEscape(publisherDN))
             .Replace("{PublisherName}", publisherName)
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
             .Replace("{Description}", description);
@@ -262,8 +231,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         CancellationToken cancellationToken = default)
     {
         // Normalize publisher to a valid distinguished name
-        var publisherDN = NormalizePublisher(publisherName);
-        var publisherDisplayName = StripCnPrefix(publisherDN);
+        var publisherDN = PublisherDnHelper.Normalize(publisherName);
+        var publisherDisplayName = PublisherDnHelper.GetDisplayName(publisherDN);
 
         taskContext.AddDebugMessage($"Package name: {packageName}");
         taskContext.AddDebugMessage($"Publisher: {publisherDN}");

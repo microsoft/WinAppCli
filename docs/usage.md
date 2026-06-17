@@ -342,7 +342,7 @@ winapp manifest generate [directory] [options]
 **Options:**
 
 - `--package-name <name>` - Package name (default: folder name)
-- `--publisher-name <name>` - Publisher CN (default: CN=\<current user\>)
+- `--publisher-name <name>` - Publisher distinguished name (default: CN=\<current user\>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=\<name\>.
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
