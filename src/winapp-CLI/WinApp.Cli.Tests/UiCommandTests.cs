@@ -348,6 +348,68 @@ public class UiCommandTests : BaseCommandTests
         StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
     }
 
+    [TestMethod]
+    public async Task ListWindows_ExcludesUntitledZeroSizeByDefault()
+    {
+        _fakeUia.WindowsByTitleResult = [
+            (1001, 1234, "Visible Window"),
+            (1002, 1234, "")
+        ];
+
+        var command = GetRequiredService<UiListWindowsCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("\"hwnd\": 1002"), "Untitled zero-size window should be excluded");
+    }
+
+    [TestMethod]
+    public async Task ListWindows_ShowHiddenIncludesUntitledZeroSize()
+    {
+        _fakeUia.WindowsByTitleResult = [
+            (1001, 1234, "Visible Window"),
+            (1002, 1234, "")
+        ];
+
+        var command = GetRequiredService<UiListWindowsCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--show-hidden", "--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1001");
+        StringAssert.Contains(TestAnsiConsole.Output, "\"hwnd\": 1002");
+    }
+
+    // ---------------------------------------------------------------------
+    // ShouldIncludeWindow predicate unit tests (#570 regression coverage)
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public void ShouldIncludeWindow_UntitledNonZeroSize_IncludedByDefault()
+    {
+        // Core #570 regression: an untitled window with real size must be visible
+        Assert.IsTrue(UiListWindowsCommand.ShouldIncludeWindow("", 800, 600, showHidden: false));
+        Assert.IsTrue(UiListWindowsCommand.ShouldIncludeWindow(null, 1920, 1080, showHidden: false));
+    }
+
+    [TestMethod]
+    public void ShouldIncludeWindow_UntitledZeroSize_ExcludedByDefault()
+    {
+        Assert.IsFalse(UiListWindowsCommand.ShouldIncludeWindow("", 0, 0, showHidden: false));
+        Assert.IsFalse(UiListWindowsCommand.ShouldIncludeWindow(null, 0, 0, showHidden: false));
+    }
+
+    [TestMethod]
+    public void ShouldIncludeWindow_UntitledZeroSize_IncludedWithShowHidden()
+    {
+        Assert.IsTrue(UiListWindowsCommand.ShouldIncludeWindow("", 0, 0, showHidden: true));
+    }
+
+    [TestMethod]
+    public void ShouldIncludeWindow_TitledWindow_AlwaysIncluded()
+    {
+        Assert.IsTrue(UiListWindowsCommand.ShouldIncludeWindow("My App", 0, 0, showHidden: false));
+        Assert.IsTrue(UiListWindowsCommand.ShouldIncludeWindow("My App", 800, 600, showHidden: false));
+    }
+
     // ---------------------------------------------------------------------
     // Tree-shape edge cases (M9): ensure BuildWindows/NestElements parse
     // unusual but realistic flat lists into the right window/root layout.

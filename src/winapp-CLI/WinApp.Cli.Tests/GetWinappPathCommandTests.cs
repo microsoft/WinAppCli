@@ -67,7 +67,7 @@ public class GetWinappPathCommandTests : BaseCommandTests
 
         var nonExistentLocal = Path.Combine(_tempDirectory.FullName, ".winapp");
         Assert.IsFalse(File.Exists(nonExistentLocal) || Directory.Exists(nonExistentLocal),
-            "Sanity check: the local .winapp should not exist for this test.");
+            "Precondition check: the local .winapp should not exist for this test.");
         Assert.IsFalse(stdout.Contains(nonExistentLocal),
             "Must not print the non-existent <cwd>/.winapp path that scripts can't use (#475).");
 

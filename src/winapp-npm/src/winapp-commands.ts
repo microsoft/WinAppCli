@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.2
+ * Source schema version: 0.3.3
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -241,7 +241,7 @@ export async function getWinappPath(options: GetWinappPathOptions = {}): Promise
 export interface InitOptions extends CommonOptions {
   /** Base/root directory for the winapp workspace, for consumption or installation. */
   baseDirectory?: string;
-  /** Directory to read/store configuration (default: current directory) */
+  /** Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) */
   configDir?: string;
   /** Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. */
   configOnly?: boolean;
@@ -251,12 +251,12 @@ export interface InitOptions extends CommonOptions {
   noGitignore?: boolean;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
-  /** Do not prompt, and use default of all prompts */
+  /** Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) */
   useDefaults?: boolean;
 }
 
 /**
- * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+ * Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default; automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
@@ -777,6 +777,8 @@ export interface UiListWindowsOptions extends CommonOptions {
   app?: string;
   /** Format output as JSON */
   json?: boolean;
+  /** Include untitled zero-size windows that are hidden by default */
+  showHidden?: boolean;
 }
 
 /**
@@ -786,6 +788,7 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
   const args: string[] = ['ui', 'list-windows'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
+  if (options.showHidden) args.push('--show-hidden');
   return execCommand(args, options);
 }
 

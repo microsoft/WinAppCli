@@ -34,7 +34,6 @@
   <Applications>
     <Application Id="winapp"
       Executable="winapp.exe"
-      EntryPoint="Windows.FullTrustApplication"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL" >
       <uap:VisualElements
