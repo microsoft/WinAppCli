@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
@@ -74,16 +75,40 @@ internal partial class ManifestTemplateService : IManifestTemplateService
     }
 
     /// <summary>
-    /// Ensures publisher name has CN= prefix
+    /// Ensures publisher input is a valid X.500 distinguished name.
+    /// Bare names (without an attribute type prefix) get wrapped with CN=.
     /// </summary>
     /// <param name="publisher">Publisher string</param>
-    /// <returns>Publisher with CN= prefix</returns>
+    /// <returns>Publisher as a valid distinguished name</returns>
     private static string NormalizePublisher(string publisher)
     {
         var trimmed = publisher.Trim().Trim('"', '\'');
-        return trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase)
-            ? trimmed
-            : "CN=" + trimmed;
+        if (IsDistinguishedName(trimmed))
+        {
+            return trimmed;
+        }
+        return "CN=" + trimmed;
+    }
+
+    /// <summary>
+    /// Returns true if the input is already a valid X.500 distinguished name
+    /// (e.g., "CN=Name", "OU=Finance, DC=corp, DC=com").
+    /// </summary>
+    internal static bool IsDistinguishedName(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+        try
+        {
+            _ = new X500DistinguishedName(input);
+            return true;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -115,6 +140,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         string template,
         string packageName,
         string publisherName,
+        string publisherDN,
         string version,
         string description)
     {
@@ -123,6 +149,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         var result = template
             .Replace("{PackageName}", packageName)
             .Replace("{ApplicationId}", applicationId)
+            .Replace("{PublisherDN}", publisherDN)
             .Replace("{PublisherName}", publisherName)
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
             .Replace("{Description}", description);
@@ -234,11 +261,12 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
-        // Normalize publisher name
-        publisherName = StripCnPrefix(NormalizePublisher(publisherName));
+        // Normalize publisher to a valid distinguished name
+        var publisherDN = NormalizePublisher(publisherName);
+        var publisherDisplayName = StripCnPrefix(publisherDN);
 
         taskContext.AddDebugMessage($"Package name: {packageName}");
-        taskContext.AddDebugMessage($"Publisher: {publisherName}");
+        taskContext.AddDebugMessage($"Publisher: {publisherDN}");
         taskContext.AddDebugMessage($"Version: {version}");
         taskContext.AddDebugMessage($"Description: {description}");
         taskContext.AddDebugMessage($"Manifest template: {manifestTemplate}");
@@ -253,7 +281,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         var content = ApplyTemplateReplacements(
             template,
             packageName,
-            publisherName,
+            publisherDisplayName,
+            publisherDN,
             version,
             description);
 

@@ -40,10 +40,10 @@ internal partial class CertificateService(
         outputPath.Directory?.Create();
 
         // Normalize the publisher to a valid X.500 distinguished name.
-        // If it already contains "CN=", treat it as a full DN; otherwise wrap with CN=.
+        // If it's already a valid DN, use it as-is; otherwise wrap with CN=.
         var trimmedPublisher = publisher.Trim().Trim('"', '\'');
         string subjectName;
-        if (trimmedPublisher.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+        if (ManifestTemplateService.IsDistinguishedName(trimmedPublisher))
         {
             subjectName = trimmedPublisher;
         }

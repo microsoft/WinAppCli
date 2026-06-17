@@ -82,6 +82,9 @@ public class PackageCommandTests : BaseCommandTests
             "CN=Publisher, O=MyOrg",
             "CN=Publisher, C=US",
             "CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US",
+            "OU=Finance, DC=corp, DC=com",
+            "O=Contoso Ltd, C=US",
+            "DC=example, DC=com",
         };
 
         foreach (var publisher in testCertificatePublishers)
@@ -200,7 +203,7 @@ public class PackageCommandTests : BaseCommandTests
     /// Removes test certificates from the CurrentUser\My certificate store
     /// This ensures test certificates don't accumulate and interfere with other tests
     /// </summary>
-    /// <param name="subjectName">Certificate subject name to clean up (e.g., "CN=TestPublisher")</param>
+    /// <param name="subjectName">Certificate subject DN to clean up (e.g., "CN=TestPublisher" or "OU=Finance, DC=corp, DC=com")</param>
     private static void CleanupInvalidTestCertificatesFromStore(string subjectName)
     {
         try
@@ -208,7 +211,7 @@ public class PackageCommandTests : BaseCommandTests
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
 
-            var certificates = store.Certificates.Find(X509FindType.FindBySubjectName, subjectName.Replace("CN=", ""), false);
+            var certificates = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subjectName, false);
 
             foreach (X509Certificate2 cert in certificates)
             {
@@ -711,6 +714,9 @@ public class PackageCommandTests : BaseCommandTests
     [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
     [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
     [DataRow("CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US", DisplayName = "DN with spaces in values")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
+    [DataRow("DC=example, DC=com", DisplayName = "Non-CN DN (DC-based)")]
     public void CertificateService_ExtractPublisherFromCertificate_WithVariousDNFormats_ShouldReturnFullSubject(string publisherDN)
     {
         // Arrange
@@ -734,6 +740,8 @@ public class PackageCommandTests : BaseCommandTests
     [DataRow("CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", DisplayName = "Full corporate DN")]
     [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
     [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
     public async Task CertificateService_ValidatePublisherMatch_WithVariousDNFormats_ShouldSucceed(string publisherDN)
     {
         // Arrange - same DN in both cert and manifest
