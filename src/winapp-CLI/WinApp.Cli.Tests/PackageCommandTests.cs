@@ -699,8 +699,8 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert
-        Assert.AreEqual(expectedPublisher, extractedPublisher, "Extracted publisher should match the full subject DN");
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedPublisher, extractedPublisher, "Extracted publisher should match the full subject DN");
     }
 
     [TestMethod]
@@ -723,8 +723,8 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert - should return the full DN exactly as specified
-        Assert.AreEqual(publisherDN, extractedPublisher);
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(publisherDN, extractedPublisher);
     }
 
     [TestMethod]
@@ -767,8 +767,8 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert
-        Assert.AreEqual(expectedSubject, extractedPublisher);
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedSubject, extractedPublisher);
     }
 
     [TestMethod]
@@ -785,8 +785,8 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert - should return the full DN, not just CN=Taozuhong
-        Assert.AreEqual(fullDN, extractedPublisher);
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(fullDN, extractedPublisher);
     }
 
     [TestMethod]
@@ -2413,4 +2413,16 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    /// <summary>
+    /// Compares two DN strings via X500DistinguishedName.RawData to match production semantics.
+    /// </summary>
+    private static void AssertDNEquals(string expectedDN, string actualDN, string? message = null)
+    {
+        var expected = new X500DistinguishedName(expectedDN);
+        var actual = new X500DistinguishedName(actualDN);
+        Assert.IsTrue(
+            expected.RawData.AsSpan().SequenceEqual(actual.RawData.AsSpan()),
+            message ?? $"DN mismatch.\nExpected: {expectedDN}\nActual:   {actualDN}");
+    }
 }
