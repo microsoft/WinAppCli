@@ -595,6 +595,16 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Hover_ZeroSizeElement_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-tiny-0000", X = 10, Y = 20, Width = 0, Height = 0 };
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-tiny-0000", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Edit", Selector = "edit-name-1234" };

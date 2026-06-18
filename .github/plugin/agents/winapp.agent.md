@@ -211,6 +211,7 @@ Want to inspect or interact with a running app's UI?
 - `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
 - `ui screenshot -a <app> [--output file.png] [--json] [--focus] [--capture-screen]` — capture window as PNG. Default uses Windows.Graphics.Capture (composited surface — preserves rounded corners and works while occluded), with PrintWindow as fallback. Use `--focus` to bring the window to the foreground first; use `--capture-screen` for popup overlays not owned by the target window.
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
+- `ui hover <selector> -a <app> [--dwell-time <ms>]` — move mouse to element center to trigger tooltips, flyouts, and hover states. Use with `ui screenshot --capture-screen` to capture the result.
 - `ui set-value <selector> "value" -a <app>` — set text or slider value
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible

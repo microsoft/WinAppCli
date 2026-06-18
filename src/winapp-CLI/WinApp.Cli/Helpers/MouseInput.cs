@@ -53,9 +53,14 @@ internal static class MouseInput
 
     private static void SendMove(int screenX, int screenY)
     {
-        // Convert screen coordinates to normalized absolute coordinates (0–65535)
-        int absoluteX = (int)((screenX * 65535.0) / PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CXSCREEN));
-        int absoluteY = (int)((screenY * 65535.0) / PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CYSCREEN));
+        // Normalize against the full virtual desktop to support multi-monitor setups
+        int vx = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_XVIRTUALSCREEN);
+        int vy = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_YVIRTUALSCREEN);
+        int vw = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CXVIRTUALSCREEN);
+        int vh = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CYVIRTUALSCREEN);
+
+        int absoluteX = (int)(((screenX - vx) * 65535.0) / vw);
+        int absoluteY = (int)(((screenY - vy) * 65535.0) / vh);
 
         Span<INPUT> inputs =
         [
@@ -66,7 +71,7 @@ internal static class MouseInput
                 {
                     dx = absoluteX,
                     dy = absoluteY,
-                    dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE
+                    dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_VIRTUALDESK
                 }}
             }
         ];
@@ -75,7 +80,13 @@ internal static class MouseInput
         {
             fixed (INPUT* pInputs = inputs)
             {
-                PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                if (sent == 0)
+                {
+                    throw new InvalidOperationException(
+                        "SendInput failed — the target window may be elevated (running as admin). " +
+                        "Try running this CLI as administrator.");
+                }
             }
         }
     }

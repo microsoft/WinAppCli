@@ -61,6 +61,13 @@ internal class UiHoverCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (dwellTime < 0 || dwellTime > 10_000)
+            {
+                logger.LogError("{Symbol} --dwell-time must be between 0 and 10000 ms.", UiSymbols.Error);
+                UiJsonError.Emit(json, "invalid-argument", "--dwell-time must be between 0 and 10000 ms.", null);
+                return 1;
+            }
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
