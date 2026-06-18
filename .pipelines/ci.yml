@@ -19,6 +19,10 @@ extends:
   template: v1/1ES.Unofficial.PipelineTemplate.yml@1esPipelines
   parameters:
     sdl:
+      policheck:
+        enabled: true
+        break: true
+        severity: 'Warning'
       sourceAnalysisPool:
         name: Azure-Pipelines-1ESPT-ExDShared
         image: windows-latest
