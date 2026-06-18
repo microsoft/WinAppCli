@@ -565,6 +565,36 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Hover_Json_EmitsEnvelope()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-info-5678", X = 50, Y = 60, Width = 120, Height = 40 };
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"dwellTimeMs\":");
+        StringAssert.Contains(TestAnsiConsole.Output, "\"elementId\":");
+    }
+
+    [TestMethod]
+    public async Task Hover_MissingApp_ReturnsError()
+    {
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Hover_ElementNotFound_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = null;
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-nonexist-0000", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Edit", Selector = "edit-name-1234" };

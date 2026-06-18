@@ -257,6 +257,14 @@ winapp ui click btn-column1-a3f2 -a myapp --double      # double-click
 winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
+### hover
+Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses `SendInput` for realistic mouse movement with a small wiggle, then waits for a configurable dwell time.
+```bash
+winapp ui hover btn-info-a1b2 -a myapp                          # hover with default 800ms dwell
+winapp ui hover btn-info-a1b2 -a myapp --dwell-time 1200        # longer dwell for slow tooltips
+winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-screen  # hover then capture tooltip
+```
+
 ### set-value
 Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
 ```bash
