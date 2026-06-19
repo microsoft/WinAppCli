@@ -103,14 +103,15 @@ export function detectProjects(root: string, maxProjects: number = 10): Detected
 		try {
 			const entries = fs.readdirSync(current, { withFileTypes: true });
 			for (const entry of entries) {
-				if (!entry.isDirectory()) { continue; }
+				if (!entry.isDirectory() && !entry.isSymbolicLink()) { continue; }
 				if (entry.name.startsWith('.') && entry.name !== '.') { continue; }
 				if (SKIP_DIRS.has(entry.name)) { continue; }
-				// Skip symlinks/junctions
 				const fullPath = path.join(current, entry.name);
+				// Skip symlinks and junctions (reparse points)
+				if (entry.isSymbolicLink()) { continue; }
 				try {
-					const stat = fs.lstatSync(fullPath);
-					if (stat.isSymbolicLink()) { continue; }
+					const stat = fs.statSync(fullPath);
+					if (!stat.isDirectory()) { continue; }
 				} catch {
 					continue;
 				}
@@ -176,12 +177,7 @@ function findExecutableCsproj(directory: string): string | undefined {
 			const filePath = path.join(directory, entry);
 			try {
 				const content = fs.readFileSync(filePath, 'utf-8');
-				// Skip test projects
-				if (content.includes('Microsoft.NET.Test.Sdk') || content.includes('xunit') || content.includes('MSTest')) {
-					continue;
-				}
-				// Must be an executable output type (Exe or WinExe)
-				if (content.includes('<OutputType>Exe</OutputType>') || content.includes('<OutputType>WinExe</OutputType>')) {
+				if (isExecutableCsproj(content)) {
 					return entry;
 				}
 			} catch {
@@ -192,4 +188,28 @@ function findExecutableCsproj(directory: string): string | undefined {
 		// Skip if we can't read
 	}
 	return undefined;
+}
+
+/**
+ * Parses csproj XML content to determine if it's an executable, non-test project.
+ * Mirrors the CLI's IsExecutableProject logic.
+ */
+function isExecutableCsproj(content: string): boolean {
+	// Extract OutputType value from PropertyGroup elements
+	const outputTypeMatch = content.match(/<OutputType>\s*(.*?)\s*<\/OutputType>/i);
+	if (!outputTypeMatch) {
+		return false;
+	}
+	const outputType = outputTypeMatch[1].toLowerCase();
+	if (outputType !== 'exe' && outputType !== 'winexe') {
+		return false;
+	}
+
+	// Check IsTestProject property
+	const isTestMatch = content.match(/<IsTestProject>\s*(.*?)\s*<\/IsTestProject>/i);
+	if (isTestMatch && isTestMatch[1].toLowerCase() === 'true') {
+		return false;
+	}
+
+	return true;
 }
