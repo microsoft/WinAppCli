@@ -117,6 +117,31 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 | `args` | string | | Command-line arguments to pass to the application. |
 | `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
 
+### AppxManifest Visual Editor
+
+The extension includes a **visual editor** for `AppxManifest.xml` and `.appxmanifest` files. Instead of hand-editing XML, you get a form-based UI organized into tabs:
+
+| Tab | What you can edit |
+|-----|-------------------|
+| **Identity** | Package name, publisher, version, processor architecture, phone identity (optional), and resource ID |
+| **Properties** | Display name, publisher display name, description, and store logo path |
+| **Dependencies** | Target device families (min/max versions), package dependencies, main package dependencies, driver constraints, OS package dependencies, host runtime dependencies, and external dependencies |
+| **Resources** | BCP-47 language declarations (e.g. `en-us`, `fr-fr`) |
+| **Capabilities** | General, restricted, device, and custom capabilities (e.g. Internet Client, Run Full Trust, Microphone) |
+| **Applications** | Application entries including executable path, entry point, trust level, runtime behavior, visual elements (logos, splash screen, tile options), and extensions (protocol activation, COM servers, background tasks, file type associations, app services, and more) |
+
+**Key features:**
+
+- **Real-time validation** — inline errors for required fields, format rules (publisher DN, version, GUIDs, BCP-47, hex colors), and extension field requirements
+- **Asset generation** — "Regenerate Assets" button invokes the CLI to auto-generate all icon sizes from a single source image
+- **Extension management** — add/remove typed extensions (Protocol Activation, COM Server, Background Tasks, File Type Association, App Execution Alias, Startup Task, Share Target, App Service, Toast Notification Activation, MCP Server) with pre-filled templates
+- **Reorderable lists** — drag dependencies and resources up/down to control XML element order
+- **Format-preserving edits** — changes are applied surgically to the XML text, preserving your whitespace, comments, and attribute ordering
+
+**How to open:**
+
+When you open an `AppxManifest.xml` or `.appxmanifest` file, VS Code will offer the visual editor as an option alongside the default text editor. You can switch between them at any time by right clicking on the file and selecting the **Open With…** command.
+
 ## Scenarios
 
 ### Initialize and set up a project

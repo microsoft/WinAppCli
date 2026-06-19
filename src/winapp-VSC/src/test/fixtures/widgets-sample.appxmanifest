@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<Package xmlns:uap17="http://schemas.microsoft.com/appx/manifest/uap/windows10/17" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:uap13="http://schemas.microsoft.com/appx/manifest/uap/windows/10/13" xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6" xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+	xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+	xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+	xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+	xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+	xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+	IgnorableNamespaces="uap uap3 rescap mp">
+
+	<Identity
+		Name="testtest"
+		Publisher="CN=Microsoft Corporation, O=t"
+		Version="1.0.0.0"
+		ProcessorArchitecture="arm64" />
+
+	<Properties>
+		<DisplayName>SampleWidgetProviderApp</DisplayName>
+		<PublisherDisplayName>Microsoft Corporation</PublisherDisplayName>
+		<Logo>Images\StoreLogo.png</Logo>
+	  <Description>ddd</Description>
+	</Properties>
+
+	<Dependencies>
+		<TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+		<TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+	  <PackageDependency Name="dddd" MinVersion="1.0.0.0" Publisher="CN=t" />
+	</Dependencies>
+
+	<Resources>
+		<Resource Language="x-generate" uap:Scale="100" />
+	</Resources>
+
+	<Applications>
+		<Application Id="App"
+			Executable="$targetnametoken$.exe"
+			EntryPoint="$targetentrypoint$"
+			uap10:TrustLevel="appContainer"
+			uap10:RuntimeBehavior="windowsApp">
+			<uap:VisualElements
+				DisplayName="SampleWidgetProviderAppPackage"
+				Description="SampleWidgetProviderAppPackage"
+				BackgroundColor="transparent"
+				Square150x150Logo="Images\Square150x150Logo.png"
+				Square44x44Logo="Images\Square44x44Logo.png">
+				<uap:DefaultTile Wide310x150Logo="Images\Wide310x150Logo.png" Square310x310Logo="" />
+				<uap:SplashScreen Image="Images\SplashScreen.png" />
+			</uap:VisualElements>
+			<Extensions>
+				<com:Extension Category="windows.comServer">
+					<com:ComServer>
+						<com:ExeServer Executable="SampleWidgetProviderApp\SampleWidgetProviderApp.exe" Arguments="-RegisterProcessAsComServer" DisplayName="SampleWidgetProviderApp">
+							<com:Class Id="101D03A3-6FC8-4887-9B64-310A7B164319" DisplayName="SampleWidgetProvider" />
+						</com:ExeServer>
+					</com:ComServer>
+				</com:Extension>
+				<uap3:Extension Category="windows.appExtension">
+					<uap3:AppExtension Name="com.microsoft.windows.widgets" DisplayName="SampleWidgetTestApp" Id="SampleWidgetApp" PublicFolder="Public">
+						<uap3:Properties>
+							<WidgetProvider>
+								<ProviderIcons>
+									<Icon Path="Images\StoreLogo.png" />
+								</ProviderIcons>
+								<Activation>
+									<CreateInstance ClassId="101D03A3-6FC8-4887-9B64-310A7B164319" />
+								</Activation>
+								<Definitions>
+									<Definition Id="Counting_Widget"
+										DisplayName="Sample Counting Widget"
+										Description="Weather Widget Description">
+										<Capabilities>
+											<Capability>
+												<Size Name="small" />
+											</Capability>
+											<Capability>
+												<Size Name="medium" />
+											</Capability>
+											<Capability>
+												<Size Name="large" />
+											</Capability>
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="appointments" />
+										  <uap:Capability Name="contacts" />
+										  <uap:Capability Name="contacts" />
+										  <uap:Capability Name="contacts" />
+										  <Capability Name="internetClientServer" />
+										  <Capability Name="codeGeneration" />
+										  <uap:Capability Name="appointments" />
+										</Capabilities>
+										<ThemeResources>
+											<Icons>
+												<Icon Path="ProviderAssets\Counting_Icon.png" />
+											</Icons>
+											<Screenshots>
+												<Screenshot Path="ProviderAssets\Counting_Screenshot.png" DisplayAltText="For accessibility" />
+											</Screenshots>
+											<!-- DarkMode and LightMode are optional -->
+											<DarkMode />
+											<LightMode />
+										</ThemeResources>
+									</Definition>
+									<Definition Id="Weather_Widget"
+										DisplayName="Sample Weather Widget"
+										Description="Weather Widget Description">
+										<Capabilities>
+											<Capability>
+												<Size Name="medium" />
+											</Capability>
+											<Capability>
+												<Size Name="large" />
+											</Capability>
+										</Capabilities>
+										<ThemeResources>
+											<Icons>
+												<Icon Path="ProviderAssets\Weather_Icon.png" />
+											</Icons>
+											<Screenshots>
+												<Screenshot Path="ProviderAssets\Weather_Screenshot.png" DisplayAltText="For accessibility" />
+											</Screenshots>
+											<!-- DarkMode and LightMode are optional -->
+											<DarkMode />
+											<LightMode />
+										</ThemeResources>
+									</Definition>
+								</Definitions>
+							</WidgetProvider>
+						</uap3:Properties>
+					</uap3:AppExtension>
+				</uap3:Extension>
+        <Extension Category="windows.backgroundTasks" EntryPoint="---">
+          <BackgroundTasks>
+            <Task Type="timer" />
+          </BackgroundTasks>
+        </Extension>
+      </Extensions>
+		</Application>
+	</Applications>
+	<Capabilities>
+		<Capability Name="internetClient" />
+		<rescap:Capability Name="runFullTrust" />
+	</Capabilities>
+</Package>
