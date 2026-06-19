@@ -34,9 +34,10 @@ export function getProjectLabel(project: DetectedProject): string {
 }
 
 const SKIP_DIRS = new Set([
-	'node_modules', '.git', 'bin', 'obj', 'target', 'build',
-	'.winapp', '.vs', '.idea', 'dist', 'out', 'packages',
-	'__pycache__', '.dart_tool', '.pub-cache'
+	'node_modules', '.git', 'bin', 'obj', 'debug', 'release',
+	'.vs', '.vscode', '.idea', 'packages', 'dist', 'build', 'out',
+	'target', '.winapp', 'artifacts', 'TestResults',
+	'__pycache__', '.gradle', '.dart_tool', '.pub-cache', '.nuget', '.cargo'
 ]);
 
 /**
