@@ -570,7 +570,7 @@ public class UiCommandTests : BaseCommandTests
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-info-5678", X = 50, Y = 60, Width = 120, Height = 40 };
 
         var command = GetRequiredService<UiHoverCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json", "--dwell-time", "0"]);
         Assert.AreEqual(0, exitCode);
         StringAssert.Contains(TestAnsiConsole.Output, "\"dwellTimeMs\":");
         StringAssert.Contains(TestAnsiConsole.Output, "\"elementId\":");
