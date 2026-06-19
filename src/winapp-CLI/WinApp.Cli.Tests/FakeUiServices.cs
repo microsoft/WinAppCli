@@ -80,3 +80,19 @@ internal class FakeUiSessionService : IUiSessionService
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
         => Task.FromResult(SessionResult);
 }
+
+/// <summary>
+/// Fake mouse input for testing — records calls instead of issuing real SendInput.
+/// </summary>
+internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
+{
+    public record HoverCall(int ScreenX, int ScreenY);
+    public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick);
+
+    public List<HoverCall> HoverCalls { get; } = [];
+    public List<ClickCall> ClickCalls { get; } = [];
+
+    public void Hover(int screenX, int screenY) => HoverCalls.Add(new(screenX, screenY));
+    public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
+        => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick));
+}

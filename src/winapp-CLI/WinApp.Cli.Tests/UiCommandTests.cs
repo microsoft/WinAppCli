@@ -13,14 +13,17 @@ public class UiCommandTests : BaseCommandTests
 {
     private FakeUiAutomationService _fakeUia = null!;
     private FakeUiSessionService _fakeSession = null!;
+    private FakeMouseInput _fakeMouse = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeUia = new FakeUiAutomationService();
         _fakeSession = new FakeUiSessionService();
+        _fakeMouse = new FakeMouseInput();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
-            .AddSingleton<IUiSessionService>(_fakeSession);
+            .AddSingleton<IUiSessionService>(_fakeSession)
+            .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse);
     }
 
     [TestMethod]
@@ -565,15 +568,88 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Hover_Json_EmitsEnvelope()
+    public async Task Hover_Json_EmitsFullEnvelopeWithCorrectValues()
     {
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-info-5678", X = 50, Y = 60, Width = 120, Height = 40 };
 
         var command = GetRequiredService<UiHoverCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json", "--dwell-time", "0"]);
         Assert.AreEqual(0, exitCode);
-        StringAssert.Contains(TestAnsiConsole.Output, "\"dwellTimeMs\":");
-        StringAssert.Contains(TestAnsiConsole.Output, "\"elementId\":");
+
+        // Deserialize and assert exact JSON shape (L1)
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("btn-info-5678", result.GetProperty("elementId").GetString());
+        Assert.AreEqual(110, result.GetProperty("x").GetInt32()); // 50 + 120/2
+        Assert.AreEqual(80, result.GetProperty("y").GetInt32());  // 60 + 40/2
+        Assert.AreEqual(0, result.GetProperty("dwellTimeMs").GetInt32());
+        Assert.AreEqual(0, result.GetProperty("hwnd").GetInt64()); // fake session has no window handle
+
+        // Verify fake mouse received correct coordinates (M2)
+        Assert.AreEqual(1, _fakeMouse.HoverCalls.Count);
+        Assert.AreEqual(110, _fakeMouse.HoverCalls[0].ScreenX);
+        Assert.AreEqual(80, _fakeMouse.HoverCalls[0].ScreenY);
+    }
+
+    [TestMethod]
+    public async Task Hover_DefaultDwellTime_Uses800ms()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-info-5678", X = 10, Y = 10, Width = 100, Height = 100 };
+
+        var command = GetRequiredService<UiHoverCommand>();
+        // Omit --dwell-time to test default
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(800, result.GetProperty("dwellTimeMs").GetInt32());
+    }
+
+    [TestMethod]
+    [DataRow(10000, DisplayName = "Max boundary (10000) is valid")]
+    [DataRow(0, DisplayName = "Min boundary (0) is valid")]
+    public async Task Hover_BoundaryDwellTime_Succeeds(int dwellTime)
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-x-0", X = 0, Y = 0, Width = 10, Height = 10 };
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-x-0", "-a", "TestApp", "--json", "--dwell-time", dwellTime.ToString()]);
+        Assert.AreEqual(0, exitCode);
+    }
+
+    [TestMethod]
+    [DataRow(-1, DisplayName = "Negative dwell time")]
+    [DataRow(10001, DisplayName = "Over-max dwell time")]
+    public async Task Hover_InvalidDwellTime_ReturnsError(int dwellTime)
+    {
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-x-0", "-a", "TestApp", "--json", "--dwell-time", dwellTime.ToString()]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Hover_MissingSelectorArgument_ReturnsError()
+    {
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Hover_ElementWithWindowHandle_UsesElementHwnd()
+    {
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "popup-btn", Type = "Button", Selector = "popup-btn-001",
+            X = 200, Y = 300, Width = 80, Height = 30,
+            WindowHandle = 99999
+        };
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["popup-btn-001", "-a", "TestApp", "--json", "--dwell-time", "0"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(99999, result.GetProperty("hwnd").GetInt64());
     }
 
     [TestMethod]

@@ -50,6 +50,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // UI Automation services
+            .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>();

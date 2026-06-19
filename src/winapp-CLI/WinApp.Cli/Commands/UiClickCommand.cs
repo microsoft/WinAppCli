@@ -44,6 +44,7 @@ internal class UiClickCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IMouseInput mouseInput,
         IAnsiConsole ansiConsole,
         ILogger<UiClickCommand> logger) : AsynchronousCommandLineAction
     {
@@ -94,16 +95,19 @@ internal class UiClickCommand : Command, IShortDescription
                     return 1;
                 }
 
+                // Use the element's own window handle if available, otherwise fall back to session
+                var targetHwnd = element.WindowHandle ?? session.WindowHandle;
+
                 // Bring target window to foreground
-                if (session.WindowHandle != 0)
+                if (targetHwnd != 0)
                 {
                     Windows.Win32.PInvoke.SetForegroundWindow(
-                        new Windows.Win32.Foundation.HWND((nint)session.WindowHandle));
+                        new Windows.Win32.Foundation.HWND((nint)targetHwnd));
                     await Task.Delay(100, cancellationToken); // let window activate
                 }
 
                 // Perform the click via SendInput
-                MouseInput.Click(centerX, centerY, doubleClick, rightClick);
+                mouseInput.Click(centerX, centerY, doubleClick, rightClick);
 
                 var elementId = (element.Selector ?? element.Id ?? "");
 
@@ -115,7 +119,7 @@ internal class UiClickCommand : Command, IShortDescription
                         ClickType = clickType,
                         X = centerX,
                         Y = centerY,
-                        Hwnd = session.WindowHandle
+                        Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiClickResult));

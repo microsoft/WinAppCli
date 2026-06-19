@@ -38,6 +38,7 @@ internal class UiHoverCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IMouseInput mouseInput,
         IAnsiConsole ansiConsole,
         ILogger<UiHoverCommand> logger) : AsynchronousCommandLineAction
     {
@@ -90,16 +91,19 @@ internal class UiHoverCommand : Command, IShortDescription
                     return 1;
                 }
 
+                // Use the element's own window handle if available, otherwise fall back to session
+                var targetHwnd = element.WindowHandle ?? session.WindowHandle;
+
                 // Bring target window to foreground
-                if (session.WindowHandle != 0)
+                if (targetHwnd != 0)
                 {
                     Windows.Win32.PInvoke.SetForegroundWindow(
-                        new Windows.Win32.Foundation.HWND((nint)session.WindowHandle));
+                        new Windows.Win32.Foundation.HWND((nint)targetHwnd));
                     await Task.Delay(100, cancellationToken);
                 }
 
                 // Move mouse to element center with a small wiggle to trigger hover detection
-                MouseInput.Hover(centerX, centerY);
+                mouseInput.Hover(centerX, centerY);
 
                 // Wait for dwell time to allow hover effects to appear
                 await Task.Delay(dwellTime, cancellationToken);
@@ -114,7 +118,7 @@ internal class UiHoverCommand : Command, IShortDescription
                         X = centerX,
                         Y = centerY,
                         DwellTimeMs = dwellTime,
-                        Hwnd = session.WindowHandle
+                        Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiHoverResult));

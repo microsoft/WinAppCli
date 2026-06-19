@@ -99,8 +99,9 @@ winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
 ### Hover (for tooltips, flyouts, hover states)
+`--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
 ```powershell
-# Hover to trigger tooltip, then capture it
+# Hover to trigger tooltip, then capture it (default 800ms dwell)
 winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-screen --output tooltip.png
 
 # Longer dwell for apps with slow tooltip timers

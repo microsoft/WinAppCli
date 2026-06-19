@@ -265,6 +265,9 @@ winapp ui hover btn-info-a1b2 -a myapp --dwell-time 1200        # longer dwell f
 winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-screen  # hover then capture tooltip
 ```
 
+**Options:**
+- `--dwell-time <ms>` — Time in milliseconds to wait after hovering for effects to appear (default: 800, range: 0–10000)
+
 ### set-value
 Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
 ```bash
