@@ -64,7 +64,7 @@ internal class UiHoverCommand : Command, IShortDescription
             if (dwellTime < 0 || dwellTime > 10_000)
             {
                 logger.LogError("{Symbol} --dwell-time must be between 0 and 10000 ms.", UiSymbols.Error);
-                UiJsonError.Emit(json, "invalid-argument", "--dwell-time must be between 0 and 10000 ms.", null);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--dwell-time must be between 0 and 10000 ms.");
                 return 1;
             }
 
