@@ -119,7 +119,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             .Replace("{PackageName}", packageName)
             .Replace("{ApplicationId}", applicationId)
             .Replace("{PublisherDN}", PublisherDnHelper.XmlEscape(publisherDN))
-            .Replace("{PublisherName}", publisherName)
+            .Replace("{PublisherName}", PublisherDnHelper.XmlEscape(publisherName))
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
             .Replace("{Description}", description);
 

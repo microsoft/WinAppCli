@@ -17,6 +17,7 @@ public class PublisherDnHelperTests
     [DataRow("O=Contoso Ltd, C=US", true, DisplayName = "O-based DN")]
     [DataRow("DC=example, DC=com", true, DisplayName = "DC-based DN")]
     [DataRow("CN=\"Company, Inc.\"", true, DisplayName = "Quoted CN value")]
+    [DataRow("cn=lowercase", true, DisplayName = "Lowercase attribute type")]
     [DataRow("", false, DisplayName = "Empty string")]
     [DataRow("   ", false, DisplayName = "Whitespace only")]
     [DataRow("Hello", false, DisplayName = "Bare name")]
@@ -24,6 +25,12 @@ public class PublisherDnHelperTests
     public void IsDistinguishedName_ReturnsExpected(string input, bool expected)
     {
         Assert.AreEqual(expected, PublisherDnHelper.IsDistinguishedName(input));
+    }
+
+    [TestMethod]
+    public void IsDistinguishedName_NullInput_ReturnsFalse()
+    {
+        Assert.AreEqual(false, PublisherDnHelper.IsDistinguishedName(null!));
     }
 
     #endregion
@@ -37,6 +44,9 @@ public class PublisherDnHelperTests
     [DataRow("  CN=Trimmed  ", "CN=Trimmed", DisplayName = "Whitespace trimmed")]
     [DataRow("\"CN=Quoted\"", "CN=Quoted", DisplayName = "Wrapper quotes stripped")]
     [DataRow("'CN=SingleQuoted'", "CN=SingleQuoted", DisplayName = "Single wrapper quotes stripped")]
+    [DataRow("Last, First", "CN=\"Last, First\"", DisplayName = "Bare name with comma is escaped")]
+    [DataRow("A&B Corp", "CN=A&B Corp", DisplayName = "Bare name with ampersand")]
+    [DataRow("cn=lowercase", "cn=lowercase", DisplayName = "Lowercase attribute type passes through")]
     public void Normalize_ReturnsExpected(string input, string expected)
     {
         var result = PublisherDnHelper.Normalize(input);
@@ -46,6 +56,12 @@ public class PublisherDnHelperTests
         Assert.IsTrue(
             expectedDn.RawData.AsSpan().SequenceEqual(actualDn.RawData.AsSpan()),
             $"DN mismatch.\nExpected: {expected}\nActual:   {result}");
+    }
+
+    [TestMethod]
+    public void Normalize_NullInput_ThrowsArgumentException()
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => PublisherDnHelper.Normalize(null!));
     }
 
     [TestMethod]
@@ -78,6 +94,16 @@ public class PublisherDnHelperTests
     public void GetDisplayName_ReturnsExpected(string dn, string expected)
     {
         Assert.AreEqual(expected, PublisherDnHelper.GetDisplayName(dn));
+    }
+
+    [TestMethod]
+    [DataRow(null, DisplayName = "Null input")]
+    [DataRow("", DisplayName = "Empty string")]
+    [DataRow("   ", DisplayName = "Whitespace only")]
+    public void GetDisplayName_HandlesNullAndEmpty(string? dn)
+    {
+        // Should return the input as-is without throwing
+        Assert.AreEqual(dn, PublisherDnHelper.GetDisplayName(dn!));
     }
 
     #endregion

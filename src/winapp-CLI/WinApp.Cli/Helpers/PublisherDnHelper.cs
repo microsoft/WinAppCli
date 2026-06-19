@@ -66,7 +66,11 @@ internal static class PublisherDnHelper
             return trimmed;
         }
 
-        return $"CN={trimmed}";
+        // Use X500DistinguishedNameBuilder to properly escape the bare name value
+        // (handles commas, special chars, etc.) instead of raw string interpolation.
+        var builder = new X500DistinguishedNameBuilder();
+        builder.AddCommonName(trimmed);
+        return builder.Build().Name;
     }
 
     /// <summary>

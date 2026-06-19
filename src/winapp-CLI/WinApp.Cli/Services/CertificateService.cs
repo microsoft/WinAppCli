@@ -447,7 +447,7 @@ internal partial class CertificateService(
             {
                 throw new InvalidOperationException(
                     $"Publisher in {manifestPath} ({manifestPublisher}) does not match the publisher in the certificate {certificatePath} ({certPublisher}). " +
-                    $"Regenerate the certificate with 'winapp cert generate --manifest \"{manifestPath.Name}\"' or update the manifest Identity Publisher to match the certificate subject.");
+                    $"Regenerate the certificate with 'winapp cert generate --manifest \"{manifestPath.FullName}\"' or update the manifest Identity Publisher to match the certificate subject.");
             }
         }
         catch (Exception ex) when (ex is not InvalidOperationException)

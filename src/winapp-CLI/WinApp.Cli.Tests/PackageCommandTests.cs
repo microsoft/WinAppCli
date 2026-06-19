@@ -6,6 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -2466,6 +2467,39 @@ public class PackageCommandTests : BaseCommandTests
     /// <summary>
     /// Compares two DN strings via X500DistinguishedName.RawData to match production semantics.
     /// </summary>
+    [TestMethod]
+    [DataRow("CN=Contoso, O=Contoso Ltd, C=US", DisplayName = "Multi-component CN+O+C publisher")]
+    [DataRow("Last, First", DisplayName = "Bare name with comma (escaped)")]
+    [DataRow("CN=A&B Corp", DisplayName = "Publisher with ampersand")]
+    public async Task CertificateService_GeneratedManifestAndCert_PublisherRoundTrips(string publisherInput)
+    {
+        // Arrange — generate a manifest using the template service, then a cert from the same input.
+        // The manifest Identity/Publisher must semantically equal the cert subject.
+        var manifestTemplateService = GetRequiredService<IManifestTemplateService>();
+        var outputDir = _tempDirectory.CreateSubdirectory($"roundtrip_{publisherInput.GetHashCode():x}");
+        var certPath = new FileInfo(Path.Combine(outputDir.FullName, "test.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Generate manifest
+        await manifestTemplateService.GenerateCompleteManifestAsync(
+            outputDir,
+            "RoundTripTestPackage",
+            publisherInput,
+            "1.0.0.0",
+            ManifestTemplates.Packaged,
+            "Test",
+            TestTaskContext,
+            TestContext.CancellationToken);
+
+        // Generate cert from same publisher input
+        await _certificateService.GenerateDevCertificateAsync(
+            publisherInput, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Act & Assert — ValidatePublisherMatchAsync should not throw
+        var manifestPath = new FileInfo(Path.Combine(outputDir.FullName, "Package.appxmanifest"));
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
     private static void AssertDNEquals(string expectedDN, string actualDN, string? message = null)
     {
         var expected = new X500DistinguishedName(expectedDN);
