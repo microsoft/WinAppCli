@@ -59,8 +59,8 @@ internal static class MouseInput
         int vw = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CXVIRTUALSCREEN);
         int vh = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CYVIRTUALSCREEN);
 
-        int absoluteX = (int)(((screenX - vx) * 65535.0) / vw);
-        int absoluteY = (int)(((screenY - vy) * 65535.0) / vh);
+        int absoluteX = Math.Clamp((int)Math.Round(((screenX - vx) * 65535.0) / Math.Max(vw - 1, 1)), 0, 65535);
+        int absoluteY = Math.Clamp((int)Math.Round(((screenY - vy) * 65535.0) / Math.Max(vh - 1, 1)), 0, 65535);
 
         Span<INPUT> inputs =
         [
