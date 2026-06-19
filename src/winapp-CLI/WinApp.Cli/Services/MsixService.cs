@@ -177,7 +177,7 @@ internal partial class MsixService(
         // Apply all placeholder replacements
         manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
 
-        // Sanity check: ensure no unresolved placeholders remain
+        // Validation check: ensure no unresolved placeholders remain
         PlaceholderHelper.ThrowIfUnresolvedPlaceholders(manifestContent);
 
         return manifestContent;

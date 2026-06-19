@@ -63,7 +63,7 @@ Try in order, use the first that exists:
 1. User-provided base.
 2. `origin/main`.
 3. `main`.
-4. `origin/master` / `master` (legacy fallback).
+4. `origin/HEAD` (remote default branch fallback).
 
 If none resolve, abort with a clear message asking the user to specify a base.
 
