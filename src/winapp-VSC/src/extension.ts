@@ -3,6 +3,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { glob } from 'glob';
+import { ManifestEditorProvider } from './manifest-editor/manifest-editor-provider';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
 
@@ -382,6 +383,34 @@ export function activate(context: vscode.ExtensionContext) {
 	const factory = new WinAppDebugAdapterFactory(extensionPath);
 	context.subscriptions.push(
 		vscode.debug.registerDebugAdapterDescriptorFactory(WINAPP_DEBUG_TYPE, factory)
+	);
+
+	// Register the AppxManifest visual editor
+	context.subscriptions.push(ManifestEditorProvider.register(context));
+
+	// When an appxmanifest file is opened in the default text editor,
+	// suggest switching to the visual editor.
+	const MANIFEST_PATTERN = /(?:^|[\\/])appxmanifest\.xml$|\.appxmanifest$/i;
+	const dismissedKey = 'winapp.manifestEditorNotificationDismissed';
+
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(editor => {
+			if (!editor || editor.document.uri.scheme !== 'file') { return; }
+			if (!MANIFEST_PATTERN.test(editor.document.uri.fsPath)) { return; }
+			if (context.globalState.get<boolean>(dismissedKey)) { return; }
+
+			vscode.window.showInformationMessage(
+				'This file can be opened with the WinApp visual manifest editor for a richer editing experience.',
+				'Open with AppxManifest Editor',
+				"Don't Show Again",
+			).then(choice => {
+				if (choice === 'Open with AppxManifest Editor') {
+					vscode.commands.executeCommand('vscode.openWith', editor.document.uri, ManifestEditorProvider.viewType);
+				} else if (choice === "Don't Show Again") {
+					context.globalState.update(dismissedKey, true);
+				}
+			});
+		})
 	);
 
 	// Register winapp.init command
