@@ -173,7 +173,20 @@
           }
         ]
       }
-    ]
+    ],
+    "configuration": {
+      "title": "WinApp",
+      "properties": {
+        "winapp.appDirectories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "List of relative paths to app project directories. When specified, WinApp commands will target these directories instead of scanning the workspace. If a single directory is listed, it is used automatically. If multiple are listed, you'll be prompted to choose."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

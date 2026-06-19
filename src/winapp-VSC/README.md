@@ -25,11 +25,37 @@ The extension supports workspaces where the app project is **not** at the root �
 
 **How it works:**
 
-When you run any WinApp command, the extension automatically detects project locations:
+When you run any WinApp command, the extension resolves the target project directory using this priority:
+
+1. **`winapp.appDirectories` setting** — If specified in `.vscode/settings.json`, the extension uses these paths directly (no scanning). With one entry, it auto-selects; with multiple, it shows a QuickPick.
+2. **Project at workspace root** — If a recognized project exists at the root, commands run there immediately.
+3. **Automatic scan** — Searches the workspace for compatible projects and prompts if multiple are found.
+
+**Configuration (optional):**
+
+To skip automatic scanning, add the `winapp.appDirectories` setting to your workspace:
+
+```jsonc
+// .vscode/settings.json
+{
+  "winapp.appDirectories": [
+    "apps/my-app",
+    "apps/shell"
+  ]
+}
+```
 
 | Scenario | Behavior |
 |----------|----------|
-| Project at workspace root | Command runs directly — no prompt (same as before) |
+| Setting has 1 entry | All commands auto-target that directory |
+| Setting has multiple entries | QuickPick prompt to choose which project |
+| Setting is absent or empty | Falls back to auto-detection (see below) |
+
+**Auto-detection behavior (when setting is not configured):**
+
+| Scenario | Behavior |
+|----------|----------|
+| Project at workspace root | Command runs directly — no prompt |
 | No project at root, 1 project found elsewhere | Auto-selects that project |
 | No project at root, multiple projects found | Shows a QuickPick list to choose which project to target |
 | No projects found anywhere | Falls back to workspace root (the CLI will report an error if initialization is required) |

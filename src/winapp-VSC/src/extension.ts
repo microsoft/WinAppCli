@@ -110,11 +110,31 @@ async function selectFolder(title: string): Promise<string | undefined> {
 
 /**
  * Resolves the project directory for commands that need a winapp project context.
- * If the workspace root contains a project, uses it directly.
- * Otherwise, searches for projects and presents a QuickPick.
+ * Priority: 1) winapp.appDirectories setting, 2) project at workspace root, 3) scan workspace.
  * Returns the absolute path to the selected project directory, or undefined if cancelled.
  */
 async function resolveProjectDirectory(workspacePath: string): Promise<string | undefined> {
+	// Check for explicit appDirectories setting
+	const config = vscode.workspace.getConfiguration('winapp');
+	const appDirs: string[] = config.get('appDirectories', []);
+
+	if (appDirs.length > 0) {
+		if (appDirs.length === 1) {
+			return path.resolve(workspacePath, appDirs[0]);
+		}
+
+		// Multiple configured directories — show QuickPick
+		const items = appDirs.map(dir => ({
+			label: `$(folder) ${dir}`,
+			directory: path.resolve(workspacePath, dir)
+		}));
+
+		const picked = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Which project would you like to target?'
+		});
+		return picked?.directory;
+	}
+
 	// If there's a project at the workspace root, use it directly
 	const rootProject = detectProjectAt(workspacePath, workspacePath);
 	if (rootProject) {
