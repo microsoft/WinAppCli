@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Top-level comment before Package -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:v="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6"
+  xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:restricted="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:iot="http://schemas.microsoft.com/appx/manifest/iot/windows10"
+  xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4"
+  xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10"
+  IgnorableNamespaces="v uap3 uap5 uap6 uap7 uap10 desktop restricted iot uap4 win32dependencies">
+
+  <!-- Comment before Identity: this mentions <Dependencies> to try to confuse parsers -->
+  <!-- Also mentions <Capabilities> and <Applications> -->
+  <Identity
+    Name="A.Very.Long.Package.Name.That.Pushes.Max.Limit.日本語"
+    Publisher="CN=Ünïcödé Tëst &amp; &lt;script&gt;alert(1)&lt;/script&gt;, O=テスト会社, C=JP"
+    Version="65535.65535.65535.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <!-- Comment inside Properties -->
+    <DisplayName>&lt;script&gt;alert('xss')&lt;/script&gt; 日本語テストアプリ</DisplayName>
+    <!-- Another comment -->
+    <PublisherDisplayName>This Is A Very Long Publisher Display Name That Tests How The Editor Handles Extended Text &lt;img src=x onerror=alert(1)&gt;</PublisherDisplayName>
+    <Logo>Assets\A\Very\Deep\Nested\Directory\Structure\StoreLogo.png</Logo>
+    <Description><![CDATA[This is a description with <special> chars & "quotes" that use CDATA — تطبيق اختباري и кириллица]]></Description>
+    <!-- Trailing comment in Properties -->
+  </Properties>
+
+  <!-- Comment between sections, mentioning <Resources> -->
+  <Dependencies>
+    <!-- Comment inside Dependencies -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+    <TargetDeviceFamily Name="Windows.IoT" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <PackageDependency Name="Microsoft.VCLibs.140.00" MinVersion="14.0.30704.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+    <PackageDependency Name="Microsoft.VCLibs.140.00.UWPDesktop" MinVersion="14.0.30704.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" uap6:Optional="true" />
+    <uap3:MainPackageDependency Name="MyMainPackage" />
+    <uap5:DriverDependency>
+      <uap5:DriverConstraint Name="CustomDriver.inf" MinVersion="1.0.0.0" MinDate="2023-01-15" />
+      <uap5:DriverConstraint Name="AnotherDriver.sys" MinVersion="2.0.0.0" />
+    </uap5:DriverDependency>
+    <uap7:OSPackageDependency Name="Microsoft.Windows.PrimaryOS" Version="10.0.19041.0" />
+    <uap10:HostRuntimeDependency Name="HostApp" Publisher="CN=HostPub" MinVersion="1.0.0.0" />
+    <win32dependencies:ExternalDependency Name="SomeLegacyLib" Publisher="CN=LegacyPub" MinVersion="5.0.0.0" Optional="true" />
+    <!-- After dependencies -->
+  </Dependencies>
+
+  <!-- Comment mentions <Applications> again here -->
+  <Resources>
+    <Resource Language="ja-jp" />
+    <Resource Language="ar-sa" />
+    <Resource Language="ru-ru" />
+  </Resources>
+
+  <Applications>
+    <!-- Comment before first application -->
+    <Application Id="MainApp" Executable="MainApp.exe" EntryPoint="Windows.FullTrustApplication" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="packagedClassicApp">
+      <!-- Inside application element -->
+      <v:VisualElements
+        DisplayName="Ünïcödé Äpp 日本語 — Multi App Main"
+        Description="Приложение с юникодом — «кавычки» и ™ символы &lt;iframe src='javascript:alert(1)'&gt;&lt;/iframe&gt;"
+        BackgroundColor="#1E90FF"
+        Square150x150Logo="Assets\Main-Square150x150Logo.png"
+        Square44x44Logo="Assets\Main-Square44x44Logo.png">
+        <v:DefaultTile Wide310x150Logo="Assets\Main-Wide310x150Logo.png" />
+      </v:VisualElements>
+      <Extensions>
+        <v:Extension Category="windows.protocol">
+          <v:Protocol Name="myapp-helper" />
+        </v:Extension>
+      </Extensions>
+    </Application>
+
+    <Application Id="HelperApp" Executable="Helper.exe" EntryPoint="Windows.FullTrustApplication">
+      <v:VisualElements
+        DisplayName="Helper Tool"
+        Description="Background helper service"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Helper-Square150x150Logo.png"
+        Square44x44Logo="Assets\Helper-Square44x44Logo.png" />
+    </Application>
+
+    <Application Id="DiagApp" Executable="Diagnostics.exe" EntryPoint="Windows.FullTrustApplication">
+      <v:VisualElements
+        DisplayName="Diagnostics"
+        Description="Diagnostic and monitoring tool"
+        BackgroundColor="#333333"
+        Square150x150Logo="Assets\Diag-Square150x150Logo.png"
+        Square44x44Logo="Assets\Diag-Square44x44Logo.png"
+        AppListEntry="none" />
+    </Application>
+    <!-- Comment after applications -->
+  </Applications>
+
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer>
+        <Path>MyComponent.dll</Path>
+        <ActivatableClass ActivatableClassId="MyNamespace.MyClass" ThreadingModel="both" />
+      </InProcessServer>
+    </Extension>
+    <Extension Category="windows.activatableClass.outOfProcessServer">
+      <OutOfProcessServer ServerName="MyOOPServer">
+        <Path>MyServer.exe</Path>
+        <Instancing>singleInstance</Instancing>
+        <ActivatableClass ActivatableClassId="MyNamespace.MyOOPClass" />
+      </OutOfProcessServer>
+    </Extension>
+  </Extensions>
+
+  <Capabilities>
+    <!-- Comment inside Capabilities -->
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+    <Capability Name="codeGeneration" />
+    <v:Capability Name="userAccountInformation" />
+    <v:Capability Name="musicLibrary" />
+    <v:Capability Name="picturesLibrary" />
+    <v:Capability Name="videosLibrary" />
+    <restricted:Capability Name="runFullTrust" />
+    <restricted:Capability Name="broadFileSystemAccess" />
+    <restricted:Capability Name="appDiagnostics" />
+    <iot:Capability Name="systemManagement" />
+    <DeviceCapability Name="microphone" />
+    <DeviceCapability Name="webcam" />
+    <DeviceCapability Name="location" />
+    <DeviceCapability Name="bluetooth">
+      <Device Id="any">
+        <Function Type="name:serialPort" />
+      </Device>
+    </DeviceCapability>
+    <uap4:CustomCapability Name="Microsoft.SomeCompany.SomeCapability_publisher" />
+    <!-- After capabilities -->
+  </Capabilities>
+  <!-- Final comment before close -->
+</Package>

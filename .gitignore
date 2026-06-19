@@ -128,6 +128,10 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# Playwright test artifacts
+test-results/
+playwright-report/
+
 # yarn v3
 .pnp.*
 .yarn/*
@@ -208,6 +212,7 @@ CMakeCache.txt
 # Development certificate
 devcert.pfx
 *.msix
+*.vsix
 
 # GUI app package outputs
 /src/winapp-GUI/winapp-GUI/AppPackages
