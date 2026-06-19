@@ -19,6 +19,27 @@ Simply navigate to the 'Extensions' tab in VS Code, and select the option to 'In
 
 ## Features
 
+### Workspace & Multi-Project Support
+
+The extension supports workspaces where the app project is **not** at the root — such as monorepos, multi-app repositories, or nested project structures.
+
+**How it works:**
+
+When you run any WinApp command, the extension automatically detects project locations:
+
+| Scenario | Behavior |
+|----------|----------|
+| Project at workspace root | Command runs directly — no prompt (same as before) |
+| No project at root, 1 project found elsewhere | Auto-selects that project |
+| No project at root, multiple projects found | Shows a QuickPick list to choose which project to target |
+| No projects found anywhere | Falls back to workspace root (the CLI will report an error if initialization is required) |
+
+**Supported project types:** .NET (WPF, WinForms, WinUI 3, Console), Electron, Tauri, Flutter, Rust, and C++ (CMake).
+
+The **WinApp: Initialize Project** command has additional behavior: when no project is at the root, it searches and lets you pick which project to initialize. If no projects are found at all, it offers to initialize in the current directory anyway.
+
+> **Note:** If more than 10 projects are discovered, the search stops and the QuickPick indicates that the list may be incomplete.
+
 ### Command Palette
 
 All commands are accessible from the Command Palette (`Ctrl+Shift+P`). Type **WinApp** to see the full list.
@@ -121,7 +142,11 @@ The extension provides a **custom `winapp` debug type** that launches your app w
 
 ### Initialize and set up a project
 
-Run **WinApp: Initialize Project** to configure your project with the Windows SDK and/or Windows App SDK. The command walks you through selecting an SDK channel and sets up the necessary dependencies.
+Run **WinApp: Initialize Project** to configure your project with the Windows SDK and/or Windows App SDK. The command:
+
+1. **Detects your project** — If there's a recognized app project at the workspace root, it proceeds immediately. Otherwise, it searches the workspace and presents a list of discovered projects for you to choose from.
+2. **Asks for SDK channel** — Select stable, preview, experimental, or none (for projects like Rust/Tauri that bring their own SDK bindings).
+3. **Runs `winapp init`** — Sets up the manifest, SDK packages, and configuration for the selected project.
 
 ### Debug with package identity
 
