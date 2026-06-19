@@ -108,6 +108,54 @@ async function selectFolder(title: string): Promise<string | undefined> {
 	return result?.[0]?.fsPath;
 }
 
+/**
+ * Resolves the project directory for commands that need a winapp project context.
+ * If the workspace root contains a project, uses it directly.
+ * Otherwise, searches for projects and presents a QuickPick.
+ * Returns the absolute path to the selected project directory, or undefined if cancelled.
+ */
+async function resolveProjectDirectory(workspacePath: string): Promise<string | undefined> {
+	// If there's a project at the workspace root, use it directly
+	const rootProject = detectProjectAt(workspacePath, workspacePath);
+	if (rootProject) {
+		return workspacePath;
+	}
+
+	// Search for projects in the workspace
+	const projects = await vscode.window.withProgress(
+		{ location: vscode.ProgressLocation.Notification, title: 'Searching for app projects...' },
+		async () => detectProjects(workspacePath)
+	);
+
+	if (projects.length === 0) {
+		// No projects found — fall back to workspace root
+		return workspacePath;
+	}
+
+	if (projects.length === 1) {
+		// Single project — auto-select it
+		return projects[0].directory;
+	}
+
+	// Multiple projects — let user pick
+	const maxProjects = 10;
+	const items = projects.map(p => ({
+		label: `$(file-code) ${p.type} project`,
+		description: getProjectLabel(p).replace(`${p.type} project `, ''),
+		directory: p.directory
+	}));
+
+	const placeHolder = projects.length >= maxProjects
+		? 'Which project? (Search stopped at 10 entries)'
+		: 'Which project would you like to target?';
+
+	const picked = await vscode.window.showQuickPick(items, { placeHolder });
+	if (!picked) {
+		return undefined;
+	}
+	return picked.directory;
+}
+
 class WinAppDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
 	private extensionPath: string;
 
@@ -493,7 +541,12 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, 'restore', workspacePath);
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'restore', projectDir);
 		})
 	);
 
@@ -502,6 +555,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('winapp.update', async () => {
 			const workspacePath = getWorkspacePath();
 			if (!workspacePath) {
+				return;
+			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
 				return;
 			}
 
@@ -515,7 +573,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` --setup-sdks ${sdkMode}`;
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -524,6 +582,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('winapp.pack', async () => {
 			const workspacePath = getWorkspacePath();
 			if (!workspacePath) {
+				return;
+			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
 				return;
 			}
 
@@ -550,7 +613,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --self-contained';
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -562,12 +625,17 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
 			const inputFolder = await selectFolder('Select input folder containing the app to run');
 			if (!inputFolder) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, `run "${inputFolder}"`, workspacePath);
+			await runWinappCommand(extensionPath, `run "${inputFolder}"`, projectDir);
 		})
 	);
 
@@ -578,6 +646,12 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!workspacePath) {
 				return;
 			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
 			const entrypoint = await selectFile('Select executable', {
 				'Executables': ['exe'],
 				'All files': ['*']
@@ -588,7 +662,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` "${entrypoint}"`;
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -597,6 +671,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('winapp.manifestGenerate', async () => {
 			const workspacePath = getWorkspacePath();
 			if (!workspacePath) {
+				return;
+			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
 				return;
 			}
 
@@ -610,7 +689,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ` --template ${template}`;
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -619,6 +698,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('winapp.manifestUpdateAssets', async () => {
 			const workspacePath = getWorkspacePath();
 			if (!workspacePath) {
+				return;
+			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
 				return;
 			}
 
@@ -631,7 +715,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, `manifest update-assets "${imagePath}"`, workspacePath);
+			await runWinappCommand(extensionPath, `manifest update-assets "${imagePath}"`, projectDir);
 		})
 	);
 
@@ -640,6 +724,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('winapp.certGenerate', async () => {
 			const workspacePath = getWorkspacePath();
 			if (!workspacePath) {
+				return;
+			}
+
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
 				return;
 			}
 
@@ -653,7 +742,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --install';
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -764,6 +853,11 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
 			const global = await vscode.window.showQuickPick(
 				['Local (.winapp in workspace)', 'Global (shared cache)'],
 				{ placeHolder: 'Which path to retrieve?' }
@@ -774,7 +868,7 @@ export function activate(context: vscode.ExtensionContext) {
 				command += ' --global';
 			}
 
-			await runWinappCommand(extensionPath, command, workspacePath);
+			await runWinappCommand(extensionPath, command, projectDir);
 		})
 	);
 
@@ -786,7 +880,12 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, 'manifest add-alias', workspacePath);
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'manifest add-alias', projectDir);
 		})
 	);
 
@@ -798,7 +897,12 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await runWinappCommand(extensionPath, 'unregister', workspacePath);
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
+			}
+
+			await runWinappCommand(extensionPath, 'unregister', projectDir);
 		})
 	);
 
