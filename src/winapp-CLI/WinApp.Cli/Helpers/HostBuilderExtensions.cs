@@ -50,6 +50,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // UI Automation services
+            .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>();
@@ -89,6 +90,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiScreenshotCommand, UiScreenshotCommand.Handler>()
                 .UseCommandHandler<UiInvokeCommand, UiInvokeCommand.Handler>()
                 .UseCommandHandler<UiClickCommand, UiClickCommand.Handler>()
+                .UseCommandHandler<UiHoverCommand, UiHoverCommand.Handler>()
                 .UseCommandHandler<UiSetValueCommand, UiSetValueCommand.Handler>()
                 .UseCommandHandler<UiFocusCommand, UiFocusCommand.Handler>()
                 .UseCommandHandler<UiScrollIntoViewCommand, UiScrollIntoViewCommand.Handler>()

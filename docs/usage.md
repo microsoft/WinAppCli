@@ -1044,6 +1044,7 @@ winapp ui [command] [options]
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
+- `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
 - `set-value` - Set value on editable element (text, number)
 - `focus` - Move keyboard focus
 - `scroll-into-view` - Scroll element visible

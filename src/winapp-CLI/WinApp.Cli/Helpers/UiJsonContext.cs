@@ -30,6 +30,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiSetValueResult))]
 [JsonSerializable(typeof(UiFocusResult))]
 [JsonSerializable(typeof(UiScrollIntoViewResult))]
+[JsonSerializable(typeof(UiHoverResult))]
 [JsonSerializable(typeof(UiErrorResult))]
 [JsonSerializable(typeof(UiErrorInfo))]
 [JsonSerializable(typeof(UiFocusedResult))]
@@ -211,5 +212,14 @@ internal sealed class UiFocusResult
 internal sealed class UiScrollIntoViewResult
 {
     public string ElementId { get; set; } = "";
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiHoverResult
+{
+    public string ElementId { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int DwellTimeMs { get; set; }
     public long Hwnd { get; set; }
 }

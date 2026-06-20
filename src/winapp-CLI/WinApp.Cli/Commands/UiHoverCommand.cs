@@ -13,30 +13,24 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal class UiClickCommand : Command, IShortDescription
+internal class UiHoverCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Click an element at its screen coordinates using mouse simulation";
+    public string ShortDescription => "Move the mouse to an element to trigger hover effects like tooltips";
 
-    public static Option<bool> DoubleClickOption { get; } = new("--double")
+    public static Option<int> DwellTimeOption { get; } = new("--dwell-time")
     {
-        Description = "Perform a double-click instead of a single click"
+        Description = "Time in milliseconds to wait after hovering for hover effects to appear (default: 800)",
+        DefaultValueFactory = _ => 800
     };
 
-    public static Option<bool> RightClickOption { get; } = new("--right")
-    {
-        Description = "Perform a right-click instead of a left click"
-    };
-
-    public UiClickCommand()
-        : base("click", "Click an element by slug or text search using mouse simulation. " +
-               "Works on elements that don't support InvokePattern (e.g., column headers, list items). " +
-               "Use --double for double-click, --right for right-click.")
+    public UiHoverCommand()
+        : base("hover", "Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). " +
+               "Uses SendInput for realistic mouse movement and waits for a configurable dwell time.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
-        Options.Add(DoubleClickOption);
-        Options.Add(RightClickOption);
+        Options.Add(DwellTimeOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -46,7 +40,7 @@ internal class UiClickCommand : Command, IShortDescription
         ISelectorService selectorService,
         IMouseInput mouseInput,
         IAnsiConsole ansiConsole,
-        ILogger<UiClickCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiHoverCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -54,6 +48,7 @@ internal class UiClickCommand : Command, IShortDescription
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var dwellTime = parseResult.GetValue(DwellTimeOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
@@ -63,12 +58,16 @@ internal class UiClickCommand : Command, IShortDescription
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "click", json);
+                UiErrors.MissingSelector(logger, "hover", json);
                 return 1;
             }
 
-            var doubleClick = parseResult.GetValue(DoubleClickOption);
-            var rightClick = parseResult.GetValue(RightClickOption);
+            if (dwellTime < 0 || dwellTime > 10_000)
+            {
+                logger.LogError("{Symbol} --dwell-time must be between 0 and 10000 ms.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--dwell-time must be between 0 and 10000 ms.");
+                return 1;
+            }
 
             try
             {
@@ -82,16 +81,13 @@ internal class UiClickCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var clickType = doubleClick ? "double-click" : rightClick ? "right-click" : "click";
-
-                // Get element center from bounding rect
                 int centerX = (int)(element.X + element.Width / 2.0);
                 int centerY = (int)(element.Y + element.Height / 2.0);
 
                 if (element.Width == 0 || element.Height == 0)
                 {
-                    logger.LogError("{Symbol} Element has zero size — cannot click.", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot click.", selectorStr);
+                    logger.LogError("{Symbol} Element has zero size — cannot hover.", UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot hover.", selectorStr);
                     return 1;
                 }
 
@@ -103,31 +99,34 @@ internal class UiClickCommand : Command, IShortDescription
                 {
                     Windows.Win32.PInvoke.SetForegroundWindow(
                         new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                    await Task.Delay(100, cancellationToken); // let window activate
+                    await Task.Delay(100, cancellationToken);
                 }
 
-                // Perform the click via SendInput
-                mouseInput.Click(centerX, centerY, doubleClick, rightClick);
+                // Move mouse to element center with a small wiggle to trigger hover detection
+                mouseInput.Hover(centerX, centerY);
 
-                var elementId = (element.Selector ?? element.Id ?? "");
+                // Wait for dwell time to allow hover effects to appear
+                await Task.Delay(dwellTime, cancellationToken);
+
+                var elementId = element.Selector ?? element.Id ?? "";
 
                 if (json)
                 {
-                    var result = new UiClickResult
+                    var result = new UiHoverResult
                     {
                         ElementId = elementId,
-                        ClickType = clickType,
                         X = centerX,
                         Y = centerY,
+                        DwellTimeMs = dwellTime,
                         Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
-                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiClickResult));
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiHoverResult));
                 }
                 else
                 {
-                    logger.LogInformation("{Symbol} {ClickType} on {ElementId} at ({X}, {Y})",
-                        UiSymbols.Check, clickType, elementId, centerX, centerY);
+                    logger.LogInformation("{Symbol} Hovered on {ElementId} at ({X}, {Y}) — dwelled {DwellTime}ms",
+                        UiSymbols.Check, elementId, centerX, centerY, dwellTime);
                 }
 
                 return 0;

@@ -700,6 +700,36 @@ export async function uiGetValue(options: UiGetValueOptions = {}): Promise<Winap
 }
 
 // ---------------------------------------------------------------------------
+// ui hover
+// ---------------------------------------------------------------------------
+
+export interface UiHoverOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Time in milliseconds to wait after hovering for hover effects to appear (default: 800) */
+  dwellTime?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
+ */
+export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'hover'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.dwellTime !== undefined) args.push('--dwell-time', options.dwellTime.toString());
+  if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui inspect
 // ---------------------------------------------------------------------------
 
