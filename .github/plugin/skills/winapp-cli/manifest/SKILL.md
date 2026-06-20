@@ -182,7 +182,7 @@ Create Package.appxmanifest without full project setup. Use when you only need a
 | `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
 | `--logo-path` | Path to logo image file | (none) |
 | `--package-name` | Package name (default: folder name) | (none) |
-| `--publisher-name` | Publisher CN (default: CN=<current user>) | (none) |
+| `--publisher-name` | Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. | (none) |
 | `--template` | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) | `Packaged` |
 | `--version` | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). | `1.0.0.0` |
 
