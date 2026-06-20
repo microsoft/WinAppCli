@@ -6,6 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -72,7 +73,19 @@ public class PackageCommandTests : BaseCommandTests
             "CN=TestCertificatePublisher",
             "CN=PasswordTestPublisher",
             "CN=CommonValidationPublisher",
-            "CN=CertificatePublisher"
+            "CN=CertificatePublisher",
+            "CN=SimplePublisher",
+            "CN=SimpleName",
+            "CN=Trimmed",
+            "CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF",
+            "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN",
+            "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+            "CN=Publisher, O=MyOrg",
+            "CN=Publisher, C=US",
+            "CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US",
+            "OU=Finance, DC=corp, DC=com",
+            "O=Contoso Ltd, C=US",
+            "DC=example, DC=com",
         };
 
         foreach (var publisher in testCertificatePublishers)
@@ -191,7 +204,7 @@ public class PackageCommandTests : BaseCommandTests
     /// Removes test certificates from the CurrentUser\My certificate store
     /// This ensures test certificates don't accumulate and interfere with other tests
     /// </summary>
-    /// <param name="subjectName">Certificate subject name to clean up (e.g., "CN=TestPublisher")</param>
+    /// <param name="subjectName">Certificate subject DN to clean up (e.g., "CN=TestPublisher" or "OU=Finance, DC=corp, DC=com")</param>
     private static void CleanupInvalidTestCertificatesFromStore(string subjectName)
     {
         try
@@ -199,7 +212,7 @@ public class PackageCommandTests : BaseCommandTests
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
 
-            var certificates = store.Certificates.Find(X509FindType.FindBySubjectName, subjectName.Replace("CN=", ""), false);
+            var certificates = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subjectName, false);
 
             foreach (X509Certificate2 cert in certificates)
             {
@@ -680,8 +693,8 @@ public class PackageCommandTests : BaseCommandTests
         // Arrange
         var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "publisher_test_cert.pfx"));
         const string testPassword = "testpassword123";
-        const string expectedPublisher = "TestCertificatePublisher";
-        const string testPublisherCN = $"CN={expectedPublisher}";
+        const string expectedPublisher = "CN=TestCertificatePublisher";
+        const string testPublisherCN = $"CN=TestCertificatePublisher";
 
         // Create a test certificate using the existing certificate service
         _certificateService.GenerateDevCertificateAsync(
@@ -690,8 +703,137 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert
-        Assert.AreEqual(expectedPublisher, extractedPublisher, "Extracted publisher should match the expected publisher");
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedPublisher, extractedPublisher, "Extracted publisher should match the full subject DN");
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", DisplayName = "Simple CN only")]
+    [DataRow("CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF", DisplayName = "GUID-style CN")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "CN with locale fields")]
+    [DataRow("CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", DisplayName = "Full corporate DN")]
+    [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
+    [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
+    [DataRow("CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US", DisplayName = "DN with spaces in values")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
+    [DataRow("DC=example, DC=com", DisplayName = "Non-CN DN (DC-based)")]
+    public void CertificateService_ExtractPublisherFromCertificate_WithVariousDNFormats_ShouldReturnFullSubject(string publisherDN)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"dn_test_{publisherDN.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(publisherDN, extractedPublisher);
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", DisplayName = "Simple CN only")]
+    [DataRow("CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF", DisplayName = "GUID-style CN")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "CN with locale fields")]
+    [DataRow("CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", DisplayName = "Full corporate DN")]
+    [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
+    [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
+    public async Task CertificateService_ValidatePublisherMatch_WithVariousDNFormats_ShouldSucceed(string publisherDN)
+    {
+        // Arrange - same DN in both cert and manifest
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"validate_dn_{publisherDN.GetHashCode():x}.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"validate_dn_{publisherDN.GetHashCode():x}_manifest.xml"));
+        const string testPassword = "testpassword123";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", publisherDN);
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should not throw
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    [DataRow("SimpleName", "CN=SimpleName", DisplayName = "Name without CN= prefix")]
+    [DataRow("  CN=Trimmed  ", "CN=Trimmed", DisplayName = "Publisher with surrounding whitespace")]
+    public void CertificateService_GenerateDevCertificate_NormalizesPublisherInput(string input, string expectedSubject)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"normalize_test_{input.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        _certificateService.GenerateDevCertificateAsync(
+            input, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedSubject, extractedPublisher);
+    }
+
+    [TestMethod]
+    public void CertificateService_ExtractPublisherFromCertificate_WithMultiComponentDN_ShouldReturnFullSubject()
+    {
+        // Arrange - multi-component DN like the bug report: CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_cert.pfx"));
+        const string testPassword = "testpassword123";
+        const string fullDN = "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN";
+
+        _certificateService.GenerateDevCertificateAsync(
+            fullDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(fullDN, extractedPublisher);
+    }
+
+    [TestMethod]
+    public async Task CertificateService_ValidatePublisherMatch_WithMultiComponentDN_ShouldSucceed()
+    {
+        // Arrange - same multi-component DN in both cert and manifest
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_validation_cert.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_validation_manifest.xml"));
+        const string testPassword = "testpassword123";
+        const string fullDN = "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            fullDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", fullDN);
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should not throw
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", "SimplePublisher", DisplayName = "Simple CN → bare name")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "Multi-component → full DN")]
+    [DataRow("OU=Finance, DC=corp, DC=com", "OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN → full DN")]
+    public async Task CertificateService_GenerateDevCertificate_PublisherDisplayField_MatchesExpected(string publisherDN, string expectedDisplay)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"display_test_{publisherDN.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Act
+        var result = await _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Assert - Publisher field is the display name
+        Assert.AreEqual(expectedDisplay, result.Publisher);
     }
 
     [TestMethod]
@@ -771,6 +913,29 @@ public class PackageCommandTests : BaseCommandTests
         // Verify error message format matches requirement
         Assert.Contains($"Publisher in {manifestPath} (CN=ManifestPublisher)", ex.Message);
         Assert.Contains($"does not match the publisher in the certificate {certPath} (CN=CertificatePublisher)", ex.Message);
+    }
+
+    [TestMethod]
+    public async Task CertificateService_ValidatePublisherMatch_WithMalformedManifestPublisher_ShouldThrowWrappedError()
+    {
+        // Arrange - Create a valid cert but a manifest with an unparsable publisher DN
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest_cert.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest.xml"));
+        const string testPassword = "testpassword123";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            "CN=TestPublisher", certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Create manifest with an invalid publisher string that X500DistinguishedName cannot parse
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", "=InvalidDN=");
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should throw a wrapped InvalidOperationException
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            async () => await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken));
+
+        Assert.Contains("Failed to validate publisher match", ex.Message);
     }
 
     [TestMethod]
@@ -2298,4 +2463,49 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    /// <summary>
+    /// Compares two DN strings via X500DistinguishedName.RawData to match production semantics.
+    /// </summary>
+    [TestMethod]
+    [DataRow("CN=Contoso, O=Contoso Ltd, C=US", DisplayName = "Multi-component CN+O+C publisher")]
+    [DataRow("Last, First", DisplayName = "Bare name with comma (escaped)")]
+    [DataRow("CN=A&B Corp", DisplayName = "Publisher with ampersand")]
+    public async Task CertificateService_GeneratedManifestAndCert_PublisherRoundTrips(string publisherInput)
+    {
+        // Arrange — generate a manifest using the template service, then a cert from the same input.
+        // The manifest Identity/Publisher must semantically equal the cert subject.
+        var manifestTemplateService = GetRequiredService<IManifestTemplateService>();
+        var outputDir = _tempDirectory.CreateSubdirectory($"roundtrip_{publisherInput.GetHashCode():x}");
+        var certPath = new FileInfo(Path.Combine(outputDir.FullName, "test.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Generate manifest
+        await manifestTemplateService.GenerateCompleteManifestAsync(
+            outputDir,
+            "RoundTripTestPackage",
+            publisherInput,
+            "1.0.0.0",
+            ManifestTemplates.Packaged,
+            "Test",
+            TestTaskContext,
+            TestContext.CancellationToken);
+
+        // Generate cert from same publisher input
+        await _certificateService.GenerateDevCertificateAsync(
+            publisherInput, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Act & Assert — ValidatePublisherMatchAsync should not throw
+        var manifestPath = new FileInfo(Path.Combine(outputDir.FullName, "Package.appxmanifest"));
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    private static void AssertDNEquals(string expectedDN, string actualDN, string? message = null)
+    {
+        var expected = new X500DistinguishedName(expectedDN);
+        var actual = new X500DistinguishedName(actualDN);
+        Assert.IsTrue(
+            expected.RawData.AsSpan().SequenceEqual(actual.RawData.AsSpan()),
+            message ?? $"DN mismatch.\nExpected: {expectedDN}\nActual:   {actualDN}");
+    }
 }

@@ -12,7 +12,7 @@ Use this skill when:
 
 ## Key concepts
 
-**Publisher matching:** The publisher in your certificate (e.g., `CN=MyCompany`) must exactly match the `Publisher` attribute in `Package.appxmanifest`. Use `--manifest` when generating to auto-match.
+**Publisher matching:** The publisher in your certificate must exactly match the `Publisher` attribute in `Package.appxmanifest`. Any valid X.500 distinguished name is supported (e.g., `CN=MyCompany` or `OU=Team, O=Corp, C=US`). Use `--manifest` when generating to auto-match.
 
 **Dev vs. production certs:** `winapp cert generate` creates self-signed certificates for **local testing only**. For production distribution (Microsoft Store or enterprise), obtain a certificate from a trusted Certificate Authority.
 
