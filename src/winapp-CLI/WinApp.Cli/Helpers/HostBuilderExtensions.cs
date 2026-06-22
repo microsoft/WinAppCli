@@ -36,6 +36,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
             .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
             .AddSingleton<IWinmdService, WinmdService>()
+            .AddSingleton<IWinmdsLockfileService, WinmdsLockfileService>()
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()

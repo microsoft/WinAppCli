@@ -14,6 +14,7 @@
     "generate-docs:check": "node scripts/generate-docs.mjs --check",
     "compile": "tsc",
     "compile:watch": "tsc --watch",
+    "test": "tsc -p tsconfig.test.json && node --test \"dist-test/test/**/*.test.js\"",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",

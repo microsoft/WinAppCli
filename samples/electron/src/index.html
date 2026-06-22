@@ -10,6 +10,7 @@
     <p>Welcome to your Electron application.</p>
     <button id="show-notification">Show Notification</button>
     <button id="show-runtime-version">Show Runtime Version from C#</button>
+    <button id="pick-image">Pick an Image (WinRT JS bindings)</button>
     <script defer>
       document.getElementById('show-notification').addEventListener('click', () => {
         window.electronAPI.showNotification('Hello', 'This is a WinRT notification from Electron!');
@@ -18,6 +19,11 @@
       document.getElementById('show-runtime-version').addEventListener('click', async () => {
         var version = await window.electronAPI.getWindowsAppRuntimeVersion();
         alert("We're running with WindowsAppRuntime version " + version);
+      });
+
+      document.getElementById('pick-image').addEventListener('click', async () => {
+        const path = await window.electronAPI.pickImage();
+        alert(path ? 'Picked: ' + path : 'Picker cancelled.');
       });
     </script>
   </body>

@@ -35,6 +35,7 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**
 
@@ -45,6 +46,7 @@ winapp init [base-directory] [options]
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
 - Stores shareable files in the global cache directory
+- Generates JS bindings for Windows App SDK APIs when enabled (npm only)
 
 **Automatic project detection:**
 
@@ -60,7 +62,7 @@ When `init` is run without a directory argument, it performs a breadth-first sea
 The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
 
 - If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
-- If `--use-defaults` is set without a directory argument, `init` searches for projects and errors with the list of detected projects — pass an explicit directory to use non-interactive mode (e.g., `winapp init . --use-defaults`)
+- If `--use-defaults` (or `--no-prompt`) is set without a directory argument, `init` skips the search and initializes the current directory non-interactively, warning first if no known project type is detected there (e.g., `winapp init --use-defaults`)
 - In non-interactive environments (piped stdin, CI, redirected input), `init` automatically uses `--use-defaults` behavior and emits a warning: `Non-interactive environment detected. Using default values.`
 - If the current directory is a compatible project, `init` proceeds immediately
 - If exactly one project is found elsewhere, you're prompted to confirm
@@ -867,6 +869,42 @@ winapp get-winapp-path [options]
 - Paths to `.winapp` workspace directory
 - Package installation directories
 - Generated header locations
+
+---
+
+### node generate-bindings
+
+*(Available in NPM package only)* Generate JS bindings for Windows App SDK APIs. The bindings are declared by a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`** and written to `.winapp/bindings/`.
+
+```bash
+npx winapp node generate-bindings [options]
+```
+
+**Options:**
+
+- `--verbose`, `-v` - Enable verbose per-file codegen output
+- `--quiet`, `-q` - Suppress progress and informational output
+
+**What it does:**
+
+- Reads the `winapp.jsBindings` block from `package.json` and the `winmds.lock.json` written by the last `winapp restore`, then emits typed `.js` + `.d.ts` bindings into `.winapp/bindings/`
+- Does **not** modify `package.json` — it is a passive regenerator. Adding the `winapp.jsBindings` block and the `@microsoft/dynwinrt` runtime dependency happens during [`winapp init`](#init) when JS bindings are enabled; this command fails fast if the block is absent
+- Warns (but does not write) if `@microsoft/dynwinrt` is missing from your dependencies — run `npm install` after `init` has added it
+
+> [!NOTE]
+> Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them. Run [`winapp init`](#init) interactively and opt in, or use `winapp init . --use-defaults --add-js-bindings`, before using this command to regenerate bindings. If you edit `winapp.yaml`, run `npx winapp restore` to refresh Windows dependencies before regenerating.
+
+**Examples:**
+
+```bash
+# Regenerate JS bindings in the current project
+npx winapp node generate-bindings
+
+# Regenerate after editing winapp.jsBindings, with verbose output
+npx winapp node generate-bindings --verbose
+```
+
+> See the [JS bindings guide](guides/electron/js-file-picker.md) for the end-to-end workflow and the `winapp.jsBindings` configuration options.
 
 ---
 
