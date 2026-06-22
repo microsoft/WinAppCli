@@ -922,6 +922,17 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Scroll_Wheel_ZeroSizeElement_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-tiny-0000", X = 10, Y = 20, Width = 0, Height = 0 };
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-tiny-0000", "-a", "TestApp", "--wheel", "-120", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
+    }
+
+    [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Edit", Selector = "edit-name-1234" };

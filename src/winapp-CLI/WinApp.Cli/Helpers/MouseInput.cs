@@ -95,19 +95,7 @@ internal static class MouseInput
             }
         ];
 
-        unsafe
-        {
-            fixed (INPUT* pInputs = inputs)
-            {
-                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-                if (sent == 0)
-                {
-                    throw new InvalidOperationException(
-                        "SendInput failed — the target window may be elevated (running as admin). " +
-                        "Try running this CLI as administrator.");
-                }
-            }
-        }
+        SendInputs(inputs);
     }
 
     private static void SendButton(MOUSE_EVENT_FLAGS flag)
@@ -121,19 +109,7 @@ internal static class MouseInput
             }
         ];
 
-        unsafe
-        {
-            fixed (INPUT* pInputs = inputs)
-            {
-                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-                if (sent == 0)
-                {
-                    throw new InvalidOperationException(
-                        "SendInput failed — the target window may be elevated (running as admin). " +
-                        "Try running this CLI as administrator.");
-                }
-            }
-        }
+        SendInputs(inputs);
     }
 
     private static void SendMove(int screenX, int screenY)
@@ -161,19 +137,7 @@ internal static class MouseInput
             }
         ];
 
-        unsafe
-        {
-            fixed (INPUT* pInputs = inputs)
-            {
-                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-                if (sent == 0)
-                {
-                    throw new InvalidOperationException(
-                        "SendInput failed — the target window may be elevated (running as admin). " +
-                        "Try running this CLI as administrator.");
-                }
-            }
-        }
+        SendInputs(inputs);
     }
 
     private static void SendClick(MOUSE_EVENT_FLAGS downFlag, MOUSE_EVENT_FLAGS upFlag)
@@ -192,6 +156,15 @@ internal static class MouseInput
             }
         ];
 
+        SendInputs(inputs);
+    }
+
+    /// <summary>
+    /// Dispatches the given input events via SendInput, throwing if the OS rejects them
+    /// (e.g. the target window is elevated and this process is not).
+    /// </summary>
+    private static void SendInputs(Span<INPUT> inputs)
+    {
         unsafe
         {
             fixed (INPUT* pInputs = inputs)
