@@ -14,16 +14,19 @@ public class UiCommandTests : BaseCommandTests
     private FakeUiAutomationService _fakeUia = null!;
     private FakeUiSessionService _fakeSession = null!;
     private FakeMouseInput _fakeMouse = null!;
+    private FakeKeyboardInput _fakeKeyboard = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeUia = new FakeUiAutomationService();
         _fakeSession = new FakeUiSessionService();
         _fakeMouse = new FakeMouseInput();
+        _fakeKeyboard = new FakeKeyboardInput();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
             .AddSingleton<IUiSessionService>(_fakeSession)
-            .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse);
+            .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
+            .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard);
     }
 
     [TestMethod]
@@ -680,6 +683,126 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode);
     }
 
+    // ---------------------------------------------------------------------
+    // send-keys (#562) — synthetic keyboard input
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task SendKeys_Json_EmitsEnvelope()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["ctrl+a", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("ctrl+a", result.GetProperty("keys").GetString());
+        Assert.AreEqual("post-message", result.GetProperty("via").GetString());
+        Assert.AreEqual(1, result.GetProperty("actionCount").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task SendKeys_DefaultTransport_IsPostMessage()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_ViaSendInput_SetsTransport()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--via", "send-input"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_SequenceAndText_ParsesMultipleActions()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        // "down down enter" -> 3 key chords; "hello" -> 1 text action
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["down down enter hello", "-a", "TestApp"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var actions = _fakeKeyboard.SendCalls[0].Actions;
+        Assert.AreEqual(4, actions.Count);
+        Assert.IsInstanceOfType<WinApp.Cli.Helpers.TextInput>(actions[3]);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_WithTarget_FocusesElementAndUsesElementHwnd()
+    {
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "e0", Type = "Edit", Selector = "txt-name-1234", WindowHandle = 4242
+        };
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["hello", "-a", "TestApp", "--target", "txt-name-1234", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(4242, _fakeKeyboard.SendCalls[0].Hwnd);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("txt-name-1234", result.GetProperty("target").GetString());
+        Assert.AreEqual(4242, result.GetProperty("hwnd").GetInt64());
+    }
+
+    [TestMethod]
+    public async Task SendKeys_TargetNotFound_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = null;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["hello", "-a", "TestApp", "--target", "missing-0000", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_MissingKeys_ReturnsError()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_MissingApp_ReturnsError()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_InvalidVia_ReturnsError()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--via", "bogus", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_InvalidKeyToken_ReturnsError()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["vk=0xZZ", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
     [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {
@@ -724,3 +847,4 @@ public class UiCommandTests : BaseCommandTests
         StringAssert.Contains(TestAnsiConsole.Output, "\"elementId\":");
     }
 }
+

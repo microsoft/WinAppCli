@@ -82,6 +82,15 @@ IsWindowVisible
 SetForegroundWindow
 SetCursorPos
 SendInput
+PostMessage
+MapVirtualKey
+VkKeyScan
+VIRTUAL_KEY
+WM_KEYDOWN
+WM_KEYUP
+WM_CHAR
+WM_SYSKEYDOWN
+WM_SYSKEYUP
 GetSystemMetrics
 GetWindow
 GetClassName

@@ -108,6 +108,24 @@ winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-
 winapp ui hover btn-info-a1b2 -a myapp --dwell-time 1200; winapp ui screenshot -a myapp --capture-screen
 ```
 
+### Send keyboard input
+Synthesize keystrokes — the keyboard counterpart to `click`. Use for arrow/Tab/Enter navigation, shortcuts, and per-keystroke typing (vs `set-value`'s atomic write). Tokens are whitespace-separated: named keys (`enter`, `down`, `tab`, `esc`, `f5`), modifier combos (`ctrl+shift+t`), literal text (`hello`), and raw virtual keys (`vk=0xNN`).
+```powershell
+# Keyboard navigation then commit
+winapp ui send-keys "down down enter" -a myapp
+
+# Shortcut: select all and delete
+winapp ui send-keys "ctrl+a delete" -a myapp
+
+# Focus a field, then type text into it
+winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
+
+# Transport: --via post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide)
+winapp ui send-keys "alt+f4" -a myapp --via send-input
+```
+- Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
+
 ### Read element state
 ```powershell
 # Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)

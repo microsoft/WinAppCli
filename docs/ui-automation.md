@@ -10,7 +10,7 @@ Used by AI agents and developers for UI testing, debugging, and automation.
 
 `winapp ui` provides commands for inspecting and interacting with Windows app UIs.
 Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, Win32, Electron, and WinUI 3.
-Most commands drive the app through UIA patterns (no input injection); `ui click` is the exception and uses real mouse simulation for controls that don't support `InvokePattern`.
+Most commands drive the app through UIA patterns (no input injection). The exceptions inject real input: `ui click`/`ui hover`/`ui drag` use mouse simulation, and `ui send-keys` synthesizes keyboard input — for controls and scenarios that UIA patterns can't drive.
 
 ## Quick Start
 
@@ -267,6 +267,32 @@ winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-
 
 **Options:**
 - `--dwell-time <ms>` — Time in milliseconds to wait after hovering for effects to appear (default: 800, range: 0–10000)
+
+### send-keys
+Send synthetic keyboard input — the keyboard counterpart to `click`. UIA has no keyboard-injection pattern, so this drops to the Win32 layer. Use it for keyboard navigation (arrows, Tab, Enter, Esc), shortcuts (`ctrl+c`, `alt+f4`), and typing into controls that need per-keystroke events rather than `set-value`'s atomic write.
+```bash
+winapp ui send-keys "down down enter" -a myapp                 # arrow navigation then commit
+winapp ui send-keys "ctrl+a delete" -a myapp                   # select all, then delete
+winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp  # focus a field, then type text
+winapp ui send-keys "alt+f4" -a myapp                          # close window via accelerator
+winapp ui send-keys "vk=0x5D" -a myapp                         # a key with no friendly name (Apps/Menu key)
+winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide injection instead of PostMessage
+```
+
+**Key grammar** (whitespace-separated tokens, quote multi-token strings):
+- **Named keys** — `enter`/`return`, `tab`, `esc`/`escape`, `space`, `backspace`, `delete`/`del`, `insert`, `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, `up`/`down`/`left`/`right`, `f1`–`f16`, `apps`, `printscreen`, `capslock`.
+- **Sequences** — multiple tokens are pressed in order: `down down enter`.
+- **Modifier combos** — `ctrl`, `shift`, `alt`, `win` joined with `+`: `ctrl+shift+t`, `alt+f4`.
+- **Literal text** — any token that isn't a known key is typed character by character: `hello`.
+- **Raw virtual keys** — `vk=0xNN` (hex) or `vk=NN` (decimal) for keys without a friendly name.
+
+**Options:**
+- `--target <selector>` — Focus this element (via UIA) before sending keys. Without it, keys go to the app's currently focused element.
+- `--via <transport>` — `post-message` (default) posts `WM_KEYDOWN`/`WM_KEYUP`/`WM_CHAR` to the target window's queue. It is HWND-targeted and bypasses UIPI (works across integrity levels). `send-input` injects OS-wide via `SendInput` and goes to the foreground window.
+
+**Choosing a transport / known limits:**
+- `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
+- `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level.
 
 ### set-value
 Set a value on an editable element (text for TextBox/ComboBox, number for Slider).

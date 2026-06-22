@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.3
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -944,6 +944,39 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui send-keys
+// ---------------------------------------------------------------------------
+
+export interface UiSendKeysOptions extends CommonOptions {
+  /** Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Quote multi-token strings, e.g. "ctrl+a delete". */
+  keys?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Optional selector (slug or text) to focus before sending keys. */
+  target?: string;
+  /** Transport: post-message (HWND-targeted, bypasses UIPI; default) or send-input (OS-wide). */
+  via?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide).
+ */
+export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'send-keys'];
+  if (options.keys) args.push(options.keys);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.target) args.push('--target', options.target);
+  if (options.via) args.push('--via', options.via);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

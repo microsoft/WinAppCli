@@ -113,6 +113,24 @@ winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-
 winapp ui hover btn-info-a1b2 -a myapp --dwell-time 1200; winapp ui screenshot -a myapp --capture-screen
 ```
 
+### Send keyboard input
+Synthesize keystrokes — the keyboard counterpart to `click`. Use for arrow/Tab/Enter navigation, shortcuts, and per-keystroke typing (vs `set-value`'s atomic write). Tokens are whitespace-separated: named keys (`enter`, `down`, `tab`, `esc`, `f5`), modifier combos (`ctrl+shift+t`), literal text (`hello`), and raw virtual keys (`vk=0xNN`).
+```powershell
+# Keyboard navigation then commit
+winapp ui send-keys "down down enter" -a myapp
+
+# Shortcut: select all and delete
+winapp ui send-keys "ctrl+a delete" -a myapp
+
+# Focus a field, then type text into it
+winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
+
+# Transport: --via post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide)
+winapp ui send-keys "alt+f4" -a myapp --via send-input
+```
+- Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
+
 ### Read element state
 ```powershell
 # Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
@@ -363,6 +381,45 @@ Click an element by slug or text search using mouse simulation. Works on element
 | `--double` | Perform a double-click instead of a single click | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--right` | Perform a right-click instead of a left click | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui hover`
+
+Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--dwell-time` | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) | `800` |
+| `--json` | Format output as JSON | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui send-keys`
+
+Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide).
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<keys>` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Quote multi-token strings, e.g. "ctrl+a delete". |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--target` | Optional selector (slug or text) to focus before sending keys. | (none) |
+| `--via` | Transport: post-message (HWND-targeted, bypasses UIPI; default) or send-input (OS-wide). | `post-message` |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui set-value`

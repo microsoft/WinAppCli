@@ -19,6 +19,7 @@ internal class UiCommand : Command, IShortDescription
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
         UiHoverCommand hoverCommand,
+        UiSendKeysCommand sendKeysCommand,
         UiSetValueCommand setValueCommand,
         UiFocusCommand focusCommand,
         UiScrollIntoViewCommand scrollIntoViewCommand,
@@ -38,6 +39,7 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);
         Subcommands.Add(hoverCommand);
+        Subcommands.Add(sendKeysCommand);
         Subcommands.Add(setValueCommand);
         Subcommands.Add(focusCommand);
         Subcommands.Add(scrollIntoViewCommand);

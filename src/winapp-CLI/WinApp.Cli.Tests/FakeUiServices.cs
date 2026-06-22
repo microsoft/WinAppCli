@@ -96,3 +96,16 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
     public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
         => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick));
 }
+
+/// <summary>
+/// Fake keyboard input for testing — records the actions/transport instead of issuing real input.
+/// </summary>
+internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
+{
+    public record SendCall(long Hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> Actions, WinApp.Cli.Helpers.KeyTransport Transport);
+
+    public List<SendCall> SendCalls { get; } = [];
+
+    public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
+        => SendCalls.Add(new(hwnd, actions, transport));
+}
