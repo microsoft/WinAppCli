@@ -443,7 +443,7 @@ Move the mouse to an element's center to trigger hover effects (tooltips, flyout
 
 ### `winapp ui send-keys`
 
-Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide).
+Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -458,7 +458,7 @@ Send synthetic keyboard input to a window. Supports named keys (down, enter, tab
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--target` | Optional selector (slug or text) to focus before sending keys. | (none) |
-| `--via` | Transport: post-message (HWND-targeted, bypasses UIPI; default) or send-input (OS-wide). | `post-message` |
+| `--via` | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both. | `post-message` |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui set-value`

@@ -31,7 +31,9 @@ internal class UiSendKeysCommand : Command, IShortDescription
 
     public static Option<string> ViaOption { get; } = new("--via")
     {
-        Description = "Transport: post-message (HWND-targeted, bypasses UIPI; default) or send-input (OS-wide).",
+        Description = "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged " +
+                      "but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character " +
+                      "KeyDown + TextChanged). Named keys and combos raise KeyDown on both.",
         DefaultValueFactory = _ => "post-message"
     };
 
@@ -39,7 +41,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
         : base("send-keys", "Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), " +
                "modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. " +
                "Use --target to focus an element first. " +
-               "Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide).")
+               "Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). " +
+               "For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.")
     {
         Arguments.Add(KeysArgument);
         Options.Add(SharedUiOptions.AppOption);
