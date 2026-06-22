@@ -194,83 +194,83 @@ describe('project-detection', () => {
 	});
 
 	describe('detectProjects', () => {
-		it('finds multiple projects in different subdirectories', () => {
+		it('finds multiple projects in different subdirectories', async () => {
 			createFile(path.join(tempDir, 'app1', 'Cargo.toml'), '[package]\n');
 			createFile(path.join(tempDir, 'app2', 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.20)\n');
 			createFile(path.join(tempDir, 'app3', 'pubspec.yaml'), 'name: app3\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 3);
 			const types = results.map(r => r.type).sort();
 			assert.deepStrictEqual(types, ['C++', 'Flutter', 'Rust']);
 		});
 
-		it('respects maxProjects limit', () => {
+		it('respects maxProjects limit', async () => {
 			for (let i = 0; i < 5; i++) {
 				createFile(path.join(tempDir, `app${i}`, 'Cargo.toml'), '[package]\n');
 			}
 
-			const results = detectProjects(tempDir, 3);
+			const results = await detectProjects(tempDir, 3);
 			assert.strictEqual(results.length, 3);
 		});
 
-		it('skips node_modules directory', () => {
+		it('skips node_modules directory', async () => {
 			createFile(path.join(tempDir, 'node_modules', 'some-pkg', 'Cargo.toml'), '[package]\n');
 			createFile(path.join(tempDir, 'src', 'Cargo.toml'), '[package]\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 1);
 			assert.strictEqual(results[0].type, 'Rust');
 			assert.ok(results[0].directory.includes('src'));
 		});
 
-		it('skips other ignored directories', () => {
+		it('skips other ignored directories', async () => {
 			const ignoredDirs = ['bin', 'obj', 'target', 'dist', 'build', '.git'];
 			for (const dir of ignoredDirs) {
 				createFile(path.join(tempDir, dir, 'Cargo.toml'), '[package]\n');
 			}
 			createFile(path.join(tempDir, 'src', 'Cargo.toml'), '[package]\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 1);
 			assert.ok(results[0].directory.includes('src'));
 		});
 
-		it('skips hidden directories', () => {
+		it('skips hidden directories', async () => {
 			createFile(path.join(tempDir, '.hidden', 'Cargo.toml'), '[package]\n');
 			createFile(path.join(tempDir, 'visible', 'Cargo.toml'), '[package]\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 1);
 			assert.ok(results[0].directory.includes('visible'));
 		});
 
-		it('does not recurse into detected project directories', () => {
+		it('does not recurse into detected project directories', async () => {
 			// Parent is a Rust project
 			createFile(path.join(tempDir, 'app', 'Cargo.toml'), '[package]\n');
 			// Nested CMake inside the Rust project should not be found
 			createFile(path.join(tempDir, 'app', 'subdir', 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.20)\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 1);
 			assert.strictEqual(results[0].type, 'Rust');
 		});
 
-		it('detects project at root when present', () => {
+		it('detects project at root when present', async () => {
 			createFile(path.join(tempDir, 'Cargo.toml'), '[package]\n');
 			createFile(path.join(tempDir, 'subdir', 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.20)\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			// Root project found, so we don't recurse
 			assert.strictEqual(results.length, 1);
 			assert.strictEqual(results[0].type, 'Rust');
 			assert.strictEqual(results[0].displayPath, '.');
 		});
 
-		it('returns empty array when no projects exist', () => {
+		it('returns empty array when no projects exist', async () => {
 			createFile(path.join(tempDir, 'readme.md'), '# Hello\n');
 
-			const results = detectProjects(tempDir);
+			const results = await detectProjects(tempDir);
 			assert.strictEqual(results.length, 0);
 		});
 	});

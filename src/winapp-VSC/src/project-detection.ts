@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 
 /**
@@ -36,7 +37,7 @@ export function getProjectLabel(project: DetectedProject): string {
 const SKIP_DIRS = new Set([
 	'node_modules', '.git', 'bin', 'obj', 'debug', 'release',
 	'.vs', '.vscode', '.idea', 'packages', 'dist', 'build', 'out',
-	'target', '.winapp', 'artifacts', 'TestResults',
+	'target', '.winapp', 'artifacts', 'testresults',
 	'__pycache__', '.gradle', '.dart_tool', '.pub-cache', '.nuget', '.cargo'
 ]);
 
@@ -85,10 +86,12 @@ export function detectProjectAt(directory: string, searchRoot: string): Detected
 /**
  * Performs a breadth-first search of the directory tree to find compatible projects.
  * Mirrors ProjectDetectionService.DetectProjectsAsync from WinApp.Cli.
+ * Uses async I/O with periodic yielding to keep the UI responsive.
  */
-export function detectProjects(root: string, maxProjects: number = 10): DetectedProject[] {
+export async function detectProjects(root: string, maxProjects: number = 10): Promise<DetectedProject[]> {
 	const results: DetectedProject[] = [];
 	const queue: string[] = [root];
+	let iterations = 0;
 
 	while (queue.length > 0 && results.length < maxProjects) {
 		const current = queue.shift()!;
@@ -101,16 +104,16 @@ export function detectProjects(root: string, maxProjects: number = 10): Detected
 
 		// Enqueue child directories (skip known non-project dirs)
 		try {
-			const entries = fs.readdirSync(current, { withFileTypes: true });
+			const entries = await fsp.readdir(current, { withFileTypes: true });
 			for (const entry of entries) {
 				if (!entry.isDirectory() && !entry.isSymbolicLink()) { continue; }
 				if (entry.name.startsWith('.') && entry.name !== '.') { continue; }
-				if (SKIP_DIRS.has(entry.name)) { continue; }
+				if (SKIP_DIRS.has(entry.name.toLowerCase())) { continue; }
 				const fullPath = path.join(current, entry.name);
 				// Skip symlinks and junctions (reparse points)
 				if (entry.isSymbolicLink()) { continue; }
 				try {
-					const stat = fs.statSync(fullPath);
+					const stat = await fsp.stat(fullPath);
 					if (!stat.isDirectory()) { continue; }
 				} catch {
 					continue;
@@ -119,6 +122,11 @@ export function detectProjects(root: string, maxProjects: number = 10): Detected
 			}
 		} catch {
 			// Skip directories we can't read
+		}
+
+		// Yield to the event loop periodically to keep the UI responsive
+		if (++iterations % 50 === 0) {
+			await new Promise(resolve => setTimeout(resolve, 0));
 		}
 	}
 
@@ -192,7 +200,9 @@ function findExecutableCsproj(directory: string): string | undefined {
 
 /**
  * Parses csproj XML content to determine if it's an executable, non-test project.
- * Mirrors the CLI's IsExecutableProject logic.
+ * Simplified heuristic inspired by the CLI's IsExecutableProject logic — uses regex
+ * to match the first <OutputType> and <IsTestProject> elements. Does not handle
+ * multiple/conditional PropertyGroups or values inside XML comments.
  */
 function isExecutableCsproj(content: string): boolean {
 	// Extract OutputType value from PropertyGroup elements

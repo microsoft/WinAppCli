@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
-import { detectProjectAt, detectProjects, getProjectLabel, DetectedProject } from './project-detection';
+import { detectProjectAt, detectProjects, getProjectLabel, getDisplayFilePath, DetectedProject } from './project-detection';
 import { glob } from 'glob';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
@@ -161,7 +161,7 @@ async function resolveProjectDirectory(workspacePath: string): Promise<string | 
 	const maxProjects = 10;
 	const items = projects.map(p => ({
 		label: `$(file-code) ${p.type} project`,
-		description: getProjectLabel(p).replace(`${p.type} project `, ''),
+		description: getDisplayFilePath(p),
 		directory: p.directory
 	}));
 
@@ -494,7 +494,7 @@ export function activate(context: vscode.ExtensionContext) {
 						[
 							{
 								label: `$(file-code) ${project.type} project`,
-								description: getProjectLabel(project).replace(`${project.type} project `, ''),
+								description: getDisplayFilePath(project),
 								project
 							},
 							{
@@ -516,7 +516,7 @@ export function activate(context: vscode.ExtensionContext) {
 						const maxProjects = 10;
 						const items = projects.map(p => ({
 							label: `$(file-code) ${p.type} project`,
-							description: getProjectLabel(p).replace(`${p.type} project `, ''),
+							description: getDisplayFilePath(p),
 							project: p
 						}));
 						items.push({
