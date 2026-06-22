@@ -803,6 +803,124 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
     }
 
+    // ---------------------------------------------------------------------
+    // drag (#498) — mouse drag gesture
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Drag_Json_EmitsEnvelopeWithElementRelativeCoords()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-canvas-1234", X = 50, Y = 60, Width = 200, Height = 200 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "40,50", "60,30", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("img-canvas-1234", result.GetProperty("elementId").GetString());
+        Assert.AreEqual(90, result.GetProperty("fromX").GetInt32());  // 50 + 40
+        Assert.AreEqual(110, result.GetProperty("fromY").GetInt32()); // 60 + 50
+        Assert.AreEqual(110, result.GetProperty("toX").GetInt32());   // 50 + 60
+        Assert.AreEqual(90, result.GetProperty("toY").GetInt32());    // 60 + 30
+        Assert.AreEqual("left", result.GetProperty("button").GetString());
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(90, drag.FromX);
+        Assert.AreEqual(110, drag.FromY);
+        Assert.AreEqual(110, drag.ToX);
+        Assert.AreEqual(90, drag.ToY);
+        Assert.IsFalse(drag.RightButton);
+    }
+
+    [TestMethod]
+    public async Task Drag_RightButton_SetsButton()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-canvas-1234", X = 0, Y = 0, Width = 100, Height = 100 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "10,10", "20,20", "-a", "TestApp", "--right", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        Assert.IsTrue(_fakeMouse.DragCalls[0].RightButton);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("right", result.GetProperty("button").GetString());
+    }
+
+    [TestMethod]
+    public async Task Drag_MissingApp_ReturnsError()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "10,10", "20,20", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_MissingSelector_ReturnsError()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_InvalidFromPoint_ReturnsError()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "notapoint", "20,20", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_ElementNotFound_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = null;
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["missing-0000", "10,10", "20,20", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    // ---------------------------------------------------------------------
+    // scroll --wheel (#498) — synthetic mouse-wheel input
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Scroll_Wheel_SendsWheelDeltaAtElementCenter()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-items-1234", X = 50, Y = 60, Width = 120, Height = 40 };
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-120", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeMouse.ScrollWheelCalls.Count);
+        var wheel = _fakeMouse.ScrollWheelCalls[0];
+        Assert.AreEqual(110, wheel.ScreenX); // 50 + 120/2
+        Assert.AreEqual(80, wheel.ScreenY);  // 60 + 40/2
+        Assert.AreEqual(-120, wheel.Delta);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(-120, result.GetProperty("wheel").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task Scroll_NoDirectionToOrWheel_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-items-1234", X = 0, Y = 0, Width = 100, Height = 100 };
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
+    }
+
     [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {

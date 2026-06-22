@@ -51,6 +51,91 @@ internal static class MouseInput
         }
     }
 
+    public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false)
+    {
+        var downFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
+        var upFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP;
+
+        // Settle on the start point, then press the button
+        SendMove(fromScreenX, fromScreenY);
+        Thread.Sleep(50);
+        SendButton(downFlag);
+        Thread.Sleep(50);
+
+        // Move toward the destination in steps so the app sees a stream of WM_MOUSEMOVE messages
+        const int steps = 20;
+        for (int i = 1; i <= steps; i++)
+        {
+            int x = fromScreenX + (int)Math.Round((toScreenX - fromScreenX) * (i / (double)steps));
+            int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
+            SendMove(x, y);
+            Thread.Sleep(10);
+        }
+
+        Thread.Sleep(50);
+        SendButton(upFlag);
+    }
+
+    public static void ScrollWheel(int screenX, int screenY, int delta)
+    {
+        // Position the cursor over the target so the wheel message is routed to the element under it
+        SendMove(screenX, screenY);
+        Thread.Sleep(30);
+
+        Span<INPUT> inputs =
+        [
+            new INPUT
+            {
+                type = INPUT_TYPE.INPUT_MOUSE,
+                Anonymous = { mi = new MOUSEINPUT
+                {
+                    mouseData = unchecked((uint)delta),
+                    dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_WHEEL
+                }}
+            }
+        ];
+
+        unsafe
+        {
+            fixed (INPUT* pInputs = inputs)
+            {
+                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                if (sent == 0)
+                {
+                    throw new InvalidOperationException(
+                        "SendInput failed — the target window may be elevated (running as admin). " +
+                        "Try running this CLI as administrator.");
+                }
+            }
+        }
+    }
+
+    private static void SendButton(MOUSE_EVENT_FLAGS flag)
+    {
+        Span<INPUT> inputs =
+        [
+            new INPUT
+            {
+                type = INPUT_TYPE.INPUT_MOUSE,
+                Anonymous = { mi = new MOUSEINPUT { dwFlags = flag } }
+            }
+        ];
+
+        unsafe
+        {
+            fixed (INPUT* pInputs = inputs)
+            {
+                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+                if (sent == 0)
+                {
+                    throw new InvalidOperationException(
+                        "SendInput failed — the target window may be elevated (running as admin). " +
+                        "Try running this CLI as administrator.");
+                }
+            }
+        }
+    }
+
     private static void SendMove(int screenX, int screenY)
     {
         // Normalize against the full virtual desktop to support multi-monitor setups

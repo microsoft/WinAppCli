@@ -32,6 +32,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiScrollIntoViewResult))]
 [JsonSerializable(typeof(UiHoverResult))]
 [JsonSerializable(typeof(UiSendKeysResult))]
+[JsonSerializable(typeof(UiDragResult))]
 [JsonSerializable(typeof(UiErrorResult))]
 [JsonSerializable(typeof(UiErrorInfo))]
 [JsonSerializable(typeof(UiFocusedResult))]
@@ -195,6 +196,7 @@ internal sealed class UiScrollResult
     public string ElementId { get; set; } = "";
     public string? Direction { get; set; }
     public string? To { get; set; }
+    public int? Wheel { get; set; }
     public long Hwnd { get; set; }
 }
 
@@ -231,5 +233,16 @@ internal sealed class UiSendKeysResult
     public string Via { get; set; } = "";
     public int ActionCount { get; set; }
     public string? Target { get; set; }
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiDragResult
+{
+    public string ElementId { get; set; } = "";
+    public int FromX { get; set; }
+    public int FromY { get; set; }
+    public int ToX { get; set; }
+    public int ToY { get; set; }
+    public string Button { get; set; } = "left";
     public long Hwnd { get; set; }
 }

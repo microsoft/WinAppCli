@@ -257,6 +257,19 @@ winapp ui click btn-column1-a3f2 -a myapp --double      # double-click
 winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
+### drag
+Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
+```bash
+winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp     # left-drag from (40,50) to (60,30) inside the element
+winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp      # drag a slider thumb to the right
+winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right  # right-button drag
+```
+
+**Options:**
+- `--right` — Drag with the right mouse button instead of the left button.
+
+> Coordinates are element-relative. Inspect the element first (`winapp ui inspect`/`search`) to size your offsets; `0,0` is the element's top-left corner.
+
 ### hover
 Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses `SendInput` for realistic mouse movement with a small wiggle, then waits for a configurable dwell time.
 ```bash
@@ -350,7 +363,16 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 
 # If you target an element that's not scrollable, scroll walks up to find the nearest scrollable parent
 winapp ui scroll itm-someitem-a1b2 --direction down -a myapp
+
+# Synthesize real mouse-wheel input over the element (120 = one notch up, -120 = one notch down).
+# Use this to test handlers that respond to the wheel directly (zoom, custom scroll) rather than ScrollPattern.
+winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
 ```
+
+**Options:**
+- `--direction <up|down|left|right>` — Scroll incrementally via `ScrollPattern`.
+- `--to <top|bottom>` — Jump to the start/end via `ScrollPattern`.
+- `--wheel <delta>` — Synthesize mouse-wheel input over the element's center via `SendInput`. One notch is `120`; positive scrolls up/away, negative down/toward. Bypasses `ScrollPattern`.
 
 ### get-focused
 Show the element that currently has keyboard focus.

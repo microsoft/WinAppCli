@@ -1798,6 +1798,135 @@
             }
           }
         },
+        "drag": {
+          "description": "Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.",
+          "hidden": false,
+          "arguments": {
+            "selector": {
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "from": {
+              "description": "Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50",
+              "order": 1,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "to": {
+              "description": "End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30",
+              "order": 2,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--right": {
+              "description": "Drag with the right mouse button instead of the left button",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
         "focus": {
           "description": "Move keyboard focus to the specified element using UIA SetFocus.",
           "hidden": false,
@@ -2757,7 +2886,7 @@
           }
         },
         "scroll": {
-          "description": "Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.",
+          "description": "Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -2852,6 +2981,18 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--wheel": {
+              "description": "Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern.",
+              "hidden": false,
+              "valueType": "System.Nullable<System.Int32>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

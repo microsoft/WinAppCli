@@ -131,6 +131,20 @@ winapp ui send-keys "alt+f4" -a myapp --via send-input
 - Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
 - `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
 
+### Drag (reorder, resize, sliders, drag-and-drop)
+Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+```powershell
+# Left-drag from (40,50) to (60,30) inside the element
+winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp
+
+# Drag a slider thumb to the right
+winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp
+
+# Right-button drag
+winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right
+```
+- Coordinates are element-relative; `0,0` is the element's top-left corner. Inspect the element first to size your offsets.
+
 ### Read element state
 ```powershell
 # Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
@@ -163,6 +177,9 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 
 # Scroll and then inspect for newly visible elements
 winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search TargetItem -a myapp
+
+# Synthesize real mouse-wheel input over the element (120 = one notch up, -120 = down) — tests wheel handlers (zoom, custom scroll)
+winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
 ```
 
 ### Wait for UI state
@@ -383,6 +400,27 @@ Click an element by slug or text search using mouse simulation. Works on element
 | `--right` | Perform a right-click instead of a left click | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
+### `winapp ui drag`
+
+Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `<from>` | No | Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50 |
+| `<to>` | No | End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30 |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--right` | Drag with the right mouse button instead of the left button | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
 ### `winapp ui hover`
 
 Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
@@ -479,7 +517,7 @@ Scroll the specified element into the visible area using UIA ScrollItemPattern.
 
 ### `winapp ui scroll`
 
-Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -495,6 +533,7 @@ Scroll a container element using ScrollPattern. Use --direction to scroll increm
 | `--direction` | Scroll direction: up, down, left, right | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--to` | Scroll to position: top, bottom | (none) |
+| `--wheel` | Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui wait-for`

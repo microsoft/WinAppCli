@@ -18,6 +18,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
     public static Option<string?> DirectionOption { get; }
     public static Option<string?> ToOption { get; }
+    public static Option<int?> WheelOption { get; }
 
     static UiScrollCommand()
     {
@@ -30,11 +31,16 @@ internal class UiScrollCommand : Command, IShortDescription
         {
             Description = "Scroll to position: top, bottom"
         };
+
+        WheelOption = new Option<int?>("--wheel")
+        {
+            Description = "Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern."
+        };
     }
 
     public UiScrollCommand()
         : base("scroll", "Scroll a container element using ScrollPattern. " +
-               "Use --direction to scroll incrementally, or --to to jump to top/bottom.")
+               "Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
@@ -42,12 +48,14 @@ internal class UiScrollCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(DirectionOption);
         Options.Add(ToOption);
+        Options.Add(WheelOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IMouseInput mouseInput,
         IAnsiConsole ansiConsole,
         ILogger<UiScrollCommand> logger) : AsynchronousCommandLineAction
     {
@@ -66,6 +74,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
             var direction = parseResult.GetValue(DirectionOption);
             var to = parseResult.GetValue(ToOption);
+            var wheel = parseResult.GetValue(WheelOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
@@ -73,11 +82,11 @@ internal class UiScrollCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (direction is null && to is null)
+            if (direction is null && to is null && wheel is null)
             {
-                logger.LogError("Specify --direction (up/down/left/right) or --to (top/bottom).");
+                logger.LogError("Specify --direction (up/down/left/right), --to (top/bottom), or --wheel (delta).");
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                    "Specify --direction (up/down/left/right) or --to (top/bottom).");
+                    "Specify --direction (up/down/left/right), --to (top/bottom), or --wheel (delta).");
                 return 1;
             }
 
@@ -93,7 +102,33 @@ internal class UiScrollCommand : Command, IShortDescription
                     return 1;
                 }
 
-                await uiAutomation.ScrollContainerAsync(session, element, direction, to, cancellationToken);
+                var targetHwnd = element.WindowHandle ?? session.WindowHandle;
+
+                if (wheel is int delta)
+                {
+                    int centerX = (int)(element.X + element.Width / 2.0);
+                    int centerY = (int)(element.Y + element.Height / 2.0);
+
+                    if (element.Width == 0 || element.Height == 0)
+                    {
+                        logger.LogError("{Symbol} Element has zero size — cannot scroll-wheel over it.", UiSymbols.Error);
+                        UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot scroll-wheel over it.", selectorStr);
+                        return 1;
+                    }
+
+                    if (targetHwnd != 0)
+                    {
+                        Windows.Win32.PInvoke.SetForegroundWindow(
+                            new Windows.Win32.Foundation.HWND((nint)targetHwnd));
+                        await Task.Delay(100, cancellationToken);
+                    }
+
+                    mouseInput.ScrollWheel(centerX, centerY, delta);
+                }
+                else
+                {
+                    await uiAutomation.ScrollContainerAsync(session, element, direction, to, cancellationToken);
+                }
 
                 if (json)
                 {
@@ -102,7 +137,8 @@ internal class UiScrollCommand : Command, IShortDescription
                         ElementId = (element.Selector ?? element.Id ?? ""),
                         Direction = direction,
                         To = to,
-                        Hwnd = session.WindowHandle
+                        Wheel = wheel,
+                        Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiScrollResult));

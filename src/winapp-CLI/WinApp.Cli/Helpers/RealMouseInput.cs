@@ -12,4 +12,10 @@ internal class RealMouseInput : IMouseInput
 
     public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
         => MouseInput.Click(screenX, screenY, doubleClick, rightClick);
+
+    public void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false)
+        => MouseInput.Drag(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton);
+
+    public void ScrollWheel(int screenX, int screenY, int delta)
+        => MouseInput.ScrollWheel(screenX, screenY, delta);
 }

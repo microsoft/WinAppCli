@@ -126,6 +126,20 @@ winapp ui send-keys "alt+f4" -a myapp --via send-input
 - Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
 - `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
 
+### Drag (reorder, resize, sliders, drag-and-drop)
+Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+```powershell
+# Left-drag from (40,50) to (60,30) inside the element
+winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp
+
+# Drag a slider thumb to the right
+winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp
+
+# Right-button drag
+winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right
+```
+- Coordinates are element-relative; `0,0` is the element's top-left corner. Inspect the element first to size your offsets.
+
 ### Read element state
 ```powershell
 # Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
@@ -158,6 +172,9 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 
 # Scroll and then inspect for newly visible elements
 winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search TargetItem -a myapp
+
+# Synthesize real mouse-wheel input over the element (120 = one notch up, -120 = down) — tests wheel handlers (zoom, custom scroll)
+winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
 ```
 
 ### Wait for UI state

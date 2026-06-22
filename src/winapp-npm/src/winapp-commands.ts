@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 1.0.0
+ * Source schema version: 0.3.3
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -592,6 +592,42 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 }
 
 // ---------------------------------------------------------------------------
+// ui drag
+// ---------------------------------------------------------------------------
+
+export interface UiDragOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50 */
+  from?: string;
+  /** End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30 */
+  to?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Drag with the right mouse button instead of the left button */
+  right?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.
+ */
+export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'drag'];
+  if (options.selector) args.push(options.selector);
+  if (options.from) args.push(options.from);
+  if (options.to) args.push(options.to);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.right) args.push('--right');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui focus
 // ---------------------------------------------------------------------------
 
@@ -873,12 +909,14 @@ export interface UiScrollOptions extends CommonOptions {
   json?: boolean;
   /** Scroll to position: top, bottom */
   to?: string;
+  /** Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. */
+  wheel?: number;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+ * Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.
  */
 export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll'];
@@ -887,6 +925,7 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
   if (options.direction) args.push('--direction', options.direction);
   if (options.json) args.push('--json');
   if (options.to) args.push('--to', options.to);
+  if (options.wheel !== undefined) args.push('--wheel', options.wheel.toString());
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
