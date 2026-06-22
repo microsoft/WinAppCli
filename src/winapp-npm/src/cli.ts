@@ -5,7 +5,7 @@ import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
 import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
 import { parseSetupSdksArg } from './jsbindings/init-prompt';
-import { stripWrapperOnlyFlags } from './cli-args';
+import { stripWrapperOnlyFlags, hasUseDefaults } from './cli-args';
 import { CLI_NAME, parseArgs, logErrorAndExit } from './cli-shared';
 import {
   handleInit,
@@ -83,14 +83,28 @@ export async function main(): Promise<void> {
     // JS-binding hooks wrap init/restore; help/completion and SDK-less init pass through.
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
+        // `--add-js-bindings` is a non-interactive opt-in: it only makes sense
+        // when the entire init flow can run without prompts. Accept any signal
+        // native init treats as non-interactive (Spectre.Console's interactive
+        // capability check at InitCommand.cs:91-96): explicit --use-defaults /
+        // --no-prompt, piped stdin, or CI=true. (We do NOT accept --json here:
+        // native init has no --json flag, so the end-to-end command would fail
+        // downstream anyway.)
+        if (commandArgs.includes('--add-js-bindings')) {
+          const isNonInteractive = hasUseDefaults(commandArgs) || !process.stdin.isTTY || !!process.env.CI;
+          if (!isNonInteractive) {
+            console.error(
+              '❌ --add-js-bindings requires a non-interactive setup. ' +
+                'Add --use-defaults (or --no-prompt), or run from piped input / CI.'
+            );
+            process.exit(1);
+          }
+        }
         if (parseSetupSdksArg(commandArgs) === 'none') {
           // JS bindings need SDK winmds; SDK-less init can't generate them.
           if (commandArgs.includes('--add-js-bindings')) {
             console.error(
-              '❌ --add-js-bindings is incompatible with --setup-sdks none ' +
-                '(JS bindings need SDK winmds). ' +
-                'Re-run as `winapp init . --add-js-bindings --setup-sdks stable` ' +
-                '(or omit --setup-sdks to be prompted).'
+              '❌ --add-js-bindings is incompatible with --setup-sdks none ' + '(JS bindings need SDK winmds).'
             );
             process.exit(1);
           }
@@ -106,8 +120,7 @@ export async function main(): Promise<void> {
         if (commandArgs.includes('--add-js-bindings')) {
           console.error(
             '❌ --add-js-bindings is only valid on `winapp init`. ' +
-              'restore uses the existing `winapp.jsBindings` configuration in package.json. ' +
-              'To enable JS bindings, run `winapp init . --add-js-bindings`.'
+              'restore uses the existing `winapp.jsBindings` configuration in package.json.'
           );
           process.exit(1);
         }

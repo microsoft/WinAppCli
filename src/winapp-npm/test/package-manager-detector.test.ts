@@ -223,3 +223,64 @@ test('resolvePackageManagerPath skips UNC PATH entries', () => {
     assert.equal(resolvePackageManagerPath('npm'), null);
   });
 });
+
+test('resolvePackageManagerPath accepts a PATH entry that is under cwd but outside the workspace', () => {
+  // Regression: an overly broad "under cwd" rejection masked legitimate global
+  // PM shims when winapp was launched from the user profile (e.g. cwd =
+  // %USERPROFILE%, PATH includes %USERPROFILE%\AppData\Roaming\npm).
+  // Workspace-controlled shims are still rejected by the workspace check.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-home-'));
+  const shimDir = path.join(home, 'sub', 'npm-bin');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.writeFileSync(path.join(shimDir, `npm${launcherExt}`), '');
+  const savedCwd = process.cwd();
+  try {
+    process.chdir(home);
+    withEnv({ PATH: shimDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      const resolved = resolvePackageManagerPath('npm');
+      // Same realpath canonicalisation as the happy-path test (TEMP may be 8.3).
+      const expected = fs.realpathSync.native(path.join(shimDir, `npm${launcherExt}`));
+      assert.equal(resolved?.toLowerCase(), expected.toLowerCase());
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath rejects a PATH entry that equals cwd itself', () => {
+  // Defense-in-depth: a PATH entry literally equal to cwd is unsafe (a dropper
+  // in cwd's top level would hijack `npm`). This must still be rejected even
+  // though descendants of cwd are allowed (see above test).
+  const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-cwdpath-'));
+  fs.writeFileSync(path.join(cwdDir, `npm${launcherExt}`), '');
+  const savedCwd = process.cwd();
+  try {
+    process.chdir(cwdDir);
+    withEnv({ PATH: cwdDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm'), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath still rejects launchers under workspace even when not under cwd', () => {
+  // Workspace check is independent of cwd — a launcher inside the project
+  // workspace is rejected regardless of where the user ran winapp from.
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-ws-only-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-elsewhere-'));
+  const savedCwd = process.cwd();
+  try {
+    fs.writeFileSync(path.join(workspace, `npm${launcherExt}`), '');
+    process.chdir(elsewhere);
+    withEnv({ PATH: workspace, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm', workspace), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

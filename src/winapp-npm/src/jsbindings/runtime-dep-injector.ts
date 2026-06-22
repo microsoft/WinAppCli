@@ -179,17 +179,17 @@ export function formatRuntimeDependencyHint(
       };
     case 'presentInDevDependencies':
       return {
-        message: `ℹ️  ${packageName} is in devDependencies — generated bindings need it as a production dep. Move it manually.`,
+        message: `💡 ${packageName} is in devDependencies — generated bindings need it as a production dep. Move it manually.`,
         needsInstall: false,
       };
     case 'noPackageJson':
       return {
-        message: `⚠️ No package.json found in workspace. Generated bindings will fail to resolve ${packageName} at runtime.${eol}    Run \`npm init -y\` first, then re-run \`winapp restore\` to add the dependency.`,
+        message: `⚠ No package.json found in workspace. Generated bindings will fail to resolve ${packageName} at runtime.${eol}    Run \`npm init -y\` first, then re-run \`winapp restore\` to add the dependency.`,
         needsInstall: false,
       };
     case 'versionMismatch':
       return {
-        message: `⚠️ ${packageName} version drift detected between package.json and the installed dynwinrt-codegen. Run \`winapp init\` to resync.`,
+        message: `⚠ ${packageName} version drift detected between package.json and the installed dynwinrt-codegen. Run \`winapp init\` to resync.`,
         needsInstall: false,
       };
     default: {

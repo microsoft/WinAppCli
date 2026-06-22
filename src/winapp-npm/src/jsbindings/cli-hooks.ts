@@ -134,7 +134,7 @@ export async function handleGenerateBindings(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Hand off to the shared pipeline (outcomes → ✅ / ❌ / ⚠️).
+  // Hand off to the shared pipeline (outcomes → ✅ / ❌ / ⚠).
   await runJsBindingsOrchestrator(workspaceDir, isVerbose(args), quiet, resolveYamlPath(args, workspaceDir));
 }
 
@@ -236,29 +236,26 @@ export async function handleInit(args: string[]): Promise<void> {
       packageJsonExistsNow: packageJsonExists(workspaceDir),
     })
   ) {
+    // Explicit opt-in but no package.json to write into: surface non-zero so
+    // CI/automation doesn't mistake a no-op for success. Matches the hard-fail
+    // for `--add-js-bindings --setup-sdks none` in cli.ts.
+    if (addJsBindings) {
+      console.error('❌ Cannot generate JS bindings: no package.json in this workspace.');
+      process.exit(1);
+    }
     if (!quiet) {
       console.log(
-        'ℹ️  JS bindings setup skipped: no package.json detected in the current directory. ' +
+        '💡 JS bindings setup skipped: no package.json detected in the current directory. ' +
           'If your project is here, re-run as `npx winapp init .`; otherwise run `npx winapp restore` from the project directory.'
       );
     }
     return;
   }
 
-  // Native init may have auto-selected a subdirectory (no positional arg, interactive mode).
-  // If .winapp/ wasn't created in our workspaceDir, native worked elsewhere — skip mutation.
-  // Exception: --config-only skips restore so .winapp/ won't exist yet — don't false-positive.
-  if (!explicitWorkspace && !configOnly && !fs.existsSync(path.join(workspaceDir, '.winapp'))) {
-    if (!quiet) {
-      console.log(
-        'ℹ️  JS bindings setup skipped: native init selected a different directory. ' +
-          'Run `npx winapp init . --add-js-bindings` from your project directory to enable JS bindings.'
-      );
-    }
-    return;
-  }
-
   // Lockfile (from SDK winmd discovery) = winmds to bind against; --config-only defers.
+  // Absent lockfile after a successful init means SDK setup was skipped — askBindingsKind
+  // handles that silently for the no-opt-in path, so don't pre-empt it with a misleading
+  // "different directory" message.
   const lockfilePresent = lockfileExists(workspaceDir);
 
   let outcome;
@@ -277,7 +274,7 @@ export async function handleInit(args: string[]): Promise<void> {
   }
 
   if (outcome.silentReason && !quiet) {
-    console.log(`ℹ️  ${outcome.silentReason}`);
+    console.log(`💡 ${outcome.silentReason}`);
   }
 
   if (outcome.kind === 'no') {
@@ -291,7 +288,7 @@ export async function handleInit(args: string[]): Promise<void> {
     if (!fs.existsSync(pkgJsonPath)) {
       if (!quiet) {
         console.warn(
-          '⚠️  package.json not found in this workspace. ' +
+          '⚠ package.json not found in this workspace. ' +
             'Run `npm init -y` (or equivalent) and then `npx winapp node generate-bindings` to enable JS bindings.'
         );
       }
@@ -361,7 +358,7 @@ export async function handleInit(args: string[]): Promise<void> {
         settleGroup('success', 'JS bindings configured (codegen deferred)');
         if (!quiet) {
           taskLog(
-            'ℹ️  --config-only requested; JS bindings codegen deferred. ' +
+            '💡 --config-only requested; JS bindings codegen deferred. ' +
               'Run `npx winapp restore` (or `npx winapp node generate-bindings` after a restore) to generate.'
           );
         }
@@ -374,7 +371,7 @@ export async function handleInit(args: string[]): Promise<void> {
         settleGroup('success', 'JS bindings configured (SDK setup pending)');
         if (!quiet) {
           taskLog(
-            'ℹ️  Windows SDKs were not set up, so JS bindings were not generated. ' +
+            '💡 Windows SDKs were not set up, so JS bindings were not generated. ' +
               'Run `npx winapp restore` then `npx winapp node generate-bindings` to generate them.'
           );
         }
@@ -475,8 +472,11 @@ async function ensureCodegenInstalledForInit(workspaceDir: string, ui: ProgressU
       ? `Run \`${pm.installCommand}\` to install it locally.`
       : `Run \`${pm.name} install --save-dev ${CODEGEN_PACKAGE_NAME}\` to install it manually.`;
     spinner?.fail(`Could not auto-install ${CODEGEN_PACKAGE_NAME}: ${result.error}`);
-    // Surface the actionable hint regardless of TTY so users see what to do next.
-    ui.log(`⚠️ ${manualHint}`);
+    // Surface the actionable hint regardless of TTY so users see what to do next —
+    // but stay silent under --quiet / --json so we don't pollute machine-readable stdout.
+    if (!ui.quiet) {
+      ui.log(`⚠ ${manualHint}`);
+    }
   }
 }
 
@@ -514,7 +514,11 @@ async function ensureRuntimeDependencyForInit(
       ui.log(hint.message);
     }
   } catch (err) {
-    console.warn(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
+    // Stay silent under --quiet / --json so wrapper diagnostics don't leak into
+    // machine-readable output (stdout JSON document / scripted callers).
+    if (!ui.quiet) {
+      console.warn(`⚠ Failed to ensure runtime dependency: ${(err as Error).message}`);
+    }
   }
 }
 
@@ -539,7 +543,7 @@ export async function handleRestore(args: string[]): Promise<void> {
   if (!lockfileExists(workspaceDir)) {
     if (!quiet) {
       console.log(
-        'ℹ️  No winmd inventory found (winapp.yaml has no packages yet), so JS bindings ' +
+        '💡 No winmd inventory found (winapp.yaml has no packages yet), so JS bindings ' +
           'were not generated. Add packages to `winapp.yaml` and re-run `npx winapp restore`.'
       );
     }
@@ -552,7 +556,7 @@ export async function handleRestore(args: string[]): Promise<void> {
   if (!yamlPackages || yamlPackages.length === 0) {
     if (!quiet) {
       console.log(
-        'ℹ️  winapp.yaml has no packages, so JS bindings were not generated. ' +
+        '💡 winapp.yaml has no packages, so JS bindings were not generated. ' +
           'Add packages to `winapp.yaml` and re-run `npx winapp restore`.'
       );
     }
@@ -603,7 +607,7 @@ async function runJsBindingsOrchestrator(
         break;
       case 'noWinmdsToEmit':
         // Warning surfaces even with --quiet so users see actionable signals.
-        console.warn(`⚠️ ${result.message}`);
+        console.warn(`⚠ ${result.message}`);
         return;
     }
   } catch (err) {

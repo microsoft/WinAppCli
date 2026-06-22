@@ -136,3 +136,63 @@ test('tryReadLockfile refuses winmd paths that resolve to directories', () => {
     assert.match(reason ?? '', /not files/i);
   });
 });
+
+// Boundary checks: nuget_cache_dir must be a real path, not a filesystem root.
+// Tampered lockfiles with `C:\` or `D:\` would let any path under that drive
+// pass containment; legitimate shallow paths like `D:\packages` must still
+// work because users often set NUGET_PACKAGES off the user profile.
+
+test('tryReadLockfile rejects a drive root as nuget_cache_dir (C:\\)', () => {
+  withWorkspace((dir) => {
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: 'C:\\',
+      packages: [],
+    });
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(lockfile, null);
+    assert.match(reason ?? '', /suspiciously broad/i);
+  });
+});
+
+test('tryReadLockfile rejects a non-C drive root as nuget_cache_dir (D:\\)', () => {
+  withWorkspace((dir) => {
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: 'D:\\',
+      packages: [],
+    });
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(lockfile, null);
+    assert.match(reason ?? '', /suspiciously broad/i);
+  });
+});
+
+test('tryReadLockfile accepts a shallow non-root nuget_cache_dir (D:\\packages)', () => {
+  // Regression for the depth-based check that rejected legitimate custom
+  // NUGET_PACKAGES locations like `D:\packages` or `C:\nuget`.
+  withWorkspace((dir) => {
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: 'D:\\packages',
+      packages: [], // empty: skip per-winmd containment checks
+    });
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(reason, undefined);
+    assert.ok(lockfile);
+    assert.deepEqual(lockfile!.packages, []);
+  });
+});
+
+test('tryReadLockfile accepts another shallow non-root nuget_cache_dir (C:\\nuget)', () => {
+  withWorkspace((dir) => {
+    writeLockfile(dir, {
+      schema: LOCKFILE_SCHEMA_VERSION,
+      nuget_cache_dir: 'C:\\nuget',
+      packages: [],
+    });
+    const { lockfile, reason } = tryReadLockfile(dir);
+    assert.equal(reason, undefined);
+    assert.ok(lockfile);
+  });
+});

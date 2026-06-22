@@ -137,11 +137,14 @@ export function tryReadLockfile(workspaceDir: string): ReadLockfileResult {
 
   const cacheBoundary = path.resolve(nugetCacheDir).replace(/[\\/]+$/, '');
 
-  // Reject suspiciously broad boundaries — a tampered lockfile setting nuget_cache_dir
-  // to a drive root (e.g. "C:\") would make every path pass containment.
-  // Real NuGet caches are always at least 3 levels deep (e.g. C:\Users\x\.nuget\packages).
-  const boundaryDepth = cacheBoundary.split(path.sep).filter(Boolean).length;
-  if (boundaryDepth < 3 || isNetworkPath(cacheBoundary)) {
+  // Reject filesystem roots — a tampered lockfile setting nuget_cache_dir to a
+  // drive root (e.g. "C:\") would let every absolute path under that drive
+  // pass containment. Use `path.dirname(x) === x` as the canonical root test
+  // so legitimate shallow caches like "D:\packages" or "C:\nuget" (common when
+  // NUGET_PACKAGES is customized off the user profile) still pass. UNC roots
+  // are handled separately by isNetworkPath.
+  const isFsRoot = path.dirname(cacheBoundary) === cacheBoundary;
+  if (isFsRoot || isNetworkPath(cacheBoundary)) {
     return {
       lockfile: null,
       reason:

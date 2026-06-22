@@ -93,3 +93,31 @@ test('parsePackagesFromYaml strips inline comments and surrounding quotes from s
 test('parsePackagesFromYaml returns an empty list when there is no packages block', () => {
   assert.deepEqual(parsePackagesFromYaml('sdk: stable\n'), []);
 });
+
+test('parsePackagesFromYaml accepts `- version:` as the first item key (cross-parser parity)', () => {
+  // YAML lets the dashed item key be either field; the C# parser handles both,
+  // so the TS parser must too — otherwise the yaml hash drifts and triggers a
+  // false "lockfile stale" warning.
+  const yaml = [
+    'packages:',
+    '  - version: 2.1.3',
+    '    name: Microsoft.WindowsAppSDK',
+    '  - version: 10.0.28000.1839',
+    '    name: Microsoft.Windows.SDK.CPP',
+  ].join('\n');
+  assert.deepEqual(parsePackagesFromYaml(yaml), [
+    { name: 'Microsoft.WindowsAppSDK', version: '2.1.3' },
+    { name: 'Microsoft.Windows.SDK.CPP', version: '10.0.28000.1839' },
+  ]);
+});
+
+test('parsePackagesFromYaml hash matches whether name- or version-first', () => {
+  // Same packages, mirrored shape: hashes must be identical.
+  const nameFirst = parsePackagesFromYaml(
+    ['packages:', '  - name: Foo', '    version: 1.0', '  - name: Bar', '    version: 2.0'].join('\n')
+  );
+  const versionFirst = parsePackagesFromYaml(
+    ['packages:', '  - version: 1.0', '    name: Foo', '  - version: 2.0', '    name: Bar'].join('\n')
+  );
+  assert.equal(computeYamlPackagesHash(nameFirst), computeYamlPackagesHash(versionFirst));
+});

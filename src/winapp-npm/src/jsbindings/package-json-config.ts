@@ -69,14 +69,14 @@ export function ensureJsBindingsBlock(
   if (!current.jsBindings) {
     writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
     if (!opts.quiet) {
-      log('ℹ️  Added "winapp.jsBindings" to package.json. Edit `additionalWinmds` or `additionalRefs` to customize.');
+      log('💡 Added "winapp.jsBindings" to package.json. Edit `additionalWinmds` or `additionalRefs` to customize.');
     }
     return 'added';
   }
   if (opts.reset) {
     writeJsBindingsConfig(workspaceDir, defaultJsBindingsConfig());
     if (!opts.quiet) {
-      log('ℹ️  Reset "winapp.jsBindings" in package.json to defaults.');
+      log('💡 Reset "winapp.jsBindings" in package.json to defaults.');
     }
     return 'reset';
   }

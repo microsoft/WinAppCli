@@ -61,7 +61,13 @@ export function resolvePackageManagerPath(name: PackageManagerName, workspaceDir
       continue;
     }
     const resolvedDir = path.resolve(dir);
-    if (isPathUnderOrEqual(resolvedDir, cwdFull) || (workspaceFull && isPathUnderOrEqual(resolvedDir, workspaceFull))) {
+    // Reject only:
+    //   1) the exact cwd as a PATH entry (someone added `.` or cwd literal),
+    //   2) anything under the workspace (npm scripts could plant a launcher there).
+    // Do NOT reject mere descendants of cwd: legitimate global PM shims live
+    // under cwd when run from $HOME (e.g. %USERPROFILE%\AppData\Roaming\npm)
+    // and are managed by the OS / user profile, not the workspace.
+    if (isSamePath(resolvedDir, cwdFull) || (workspaceFull && isPathUnderOrEqual(resolvedDir, workspaceFull))) {
       continue;
     }
     for (const ext of exts) {
@@ -76,7 +82,7 @@ export function resolvePackageManagerPath(name: PackageManagerName, workspaceDir
           !path.isAbsolute(real) ||
           isNetworkPath(real) ||
           hasReparsePointOnPath(candidate, path.parse(candidate).root || resolvedDir) ||
-          isPathUnderOrEqual(real, cwdFull) ||
+          isSamePath(real, cwdFull) ||
           (workspaceFull && isPathUnderOrEqual(real, workspaceFull))
         ) {
           continue;
@@ -88,6 +94,18 @@ export function resolvePackageManagerPath(name: PackageManagerName, workspaceDir
     }
   }
   return null;
+}
+
+function isSamePath(a: string, b: string): boolean {
+  const aa = path
+    .resolve(a)
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
+  const bb = path
+    .resolve(b)
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
+  return aa === bb;
 }
 
 function isPathUnderOrEqual(candidate: string, root: string): boolean {

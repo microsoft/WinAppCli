@@ -47,6 +47,13 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
 
   // Init re-runs mirror native overwrite prompts; default Yes preserves UX parity.
   if (inputs.existingJsBindings) {
+    // Explicit --add-js-bindings means "I want JS bindings, non-interactively."
+    // The config already exists, so preserve it — opt-in doesn't mean "reset".
+    // Fast-path before any prompt path so CI/--add-js-bindings combinations
+    // (which may have TTY but no --use-defaults) don't hang on confirmation.
+    if (inputs.addJsBindings) {
+      return { kind: 'yes', overwriteExistingConfig: false };
+    }
     const useDefaults = inputs.argv.some((a) => USE_DEFAULTS_FLAGS.has(a));
     if (useDefaults) {
       return {
@@ -71,19 +78,29 @@ export async function askBindingsKind(inputs: BindingsPromptInputs): Promise<Bin
 
   // Without package.json we have nowhere to write `winapp.jsBindings` or the runtime dep.
   if (!fs.existsSync(path.join(inputs.workspaceDir, 'package.json'))) {
-    return {
-      kind: 'no',
-      silentReason: 'no package.json in this workspace — JS bindings only apply to npm/Node projects.',
-    };
+    // Explicit opt-in must surface as a hard failure — CI scripts watching
+    // exit codes should not interpret "couldn't even start" as success.
+    // Prefix with ❌ so the printed message matches other hard-fail outputs
+    // (logErrorAndExit forwards the message verbatim without adding a prefix).
+    if (inputs.addJsBindings) {
+      throw new Error('❌ Cannot generate JS bindings: no package.json in this workspace.');
+    }
+    // No opt-in + not an npm project → silently skip. The user didn't ask for
+    // JS bindings; reminding them "this only applies to npm projects" is noise
+    // when they're initializing a non-Node project (C++, Rust, Tauri, etc.).
+    return { kind: 'no' };
   }
 
   // JS bindings need SDK winmds; if setup was skipped, defer the prompt until they exist.
+  // When the user did not explicitly opt in via --add-js-bindings, skip silently — they
+  // chose to skip SDK setup, so they have no signal they wanted JS bindings either.
   if (!inputs.sdksReady) {
     return {
       kind: 'no',
-      silentReason:
-        'Windows SDKs were not set up during init, so JS bindings were skipped. ' +
-        'Run `npx winapp restore` then `npx winapp node generate-bindings` to add them later.',
+      silentReason: inputs.addJsBindings
+        ? 'Windows SDKs were not set up during init, so --add-js-bindings could not run. ' +
+          'Run `npx winapp restore` then `npx winapp node generate-bindings` to add them later.'
+        : undefined,
     };
   }
 

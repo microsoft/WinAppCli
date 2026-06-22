@@ -214,7 +214,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
             try {
               updateRuntimeDependency(workspaceDir, RUNTIME_PACKAGE_NAME, pinnedVersion);
             } catch (err) {
-              console.warn(`⚠️ Failed to update ${RUNTIME_PACKAGE_NAME} version pin: ${(err as Error).message}`);
+              console.warn(`⚠ Failed to update ${RUNTIME_PACKAGE_NAME} version pin: ${(err as Error).message}`);
               throw err;
             }
             bumpedFrom = existing;
@@ -287,7 +287,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
             if (installSpinner) {
               installSpinner.fail(failureMessage);
             } else {
-              console.warn(`⚠️ ${failureMessage}`);
+              console.warn(`⚠ ${failureMessage}`);
             }
           }
         } else {
@@ -303,7 +303,7 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
         }
       } catch (err) {
         // Warnings always surface, even in --quiet.
-        console.warn(`⚠️ Failed to ensure runtime dependency: ${(err as Error).message}`);
+        console.warn(`⚠ Failed to ensure runtime dependency: ${(err as Error).message}`);
       }
     }
   } else {
@@ -311,14 +311,14 @@ export async function runJsBindingsPipeline(options: OrchestratorOptions): Promi
     const declaredVersion = getRuntimeDependencyVersion(workspaceDir, RUNTIME_PACKAGE_NAME);
     if (!declaredVersion) {
       console.warn(
-        `⚠️ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
+        `⚠ ${RUNTIME_PACKAGE_NAME} is not declared in package.json dependencies. ` +
           'Generated bindings import it at runtime — run `winapp init` to add it (or add it manually).'
       );
     } else {
       const expectedVersion = options.versionOverride ?? (await safeGetRuntimeVersion(workspaceDir));
       if (expectedVersion && declaredVersion !== expectedVersion) {
         console.warn(
-          `⚠️ ${RUNTIME_PACKAGE_NAME} is declared as ${declaredVersion}, ` +
+          `⚠ ${RUNTIME_PACKAGE_NAME} is declared as ${declaredVersion}, ` +
             `but dynwinrt-codegen declares ${expectedVersion}. ` +
             'Run `winapp init` to update it (or update it manually).'
         );
@@ -343,7 +343,7 @@ async function safeGetRuntimeVersion(workspaceDir: string): Promise<string | nul
     return (await getCodegenRuntimeDependency(workspaceDir)).version;
   } catch (err) {
     console.warn(
-      `⚠️ Could not resolve ${RUNTIME_PACKAGE_NAME} version from dynwinrt-codegen: ${(err as Error).message}`
+      `⚠ Could not resolve ${RUNTIME_PACKAGE_NAME} version from dynwinrt-codegen: ${(err as Error).message}`
     );
     return null;
   }

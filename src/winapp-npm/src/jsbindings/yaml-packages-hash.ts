@@ -78,7 +78,8 @@ export function parsePackagesFromYaml(yaml: string): PackagePin[] {
     if (!inPackages) {
       continue;
     }
-    // List item or bare `name:` / `version:` row.
+    // List item or bare `name:` / `version:` row. Order between the dashed
+    // and bare forms is independent — mirror C# ConfigService.ParsePackages.
     const dashName = matchPrefixCaseInsensitive(t, '- name:');
     if (dashName !== null) {
       currentName = sanitizeScalar(dashName);
@@ -87,9 +88,13 @@ export function parsePackagesFromYaml(yaml: string): PackagePin[] {
     if (bareName !== null) {
       currentName = sanitizeScalar(bareName);
     }
-    const version = matchPrefixCaseInsensitive(t, 'version:');
-    if (version !== null) {
-      currentVersion = sanitizeScalar(version);
+    const dashVersion = matchPrefixCaseInsensitive(t, '- version:');
+    if (dashVersion !== null) {
+      currentVersion = sanitizeScalar(dashVersion);
+    }
+    const bareVersion = dashVersion === null ? matchPrefixCaseInsensitive(t, 'version:') : null;
+    if (bareVersion !== null) {
+      currentVersion = sanitizeScalar(bareVersion);
     }
     // Commit once both name and version are collected (order-independent).
     if (currentName !== null && currentVersion !== null) {
