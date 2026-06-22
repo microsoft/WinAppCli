@@ -194,7 +194,7 @@ winapp pack <input-folder> [input-folder...] [options]
 - `--cert-password <password>` - Certificate password (default: "password")
 - `--generate-cert` - Generate a new development certificate
 - `--install-cert` - Install certificate to machine
-- `--publisher <name>` - Publisher name for certificate generation
+- `--publisher <name>` - Publisher for certificate generation. Accepts a full X.500 distinguished name or a bare name (automatically wrapped as `CN=<name>`)
 - `--self-contained` - Bundle Windows App SDK runtime
 - `--skip-pri` - Skip PRI file generation
 - `--executable <path>` - Path to the executable relative to the input folder (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
@@ -344,7 +344,7 @@ winapp manifest generate [directory] [options]
 **Options:**
 
 - `--package-name <name>` - Package name (default: folder name)
-- `--publisher-name <name>` - Publisher CN (default: CN=\<current user\>)
+- `--publisher-name <name>` - Publisher distinguished name (default: CN=\<current user\>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=\<name\>.
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
@@ -644,7 +644,7 @@ winapp cert generate [options]
 **Options:**
 
 - `--manifest <Package.appxmanifest>` - Extract publisher information from Package.appxmanifest 
-- `--publisher <name>` - Publisher name for certificate
+- `--publisher <name>` - Publisher for the certificate. Accepts a full X.500 distinguished name (e.g., `CN=Contoso, O=Contoso Ltd, C=US`) or a bare name which is automatically wrapped as `CN=<name>`
 - `--output <path>` - Output certificate file path (supports absolute and relative paths)
 - `--password <password>` - Certificate password (default: "password")
 - `--valid-days <valid-days>` - Number of days the certificate is valid (default: 365)
@@ -1082,6 +1082,7 @@ winapp ui [command] [options]
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
+- `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
 - `set-value` - Set value on editable element (text, number)
 - `focus` - Move keyboard focus
 - `scroll-into-view` - Scroll element visible

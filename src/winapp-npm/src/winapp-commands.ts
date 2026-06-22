@@ -85,7 +85,7 @@ export interface CertGenerateOptions extends CommonOptions {
   output?: string;
   /** Password for the generated PFX file */
   password?: string;
-  /** Publisher name for the generated certificate. If not specified, will be inferred from manifest. */
+  /** Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. */
   publisher?: string;
   /** Number of days the certificate is valid */
   validDays?: number;
@@ -311,7 +311,7 @@ export interface ManifestGenerateOptions extends CommonOptions {
   logoPath?: string;
   /** Package name (default: folder name) */
   packageName?: string;
-  /** Publisher CN (default: CN=<current user>) */
+  /** Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. */
   publisherName?: string;
   /** Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) */
   template?: ManifestTemplates;
@@ -383,7 +383,7 @@ export interface PackageOptions extends CommonOptions {
   name?: string;
   /** Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. */
   output?: string;
-  /** Publisher name for certificate generation */
+  /** Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. */
   publisher?: string;
   /** Bundle Windows App SDK runtime for self-contained deployment */
   selfContained?: boolean;
@@ -694,6 +694,36 @@ export async function uiGetValue(options: UiGetValueOptions = {}): Promise<Winap
   const args: string[] = ['ui', 'get-value'];
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui hover
+// ---------------------------------------------------------------------------
+
+export interface UiHoverOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Time in milliseconds to wait after hovering for hover effects to appear (default: 800) */
+  dwellTime?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
+ */
+export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'hover'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.dwellTime !== undefined) args.push('--dwell-time', options.dwellTime.toString());
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);

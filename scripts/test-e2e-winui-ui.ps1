@@ -351,12 +351,19 @@ Assert-WinappSuccess "click Counter Button" -WinappArgs @("ui", "click", "Counte
 # --- wait-for counter = Count: 4 (click may use different coordinates on different screens) ---
 Assert-WinappSuccess "wait-for: counter after click" -WinappArgs @("ui", "wait-for", "CounterDisplay", "-a", "$appPid", "-t", "3000")
 
+# --- hover (exercises mouse hover + dwell) ---
+Assert-WinappSuccess "hover Counter Button" -WinappArgs @("ui", "hover", "Counter Button", "-a", "$appPid", "--json", "--dwell-time", "200")
+
+# --- hover + screenshot --capture-screen (tooltip workflow from docs) ---
+$ssHover = Join-Path $ScreenshotDir "05-hover-screen.png"
+Assert-WinappSuccess "screenshot after hover" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssHover, "--capture-screen")
+
 # --- screenshot --capture-screen ---
-$ssScreen = Join-Path $ScreenshotDir "05-capture-screen.png"
+$ssScreen = Join-Path $ScreenshotDir "06-capture-screen.png"
 Assert-WinappSuccess "screenshot --capture-screen" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssScreen, "--capture-screen")
 
 # --- screenshot --focus (exercises new WGC + foreground path) ---
-$ssFocus = Join-Path $ScreenshotDir "06-focus.png"
+$ssFocus = Join-Path $ScreenshotDir "07-focus.png"
 Assert-WinappSuccess "screenshot --focus" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssFocus, "--focus")
 
 # --- wait-for: element exists ---
@@ -393,8 +400,9 @@ Assert-ScreenshotValid "screenshot: 01-initial.png" $ssInitial
 Assert-ScreenshotValid "screenshot: 02-after-counter.png" $ssCounter
 Assert-ScreenshotValid "screenshot: 03-after-input.png" $ssInput
 Assert-ScreenshotValid "screenshot: 04-after-submit.png" $ssSubmit
-Assert-ScreenshotValid "screenshot: 05-capture-screen.png" $ssScreen
-Assert-ScreenshotValid "screenshot: 06-focus.png" $ssFocus
+Assert-ScreenshotValid "screenshot: 05-hover-screen.png" $ssHover
+Assert-ScreenshotValid "screenshot: 06-capture-screen.png" $ssScreen
+Assert-ScreenshotValid "screenshot: 07-focus.png" $ssFocus
 
 # ============================================================================
 # Summary

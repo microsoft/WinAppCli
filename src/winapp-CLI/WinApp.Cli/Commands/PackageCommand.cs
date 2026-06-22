@@ -65,7 +65,7 @@ internal class PackageCommand : Command, IShortDescription
         };
         PublisherOption = new Option<string?>("--publisher")
         {
-            Description = "Publisher name for certificate generation"
+            Description = "Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>."
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {

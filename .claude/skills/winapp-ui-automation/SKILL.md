@@ -103,6 +103,16 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
+### Hover (for tooltips, flyouts, hover states)
+`--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
+```powershell
+# Hover to trigger tooltip, then capture it (default 800ms dwell)
+winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-screen --output tooltip.png
+
+# Longer dwell for apps with slow tooltip timers
+winapp ui hover btn-info-a1b2 -a myapp --dwell-time 1200; winapp ui screenshot -a myapp --capture-screen
+```
+
 ### Read element state
 ```powershell
 # Read text/value content (works for RichEditBox, TextBox, ComboBox, Slider, labels)
@@ -152,6 +162,7 @@ winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 - Use `get-property --property ToggleState` to verify checkbox/toggle state after invoke
 - `scroll` auto-finds the nearest scrollable parent
 - Use `--capture-screen` to capture popup overlays, dropdown menus, and flyouts (also brings the window to the foreground)
+- Use `hover` before `screenshot --capture-screen` to capture tooltips and hover-triggered UI
 - Use `--focus` to foreground the target window before capture without switching to screen-DC capture (default capture path uses Windows.Graphics.Capture and works while occluded)
 - Use `--hide-disabled` and `--hide-offscreen` to reduce noise
 

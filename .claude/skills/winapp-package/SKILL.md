@@ -215,7 +215,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 | `--manifest` | Path to AppX manifest file (default: auto-detect from input folder or current directory) | (none) |
 | `--name` | Package name (default: from manifest) | (none) |
 | `--output` | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. | (none) |
-| `--publisher` | Publisher name for certificate generation | (none) |
+| `--publisher` | Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. | (none) |
 | `--self-contained` | Bundle Windows App SDK runtime for self-contained deployment | (none) |
 | `--skip-pri` | Skip PRI file generation | (none) |
 
