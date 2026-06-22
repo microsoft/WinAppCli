@@ -307,6 +307,13 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 - `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
 - `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level.
 
+**Per-keystroke events (KeyDown / TextChanged):**
+- **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).
+- **Literal typed text** (`hello`) differs by transport:
+  - `--via send-input` maps each character to its virtual key (plus Shift) on the active keyboard layout, so the target sees a genuine **`KeyDown` with the correct virtual key** followed by the OS-composed `WM_CHAR` (raising **`TextChanged`**) — i.e. one full keystroke per character. Characters not reachable on the current layout (or needing Ctrl/AltGr) fall back to a Unicode packet so the exact character still lands. **Use `send-input` when you need per-keystroke `KeyDown` fidelity** (e.g. driving a WinUI 3 / WPF `TextBox` whose handlers key off `KeyDown`). For a normal (non-elevated) WinUI 3 test host, bring its window to the foreground first (`winapp ui focus` / clicking it) since `send-input` targets the foreground window.
+  - `--via post-message` posts `WM_CHAR` per character, which raises **`TextChanged`** and lands the correct text (including case) but does **not** raise a per-character `KeyDown`. Prefer `post-message` when you only need the text to land (including across integrity levels); prefer `send-input` when downstream logic depends on per-keystroke `KeyDown`.
+
+
 ### set-value
 Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
 ```bash

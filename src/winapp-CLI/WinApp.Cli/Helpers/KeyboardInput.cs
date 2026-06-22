@@ -128,8 +128,7 @@ internal static class KeyboardInput
                 case TextInput text:
                     foreach (var ch in text.Text)
                     {
-                        inputs.Add(UnicodeEvent(ch, keyUp: false));
-                        inputs.Add(UnicodeEvent(ch, keyUp: true));
+                        AppendCharEvents(inputs, ch);
                     }
                     break;
             }
@@ -176,6 +175,38 @@ internal static class KeyboardInput
             type = INPUT_TYPE.INPUT_KEYBOARD,
             Anonymous = { ki = new KEYBDINPUT { wVk = 0, wScan = ch, dwFlags = flags } }
         };
+    }
+
+    /// <summary>
+    /// Appends real per-character key events for SendInput. Maps the character to a virtual key (plus Shift)
+    /// via the active keyboard layout so the target sees a genuine WM_KEYDOWN (KeyDown event with the correct
+    /// virtual key) and the OS composes the matching WM_CHAR (TextChanged) — i.e. per-keystroke fidelity.
+    /// Characters not reachable on the current layout, or requiring Ctrl/AltGr, fall back to a Unicode packet
+    /// so the exact character still lands.
+    /// </summary>
+    private static void AppendCharEvents(List<INPUT> inputs, char ch)
+    {
+        short scan = PInvoke.VkKeyScan(ch);
+        int lo = scan & 0xFF;
+        int hi = (scan >> 8) & 0xFF;
+
+        bool mappable = scan != -1 && lo != 0xFF;
+        bool needsCtrlOrAlt = (hi & 0x02) != 0 || (hi & 0x04) != 0; // Ctrl / Alt (AltGr) — layout-specific
+
+        if (!mappable || needsCtrlOrAlt)
+        {
+            inputs.Add(UnicodeEvent(ch, keyUp: false));
+            inputs.Add(UnicodeEvent(ch, keyUp: true));
+            return;
+        }
+
+        var vk = (ushort)lo;
+        bool needsShift = (hi & 0x01) != 0;
+
+        if (needsShift) { inputs.Add(KeyEvent(0x10, extended: false, keyUp: false)); } // Shift down
+        inputs.Add(KeyEvent(vk, extended: false, keyUp: false));
+        inputs.Add(KeyEvent(vk, extended: false, keyUp: true));
+        if (needsShift) { inputs.Add(KeyEvent(0x10, extended: false, keyUp: true)); }  // Shift up
     }
 
     private static bool IsExtended(ushort vk) => vk is 0x5B or 0x5C or 0x5D;
