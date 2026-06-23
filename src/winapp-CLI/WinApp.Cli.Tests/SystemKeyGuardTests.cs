@@ -18,7 +18,8 @@ public class SystemKeyGuardTests
     public void WinModifiedCombos_AreReportedGenerically(string keys)
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse(keys));
-        CollectionAssert.AreEqual(new[] { "win+<key>" }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual("win+<key>", combos[0]);
     }
 
     [TestMethod]
@@ -32,7 +33,8 @@ public class SystemKeyGuardTests
     public void KnownSystemCombos_AreReportedByName(string keys, string expected)
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse(keys));
-        CollectionAssert.AreEqual(new[] { expected }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual(expected, combos[0]);
     }
 
     [TestMethod]
@@ -40,14 +42,16 @@ public class SystemKeyGuardTests
     {
         // The Win key has no named token; it can only be sent raw via vk=0x5B.
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse("vk=0x5B"));
-        CollectionAssert.AreEqual(new[] { "win" }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual("win", combos[0]);
     }
 
     [TestMethod]
     public void LonePrintScreen_IsReported()
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse("printscreen"));
-        CollectionAssert.AreEqual(new[] { "printscreen" }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual("printscreen", combos[0]);
     }
 
     [TestMethod]
@@ -77,21 +81,26 @@ public class SystemKeyGuardTests
     {
         // Two Win combos collapse to a single generic entry.
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse("win+l win+r"));
-        CollectionAssert.AreEqual(new[] { "win+<key>" }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual("win+<key>", combos[0]);
     }
 
     [TestMethod]
     public void MultipleDistinctCombos_PreserveFirstSeenOrder()
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse("alt+f4 ctrl+esc alt+tab"));
-        CollectionAssert.AreEqual(new[] { "alt+f4", "ctrl+esc", "alt+tab" }, combos.ToArray());
+        Assert.AreEqual(3, combos.Count);
+        Assert.AreEqual("alt+f4", combos[0]);
+        Assert.AreEqual("ctrl+esc", combos[1]);
+        Assert.AreEqual("alt+tab", combos[2]);
     }
 
     [TestMethod]
     public void MixedSafeAndSystemKeys_ReportsOnlySystem()
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse("ctrl+a win+l enter"));
-        CollectionAssert.AreEqual(new[] { "win+<key>" }, combos.ToArray());
+        Assert.AreEqual(1, combos.Count);
+        Assert.AreEqual("win+<key>", combos[0]);
     }
 
     [TestMethod]
