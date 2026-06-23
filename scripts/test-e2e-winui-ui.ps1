@@ -366,6 +366,15 @@ Assert-WinappSuccess "screenshot --capture-screen" -WinappArgs @("ui", "screensh
 $ssFocus = Join-Path $ScreenshotDir "07-focus.png"
 Assert-WinappSuccess "screenshot --focus" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssFocus, "--focus")
 
+# --- send-keys: synthetic keyboard input into the focused Text Input (#562) ---
+# Literal text with spaces exercises the whitespace-preserving parser path.
+Assert-WinappSuccess "focus Text Input (for send-keys)" -WinappArgs @("ui", "focus", "Text Input", "-a", "$appPid")
+Assert-WinappSuccess "send-keys: literal text" -WinappArgs @("ui", "send-keys", "Typed via send-keys", "-a", "$appPid", "--target", "Text Input", "--json")
+Assert-WinappSuccess "send-keys: named key" -WinappArgs @("ui", "send-keys", "end", "-a", "$appPid", "--target", "Text Input")
+
+# --- scroll --wheel against the main ScrollViewer (exercises mouse wheel path) ---
+Assert-WinappSuccess "scroll --wheel MainScroller" -WinappArgs @("ui", "scroll", "MainScroller", "-a", "$appPid", "--wheel", "-120", "--json")
+
 # --- wait-for: element exists ---
 Assert-WinappSuccess "wait-for: element exists" -WinappArgs @("ui", "wait-for", "Submit Button", "-a", "$appPid", "-t", "3000")
 

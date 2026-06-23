@@ -104,9 +104,56 @@ public class KeyStringParserTests
     }
 
     [TestMethod]
-    public void Parse_UnknownModifierInCombo_Throws()
+    public void Parse_ModifierLedComboWithUnknownMainKey_Throws()
     {
-        Assert.ThrowsExactly<FormatException>(() => KeyStringParser.Parse("hyper+a"));
+        // Leading segment IS a real modifier, so the user clearly intended a combo — an unknown main
+        // key is an actionable error rather than something to type literally.
+        Assert.ThrowsExactly<FormatException>(() => KeyStringParser.Parse("ctrl+bogus"));
+    }
+
+    [TestMethod]
+    [DataRow("hyper+a")]   // unknown leading "modifier" → not a combo
+    [DataRow("a+b")]       // plain literal that happens to contain '+'
+    [DataRow("C++")]       // language name, not a combo
+    [DataRow("1+1")]
+    public void Parse_PlusToken_WithoutLeadingModifier_IsLiteralText(string token)
+    {
+        var actions = KeyStringParser.Parse(token);
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual(token, ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_QuotedPhrase_PreservesSpacesAsSingleLiteral()
+    {
+        // Regression for the "Hello world" → "Helloworld" whitespace-loss bug: adjacent literal words
+        // coalesce into one TextInput with the space preserved.
+        var actions = KeyStringParser.Parse("Hello world");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("Hello world", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_LiteralRunSeparatedByKey_StaysDistinct()
+    {
+        // A key between literal runs breaks the coalescing: "Hello enter world" → text, key, text.
+        var actions = KeyStringParser.Parse("Hello enter world");
+        Assert.AreEqual(3, actions.Count);
+        Assert.AreEqual("Hello", ((TextInput)actions[0]).Text);
+        Assert.AreEqual(0x0D, ((KeyChord)actions[1]).Vk); // VK_RETURN
+        Assert.AreEqual("world", ((TextInput)actions[2]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TrailingLiteralAfterCombo_CoalescesOnlyLiterals()
+    {
+        // "ctrl+a Hello world" → chord, then the two literal words merge into one TextInput.
+        var actions = KeyStringParser.Parse("ctrl+a Hello world");
+        Assert.AreEqual(2, actions.Count);
+        Assert.IsInstanceOfType<KeyChord>(actions[0]);
+        Assert.AreEqual("Hello world", ((TextInput)actions[1]).Text);
     }
 }
 

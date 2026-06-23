@@ -933,6 +933,19 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Scroll_ConflictingModes_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-items-1234", X = 0, Y = 0, Width = 100, Height = 100 };
+
+        var command = GetRequiredService<UiScrollCommand>();
+        // --wheel and --direction are mutually exclusive; specifying both must fail rather than
+        // silently preferring --wheel.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-120", "--direction", "down", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
+    }
+
+    [TestMethod]
     public async Task Focus_Json_EmitsEnvelope()
     {
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Edit", Selector = "edit-name-1234" };

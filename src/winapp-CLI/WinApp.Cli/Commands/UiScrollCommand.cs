@@ -90,6 +90,15 @@ internal class UiScrollCommand : Command, IShortDescription
                 return 1;
             }
 
+            int modeCount = (direction is not null ? 1 : 0) + (to is not null ? 1 : 0) + (wheel is not null ? 1 : 0);
+            if (modeCount > 1)
+            {
+                logger.LogError("{Symbol} Specify only one of --direction, --to, or --wheel.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    "Specify only one of --direction, --to, or --wheel — they are mutually exclusive.");
+                return 1;
+            }
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);

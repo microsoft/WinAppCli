@@ -131,6 +131,21 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken);
                 }
 
+                // send-input is OS-wide: it lands on whatever window is actually in the foreground. If
+                // SetForegroundWindow didn't take (focus-stealing prevention, a UAC prompt, or another app
+                // grabbing focus), injecting now would type into the wrong window. Verify the foreground
+                // belongs to the target before sending. (post-message posts straight to the target HWND's
+                // queue, so it isn't affected.)
+                if (transport == KeyTransport.SendInput && targetHwnd != 0 && !ForegroundBelongsTo(targetHwnd))
+                {
+                    logger.LogError(
+                        "{Symbol} Target window is not in the foreground — refusing --via send-input to avoid typing into the wrong window. Focus or click the window first.",
+                        UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                        "Target window is not in the foreground — refusing --via send-input to avoid injecting into the wrong window. Bring it to the foreground first.");
+                    return 1;
+                }
+
                 keyboardInput.Send(targetHwnd, actions, transport);
 
                 if (json)
@@ -165,6 +180,28 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
+        }
+
+        private static unsafe bool ForegroundBelongsTo(long targetHwnd)
+        {
+            var foreground = Windows.Win32.PInvoke.GetForegroundWindow();
+            if (foreground.IsNull)
+            {
+                return false;
+            }
+
+            var target = new Windows.Win32.Foundation.HWND((nint)targetHwnd);
+            if (foreground == target)
+            {
+                return true;
+            }
+
+            // The foreground is often the top-level ancestor of the resolved element HWND, so compare by
+            // owning process rather than requiring an exact handle match.
+            uint foregroundPid = 0, targetPid = 0;
+            Windows.Win32.PInvoke.GetWindowThreadProcessId(foreground, &foregroundPid);
+            Windows.Win32.PInvoke.GetWindowThreadProcessId(target, &targetPid);
+            return foregroundPid != 0 && foregroundPid == targetPid;
         }
 
         private static bool TryParseTransport(string via, out KeyTransport transport)

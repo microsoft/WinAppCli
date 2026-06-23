@@ -143,12 +143,64 @@ internal static class KeyboardInput
         fixed (INPUT* pInputs = array)
         {
             var sent = PInvoke.SendInput((uint)array.Length, pInputs, sizeof(INPUT));
-            if (sent == 0)
+            if (sent != (uint)array.Length)
             {
-                throw new InvalidOperationException(
-                    "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
-                    "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.");
+                // A zero or short write can strand a key/modifier in the down state (e.g. a Ctrl-down
+                // whose matching up never fired), which corrupts the whole session. Best-effort release
+                // everything we pressed before surfacing the failure.
+                ReleaseHeldKeys(array);
+
+                throw new InvalidOperationException(sent == 0
+                    ? "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
+                      "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator."
+                    : $"SendInput delivered only {sent} of {array.Length} key events — input was partially applied. " +
+                      "Held keys were released; retry the gesture.");
             }
+        }
+    }
+
+    /// <summary>
+    /// Best-effort release of every key pressed in <paramref name="batch"/> — emits a matching key-up for
+    /// each key-down event, in reverse order, so a partial <see cref="PInvoke.SendInput"/> can't leave a
+    /// modifier or key logically stuck down. Failures here are swallowed (we're already on the error path).
+    /// </summary>
+    private static unsafe void ReleaseHeldKeys(INPUT[] batch)
+    {
+        var ups = new List<INPUT>();
+        for (int i = batch.Length - 1; i >= 0; i--)
+        {
+            if (batch[i].type != INPUT_TYPE.INPUT_KEYBOARD)
+            {
+                continue;
+            }
+
+            var ki = batch[i].Anonymous.ki;
+            if ((ki.dwFlags & KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP) != 0)
+            {
+                continue; // already an up event
+            }
+
+            ups.Add(new INPUT
+            {
+                type = INPUT_TYPE.INPUT_KEYBOARD,
+                Anonymous = { ki = new KEYBDINPUT
+                {
+                    wVk = ki.wVk,
+                    wScan = ki.wScan,
+                    dwFlags = ki.dwFlags | KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP
+                }}
+            });
+        }
+
+        if (ups.Count == 0)
+        {
+            return;
+        }
+
+        var arr = ups.ToArray();
+        fixed (INPUT* p = arr)
+        {
+            PInvoke.SendInput((uint)arr.Length, p, sizeof(INPUT));
         }
     }
 

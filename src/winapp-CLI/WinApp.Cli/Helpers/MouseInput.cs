@@ -60,20 +60,36 @@ internal static class MouseInput
         SendMove(fromScreenX, fromScreenY);
         Thread.Sleep(50);
         SendButton(downFlag);
-        Thread.Sleep(50);
 
-        // Move toward the destination in steps so the app sees a stream of WM_MOUSEMOVE messages
-        const int steps = 20;
-        for (int i = 1; i <= steps; i++)
+        var released = false;
+        try
         {
-            int x = fromScreenX + (int)Math.Round((toScreenX - fromScreenX) * (i / (double)steps));
-            int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
-            SendMove(x, y);
-            Thread.Sleep(10);
-        }
+            Thread.Sleep(50);
 
-        Thread.Sleep(50);
-        SendButton(upFlag);
+            // Move toward the destination in steps so the app sees a stream of WM_MOUSEMOVE messages
+            const int steps = 20;
+            for (int i = 1; i <= steps; i++)
+            {
+                int x = fromScreenX + (int)Math.Round((toScreenX - fromScreenX) * (i / (double)steps));
+                int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
+                SendMove(x, y);
+                Thread.Sleep(10);
+            }
+
+            Thread.Sleep(50);
+            SendButton(upFlag);
+            released = true;
+        }
+        finally
+        {
+            // If a move or the up-event threw, make sure the button doesn't stay logically held down
+            // (which would wreck the user's whole session). Best-effort — swallow a secondary failure.
+            if (!released)
+            {
+                try { SendButton(upFlag); }
+                catch (InvalidOperationException) { }
+            }
+        }
     }
 
     public static void ScrollWheel(int screenX, int screenY, int delta)
@@ -170,11 +186,13 @@ internal static class MouseInput
             fixed (INPUT* pInputs = inputs)
             {
                 var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-                if (sent == 0)
+                if (sent != (uint)inputs.Length)
                 {
-                    throw new InvalidOperationException(
-                        "SendInput failed — the target window may be elevated (running as admin). " +
-                        "Try running this CLI as administrator.");
+                    throw new InvalidOperationException(sent == 0
+                        ? "SendInput failed — the target window may be elevated (running as admin). " +
+                          "Try running this CLI as administrator."
+                        : $"SendInput delivered only {sent} of {inputs.Length} mouse events — the gesture was " +
+                          "partially applied.");
                 }
             }
         }

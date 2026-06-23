@@ -88,10 +88,12 @@ internal static class KeyStringParser
 
         foreach (var token in tokens)
         {
-            // Modifier combo, e.g. ctrl+shift+t  (a bare "+" main key is supported via vk=).
-            if (token.Contains('+') && token.Length > 1)
+            // Modifier combo, e.g. ctrl+shift+t. Only treated as a chord when the leading segments
+            // are real modifiers, so literal tokens that merely contain '+' (e.g. "C++", "a+b") are
+            // typed as text instead of throwing. (A bare "+" main key is supported via vk=.)
+            if (TryParseChord(token, out var chord))
             {
-                actions.Add(ParseChord(token));
+                actions.Add(chord);
                 continue;
             }
 
@@ -113,26 +115,65 @@ internal static class KeyStringParser
             actions.Add(new TextInput(token));
         }
 
-        return actions;
+        // The tokenizer splits on whitespace, so a quoted phrase like "Hello world" arrives as two
+        // literal-text tokens. Re-join adjacent literal runs with a single space so the phrase is
+        // typed verbatim; runs separated by a key (e.g. "Hello enter world") stay distinct.
+        return CoalesceText(actions);
     }
 
-    private static KeyChord ParseChord(string token)
+    private static List<KeyAction> CoalesceText(List<KeyAction> actions)
     {
+        var merged = new List<KeyAction>(actions.Count);
+        foreach (var action in actions)
+        {
+            if (action is TextInput text && merged.Count > 0 && merged[^1] is TextInput prev)
+            {
+                merged[^1] = new TextInput(prev.Text + " " + text.Text);
+            }
+            else
+            {
+                merged.Add(action);
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Parses a modifier combo (e.g. <c>ctrl+shift+t</c>). Returns <see langword="false"/> when the token
+    /// is not a modifier-led combo (so the caller can fall back to literal text), and throws only when the
+    /// token clearly *is* a modifier combo but names an unknown main key (e.g. <c>ctrl+bogus</c>).
+    /// </summary>
+    private static bool TryParseChord(string token, out KeyChord chord)
+    {
+        chord = null!;
+
+        if (!token.Contains('+'))
+        {
+            return false;
+        }
+
         var parts = token.Split('+', StringSplitOptions.RemoveEmptyEntries);
+
+        // Need at least one modifier + one main key, and every leading segment must be a known
+        // modifier. Otherwise it's an ordinary literal that happens to contain '+' ("C++", "a+b").
         if (parts.Length < 2)
         {
-            throw new FormatException($"Invalid key combo '{token}'. Use the form modifier+key, e.g. ctrl+shift+t.");
+            return false;
+        }
+
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (!Modifiers.ContainsKey(parts[i]))
+            {
+                return false;
+            }
         }
 
         var modifiers = new List<ushort>();
         for (int i = 0; i < parts.Length - 1; i++)
         {
-            if (!Modifiers.TryGetValue(parts[i], out var modVk))
-            {
-                throw new FormatException(
-                    $"Unknown modifier '{parts[i]}' in '{token}'. Valid modifiers: ctrl, shift, alt, win.");
-            }
-            modifiers.Add(modVk);
+            modifiers.Add(Modifiers[parts[i]]);
         }
 
         var mainKey = parts[^1];
@@ -142,7 +183,8 @@ internal static class KeyStringParser
                 $"Unknown key '{mainKey}' in '{token}'. Use a named key (enter, down, f5), a single character, or vk=0xNN.");
         }
 
-        return new KeyChord(modifiers, vk, extended);
+        chord = new KeyChord(modifiers, vk, extended);
+        return true;
     }
 
     private static bool TryResolveKey(string name, out ushort vk, out bool extended)
