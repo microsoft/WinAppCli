@@ -28,6 +28,7 @@ public class SystemKeyGuardTests
     [DataRow("alt+tab", "alt+tab")]
     [DataRow("alt+esc", "alt+esc")]
     [DataRow("alt+f4", "alt+f4")]
+    [DataRow("alt+printscreen", "alt+printscreen")]
     public void KnownSystemCombos_AreReportedByName(string keys, string expected)
     {
         var combos = SystemKeyGuard.FindSystemCombos(KeyStringParser.Parse(keys));

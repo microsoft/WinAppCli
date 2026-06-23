@@ -955,8 +955,9 @@ public class UiCommandTests : BaseCommandTests
     [TestMethod]
     public async Task Drag_TwoArg_SelectorToSelector_UsesBothCenters()
     {
-        // Both selectors resolve via the shared fake result, so both endpoints land on its center.
-        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "ListItem", Selector = "row-1111", X = 10, Y = 20, Width = 100, Height = 80 };
+        // Distinct from/to elements (via the per-call queue) so reusing one endpoint for both would fail.
+        _fakeUia.FindSingleResults.Enqueue(new UiElement { Id = "e0", Type = "ListItem", Selector = "row-1111", X = 10, Y = 20, Width = 100, Height = 80 });   // center 60,60
+        _fakeUia.FindSingleResults.Enqueue(new UiElement { Id = "e1", Type = "ListItem", Selector = "row-2222", X = 200, Y = 300, Width = 40, Height = 60 });  // center 220,330
 
         var command = GetRequiredService<UiDragCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["row-1111", "row-2222", "-a", "TestApp", "--json"]);
@@ -965,12 +966,51 @@ public class UiCommandTests : BaseCommandTests
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
         Assert.AreEqual("row-1111", result.GetProperty("from").GetString());
         Assert.AreEqual("row-2222", result.GetProperty("to").GetString());
-        Assert.AreEqual(60, result.GetProperty("fromX").GetInt32());  // 10 + 100/2
-        Assert.AreEqual(60, result.GetProperty("fromY").GetInt32());  // 20 + 80/2
-        Assert.AreEqual(60, result.GetProperty("toX").GetInt32());
-        Assert.AreEqual(60, result.GetProperty("toY").GetInt32());
+        Assert.AreEqual(60, result.GetProperty("fromX").GetInt32());   // 10 + 100/2
+        Assert.AreEqual(60, result.GetProperty("fromY").GetInt32());   // 20 + 80/2
+        Assert.AreEqual(220, result.GetProperty("toX").GetInt32());    // 200 + 40/2
+        Assert.AreEqual(330, result.GetProperty("toY").GetInt32());    // 300 + 60/2
 
         Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(60, drag.FromX);
+        Assert.AreEqual(60, drag.FromY);
+        Assert.AreEqual(220, drag.ToX);
+        Assert.AreEqual(330, drag.ToY);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_CoordinatesToSelector_ResolvesOnlyTo()
+    {
+        // from is bare coords (no lookup); to is a selector resolving to its center.
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "ListItem", Selector = "row-2222", X = 200, Y = 300, Width = 40, Height = 60 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,200", "row-2222", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("100,200", result.GetProperty("from").GetString());
+        Assert.AreEqual("row-2222", result.GetProperty("to").GetString());
+        Assert.AreEqual(100, result.GetProperty("fromX").GetInt32());
+        Assert.AreEqual(200, result.GetProperty("fromY").GetInt32());
+        Assert.AreEqual(220, result.GetProperty("toX").GetInt32());   // 200 + 40/2
+        Assert.AreEqual(330, result.GetProperty("toY").GetInt32());   // 300 + 60/2
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_ToSelectorNotFound_ReturnsError()
+    {
+        // from resolves fine; the second (to) selector lookup returns null → error, no drag.
+        _fakeUia.FindSingleResults.Enqueue(new UiElement { Id = "e0", Type = "ListItem", Selector = "row-1111", X = 10, Y = 20, Width = 100, Height = 80 });
+        _fakeUia.FindSingleResults.Enqueue(null);
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["row-1111", "missing-9999", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }
 
     [TestMethod]

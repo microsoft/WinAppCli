@@ -74,6 +74,12 @@ internal static class SystemKeyGuard
             return null;
         }
 
+        // Alt+PrintScreen captures the active window to the clipboard.
+        if (alt && chord.Vk == VkPrintScreen)
+        {
+            return "alt+printscreen";
+        }
+
         if (ctrl && shift && chord.Vk == VkEsc)
         {
             return "ctrl+shift+esc";

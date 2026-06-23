@@ -14,6 +14,13 @@ internal class FakeUiAutomationService : IUiAutomationService
     public UiElement[] InspectResult { get; set; } = [];
     public UiElement[] SearchResult { get; set; } = [];
     public UiElement? FindSingleResult { get; set; }
+
+    /// <summary>
+    /// Optional per-call results for <see cref="FindSingleElementAsync"/>. When non-empty, each call
+    /// dequeues the next entry (so a single command resolving two selectors — e.g. a selector→selector
+    /// drag — can return two distinct elements). Falls back to <see cref="FindSingleResult"/> when empty.
+    /// </summary>
+    public Queue<UiElement?> FindSingleResults { get; } = new();
     public Dictionary<string, object?> PropertiesResult { get; set; } = [];
     public string InvokeResult { get; set; } = "InvokePattern";
     public (byte[] Pixels, int Width, int Height) ScreenshotResult { get; set; } = (new byte[4], 1, 1);
@@ -33,7 +40,7 @@ internal class FakeUiAutomationService : IUiAutomationService
         => Task.FromResult(SearchResult.Take(maxResults).ToArray());
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
-        => Task.FromResult(FindSingleResult);
+        => Task.FromResult(FindSingleResults.Count > 0 ? FindSingleResults.Dequeue() : FindSingleResult);
 
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);

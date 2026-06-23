@@ -108,15 +108,15 @@ internal class UiDragCommand : Command, IShortDescription
 
                     if (!TryParsePoint(arg1, out int offFromX, out int offFromY))
                     {
-                        logger.LogError("{Symbol} Invalid <from> offset — expected x,y (e.g. 40,50).", UiSymbols.Error);
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <from> offset — expected x,y (e.g. 40,50).");
+                        logger.LogError("{Symbol} Invalid <from> offset '{Arg}' — expected x,y (e.g. 40,50). You passed 3 arguments, which selects the legacy 'drag <selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords use just 2 arguments: 'drag <from> <to>'.", UiSymbols.Error, arg1);
+                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <from> offset — expected x,y (e.g. 40,50). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments.");
                         return 1;
                     }
 
                     if (!TryParsePoint(legacyToOffset, out int offToX, out int offToY))
                     {
-                        logger.LogError("{Symbol} Invalid <to> offset — expected x,y (e.g. 60,30).", UiSymbols.Error);
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <to> offset — expected x,y (e.g. 60,30).");
+                        logger.LogError("{Symbol} Invalid <to> offset '{Arg}' — expected x,y (e.g. 60,30). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments: 'drag <from> <to>'.", UiSymbols.Error, legacyToOffset);
+                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <to> offset — expected x,y (e.g. 60,30). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments.");
                         return 1;
                     }
 

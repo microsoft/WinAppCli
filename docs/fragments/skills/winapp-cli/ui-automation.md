@@ -124,22 +124,28 @@ winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
 winapp ui send-keys "alt+f4" -a myapp --via send-input
 ```
 - Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
-- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It also **warns before synthesizing system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) since those act on the OS/shell, but still sends them.
 - Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR` (raises `TextChanged`, lands correct text across integrity levels) but does not fire a per-character `KeyDown`.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release. Two forms: **`drag <from> <to>`** (preferred) where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`; or legacy **`drag <selector> <fromX,fromY> <toX,toY>`** where the two `x,y` are pixel offsets from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
-# Left-drag from (40,50) to (60,30) inside the element
+# Preferred: reorder one item onto another (center → center)
+winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
+
+# Element center → app coordinates (as reported by `ui inspect`)
+winapp ui drag itm-card-9f8e 300,400 -a myapp
+
+# Raw app coordinates → app coordinates
+winapp ui drag 120,200 480,200 -a myapp
+
+# Legacy: offsets from the element's top-left corner
 winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp
 
-# Drag a slider thumb to the right
-winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp
-
 # Right-button drag
-winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right
+winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- Coordinates are element-relative; `0,0` is the element's top-left corner. Inspect the element first to size your offsets.
+- In the 2-arg form a selector drags from/to the element's center and `x,y` are app coordinates (same space as `ui inspect`). In the legacy 3-arg form `x,y` are offsets from the element's top-left corner (`0,0` is the corner).
 
 ### Read element state
 ```powershell
