@@ -155,5 +155,194 @@ public class KeyStringParserTests
         Assert.IsInstanceOfType<KeyChord>(actions[0]);
         Assert.AreEqual("Hello world", ((TextInput)actions[1]).Text);
     }
+
+    [TestMethod]
+    [DataRow("control")]
+    [DataRow("ctrl")]
+    public void Parse_CtrlAliases_MapToControlVk(string alias)
+    {
+        var chord = (KeyChord)KeyStringParser.Parse($"{alias}+a")[0];
+        CollectionAssert.AreEqual(new ushort[] { 0x11 }, chord.Modifiers.ToArray()); // VK_CONTROL
+    }
+
+    [TestMethod]
+    [DataRow("alt")]
+    [DataRow("menu")]
+    public void Parse_AltAliases_MapToMenuVk(string alias)
+    {
+        var chord = (KeyChord)KeyStringParser.Parse($"{alias}+a")[0];
+        CollectionAssert.AreEqual(new ushort[] { 0x12 }, chord.Modifiers.ToArray()); // VK_MENU
+    }
+
+    [TestMethod]
+    [DataRow("win")]
+    [DataRow("cmd")]
+    [DataRow("super")]
+    [DataRow("meta")]
+    public void Parse_WinAliases_MapToLWinVk(string alias)
+    {
+        var chord = (KeyChord)KeyStringParser.Parse($"{alias}+a")[0];
+        CollectionAssert.AreEqual(new ushort[] { 0x5B }, chord.Modifiers.ToArray()); // VK_LWIN
+    }
+
+    [TestMethod]
+    [DataRow("enter", (ushort)0x0D)]
+    [DataRow("return", (ushort)0x0D)]
+    [DataRow("esc", (ushort)0x1B)]
+    [DataRow("escape", (ushort)0x1B)]
+    [DataRow("tab", (ushort)0x09)]
+    [DataRow("space", (ushort)0x20)]
+    [DataRow("backspace", (ushort)0x08)]
+    [DataRow("bksp", (ushort)0x08)]
+    [DataRow("del", (ushort)0x2E)]
+    [DataRow("delete", (ushort)0x2E)]
+    [DataRow("ins", (ushort)0x2D)]
+    [DataRow("home", (ushort)0x24)]
+    [DataRow("end", (ushort)0x23)]
+    [DataRow("pgup", (ushort)0x21)]
+    [DataRow("pagedown", (ushort)0x22)]
+    [DataRow("printscreen", (ushort)0x2C)]
+    [DataRow("apps", (ushort)0x5D)]
+    public void Parse_NamedKeyAliases_ResolveToExpectedVk(string name, ushort expected)
+    {
+        var chord = (KeyChord)KeyStringParser.Parse(name)[0];
+        Assert.AreEqual(0, chord.Modifiers.Count);
+        Assert.AreEqual(expected, chord.Vk);
+    }
+
+    [TestMethod]
+    [DataRow("home")]
+    [DataRow("end")]
+    [DataRow("pageup")]
+    [DataRow("pagedown")]
+    [DataRow("insert")]
+    [DataRow("delete")]
+    [DataRow("up")]
+    [DataRow("down")]
+    [DataRow("left")]
+    [DataRow("right")]
+    [DataRow("printscreen")]
+    public void Parse_ExtendedKeys_SetExtendedFlag(string name)
+    {
+        Assert.IsTrue(((KeyChord)KeyStringParser.Parse(name)[0]).Extended);
+    }
+
+    [TestMethod]
+    [DataRow("enter")]
+    [DataRow("tab")]
+    [DataRow("space")]
+    [DataRow("f5")]
+    [DataRow("capslock")]
+    public void Parse_NonExtendedKeys_DoNotSetExtendedFlag(string name)
+    {
+        Assert.IsFalse(((KeyChord)KeyStringParser.Parse(name)[0]).Extended);
+    }
+
+    [TestMethod]
+    [DataRow("f1", (ushort)0x70)]
+    [DataRow("f5", (ushort)0x74)]
+    [DataRow("f12", (ushort)0x7B)]
+    [DataRow("f16", (ushort)0x7F)]
+    public void Parse_FunctionKeys_ResolveToExpectedVk(string name, ushort expected)
+    {
+        Assert.AreEqual(expected, ((KeyChord)KeyStringParser.Parse(name)[0]).Vk);
+    }
+
+    [TestMethod]
+    public void Parse_NamedKeysAreCaseInsensitive()
+    {
+        Assert.AreEqual(0x0D, ((KeyChord)KeyStringParser.Parse("ENTER")[0]).Vk);
+        Assert.AreEqual(0x73, ((KeyChord)KeyStringParser.Parse("Alt+F4")[0]).Vk);
+    }
+
+    [TestMethod]
+    public void Parse_MultipleModifiers_PreserveOrder()
+    {
+        var chord = (KeyChord)KeyStringParser.Parse("ctrl+alt+shift+del")[0];
+        CollectionAssert.AreEqual(new ushort[] { 0x11, 0x12, 0x10 }, chord.Modifiers.ToArray());
+        Assert.AreEqual(0x2E, chord.Vk); // VK_DELETE
+        Assert.IsTrue(chord.Extended);
+    }
+
+    [TestMethod]
+    public void Parse_ChordWithRawVkMainKey_Resolves()
+    {
+        var chord = (KeyChord)KeyStringParser.Parse("ctrl+vk=0x42")[0];
+        CollectionAssert.AreEqual(new ushort[] { 0x11 }, chord.Modifiers.ToArray());
+        Assert.AreEqual(0x42, chord.Vk);
+    }
+
+    [TestMethod]
+    public void Parse_RawVkForExtendedKey_SetsExtendedFlag()
+    {
+        // vk=0x2E is Delete, an extended key — the flag must be inferred from the code.
+        Assert.IsTrue(((KeyChord)KeyStringParser.Parse("vk=0x2E")[0]).Extended);
+    }
+
+    [TestMethod]
+    public void Parse_LoneSingleCharacter_IsLiteralText()
+    {
+        // A bare single character is not a named/vk/chord token, so it is typed as literal text.
+        // (Single-char → virtual-key resolution only applies to a chord's main key, e.g. ctrl+a.)
+        var actions = KeyStringParser.Parse("a");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("a", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_ChordSingleCharMainKey_MapsViaKeyboardLayout()
+    {
+        // The single-char → VK path runs for a chord's main key; 'a' resolves to 0x41 on a US layout.
+        var chord = (KeyChord)KeyStringParser.Parse("ctrl+a")[0];
+        Assert.AreEqual(0x41, chord.Vk);
+    }
+
+    [TestMethod]
+    public void Parse_ExtraWhitespaceBetweenTokens_IsIgnored()
+    {
+        var actions = KeyStringParser.Parse("  down    enter  ");
+        Assert.AreEqual(2, actions.Count);
+        Assert.AreEqual(0x28, ((KeyChord)actions[0]).Vk);
+        Assert.AreEqual(0x0D, ((KeyChord)actions[1]).Vk);
+    }
+
+    [TestMethod]
+    public void Parse_TabSeparatedTokens_AreSplit()
+    {
+        var actions = KeyStringParser.Parse("down\tenter");
+        Assert.AreEqual(2, actions.Count);
+        Assert.AreEqual(0x28, ((KeyChord)actions[0]).Vk);
+        Assert.AreEqual(0x0D, ((KeyChord)actions[1]).Vk);
+    }
+
+    [TestMethod]
+    public void Parse_ThreeLiteralWords_CoalesceWithSingleSpaces()
+    {
+        var actions = KeyStringParser.Parse("the quick brown");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("the quick brown", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_NamedSpaceToken_IsAKeyNotText()
+    {
+        // "space" is a named key (VK_SPACE), so it breaks a literal run rather than coalescing.
+        var actions = KeyStringParser.Parse("Hello space world");
+        Assert.AreEqual(3, actions.Count);
+        Assert.AreEqual("Hello", ((TextInput)actions[0]).Text);
+        Assert.AreEqual(0x20, ((KeyChord)actions[1]).Vk); // VK_SPACE
+        Assert.AreEqual("world", ((TextInput)actions[2]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_BarePlusToken_IsLiteralText()
+    {
+        // A token that is only "+" has no main key after splitting — treated as literal text.
+        var actions = KeyStringParser.Parse("+");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("+", ((TextInput)actions[0]).Text);
+    }
 }
 

@@ -258,17 +258,28 @@ winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
 ### drag
-Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
+Press the mouse button at one point, move to another, then release. Two forms:
+
+- **Preferred — `drag <from> <to>`:** each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
+- **Legacy — `drag <selector> <fromX,fromY> <toX,toY>`:** the two `x,y` values are pixel **offsets from the element's top-left corner**. Disambiguated by the third positional argument; existing scripts keep working unchanged.
+
+Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
 ```bash
-winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp     # left-drag from (40,50) to (60,30) inside the element
-winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp      # drag a slider thumb to the right
-winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right  # right-button drag
+# Preferred 2-arg form
+winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp           # reorder: card center → slot center
+winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center → app coords (from inspect)
+winapp ui drag 120,200 480,200 -a myapp                       # raw app coords → app coords
+winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right  # right-button drag
+
+# Legacy 3-arg form (offsets from the element's top-left)
+winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp           # left-drag from (40,50) to (60,30) inside the element
+winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp            # drag a slider thumb to the right
 ```
 
 **Options:**
 - `--right` — Drag with the right mouse button instead of the left button.
 
-> Coordinates are element-relative. Inspect the element first (`winapp ui inspect`/`search`) to size your offsets; `0,0` is the element's top-left corner.
+> In the 2-arg form, bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points. In the legacy 3-arg form the `x,y` values are offsets from the element's top-left corner (`0,0` is the corner).
 
 > Like `send-keys --via send-input`, `drag` injects OS-wide at screen coordinates after bringing the target to the foreground. If focus can't be brought to the target (e.g. focus-stealing prevention from a background process), the command **fails (`foreground_not_target`)** rather than dragging on the wrong window — focus or click the window first.
 
@@ -308,6 +319,7 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 **Choosing a transport / known limits:**
 - `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
 - `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level. As a safety guard, `send-input` verifies the target window is actually in the foreground immediately before injecting and **fails (`foreground_not_target`) rather than typing into the wrong window** if focus could not be brought to it — focus or click the window first.
+- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **emits a warning** before synthesizing them (e.g. `win+l` would lock the session) but still sends them — synthesizing them can be the legitimate intent of a test. `post-message` is window-scoped and is not affected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
 
 **Per-keystroke events (KeyDown / TextChanged):**
 - **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).

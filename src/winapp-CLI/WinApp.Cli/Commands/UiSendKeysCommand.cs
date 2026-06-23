@@ -34,7 +34,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
     {
         Description = "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged " +
                       "but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character " +
-                      "KeyDown + TextChanged). Named keys and combos raise KeyDown on both.",
+                      "KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard " +
+                      "accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input.",
         DefaultValueFactory = _ => "post-message"
     };
 
@@ -155,6 +156,22 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     logger.LogWarning(
                         "{Symbol} Literal text via --via post-message may not be delivered to WinUI 3 / XAML apps (WM_CHAR is dropped by the input pipeline). Use --via send-input if the text does not appear.",
                         UiSymbols.Warning);
+                }
+
+                // send-input is OS-wide, so a system-reserved combo (win+l, alt+f4, ctrl+shift+esc, …)
+                // acts on the OS/shell rather than just the target app. Warn so an accidental lock /
+                // window-close / Task Manager isn't silent. Advisory only — the keys are still sent
+                // (synthesizing them can be the legitimate intent of an automation/test run).
+                if (transport == KeyTransport.SendInput)
+                {
+                    var systemCombos = SystemKeyGuard.FindSystemCombos(actions);
+                    if (systemCombos.Count > 0)
+                    {
+                        logger.LogWarning(
+                            "{Symbol} Synthesizing system-reserved key(s) via --via send-input: {Combos}. " +
+                            "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window), not just the target app.",
+                            UiSymbols.Warning, string.Join(", ", systemCombos));
+                    }
                 }
 
                 keyboardInput.Send(targetHwnd, actions, transport);

@@ -1799,11 +1799,11 @@
           }
         },
         "drag": {
-          "description": "Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.",
+          "description": "Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.",
           "hidden": false,
           "arguments": {
-            "selector": {
-              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+            "from": {
+              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within.",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1813,8 +1813,8 @@
                 "maximum": 1
               }
             },
-            "from": {
-              "description": "Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50",
+            "to": {
+              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left.",
               "order": 1,
               "hidden": false,
               "valueType": "System.String",
@@ -1824,8 +1824,8 @@
                 "maximum": 1
               }
             },
-            "to": {
-              "description": "End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30",
+            "to-offset": {
+              "description": "(Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form.",
               "order": 2,
               "hidden": false,
               "valueType": "System.String",
@@ -3306,7 +3306,7 @@
               "recursive": false
             },
             "--via": {
-              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both.",
+              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": true,

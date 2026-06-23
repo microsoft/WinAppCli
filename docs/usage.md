@@ -1083,7 +1083,7 @@ winapp ui [command] [options]
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
-- `drag` - Drag the mouse from one point to another within an element (reorder, resize, sliders, drag-and-drop)
+- `drag` - Drag the mouse from one point to another, by element selector or app `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
 - `send-keys` - Send synthetic keyboard input (named keys, combos, raw vk=0xNN, or literal text) to a window
 - `set-value` - Set value on editable element (text, number)
 - `focus` - Move keyboard focus

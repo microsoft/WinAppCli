@@ -803,6 +803,18 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
     }
 
+    [TestMethod]
+    public async Task SendKeys_SystemCombo_ViaSendInput_StillSends()
+    {
+        // The system-reserved-combo guard is advisory (warn-only): a win+l send-input request still
+        // succeeds and reaches the keyboard transport — it must not be silently blocked.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+l", "-a", "TestApp", "--via", "send-input", "--json"]);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+    }
+
     // ---------------------------------------------------------------------
     // drag (#498) — mouse drag gesture
     // ---------------------------------------------------------------------
@@ -883,6 +895,111 @@ public class UiCommandTests : BaseCommandTests
 
         var command = GetRequiredService<UiDragCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["missing-0000", "10,10", "20,20", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    // ---- 2-arg form: drag <from> <to> where each is a selector (center) or x,y app coords ----
+
+    [TestMethod]
+    public async Task Drag_TwoArg_SelectorToCoordinates_UsesElementCenter()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-canvas-1234", X = 50, Y = 60, Width = 200, Height = 200 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "300,400", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("img-canvas-1234", result.GetProperty("from").GetString());
+        Assert.AreEqual("300,400", result.GetProperty("to").GetString());
+        Assert.AreEqual(150, result.GetProperty("fromX").GetInt32());  // 50 + 200/2
+        Assert.AreEqual(160, result.GetProperty("fromY").GetInt32());  // 60 + 200/2
+        Assert.AreEqual(300, result.GetProperty("toX").GetInt32());
+        Assert.AreEqual(400, result.GetProperty("toY").GetInt32());
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(150, drag.FromX);
+        Assert.AreEqual(160, drag.FromY);
+        Assert.AreEqual(300, drag.ToX);
+        Assert.AreEqual(400, drag.ToY);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_CoordinatesToCoordinates_NoElementLookup()
+    {
+        // Both endpoints are bare coordinates, so no element is resolved (FindSingleResult stays null).
+        _fakeUia.FindSingleResult = null;
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,200", "300,400", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("100,200", result.GetProperty("from").GetString());
+        Assert.AreEqual("300,400", result.GetProperty("to").GetString());
+        Assert.AreEqual(100, result.GetProperty("fromX").GetInt32());
+        Assert.AreEqual(200, result.GetProperty("fromY").GetInt32());
+        Assert.AreEqual(300, result.GetProperty("toX").GetInt32());
+        Assert.AreEqual(400, result.GetProperty("toY").GetInt32());
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(100, drag.FromX);
+        Assert.AreEqual(200, drag.FromY);
+        Assert.AreEqual(300, drag.ToX);
+        Assert.AreEqual(400, drag.ToY);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_SelectorToSelector_UsesBothCenters()
+    {
+        // Both selectors resolve via the shared fake result, so both endpoints land on its center.
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "ListItem", Selector = "row-1111", X = 10, Y = 20, Width = 100, Height = 80 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["row-1111", "row-2222", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("row-1111", result.GetProperty("from").GetString());
+        Assert.AreEqual("row-2222", result.GetProperty("to").GetString());
+        Assert.AreEqual(60, result.GetProperty("fromX").GetInt32());  // 10 + 100/2
+        Assert.AreEqual(60, result.GetProperty("fromY").GetInt32());  // 20 + 80/2
+        Assert.AreEqual(60, result.GetProperty("toX").GetInt32());
+        Assert.AreEqual(60, result.GetProperty("toY").GetInt32());
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_MissingTo_ReturnsError()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,200", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_SelectorEndpointNotFound_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = null;
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["missing-0000", "300,400", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Drag_TwoArg_ZeroSizeSelector_ReturnsError()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-zero-0000", X = 10, Y = 20, Width = 0, Height = 0 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-zero-0000", "300,400", "-a", "TestApp", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }

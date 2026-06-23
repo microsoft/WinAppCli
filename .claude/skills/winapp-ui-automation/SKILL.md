@@ -129,22 +129,28 @@ winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
 winapp ui send-keys "alt+f4" -a myapp --via send-input
 ```
 - Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
-- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It also **warns before synthesizing system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) since those act on the OS/shell, but still sends them.
 - Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR` (raises `TextChanged`, lands correct text across integrity levels) but does not fire a per-character `KeyDown`.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at a point inside an element, move to another point, then release. Coordinates are `x,y` offsets (in pixels) from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release. Two forms: **`drag <from> <to>`** (preferred) where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`; or legacy **`drag <selector> <fromX,fromY> <toX,toY>`** where the two `x,y` are pixel offsets from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
-# Left-drag from (40,50) to (60,30) inside the element
+# Preferred: reorder one item onto another (center → center)
+winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
+
+# Element center → app coordinates (as reported by `ui inspect`)
+winapp ui drag itm-card-9f8e 300,400 -a myapp
+
+# Raw app coordinates → app coordinates
+winapp ui drag 120,200 480,200 -a myapp
+
+# Legacy: offsets from the element's top-left corner
 winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp
 
-# Drag a slider thumb to the right
-winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp
-
 # Right-button drag
-winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right
+winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- Coordinates are element-relative; `0,0` is the element's top-left corner. Inspect the element first to size your offsets.
+- In the 2-arg form a selector drags from/to the element's center and `x,y` are app coordinates (same space as `ui inspect`). In the legacy 3-arg form `x,y` are offsets from the element's top-left corner (`0,0` is the corner).
 
 ### Read element state
 ```powershell
@@ -403,15 +409,15 @@ Click an element by slug or text search using mouse simulation. Works on element
 
 ### `winapp ui drag`
 
-Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.
+Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
-| `<from>` | No | Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50 |
-| `<to>` | No | End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30 |
+| `<from>` | No | Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within. |
+| `<to>` | No | End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left. |
+| `<to-offset>` | No | (Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form. |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -458,7 +464,7 @@ Send synthetic keyboard input to a window. Supports named keys (down, enter, tab
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--target` | Optional selector (slug or text) to focus before sending keys. | (none) |
-| `--via` | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both. | `post-message` |
+| `--via` | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. | `post-message` |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui set-value`
