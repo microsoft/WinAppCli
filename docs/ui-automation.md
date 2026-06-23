@@ -270,6 +270,8 @@ winapp ui drag itm-card-9f8e 20,20 20,200 -a myapp --right  # right-button drag
 
 > Coordinates are element-relative. Inspect the element first (`winapp ui inspect`/`search`) to size your offsets; `0,0` is the element's top-left corner.
 
+> Like `send-keys --via send-input`, `drag` injects OS-wide at screen coordinates after bringing the target to the foreground. If focus can't be brought to the target (e.g. focus-stealing prevention from a background process), the command **fails (`foreground_not_target`)** rather than dragging on the wrong window — focus or click the window first.
+
 ### hover
 Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses `SendInput` for realistic mouse movement with a small wiggle, then waits for a configurable dwell time.
 ```bash
@@ -311,7 +313,7 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 - **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).
 - **Literal typed text** (`hello`) differs by transport:
   - `--via send-input` maps each character to its virtual key (plus Shift) on the active keyboard layout, so the target sees a genuine **`KeyDown` with the correct virtual key** followed by the OS-composed `WM_CHAR` (raising **`TextChanged`**) — i.e. one full keystroke per character. Characters not reachable on the current layout (or needing Ctrl/AltGr) fall back to a Unicode packet so the exact character still lands. **Use `send-input` when you need per-keystroke `KeyDown` fidelity** (e.g. driving a WinUI 3 / WPF `TextBox` whose handlers key off `KeyDown`). For a normal (non-elevated) WinUI 3 test host, bring its window to the foreground first (`winapp ui focus` / clicking it) since `send-input` targets the foreground window.
-  - `--via post-message` posts `WM_CHAR` per character, which raises **`TextChanged`** and lands the correct text (including case) but does **not** raise a per-character `KeyDown`. Prefer `post-message` when you only need the text to land (including across integrity levels); prefer `send-input` when downstream logic depends on per-keystroke `KeyDown`.
+  - `--via post-message` posts `WM_CHAR` per character, which does **not** raise a per-character `KeyDown`. **Caveat:** WinUI 3 / XAML apps (winapp's primary target) generally do **not** turn a posted `WM_CHAR` into text — the XAML input pipeline drops it, so typed literal text silently no-ops even though the command reports success (it emits a warning in this case). Classic Win32/WinForms `WM_CHAR`-driven edit controls do land the text (raising `TextChanged`). **Use `--via send-input` to type literal text into WinUI 3 / WPF apps**; reserve `post-message` typed text for classic Win32 controls or when you only need named keys/combos (which fire on both transports).
 
 
 ### set-value
@@ -380,6 +382,8 @@ winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
 - `--direction <up|down|left|right>` — Scroll incrementally via `ScrollPattern`.
 - `--to <top|bottom>` — Jump to the start/end via `ScrollPattern`.
 - `--wheel <delta>` — Synthesize mouse-wheel input over the element's center via `SendInput`. One notch is `120`; positive scrolls up/away, negative down/toward. Bypasses `ScrollPattern`.
+
+> `--direction`, `--to`, and `--wheel` are mutually exclusive — pass exactly one. Because `--wheel` injects OS-wide input at screen coordinates, it brings the target to the foreground first and **fails (`foreground_not_target`)** if focus couldn't be transferred, rather than scrolling the wrong window.
 
 ### get-focused
 Show the element that currently has keyboard focus.

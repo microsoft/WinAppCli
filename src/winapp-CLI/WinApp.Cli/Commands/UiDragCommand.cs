@@ -119,6 +119,18 @@ internal class UiDragCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken);
                 }
 
+                // The drag is injected OS-wide at screen coordinates; if SetForegroundWindow didn't take,
+                // it would land on whatever window is on top at those coords. Verify the target won focus.
+                if (targetHwnd != 0 && !ForegroundGuard.ForegroundBelongsTo(targetHwnd))
+                {
+                    logger.LogError(
+                        "{Symbol} Target window is not in the foreground — refusing to drag to avoid acting on the wrong window. Focus or click the window first.",
+                        UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                        "Target window is not in the foreground — refusing to drag to avoid injecting into the wrong window. Bring it to the foreground first.");
+                    return 1;
+                }
+
                 mouseInput.Drag(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton);
 
                 var elementId = element.Selector ?? element.Id ?? "";

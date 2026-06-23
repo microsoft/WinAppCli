@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -136,7 +137,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // grabbing focus), injecting now would type into the wrong window. Verify the foreground
                 // belongs to the target before sending. (post-message posts straight to the target HWND's
                 // queue, so it isn't affected.)
-                if (transport == KeyTransport.SendInput && targetHwnd != 0 && !ForegroundBelongsTo(targetHwnd))
+                if (transport == KeyTransport.SendInput && targetHwnd != 0 && !ForegroundGuard.ForegroundBelongsTo(targetHwnd))
                 {
                     logger.LogError(
                         "{Symbol} Target window is not in the foreground — refusing --via send-input to avoid typing into the wrong window. Focus or click the window first.",
@@ -144,6 +145,16 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
                         "Target window is not in the foreground — refusing --via send-input to avoid injecting into the wrong window. Bring it to the foreground first.");
                     return 1;
+                }
+
+                // WM_CHAR posted to a WinUI 3 host window is not turned into text by the XAML input
+                // pipeline, so typed literal text silently no-ops on the framework winapp targets most
+                // often. Warn rather than report a false success. (Named keys/combos still post KeyDown.)
+                if (transport == KeyTransport.PostMessage && actions.Any(a => a is TextInput))
+                {
+                    logger.LogWarning(
+                        "{Symbol} Literal text via --via post-message may not be delivered to WinUI 3 / XAML apps (WM_CHAR is dropped by the input pipeline). Use --via send-input if the text does not appear.",
+                        UiSymbols.Warning);
                 }
 
                 keyboardInput.Send(targetHwnd, actions, transport);
@@ -180,28 +191,6 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
-        }
-
-        private static unsafe bool ForegroundBelongsTo(long targetHwnd)
-        {
-            var foreground = Windows.Win32.PInvoke.GetForegroundWindow();
-            if (foreground.IsNull)
-            {
-                return false;
-            }
-
-            var target = new Windows.Win32.Foundation.HWND((nint)targetHwnd);
-            if (foreground == target)
-            {
-                return true;
-            }
-
-            // The foreground is often the top-level ancestor of the resolved element HWND, so compare by
-            // owning process rather than requiring an exact handle match.
-            uint foregroundPid = 0, targetPid = 0;
-            Windows.Win32.PInvoke.GetWindowThreadProcessId(foreground, &foregroundPid);
-            Windows.Win32.PInvoke.GetWindowThreadProcessId(target, &targetPid);
-            return foregroundPid != 0 && foregroundPid == targetPid;
         }
 
         private static bool TryParseTransport(string via, out KeyTransport transport)

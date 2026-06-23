@@ -84,7 +84,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
             if (direction is null && to is null && wheel is null)
             {
-                logger.LogError("Specify --direction (up/down/left/right), --to (top/bottom), or --wheel (delta).");
+                logger.LogError("{Symbol} Specify --direction (up/down/left/right), --to (top/bottom), or --wheel (delta).", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                     "Specify --direction (up/down/left/right), --to (top/bottom), or --wheel (delta).");
                 return 1;
@@ -130,6 +130,18 @@ internal class UiScrollCommand : Command, IShortDescription
                         Windows.Win32.PInvoke.SetForegroundWindow(
                             new Windows.Win32.Foundation.HWND((nint)targetHwnd));
                         await Task.Delay(100, cancellationToken);
+
+                        // The wheel event is injected at screen coordinates; verify the target actually
+                        // came to the foreground so it doesn't scroll whatever window is on top instead.
+                        if (!ForegroundGuard.ForegroundBelongsTo(targetHwnd))
+                        {
+                            logger.LogError(
+                                "{Symbol} Target window is not in the foreground — refusing scroll --wheel to avoid acting on the wrong window. Focus or click the window first.",
+                                UiSymbols.Error);
+                            UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                                "Target window is not in the foreground — refusing scroll --wheel to avoid injecting into the wrong window. Bring it to the foreground first.");
+                            return 1;
+                        }
                     }
 
                     mouseInput.ScrollWheel(centerX, centerY, delta);
