@@ -212,6 +212,8 @@ Want to inspect or interact with a running app's UI?
 - `ui screenshot -a <app> [--output file.png] [--json] [--focus] [--capture-screen]` — capture window as PNG. Default uses Windows.Graphics.Capture (composited surface — preserves rounded corners and works while occluded), with PrintWindow as fallback. Use `--focus` to bring the window to the foreground first; use `--capture-screen` for popup overlays not owned by the target window.
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
 - `ui hover <selector> -a <app> [--dwell-time <ms>]` — move mouse to element center to trigger tooltips, flyouts, and hover states. Use with `ui screenshot --capture-screen` to capture the result.
+- `ui drag <selector> <fromX,fromY> <toX,toY> -a <app> [--right]` — press the mouse button at one point inside an element, move to another, and release (reorder, resize, sliders, drag-and-drop). Coordinates are pixel offsets from the element's top-left corner.
+- `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--via send-input` for per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox).
 - `ui set-value <selector> "value" -a <app>` — set text or slider value
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
