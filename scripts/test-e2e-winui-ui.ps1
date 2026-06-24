@@ -373,7 +373,7 @@ Assert-WinappSuccess "send-keys: literal text" -WinappArgs @("ui", "send-keys", 
 Assert-WinappSuccess "send-keys: named key" -WinappArgs @("ui", "send-keys", "end", "-a", "$appPid", "--target", "Text Input")
 
 # --- scroll --wheel against the main ScrollViewer (exercises mouse wheel path) ---
-Assert-WinappSuccess "scroll --wheel MainScroller" -WinappArgs @("ui", "scroll", "MainScroller", "-a", "$appPid", "--wheel", "-120", "--json")
+Assert-WinappSuccess "scroll --wheel MainScroller" -WinappArgs @("ui", "scroll", "MainScroller", "-a", "$appPid", "--wheel", "-1", "--json")
 
 # --- wait-for: element exists ---
 Assert-WinappSuccess "wait-for: element exists" -WinappArgs @("ui", "wait-for", "Submit Button", "-a", "$appPid", "-t", "3000")
