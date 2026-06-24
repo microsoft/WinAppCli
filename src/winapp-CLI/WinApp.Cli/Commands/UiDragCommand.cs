@@ -142,15 +142,34 @@ internal class UiDragCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken);
                 }
 
-                // The drag is injected OS-wide at screen coordinates; if SetForegroundWindow didn't take,
-                // it would land on whatever window is on top at those coords. Verify the target won focus.
-                if (targetHwnd != 0 && !ForegroundGuard.ForegroundBelongsTo(targetHwnd))
+                // Foregrounding can shift/animate the window (restore, snap, layout settle); re-resolve any
+                // element endpoint so we drag where it is *now*, and refuse rather than hit empty space if
+                // it's still moving. Raw-coordinate endpoints can't be verified, so they pass through.
+                var fromStable = await StabilizeAsync(from, session, "from", json, cancellationToken);
+                if (!fromStable.Ok)
                 {
-                    logger.LogError(
-                        "{Symbol} Target window is not in the foreground — refusing to drag to avoid acting on the wrong window. Focus or click the window first.",
-                        UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
-                        "Target window is not in the foreground — refusing to drag to avoid injecting into the wrong window. Bring it to the foreground first.");
+                    return 1;
+                }
+
+                var toStable = await StabilizeAsync(to, session, "to", json, cancellationToken);
+                if (!toStable.Ok)
+                {
+                    return 1;
+                }
+
+                fromX = fromStable.X;
+                fromY = fromStable.Y;
+                toX = toStable.X;
+                toY = toStable.Y;
+
+                // Verify the target STILL holds the foreground as the final gate immediately before the
+                // OS-wide drag. The stabilize re-resolve above performs awaited UIA reads (with delays);
+                // another window could steal focus during that gap, so we check here — after the awaits,
+                // not before them — to close the race and ensure the drag can't land on whatever window
+                // grabbed foreground mid-resolve. Also distinguishes a locked/secure desktop from a
+                // wrong-window foreground.
+                if (!ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
+                {
                     return 1;
                 }
 
@@ -197,7 +216,35 @@ internal class UiDragCommand : Command, IShortDescription
             }
         }
 
-        private readonly record struct Endpoint(bool Ok, int X, int Y, long Hwnd);
+        private readonly record struct Endpoint(bool Ok, int X, int Y, long Hwnd, SelectorExpression? Selector, UiElement? Element, string? Token);
+
+        /// <summary>
+        /// Re-resolves an element endpoint's bounds immediately before injection (N5) so the drag uses the
+        /// element's current location, not a rectangle captured before the window was foregrounded. A
+        /// raw-coordinate endpoint has no element to verify and is returned unchanged. On a vanished or
+        /// never-settling target it emits <c>target_moved</c> and returns Ok = <see langword="false"/>.
+        /// </summary>
+        private async Task<(bool Ok, int X, int Y)> StabilizeAsync(
+            Endpoint endpoint, UiSessionInfo session, string label, bool json, CancellationToken cancellationToken)
+        {
+            if (endpoint.Selector is null || endpoint.Element is null)
+            {
+                return (true, endpoint.X, endpoint.Y);
+            }
+
+            var stable = await GestureTargeting.ResolveStableAsync(
+                uiAutomation, session, endpoint.Selector, endpoint.Element,
+                GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
+
+            // Report the actual selector token the caller passed (e.g. "row-1") rather than the internal
+            // "from"/"to" endpoint label, so a target_moved error's selector field is actionable.
+            if (!GestureTargeting.TryReport(stable, logger, json, endpoint.Token ?? label, "drag"))
+            {
+                return (false, 0, 0);
+            }
+
+            return (true, stable.CenterX, stable.CenterY);
+        }
 
         /// <summary>
         /// Resolves a drag endpoint token into screen coordinates. A token of the form <c>x,y</c> is taken as
@@ -210,7 +257,7 @@ internal class UiDragCommand : Command, IShortDescription
         {
             if (TryParsePoint(token, out int px, out int py))
             {
-                return new Endpoint(true, px, py, 0);
+                return new Endpoint(true, px, py, 0, null, null, null);
             }
 
             var selector = selectorService.Parse(token);
@@ -218,7 +265,7 @@ internal class UiDragCommand : Command, IShortDescription
             if (element is null)
             {
                 UiErrors.ElementNotFound(logger, token, json);
-                return new Endpoint(false, 0, 0, 0);
+                return new Endpoint(false, 0, 0, 0, null, null, null);
             }
 
             if (element.Width == 0 || element.Height == 0)
@@ -226,12 +273,12 @@ internal class UiDragCommand : Command, IShortDescription
                 logger.LogError("{Symbol} Element for <{Label}> has zero size — cannot use its center as a drag point.", UiSymbols.Error, label);
                 UiJsonError.Emit(json, UiJsonError.CodeZeroSize,
                     $"Element for <{label}> has zero size — cannot use its center as a drag point.", token);
-                return new Endpoint(false, 0, 0, 0);
+                return new Endpoint(false, 0, 0, 0, null, null, null);
             }
 
             int centerX = (int)(element.X + element.Width / 2.0);
             int centerY = (int)(element.Y + element.Height / 2.0);
-            return new Endpoint(true, centerX, centerY, element.WindowHandle ?? 0);
+            return new Endpoint(true, centerX, centerY, element.WindowHandle ?? 0, selector, element, token);
         }
 
         private static bool TryParsePoint(string? value, out int x, out int y)

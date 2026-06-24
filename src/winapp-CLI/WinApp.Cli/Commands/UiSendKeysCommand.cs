@@ -134,24 +134,24 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 }
 
                 // send-input is OS-wide: it lands on whatever window is actually in the foreground. If
-                // SetForegroundWindow didn't take (focus-stealing prevention, a UAC prompt, or another app
-                // grabbing focus), injecting now would type into the wrong window. Verify the foreground
-                // belongs to the target before sending. (post-message posts straight to the target HWND's
-                // queue, so it isn't affected.)
-                if (transport == KeyTransport.SendInput && targetHwnd != 0 && !ForegroundGuard.ForegroundBelongsTo(targetHwnd))
+                // SetForegroundWindow didn't take (focus-stealing prevention, a UAC prompt, another app
+                // grabbing focus, or a locked/secure desktop), injecting now would type into the wrong
+                // window. Verify the foreground belongs to the target before sending. (post-message posts
+                // straight to the target HWND's queue, so it isn't affected.)
+                if (transport == KeyTransport.SendInput &&
+                    !ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
                 {
-                    logger.LogError(
-                        "{Symbol} Target window is not in the foreground — refusing --via send-input to avoid typing into the wrong window. Focus or click the window first.",
-                        UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
-                        "Target window is not in the foreground — refusing --via send-input to avoid injecting into the wrong window. Bring it to the foreground first.");
                     return 1;
                 }
 
-                // WM_CHAR posted to a WinUI 3 host window is not turned into text by the XAML input
-                // pipeline, so typed literal text silently no-ops on the framework winapp targets most
-                // often. Warn rather than report a false success. (Named keys/combos still post KeyDown.)
-                if (transport == KeyTransport.PostMessage && actions.Any(a => a is TextInput))
+                // WM_CHAR posted to a WinUI 3 / XAML host window is not turned into text by the XAML input
+                // pipeline, so typed literal text silently no-ops there. Warn — but only when the target
+                // actually looks like a XAML window — rather than false-alarming on Win32/WPF/Electron
+                // apps that do consume WM_CHAR. (Named keys/combos still post KeyDown regardless.)
+                if (ShouldWarnPostMessageTextDropped(
+                        transport == KeyTransport.PostMessage,
+                        actions.Any(a => a is TextInput),
+                        FrameworkHint.IsLikelyXaml(targetHwnd)))
                 {
                     logger.LogWarning(
                         "{Symbol} Literal text via --via post-message may not be delivered to WinUI 3 / XAML apps (WM_CHAR is dropped by the input pipeline). Use --via send-input if the text does not appear.",
@@ -213,6 +213,16 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 return 1;
             }
         }
+
+        /// <summary>
+        /// Whether to warn that literal typed text may be silently dropped: only when posting WM_CHAR
+        /// (<paramref name="isPostMessage"/>) AND the payload actually contains literal text AND the
+        /// target looks like a XAML window (WinUI 3 / UWP), which drops posted WM_CHAR text. Pure so
+        /// the gate is unit-testable without a live XAML window; the command computes the three inputs
+        /// (the third via <see cref="FrameworkHint.IsLikelyXaml"/>) and routes the warning through here.
+        /// </summary>
+        internal static bool ShouldWarnPostMessageTextDropped(bool isPostMessage, bool hasLiteralText, bool targetLooksXaml)
+            => isPostMessage && hasLiteralText && targetLooksXaml;
 
         private static bool TryParseTransport(string via, out KeyTransport transport)
         {

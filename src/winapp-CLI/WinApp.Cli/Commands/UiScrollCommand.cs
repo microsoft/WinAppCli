@@ -134,18 +134,29 @@ internal class UiScrollCommand : Command, IShortDescription
                         Windows.Win32.PInvoke.SetForegroundWindow(
                             new Windows.Win32.Foundation.HWND((nint)targetHwnd));
                         await Task.Delay(100, cancellationToken);
+                    }
 
-                        // The wheel event is injected at screen coordinates; verify the target actually
-                        // came to the foreground so it doesn't scroll whatever window is on top instead.
-                        if (!ForegroundGuard.ForegroundBelongsTo(targetHwnd))
-                        {
-                            logger.LogError(
-                                "{Symbol} Target window is not in the foreground — refusing scroll --wheel to avoid acting on the wrong window. Focus or click the window first.",
-                                UiSymbols.Error);
-                            UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
-                                "Target window is not in the foreground — refusing scroll --wheel to avoid injecting into the wrong window. Bring it to the foreground first.");
-                            return 1;
-                        }
+                    // Re-resolve just before scrolling (N5): foregrounding can restore/animate the window,
+                    // so the captured rect may be stale. Refuse rather than scroll empty space if it's
+                    // still moving.
+                    var stable = await GestureTargeting.ResolveStableAsync(
+                        uiAutomation, session, selector, element,
+                        GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
+                    if (!GestureTargeting.TryReport(stable, logger, json, selectorStr, "scroll --wheel"))
+                    {
+                        return 1;
+                    }
+                    centerX = stable.CenterX;
+                    centerY = stable.CenterY;
+
+                    // Verify the target STILL holds the foreground as the final gate immediately before the
+                    // OS-wide wheel injection. The re-resolve above awaits UIA reads (with delays) during
+                    // which another window could steal focus, so we check here — after the awaits, not
+                    // before them — to close the race and avoid scrolling whatever window is on top. Also
+                    // distinguishes a locked/secure desktop from a wrong-window foreground.
+                    if (!ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
+                    {
+                        return 1;
                     }
 
                     // --wheel is expressed in notches for ergonomics; SendInput's mouse wheel works in

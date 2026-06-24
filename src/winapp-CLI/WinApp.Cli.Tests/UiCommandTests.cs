@@ -684,6 +684,68 @@ public class UiCommandTests : BaseCommandTests
     }
 
     // ---------------------------------------------------------------------
+    // N5 — stable re-resolve before injection (moving/animating targets)
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Click_MovingTarget_ReturnsTargetMoved()
+    {
+        // The element's bounds keep changing on every read (an animating/scrolling target). The click
+        // must refuse rather than report a false success after landing on empty space.
+        const string sel = "btn-moving-1234";
+        var seq = new Queue<UiElement?>();
+        for (int i = 0; i < 4; i++)
+        {
+            seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 10 + i * 60, Y = 20, Width = 40, Height = 30 });
+        }
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ClickCalls.Count, "no click should be injected at a moving target");
+    }
+
+    [TestMethod]
+    public async Task Click_TargetSettlesAfterMove_UsesReResolvedCenter()
+    {
+        // The element moves once (initial read at X=10, then settles at X=200). The click must use the
+        // re-resolved, settled center (250), not the stale initial center (30).
+        const string sel = "btn-settle-1234";
+        var seq = new Queue<UiElement?>();
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 10, Y = 20, Width = 40, Height = 30 });   // initial center 30,35
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 200, Y = 20, Width = 100, Height = 30 }); // settled center 250,35
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMouse.ClickCalls.Count);
+        Assert.AreEqual(250, _fakeMouse.ClickCalls[0].ScreenX);
+        Assert.AreEqual(35, _fakeMouse.ClickCalls[0].ScreenY);
+    }
+
+    [TestMethod]
+    public async Task Scroll_Wheel_MovingTarget_ReturnsTargetMoved()
+    {
+        const string sel = "lst-moving-1234";
+        var seq = new Queue<UiElement?>();
+        for (int i = 0; i < 4; i++)
+        {
+            seq.Enqueue(new UiElement { Id = "e0", Type = "List", Selector = sel, X = 10, Y = 20 + i * 60, Width = 120, Height = 40 });
+        }
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--wheel", "-3", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
+    }
+
+    // ---------------------------------------------------------------------
     // send-keys (#562) — synthetic keyboard input
     // ---------------------------------------------------------------------
 

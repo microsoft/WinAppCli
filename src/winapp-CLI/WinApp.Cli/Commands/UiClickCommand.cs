@@ -106,6 +106,19 @@ internal class UiClickCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken); // let window activate
                 }
 
+                // Re-resolve the element just before clicking (N5): foregrounding can restore/animate the
+                // window, so the rect captured above may be stale. Refuse rather than click empty space if
+                // the target is still moving.
+                var stable = await GestureTargeting.ResolveStableAsync(
+                    uiAutomation, session, selector, element,
+                    GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
+                if (!GestureTargeting.TryReport(stable, logger, json, selectorStr, clickType))
+                {
+                    return 1;
+                }
+                centerX = stable.CenterX;
+                centerY = stable.CenterY;
+
                 // Perform the click via SendInput
                 mouseInput.Click(centerX, centerY, doubleClick, rightClick);
 

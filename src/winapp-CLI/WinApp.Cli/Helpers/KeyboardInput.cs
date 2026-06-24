@@ -151,8 +151,13 @@ internal static class KeyboardInput
                 ReleaseHeldKeys(array);
 
                 throw new InvalidOperationException(sent == 0
-                    ? "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
-                      "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator."
+                    ? (PInvoke.GetForegroundWindow().IsNull
+                        // No foreground window → the session is locked or on a secure desktop, where a
+                        // user-session process can't inject. That's not an elevation/UIPI problem.
+                        ? "SendInput failed — no interactive desktop is available (the session is locked " +
+                          "or on a secure desktop). Unlock the session and retry."
+                        : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
+                          "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.")
                     : $"SendInput delivered only {sent} of {array.Length} key events — input was partially applied. " +
                       "Held keys were released; retry the gesture.");
             }

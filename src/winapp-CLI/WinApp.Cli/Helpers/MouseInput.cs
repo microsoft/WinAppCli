@@ -191,7 +191,7 @@ internal static class MouseInput
 
     /// <summary>
     /// Dispatches the given input events via SendInput, throwing if the OS rejects them
-    /// (e.g. the target window is elevated and this process is not).
+    /// (e.g. the session is locked, or the target window is elevated and this process is not).
     /// </summary>
     private static void SendInputs(Span<INPUT> inputs)
     {
@@ -203,8 +203,14 @@ internal static class MouseInput
                 if (sent != (uint)inputs.Length)
                 {
                     throw new InvalidOperationException(sent == 0
-                        ? "SendInput failed — the target window may be elevated (running as admin). " +
-                          "Try running this CLI as administrator."
+                        ? (PInvoke.GetForegroundWindow().IsNull
+                            // No foreground window at all → the workstation is locked or on a secure
+                            // desktop (LogonUI/UAC), where a user-session process simply can't inject.
+                            // Don't blame elevation in that case.
+                            ? "SendInput failed — no interactive desktop is available (the session is locked " +
+                              "or on a secure desktop). Unlock the session and retry."
+                            : "SendInput failed — the target window may be elevated (running as admin). " +
+                              "Try running this CLI as administrator.")
                         : $"SendInput delivered only {sent} of {inputs.Length} mouse events — the gesture was " +
                           "partially applied.");
                 }

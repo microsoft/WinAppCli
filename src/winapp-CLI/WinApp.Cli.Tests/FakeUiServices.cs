@@ -16,11 +16,24 @@ internal class FakeUiAutomationService : IUiAutomationService
     public UiElement? FindSingleResult { get; set; }
 
     /// <summary>
-    /// Optional per-call results for <see cref="FindSingleElementAsync"/>. When non-empty, each call
-    /// dequeues the next entry (so a single command resolving two selectors — e.g. a selector→selector
-    /// drag — can return two distinct elements). Falls back to <see cref="FindSingleResult"/> when empty.
+    /// Optional per-call results for <see cref="FindSingleElementAsync"/>. When non-empty, the first
+    /// resolution of a *new* selector dequeues the next entry (so a single command resolving two
+    /// distinct selectors — e.g. a selector→selector drag — returns two distinct elements). Re-reads of
+    /// the same selector (the N5 stable-resolve) return the memoized element instead of draining the
+    /// queue. Falls back to <see cref="FindSingleResult"/> when empty.
     /// </summary>
     public Queue<UiElement?> FindSingleResults { get; } = new();
+
+    /// <summary>
+    /// Per-selector movement sequences for N5 stability tests. Each read of the keyed selector advances
+    /// the sequence (simulating an element whose bounds change between reads); once drained, the last
+    /// value sticks. Key by the selector's slug or query text. Enqueue the command's initial-resolve
+    /// element first, then one element per stability re-read.
+    /// </summary>
+    public Dictionary<string, Queue<UiElement?>> MovingResults { get; } = new();
+
+    private readonly Dictionary<string, UiElement?> _resolvedBySelector = new();
+    private readonly Dictionary<string, UiElement?> _lastMoving = new();
     public Dictionary<string, object?> PropertiesResult { get; set; } = [];
     public string InvokeResult { get; set; } = "InvokePattern";
     public (byte[] Pixels, int Width, int Height) ScreenshotResult { get; set; } = (new byte[4], 1, 1);
@@ -40,7 +53,34 @@ internal class FakeUiAutomationService : IUiAutomationService
         => Task.FromResult(SearchResult.Take(maxResults).ToArray());
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
-        => Task.FromResult(FindSingleResults.Count > 0 ? FindSingleResults.Dequeue() : FindSingleResult);
+    {
+        var key = selector.Slug ?? selector.Query ?? string.Empty;
+
+        // Per-selector movement sequence (N5 stability tests): advance each read, last value sticks.
+        if (MovingResults.TryGetValue(key, out var seq))
+        {
+            var moving = seq.Count > 0 ? seq.Dequeue() : _lastMoving.GetValueOrDefault(key);
+            _lastMoving[key] = moving;
+            return Task.FromResult(moving);
+        }
+
+        // Re-read of an already-resolved selector → return the memoized element so the N5 re-resolve
+        // doesn't drain the cross-selector queue.
+        if (_resolvedBySelector.TryGetValue(key, out var memo))
+        {
+            return Task.FromResult(memo);
+        }
+
+        // First resolution of a new selector: dequeue the next distinct cross-selector result.
+        if (FindSingleResults.Count > 0)
+        {
+            var dequeued = FindSingleResults.Dequeue();
+            _resolvedBySelector[key] = dequeued;
+            return Task.FromResult(dequeued);
+        }
+
+        return Task.FromResult(FindSingleResult);
+    }
 
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);

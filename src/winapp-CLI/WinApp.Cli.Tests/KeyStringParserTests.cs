@@ -397,5 +397,41 @@ public class KeyStringParserTests
         Assert.AreEqual(1, actions.Count);
         Assert.AreEqual("", ((TextInput)actions[0]).Text);
     }
+
+    [TestMethod]
+    [DataRow(@"text=a\sb", "a b")]            // \s → single space inside one token
+    [DataRow(@"text=a\s\sb", "a  b")]         // double space — not expressible without the escape
+    [DataRow(@"text=a\tb", "a\tb")]           // \t → tab
+    [DataRow(@"text=line1\nline2", "line1\nline2")] // \n → newline
+    [DataRow(@"text=a\rb", "a\rb")]           // \r → carriage return
+    [DataRow(@"text=a\\b", @"a\b")]           // \\ → literal backslash
+    public void Parse_TextEscape_DecodesWhitespaceEscapes(string token, string expected)
+    {
+        // N2: the tokenizer splits on whitespace and re-joins literal runs with a single space, so
+        // multiple/leading/tab/newline whitespace can't survive as raw spaces. Backslash escapes in a
+        // text= value restore exact whitespace fidelity.
+        var actions = KeyStringParser.Parse(token);
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual(expected, ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TextEscape_UnknownEscape_KeepsBackslashLiteral()
+    {
+        // An unrecognised escape (\x) is left verbatim so real backslashes in text don't vanish.
+        var actions = KeyStringParser.Parse(@"text=a\xb");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual(@"a\xb", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TextEscape_LeadingSpace_IsPreserved()
+    {
+        // A leading space (which the whitespace tokenizer would otherwise drop) survives via \s.
+        var actions = KeyStringParser.Parse(@"text=\shi");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual(" hi", ((TextInput)actions[0]).Text);
+    }
 }
 
