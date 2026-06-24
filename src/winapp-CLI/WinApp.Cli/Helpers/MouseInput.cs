@@ -51,7 +51,7 @@ internal static class MouseInput
         }
     }
 
-    public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false)
+    public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0)
     {
         var downFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
         var upFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP;
@@ -66,6 +66,13 @@ internal static class MouseInput
         {
             Thread.Sleep(50);
 
+            // Optional press-and-hold at the start before moving: drives long-press / press-and-hold
+            // detection. With from == to (no movement) this is a pure long-press gesture.
+            if (holdMs > 0)
+            {
+                Thread.Sleep(holdMs);
+            }
+
             // Move toward the destination in steps so the app sees a stream of WM_MOUSEMOVE messages
             const int steps = 20;
             for (int i = 1; i <= steps; i++)
@@ -74,6 +81,13 @@ internal static class MouseInput
                 int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
                 SendMove(x, y);
                 Thread.Sleep(10);
+            }
+
+            // Optional dwell at the destination before releasing, so drop targets / merge overlays
+            // that arm from a sustained hover (rather than the instant the cursor arrives) can latch.
+            if (dwellMs > 0)
+            {
+                Thread.Sleep(dwellMs);
             }
 
             Thread.Sleep(50);

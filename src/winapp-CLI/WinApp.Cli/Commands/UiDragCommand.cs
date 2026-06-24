@@ -47,12 +47,27 @@ internal class UiDragCommand : Command, IShortDescription
         Description = "Drag with the right mouse button instead of the left button"
     };
 
+    public static Option<int> HoldOption { get; } = new("--hold-ms")
+    {
+        Description = "Milliseconds to hold the button down at the start before moving (default: 0). " +
+                      "With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture.",
+        DefaultValueFactory = _ => 0
+    };
+
+    public static Option<int> DwellOption { get; } = new("--dwell-ms")
+    {
+        Description = "Milliseconds to dwell at the destination after moving, before releasing (default: 0). " +
+                      "Lets drop targets / merge overlays that arm from a sustained hover latch before release.",
+        DefaultValueFactory = _ => 0
+    };
+
     public UiDragCommand()
         : base("drag", "Press the mouse button at one point, move to another, then release. Preferred form: " +
                "'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or " +
                "app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> " +
                "<toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures " +
-               "and drag-and-drop. Use --right for a right-button drag.")
+               "and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and " +
+               "--dwell-ms to settle on a drop target before releasing.")
     {
         Arguments.Add(FromArgument);
         Arguments.Add(ToArgument);
@@ -60,6 +75,8 @@ internal class UiDragCommand : Command, IShortDescription
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
         Options.Add(RightButtonOption);
+        Options.Add(HoldOption);
+        Options.Add(DwellOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -80,10 +97,20 @@ internal class UiDragCommand : Command, IShortDescription
             var arg1 = parseResult.GetValue(ToArgument);
             var legacyToOffset = parseResult.GetValue(LegacyToOffsetArgument);
             var rightButton = parseResult.GetValue(RightButtonOption);
+            var holdMs = parseResult.GetValue(HoldOption);
+            var dwellMs = parseResult.GetValue(DwellOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
+                return 1;
+            }
+
+            if (holdMs < 0 || dwellMs < 0)
+            {
+                logger.LogError("{Symbol} --hold-ms and --dwell-ms must be zero or positive.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    "--hold-ms and --dwell-ms must be zero or positive.");
                 return 1;
             }
 
@@ -188,7 +215,7 @@ internal class UiDragCommand : Command, IShortDescription
                     return 1;
                 }
 
-                mouseInput.Drag(fromX, fromY, toX, toY, rightButton);
+                mouseInput.Drag(fromX, fromY, toX, toY, rightButton, holdMs, dwellMs);
 
                 var button = rightButton ? "right" : "left";
 
@@ -204,6 +231,8 @@ internal class UiDragCommand : Command, IShortDescription
                         ToX = toX,
                         ToY = toY,
                         Button = button,
+                        HoldMs = holdMs,
+                        DwellMs = dwellMs,
                         Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(

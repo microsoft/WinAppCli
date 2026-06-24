@@ -246,5 +246,7 @@ internal sealed class UiDragResult
     public int ToX { get; set; }
     public int ToY { get; set; }
     public string Button { get; set; } = "left";
+    public int HoldMs { get; set; }
+    public int DwellMs { get; set; }
     public long Hwnd { get; set; }
 }

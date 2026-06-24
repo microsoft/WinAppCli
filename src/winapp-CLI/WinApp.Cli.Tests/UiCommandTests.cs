@@ -1044,6 +1044,82 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }
 
+    // ---- --hold-ms / --dwell-ms: press-and-hold (long-press) and drop-target dwell ----
+
+    [TestMethod]
+    public async Task Drag_HoldMs_FlowsToMouseInput()
+    {
+        // from == to with --hold-ms is a press-and-hold / long-press gesture.
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-tile-9001", X = 100, Y = 100, Width = 80, Height = 40 };
+
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-tile-9001", "btn-tile-9001", "-a", "TestApp", "--hold-ms", "600", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(600, drag.HoldMs);
+        Assert.AreEqual(0, drag.DwellMs);
+        Assert.AreEqual(140, drag.FromX); // 100 + 80/2
+        Assert.AreEqual(140, drag.ToX);   // same element → long-press, no movement
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(600, result.GetProperty("holdMs").GetInt32());
+        Assert.AreEqual(0, result.GetProperty("dwellMs").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task Drag_DwellMs_FlowsToMouseInput()
+    {
+        // --dwell-ms holds at the destination so a drop target / merge overlay can latch before release.
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,100", "300,300", "-a", "TestApp", "--dwell-ms", "350", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(0, drag.HoldMs);
+        Assert.AreEqual(350, drag.DwellMs);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(350, result.GetProperty("dwellMs").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task Drag_HoldAndDwell_BothFlow()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,100", "300,300", "-a", "TestApp", "--hold-ms", "120", "--dwell-ms", "200", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(120, drag.HoldMs);
+        Assert.AreEqual(200, drag.DwellMs);
+    }
+
+    [TestMethod]
+    public async Task Drag_DefaultHoldAndDwell_AreZero()
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,100", "300,300", "-a", "TestApp", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var drag = _fakeMouse.DragCalls[0];
+        Assert.AreEqual(0, drag.HoldMs);
+        Assert.AreEqual(0, drag.DwellMs);
+    }
+
+    [TestMethod]
+    [DataRow("--hold-ms")]
+    [DataRow("--dwell-ms")]
+    public async Task Drag_NegativeHoldOrDwell_ReturnsError(string option)
+    {
+        var command = GetRequiredService<UiDragCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,100", "300,300", "-a", "TestApp", option, "-5", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
+    }
+
     // ---------------------------------------------------------------------
     // scroll --wheel (#498) — synthetic mouse-wheel input
     // ---------------------------------------------------------------------

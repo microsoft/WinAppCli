@@ -95,7 +95,7 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
 {
     public record HoverCall(int ScreenX, int ScreenY);
     public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick);
-    public record DragCall(int FromX, int FromY, int ToX, int ToY, bool RightButton);
+    public record DragCall(int FromX, int FromY, int ToX, int ToY, bool RightButton, int HoldMs = 0, int DwellMs = 0);
     public record ScrollWheelCall(int ScreenX, int ScreenY, int Delta);
 
     public List<HoverCall> HoverCalls { get; } = [];
@@ -106,8 +106,8 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
     public void Hover(int screenX, int screenY) => HoverCalls.Add(new(screenX, screenY));
     public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
         => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick));
-    public void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false)
-        => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton));
+    public void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0)
+        => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton, holdMs, dwellMs));
     public void ScrollWheel(int screenX, int screenY, int delta)
         => ScrollWheelCalls.Add(new(screenX, screenY, delta));
 }

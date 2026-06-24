@@ -596,14 +596,18 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface UiDragOptions extends CommonOptions {
-  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
-  selector?: string;
-  /** Start point as x,y offset (in pixels) from the element's top-left corner, e.g. 40,50 */
+  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within. */
   from?: string;
-  /** End point as x,y offset (in pixels) from the element's top-left corner, e.g. 60,30 */
+  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left. */
   to?: string;
+  /** (Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form. */
+  toOffset?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
+  /** Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. */
+  dwellMs?: number;
+  /** Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. */
+  holdMs?: number;
   /** Format output as JSON */
   json?: boolean;
   /** Drag with the right mouse button instead of the left button */
@@ -613,14 +617,16 @@ export interface UiDragOptions extends CommonOptions {
 }
 
 /**
- * Press the mouse button at a point inside an element, move to another point, then release. Coordinates are x,y offsets (in pixels) from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag.
+ * Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
  */
 export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'drag'];
-  if (options.selector) args.push(options.selector);
   if (options.from) args.push(options.from);
   if (options.to) args.push(options.to);
+  if (options.toOffset) args.push(options.toOffset);
   if (options.app) args.push('--app', options.app);
+  if (options.dwellMs !== undefined) args.push('--dwell-ms', options.dwellMs.toString());
+  if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
   if (options.json) args.push('--json');
   if (options.right) args.push('--right');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1000,14 +1006,14 @@ export interface UiSendKeysOptions extends CommonOptions {
   json?: boolean;
   /** Optional selector (slug or text) to focus before sending keys. */
   target?: string;
-  /** Transport: post-message (HWND-targeted, bypasses UIPI; default) or send-input (OS-wide). */
+  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. */
   via?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide).
+ * Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.
  */
 export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'send-keys'];

@@ -34,6 +34,7 @@ internal sealed record TextInput(string Text) : KeyAction;
 /// <item>Named keys: <c>down</c>, <c>enter</c>, <c>tab</c>, <c>esc</c>, <c>f5</c> …</item>
 /// <item>Modifier combos: <c>ctrl+shift+t</c>, <c>alt+f4</c></item>
 /// <item>Raw virtual keys: <c>vk=0x42</c> or <c>vk=66</c></item>
+/// <item>Explicit literal text: <c>text=enter</c> types the word "enter" instead of pressing Enter.</item>
 /// <item>Anything else is treated as literal text and typed character by character.</item>
 /// </list>
 /// </summary>
@@ -88,6 +89,15 @@ internal static class KeyStringParser
 
         foreach (var token in tokens)
         {
+            // Explicit literal text: text=enter types the word "enter" rather than pressing Enter.
+            // Mirrors the vk= escape and lets values that collide with a key/modifier name (enter,
+            // del, up, ctrl+a, …) be typed verbatim. Checked first so the escape always wins.
+            if (token.StartsWith("text=", StringComparison.OrdinalIgnoreCase))
+            {
+                actions.Add(new TextInput(token["text=".Length..]));
+                continue;
+            }
+
             // Modifier combo, e.g. ctrl+shift+t. Only treated as a chord when the leading segments
             // are real modifiers, so literal tokens that merely contain '+' (e.g. "C++", "a+b") are
             // typed as text instead of throwing. (A bare "+" main key is supported via vk=.)

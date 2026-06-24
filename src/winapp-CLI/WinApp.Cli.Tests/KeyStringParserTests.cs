@@ -344,5 +344,48 @@ public class KeyStringParserTests
         Assert.IsInstanceOfType<TextInput>(actions[0]);
         Assert.AreEqual("+", ((TextInput)actions[0]).Text);
     }
+
+    [TestMethod]
+    [DataRow("text=enter", "enter")]   // collides with a named key
+    [DataRow("text=del", "del")]
+    [DataRow("text=up", "up")]
+    [DataRow("text=ctrl+a", "ctrl+a")] // collides with a modifier combo
+    [DataRow("text=vk=0x42", "vk=0x42")]
+    [DataRow("TEXT=Enter", "Enter")]   // prefix is case-insensitive; value is preserved verbatim
+    public void Parse_TextEscape_ForcesLiteralEvenWhenColliding(string token, string expected)
+    {
+        var actions = KeyStringParser.Parse(token);
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual(expected, ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TextEscape_CoalescesWithAdjacentLiterals()
+    {
+        // "text=down" escapes "down" to literal; the following plain word joins it with a space.
+        var actions = KeyStringParser.Parse("text=down low");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("down low", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TextEscape_BreaksFromRealKeys()
+    {
+        // A real key between escaped-literal tokens stays a distinct key action.
+        var actions = KeyStringParser.Parse("text=enter tab text=down");
+        Assert.AreEqual(3, actions.Count);
+        Assert.AreEqual("enter", ((TextInput)actions[0]).Text);
+        Assert.AreEqual(0x09, ((KeyChord)actions[1]).Vk); // VK_TAB
+        Assert.AreEqual("down", ((TextInput)actions[2]).Text);
+    }
+
+    [TestMethod]
+    public void Parse_TextEscape_EmptyValue_IsEmptyLiteral()
+    {
+        var actions = KeyStringParser.Parse("text=");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("", ((TextInput)actions[0]).Text);
+    }
 }
 

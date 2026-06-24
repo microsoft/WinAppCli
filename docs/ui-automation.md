@@ -271,6 +271,10 @@ winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center �
 winapp ui drag 120,200 480,200 -a myapp                       # raw app coords → app coords
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right  # right-button drag
 
+# Press-and-hold / long-press and drop-target dwell
+winapp ui drag tile-photo-7b3c tile-photo-7b3c -a myapp --hold-ms 600   # long-press: from == to, hold 600ms, no move
+winapp ui drag itm-card-9f8e pane-left-2c1a -a myapp --dwell-ms 350      # settle on the drop target before releasing
+
 # Legacy 3-arg form (offsets from the element's top-left)
 winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp           # left-drag from (40,50) to (60,30) inside the element
 winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp            # drag a slider thumb to the right
@@ -278,6 +282,8 @@ winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp            # drag a slider th
 
 **Options:**
 - `--right` — Drag with the right mouse button instead of the left button.
+- `--hold-ms <ms>` — Hold the button down at the start before moving (default: 0). With `<from> == <to>` (no movement) this performs a **press-and-hold / long-press** gesture.
+- `--dwell-ms <ms>` — Dwell at the destination after moving, before releasing (default: 0). Lets **drop targets / merge overlays** that arm from a sustained hover (rather than the instant the cursor arrives) latch before the button-up.
 
 > In the 2-arg form, bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points. In the legacy 3-arg form the `x,y` values are offsets from the element's top-left corner (`0,0` is the corner).
 
@@ -310,6 +316,7 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 - **Sequences** — multiple tokens are pressed in order: `down down enter`.
 - **Modifier combos** — `ctrl`, `shift`, `alt`, `win` joined with `+`: `ctrl+shift+t`, `alt+f4`.
 - **Literal text** — any token that isn't a known key is typed character by character: `hello`. Adjacent literal words keep the space between them, so a quoted phrase like `"Hello world"` is typed verbatim (the space is preserved); a literal that merely contains `+` such as `C++` or `a+b` is typed as text, not parsed as a combo.
+- **Explicit literal escape** — prefix a token with `text=` to type it verbatim even when it collides with a key or modifier name: `text=enter` types the word "enter" instead of pressing Enter, and `text=ctrl+a` types the literal string. Mirrors the `vk=` escape; the escaped value still coalesces with adjacent literal words (`text=down low` → "down low").
 - **Raw virtual keys** — `vk=0xNN` (hex) or `vk=NN` (decimal) for keys without a friendly name.
 
 **Options:**
