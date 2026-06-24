@@ -258,14 +258,10 @@ winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
 ### drag
-Press the mouse button at one point, move to another, then release. Two forms:
-
-- **Preferred — `drag <from> <to>`:** each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
-- **Legacy — `drag <selector> <fromX,fromY> <toX,toY>`:** the two `x,y` values are pixel **offsets from the element's top-left corner**. Disambiguated by the third positional argument; existing scripts keep working unchanged.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
 
 Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
 ```bash
-# Preferred 2-arg form
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp           # reorder: card center → slot center
 winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center → app coords (from inspect)
 winapp ui drag 120,200 480,200 -a myapp                       # raw app coords → app coords
@@ -274,10 +270,6 @@ winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right  # right-button dra
 # Press-and-hold / long-press and drop-target dwell
 winapp ui drag tile-photo-7b3c tile-photo-7b3c -a myapp --hold-ms 600   # long-press: from == to, hold 600ms, no move
 winapp ui drag itm-card-9f8e pane-left-2c1a -a myapp --dwell-ms 350      # settle on the drop target before releasing
-
-# Legacy 3-arg form (offsets from the element's top-left)
-winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp           # left-drag from (40,50) to (60,30) inside the element
-winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp            # drag a slider thumb to the right
 ```
 
 **Options:**
@@ -285,7 +277,7 @@ winapp ui drag sld-volume-c3d4 0,10 80,10 -a myapp            # drag a slider th
 - `--hold-ms <ms>` — Hold the button down at the start before moving (default: 0). With `<from> == <to>` (no movement) this performs a **press-and-hold / long-press** gesture.
 - `--dwell-ms <ms>` — Dwell at the destination after moving, before releasing (default: 0). Lets **drop targets / merge overlays** that arm from a sustained hover (rather than the instant the cursor arrives) latch before the button-up.
 
-> In the 2-arg form, bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points. In the legacy 3-arg form the `x,y` values are offsets from the element's top-left corner (`0,0` is the corner).
+> Bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points.
 
 > Like `send-keys --via send-input`, `drag` injects OS-wide at screen coordinates after bringing the target to the foreground. If focus can't be brought to the target (e.g. focus-stealing prevention from a background process), the command **fails (`foreground_not_target`)** rather than dragging on the wrong window — focus or click the window first.
 
@@ -306,6 +298,7 @@ Send synthetic keyboard input — the keyboard counterpart to `click`. UIA has n
 winapp ui send-keys "down down enter" -a myapp                 # arrow navigation then commit
 winapp ui send-keys "ctrl+a delete" -a myapp                   # select all, then delete
 winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp  # focus a field, then type text
+winapp ui send-keys "text=down text=down text=enter" -a myapp  # type the words, don't press the keys
 winapp ui send-keys "alt+f4" -a myapp                          # close window via accelerator
 winapp ui send-keys "vk=0x5D" -a myapp                         # a key with no friendly name (Apps/Menu key)
 winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide injection instead of PostMessage
@@ -326,7 +319,7 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 **Choosing a transport / known limits:**
 - `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
 - `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level. As a safety guard, `send-input` verifies the target window is actually in the foreground immediately before injecting and **fails (`foreground_not_target`) rather than typing into the wrong window** if focus could not be brought to it — focus or click the window first.
-- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **emits a warning** before synthesizing them (e.g. `win+l` would lock the session) but still sends them — synthesizing them can be the legitimate intent of a test. `post-message` is window-scoped and is not affected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
+- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **rejects them** (errors with `invalid_arguments` and sends nothing) because injecting them at the OS level has effects well beyond the target window (e.g. `win+l` would lock the session). If you genuinely need to deliver one to a window, use `--via post-message`, which is window-scoped and unaffected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
 
 **Per-keystroke events (KeyDown / TextChanged):**
 - **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).
@@ -392,15 +385,15 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 # If you target an element that's not scrollable, scroll walks up to find the nearest scrollable parent
 winapp ui scroll itm-someitem-a1b2 --direction down -a myapp
 
-# Synthesize real mouse-wheel input over the element (120 = one notch up, -120 = one notch down).
+# Synthesize real mouse-wheel input over the element (1 = one notch up, -1 = one notch down).
 # Use this to test handlers that respond to the wheel directly (zoom, custom scroll) rather than ScrollPattern.
-winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
+winapp ui scroll img-map-a1b2 --wheel -1 -a myapp
 ```
 
 **Options:**
 - `--direction <up|down|left|right>` — Scroll incrementally via `ScrollPattern`.
 - `--to <top|bottom>` — Jump to the start/end via `ScrollPattern`.
-- `--wheel <delta>` — Synthesize mouse-wheel input over the element's center via `SendInput`. One notch is `120`; positive scrolls up/away, negative down/toward. Bypasses `ScrollPattern`.
+- `--wheel <notches>` — Synthesize mouse-wheel input over the element's center via `SendInput`, in wheel notches (detents): `1` = one notch up/away, `-1` = one notch down/toward, `3` = three notches up. (Each notch is the Windows `WHEEL_DELTA` of 120 units that `SendInput` consumes; the CLI scales notches by 120 for you.) Bypasses `ScrollPattern`.
 
 > `--direction`, `--to`, and `--wheel` are mutually exclusive — pass exactly one. Because `--wheel` injects OS-wide input at screen coordinates, it brings the target to the foreground first and **fails (`foreground_not_target`)** if focus couldn't be transferred, rather than scrolling the wrong window.
 

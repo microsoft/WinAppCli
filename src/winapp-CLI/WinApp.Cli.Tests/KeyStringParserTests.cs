@@ -381,6 +381,16 @@ public class KeyStringParserTests
     }
 
     [TestMethod]
+    public void Parse_TextEscape_TypesLiteralPhraseThatCollidesWithKeyNames()
+    {
+        // The phrase "down down enter" is all key names; escaping each word with text= types it
+        // verbatim as one literal instead of pressing Down, Down, Enter.
+        var actions = KeyStringParser.Parse("text=down text=down text=enter");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("down down enter", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
     public void Parse_TextEscape_EmptyValue_IsEmptyLiteral()
     {
         var actions = KeyStringParser.Parse("text=");

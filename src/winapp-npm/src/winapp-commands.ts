@@ -596,12 +596,10 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface UiDragOptions extends CommonOptions {
-  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within. */
+  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
   from?: string;
-  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left. */
+  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
   to?: string;
-  /** (Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form. */
-  toOffset?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. */
@@ -617,13 +615,12 @@ export interface UiDragOptions extends CommonOptions {
 }
 
 /**
- * Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+ * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
  */
 export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'drag'];
   if (options.from) args.push(options.from);
   if (options.to) args.push(options.to);
-  if (options.toOffset) args.push(options.toOffset);
   if (options.app) args.push('--app', options.app);
   if (options.dwellMs !== undefined) args.push('--dwell-ms', options.dwellMs.toString());
   if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
@@ -915,7 +912,7 @@ export interface UiScrollOptions extends CommonOptions {
   json?: boolean;
   /** Scroll to position: top, bottom */
   to?: string;
-  /** Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. */
+  /** Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. */
   wheel?: number;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;

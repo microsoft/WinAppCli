@@ -18,27 +18,19 @@ internal class UiDragCommand : Command, IShortDescription
 {
     public string ShortDescription => "Drag from one element/point to another element/point";
 
-    // The command accepts two forms, disambiguated by how many positional args are supplied:
-    //   2-arg (preferred): drag <from> <to>            — each is a selector (element center) or app x,y coords
-    //   3-arg (legacy):    drag <selector> <from> <to> — <from>/<to> are x,y offsets from the element's top-left
+    // drag <from> <to> — each endpoint is an element selector (drags from/to the element's center)
+    // or app x,y coordinates in the same space 'ui inspect' reports.
     public static Argument<string?> FromArgument { get; } = new("from")
     {
         Description = "Start point — an element selector (drags from its center) or app coordinates x,y as reported by " +
-                      "'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within.",
+                      "'ui inspect' (e.g. pn-list-d736 or 100,200).",
         Arity = ArgumentArity.ZeroOrOne
     };
 
     public static Argument<string?> ToArgument { get; } = new("to")
     {
         Description = "End point — an element selector (drops at its center) or app coordinates x,y as reported by " +
-                      "'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left.",
-        Arity = ArgumentArity.ZeroOrOne
-    };
-
-    public static Argument<string?> LegacyToOffsetArgument { get; } = new("to-offset")
-    {
-        Description = "(Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. " +
-                      "Omit this to use the preferred 2-arg form.",
+                      "'ui inspect' (e.g. pn-target-d746 or 300,400).",
         Arity = ArgumentArity.ZeroOrOne
     };
 
@@ -62,16 +54,14 @@ internal class UiDragCommand : Command, IShortDescription
     };
 
     public UiDragCommand()
-        : base("drag", "Press the mouse button at one point, move to another, then release. Preferred form: " +
+        : base("drag", "Press the mouse button at one point, move to another, then release. " +
                "'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or " +
-               "app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> " +
-               "<toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures " +
+               "app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures " +
                "and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and " +
                "--dwell-ms to settle on a drop target before releasing.")
     {
         Arguments.Add(FromArgument);
         Arguments.Add(ToArgument);
-        Arguments.Add(LegacyToOffsetArgument);
         Options.Add(SharedUiOptions.AppOption);
         Options.Add(SharedUiOptions.WindowOption);
         Options.Add(RightButtonOption);
@@ -95,7 +85,6 @@ internal class UiDragCommand : Command, IShortDescription
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var arg0 = parseResult.GetValue(FromArgument);
             var arg1 = parseResult.GetValue(ToArgument);
-            var legacyToOffset = parseResult.GetValue(LegacyToOffsetArgument);
             var rightButton = parseResult.GetValue(RightButtonOption);
             var holdMs = parseResult.GetValue(HoldOption);
             var dwellMs = parseResult.GetValue(DwellOption);
@@ -114,87 +103,37 @@ internal class UiDragCommand : Command, IShortDescription
                 return 1;
             }
 
-            // A third positional value means the legacy 'drag <selector> <fromOffset> <toOffset>' form.
-            var legacy = !string.IsNullOrWhiteSpace(legacyToOffset);
-
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
-                int fromX, fromY, toX, toY;
-                long targetHwnd;
-                string elementId = "", fromToken = "", toToken = "";
-
-                if (legacy)
+                if (string.IsNullOrWhiteSpace(arg0) || string.IsNullOrWhiteSpace(arg1))
                 {
-                    if (string.IsNullOrWhiteSpace(arg0))
-                    {
-                        UiErrors.MissingSelector(logger, "drag", json);
-                        return 1;
-                    }
-
-                    if (!TryParsePoint(arg1, out int offFromX, out int offFromY))
-                    {
-                        logger.LogError("{Symbol} Invalid <from> offset '{Arg}' — expected x,y (e.g. 40,50). You passed 3 arguments, which selects the legacy 'drag <selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords use just 2 arguments: 'drag <from> <to>'.", UiSymbols.Error, arg1);
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <from> offset — expected x,y (e.g. 40,50). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments.");
-                        return 1;
-                    }
-
-                    if (!TryParsePoint(legacyToOffset, out int offToX, out int offToY))
-                    {
-                        logger.LogError("{Symbol} Invalid <to> offset '{Arg}' — expected x,y (e.g. 60,30). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments: 'drag <from> <to>'.", UiSymbols.Error, legacyToOffset);
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Invalid <to> offset — expected x,y (e.g. 60,30). With 3 arguments drag uses the legacy '<selector> <fromOffset> <toOffset>' form; for selector→selector or selector→coords pass only 2 arguments.");
-                        return 1;
-                    }
-
-                    var selector = selectorService.Parse(arg0);
-                    var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
-                    if (element is null)
-                    {
-                        UiErrors.ElementNotFound(logger, arg0, json);
-                        return 1;
-                    }
-
-                    // Offsets are relative to the element's top-left corner (element coords are screen space).
-                    fromX = (int)(element.X + offFromX);
-                    fromY = (int)(element.Y + offFromY);
-                    toX = (int)(element.X + offToX);
-                    toY = (int)(element.Y + offToY);
-                    targetHwnd = element.WindowHandle ?? session.WindowHandle;
-                    elementId = element.Selector ?? element.Id ?? "";
+                    logger.LogError("{Symbol} Specify both <from> and <to> — each is an element selector or x,y coordinates.", UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                        "Specify both <from> and <to> — each is an element selector or x,y coordinates.");
+                    return 1;
                 }
-                else
+
+                var from = await ResolveEndpointAsync(arg0, "from", session, json, cancellationToken);
+                if (!from.Ok)
                 {
-                    if (string.IsNullOrWhiteSpace(arg0) || string.IsNullOrWhiteSpace(arg1))
-                    {
-                        logger.LogError("{Symbol} Specify both <from> and <to> — each is an element selector or x,y coordinates.", UiSymbols.Error);
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                            "Specify both <from> and <to> — each is an element selector or x,y coordinates.");
-                        return 1;
-                    }
-
-                    var from = await ResolveEndpointAsync(arg0, "from", session, json, cancellationToken);
-                    if (!from.Ok)
-                    {
-                        return 1;
-                    }
-
-                    var to = await ResolveEndpointAsync(arg1, "to", session, json, cancellationToken);
-                    if (!to.Ok)
-                    {
-                        return 1;
-                    }
-
-                    fromX = from.X;
-                    fromY = from.Y;
-                    toX = to.X;
-                    toY = to.Y;
-                    // Prefer the HWND of whichever endpoint resolved from a real element; fall back to the
-                    // session window when both endpoints are bare coordinates.
-                    targetHwnd = from.Hwnd != 0 ? from.Hwnd : (to.Hwnd != 0 ? to.Hwnd : session.WindowHandle);
-                    fromToken = arg0;
-                    toToken = arg1;
+                    return 1;
                 }
+
+                var to = await ResolveEndpointAsync(arg1, "to", session, json, cancellationToken);
+                if (!to.Ok)
+                {
+                    return 1;
+                }
+
+                int fromX = from.X;
+                int fromY = from.Y;
+                int toX = to.X;
+                int toY = to.Y;
+                // Prefer the HWND of whichever endpoint resolved from a real element; fall back to the
+                // session window when both endpoints are bare coordinates.
+                long targetHwnd = from.Hwnd != 0 ? from.Hwnd : (to.Hwnd != 0 ? to.Hwnd : session.WindowHandle);
 
                 if (targetHwnd != 0)
                 {
@@ -223,9 +162,8 @@ internal class UiDragCommand : Command, IShortDescription
                 {
                     var result = new UiDragResult
                     {
-                        ElementId = elementId,
-                        From = fromToken,
-                        To = toToken,
+                        From = arg0,
+                        To = arg1,
                         FromX = fromX,
                         FromY = fromY,
                         ToX = toX,

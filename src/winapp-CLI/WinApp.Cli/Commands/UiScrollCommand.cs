@@ -16,6 +16,9 @@ internal class UiScrollCommand : Command, IShortDescription
 {
     public string ShortDescription => "Scroll a container element";
 
+    /// <summary>One mouse-wheel detent in WHEEL_DELTA units, the granularity SendInput's wheel expects.</summary>
+    private const int WheelDelta = 120;
+
     public static Option<string?> DirectionOption { get; }
     public static Option<string?> ToOption { get; }
     public static Option<int?> WheelOption { get; }
@@ -34,7 +37,8 @@ internal class UiScrollCommand : Command, IShortDescription
 
         WheelOption = new Option<int?>("--wheel")
         {
-            Description = "Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern."
+            Description = "Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). " +
+                          "Synthesizes real wheel input instead of using ScrollPattern."
         };
     }
 
@@ -113,7 +117,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
                 var targetHwnd = element.WindowHandle ?? session.WindowHandle;
 
-                if (wheel is int delta)
+                if (wheel is int notches)
                 {
                     int centerX = (int)(element.X + element.Width / 2.0);
                     int centerY = (int)(element.Y + element.Height / 2.0);
@@ -144,7 +148,9 @@ internal class UiScrollCommand : Command, IShortDescription
                         }
                     }
 
-                    mouseInput.ScrollWheel(centerX, centerY, delta);
+                    // --wheel is expressed in notches for ergonomics; SendInput's mouse wheel works in
+                    // WHEEL_DELTA units (120 per detent), so scale up to the raw delta the OS expects.
+                    mouseInput.ScrollWheel(centerX, centerY, notches * WheelDelta);
                 }
                 else
                 {

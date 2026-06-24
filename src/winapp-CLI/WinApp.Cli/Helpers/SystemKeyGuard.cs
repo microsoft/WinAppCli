@@ -4,9 +4,10 @@
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
-/// Recognizes system- and shell-reserved key combinations so <c>send-keys --via send-input</c> can warn
-/// before synthesizing them. These combos act on the OS/shell (lock, Start, Task Manager, close window),
-/// not just the targeted app, when injected OS-wide. This is advisory only — the keys are still sent.
+/// Recognizes system- and shell-reserved key combinations so <c>send-keys --via send-input</c> can refuse
+/// to synthesize them. These combos act on the OS/shell (lock, Start, Task Manager, close window), not just
+/// the targeted app, when injected OS-wide — so send-input rejects them rather than acting beyond the target.
+/// (<c>--via post-message</c> is window-scoped and is not affected.)
 /// </summary>
 internal static class SystemKeyGuard
 {

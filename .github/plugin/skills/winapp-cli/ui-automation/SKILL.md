@@ -119,6 +119,9 @@ Synthesize keystrokes — the keyboard counterpart to `click`. Use for arrow/Tab
 # Keyboard navigation then commit
 winapp ui send-keys "down down enter" -a myapp
 
+# Type the literal words "down down enter" instead of pressing those keys (text= escapes each token)
+winapp ui send-keys "text=down text=down text=enter" -a myapp
+
 # Shortcut: select all and delete
 winapp ui send-keys "ctrl+a delete" -a myapp
 
@@ -126,16 +129,17 @@ winapp ui send-keys "ctrl+a delete" -a myapp
 winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
 
 # Transport: --via post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide)
-winapp ui send-keys "alt+f4" -a myapp --via send-input
+winapp ui send-keys "enter" -a myapp --via send-input
 ```
 - Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
-- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It also **warns before synthesizing system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) since those act on the OS/shell, but still sends them.
+- A token that collides with a key/modifier name (e.g. `enter`, `down`, `ctrl+a`) is pressed as that key. Prefix it with `text=` to type it as literal text instead — `text=enter` types the word "enter"; chain `text=` tokens to type a literal phrase like `text=down text=down text=enter`.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It **rejects system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) because those act on the OS/shell, not just the target — use `--via post-message` (window-scoped) if you really need to send one to the window.
 - Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR` (raises `TextChanged`, lands correct text across integrity levels) but does not fire a per-character `KeyDown`.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at one point, move to another, then release. Two forms: **`drag <from> <to>`** (preferred) where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`; or legacy **`drag <selector> <fromX,fromY> <toX,toY>`** where the two `x,y` are pixel offsets from the element's top-left corner. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
-# Preferred: reorder one item onto another (center → center)
+# Reorder one item onto another (center → center)
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
 
 # Element center → app coordinates (as reported by `ui inspect`)
@@ -144,13 +148,10 @@ winapp ui drag itm-card-9f8e 300,400 -a myapp
 # Raw app coordinates → app coordinates
 winapp ui drag 120,200 480,200 -a myapp
 
-# Legacy: offsets from the element's top-left corner
-winapp ui drag img-canvas-a1b2 40,50 60,30 -a myapp
-
 # Right-button drag
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- In the 2-arg form a selector drags from/to the element's center and `x,y` are app coordinates (same space as `ui inspect`). In the legacy 3-arg form `x,y` are offsets from the element's top-left corner (`0,0` is the corner).
+- A selector drags from/to the element's center; `x,y` are app coordinates in the same space `ui inspect`/`search` report.
 
 ### Read element state
 ```powershell
@@ -185,8 +186,8 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 # Scroll and then inspect for newly visible elements
 winapp ui scroll pn-scrollview-bfef --direction down -a myapp; winapp ui search TargetItem -a myapp
 
-# Synthesize real mouse-wheel input over the element (120 = one notch up, -120 = down) — tests wheel handlers (zoom, custom scroll)
-winapp ui scroll img-map-a1b2 --wheel -120 -a myapp
+# Synthesize real mouse-wheel input over the element (1 = one notch up, -1 = down) — tests wheel handlers (zoom, custom scroll)
+winapp ui scroll img-map-a1b2 --wheel -1 -a myapp
 ```
 
 ### Wait for UI state
@@ -409,15 +410,14 @@ Click an element by slug or text search using mouse simulation. Works on element
 
 ### `winapp ui drag`
 
-Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<from>` | No | Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within. |
-| `<to>` | No | End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left. |
-| `<to-offset>` | No | (Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form. |
+| `<from>` | No | Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
+| `<to>` | No | End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -542,7 +542,7 @@ Scroll a container element using ScrollPattern. Use --direction to scroll increm
 | `--direction` | Scroll direction: up, down, left, right | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--to` | Scroll to position: top, bottom | (none) |
-| `--wheel` | Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. | (none) |
+| `--wheel` | Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui wait-for`

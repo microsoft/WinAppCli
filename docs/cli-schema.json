@@ -1799,11 +1799,11 @@
           }
         },
         "drag": {
-          "description": "Press the mouse button at one point, move to another, then release. Preferred form: 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Legacy form: 'drag <selector> <fromX,fromY> <toX,toY>' with offsets from the element's top-left corner. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
+          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
           "hidden": false,
           "arguments": {
             "from": {
-              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). Legacy 3-arg form: the element selector to drag within.",
+              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1814,19 +1814,8 @@
               }
             },
             "to": {
-              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). Legacy 3-arg form: the start x,y offset from the element's top-left.",
+              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
               "order": 1,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              }
-            },
-            "to-offset": {
-              "description": "(Legacy 3-arg form only) the end x,y offset from the element's top-left corner, e.g. 60,30. Omit this to use the preferred 2-arg form.",
-              "order": 2,
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -3013,7 +3002,7 @@
               "recursive": false
             },
             "--wheel": {
-              "description": "Rotate the mouse wheel over the element by this delta (120 = one notch up, -120 = one notch down). Synthesizes real wheel input instead of using ScrollPattern.",
+              "description": "Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern.",
               "hidden": false,
               "valueType": "System.Nullable<System.Int32>",
               "hasDefaultValue": false,

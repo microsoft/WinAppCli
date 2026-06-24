@@ -804,46 +804,33 @@ public class UiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SendKeys_SystemCombo_ViaSendInput_StillSends()
+    public async Task SendKeys_SystemCombo_ViaSendInput_IsRejected()
     {
-        // The system-reserved-combo guard is advisory (warn-only): a win+l send-input request still
-        // succeeds and reaches the keyboard transport — it must not be silently blocked.
+        // send-input is OS-wide, so a system-reserved combo (win+l) acts on the shell, not just the
+        // target — the command must refuse it and never reach the keyboard transport.
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+l", "-a", "TestApp", "--via", "send-input", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_SystemCombo_ViaPostMessage_StillSends()
+    {
+        // post-message is window-scoped (posts straight to the target HWND's queue), so it isn't
+        // OS-wide and is not blocked — an alt+f4 posted to the window just closes that window.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["alt+f4", "-a", "TestApp", "--via", "post-message", "--json"]);
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
     }
 
     // ---------------------------------------------------------------------
-    // drag (#498) — mouse drag gesture
+    // drag (#498) — mouse drag gesture: drag <from> <to>, each a selector
+    // (element center) or app x,y coordinates
     // ---------------------------------------------------------------------
-
-    [TestMethod]
-    public async Task Drag_Json_EmitsEnvelopeWithElementRelativeCoords()
-    {
-        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-canvas-1234", X = 50, Y = 60, Width = 200, Height = 200 };
-
-        var command = GetRequiredService<UiDragCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "40,50", "60,30", "-a", "TestApp", "--json"]);
-        Assert.AreEqual(0, exitCode);
-
-        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
-        Assert.AreEqual("img-canvas-1234", result.GetProperty("elementId").GetString());
-        Assert.AreEqual(90, result.GetProperty("fromX").GetInt32());  // 50 + 40
-        Assert.AreEqual(110, result.GetProperty("fromY").GetInt32()); // 60 + 50
-        Assert.AreEqual(110, result.GetProperty("toX").GetInt32());   // 50 + 60
-        Assert.AreEqual(90, result.GetProperty("toY").GetInt32());    // 60 + 30
-        Assert.AreEqual("left", result.GetProperty("button").GetString());
-
-        Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
-        var drag = _fakeMouse.DragCalls[0];
-        Assert.AreEqual(90, drag.FromX);
-        Assert.AreEqual(110, drag.FromY);
-        Assert.AreEqual(110, drag.ToX);
-        Assert.AreEqual(90, drag.ToY);
-        Assert.IsFalse(drag.RightButton);
-    }
 
     [TestMethod]
     public async Task Drag_RightButton_SetsButton()
@@ -851,7 +838,7 @@ public class UiCommandTests : BaseCommandTests
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Image", Selector = "img-canvas-1234", X = 0, Y = 0, Width = 100, Height = 100 };
 
         var command = GetRequiredService<UiDragCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "10,10", "20,20", "-a", "TestApp", "--right", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "200,200", "-a", "TestApp", "--right", "--json"]);
         Assert.AreEqual(0, exitCode);
 
         Assert.AreEqual(1, _fakeMouse.DragCalls.Count);
@@ -865,13 +852,13 @@ public class UiCommandTests : BaseCommandTests
     public async Task Drag_MissingApp_ReturnsError()
     {
         var command = GetRequiredService<UiDragCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "10,10", "20,20", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["100,100", "200,200", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }
 
     [TestMethod]
-    public async Task Drag_MissingSelector_ReturnsError()
+    public async Task Drag_MissingArgs_ReturnsError()
     {
         var command = GetRequiredService<UiDragCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
@@ -879,27 +866,7 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }
 
-    [TestMethod]
-    public async Task Drag_InvalidFromPoint_ReturnsError()
-    {
-        var command = GetRequiredService<UiDragCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["img-canvas-1234", "notapoint", "20,20", "-a", "TestApp", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
-    }
-
-    [TestMethod]
-    public async Task Drag_ElementNotFound_ReturnsError()
-    {
-        _fakeUia.FindSingleResult = null;
-
-        var command = GetRequiredService<UiDragCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["missing-0000", "10,10", "20,20", "-a", "TestApp", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
-    }
-
-    // ---- 2-arg form: drag <from> <to> where each is a selector (center) or x,y app coords ----
+    // ---- drag <from> <to> where each is a selector (center) or x,y app coords ----
 
     [TestMethod]
     public async Task Drag_TwoArg_SelectorToCoordinates_UsesElementCenter()
@@ -1130,17 +1097,31 @@ public class UiCommandTests : BaseCommandTests
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-items-1234", X = 50, Y = 60, Width = 120, Height = 40 };
 
         var command = GetRequiredService<UiScrollCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-120", "--json"]);
+        // --wheel is in notches; -1 notch scales to the -120 WHEEL_DELTA the OS wheel consumes.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-1", "--json"]);
         Assert.AreEqual(0, exitCode);
 
         Assert.AreEqual(1, _fakeMouse.ScrollWheelCalls.Count);
         var wheel = _fakeMouse.ScrollWheelCalls[0];
         Assert.AreEqual(110, wheel.ScreenX); // 50 + 120/2
         Assert.AreEqual(80, wheel.ScreenY);  // 60 + 40/2
-        Assert.AreEqual(-120, wheel.Delta);
+        Assert.AreEqual(-120, wheel.Delta);  // -1 notch * 120 (WHEEL_DELTA)
 
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
-        Assert.AreEqual(-120, result.GetProperty("wheel").GetInt32());
+        Assert.AreEqual(-1, result.GetProperty("wheel").GetInt32()); // echoes the notch count the caller passed
+    }
+
+    [TestMethod]
+    public async Task Scroll_Wheel_MultipleNotches_ScaleByWheelDelta()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-items-1234", X = 0, Y = 0, Width = 100, Height = 100 };
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "3", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeMouse.ScrollWheelCalls.Count);
+        Assert.AreEqual(360, _fakeMouse.ScrollWheelCalls[0].Delta); // 3 notches * 120
     }
 
     [TestMethod]
@@ -1160,7 +1141,7 @@ public class UiCommandTests : BaseCommandTests
         _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "List", Selector = "lst-tiny-0000", X = 10, Y = 20, Width = 0, Height = 0 };
 
         var command = GetRequiredService<UiScrollCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-tiny-0000", "-a", "TestApp", "--wheel", "-120", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-tiny-0000", "-a", "TestApp", "--wheel", "-1", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
     }
@@ -1173,7 +1154,7 @@ public class UiCommandTests : BaseCommandTests
         var command = GetRequiredService<UiScrollCommand>();
         // --wheel and --direction are mutually exclusive; specifying both must fail rather than
         // silently preferring --wheel.
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-120", "--direction", "down", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["lst-items-1234", "-a", "TestApp", "--wheel", "-1", "--direction", "down", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
     }

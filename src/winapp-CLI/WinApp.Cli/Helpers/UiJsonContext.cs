@@ -238,7 +238,6 @@ internal sealed class UiSendKeysResult
 
 internal sealed class UiDragResult
 {
-    public string ElementId { get; set; } = "";
     public string From { get; set; } = "";
     public string To { get; set; } = "";
     public int FromX { get; set; }

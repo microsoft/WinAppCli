@@ -159,18 +159,22 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 }
 
                 // send-input is OS-wide, so a system-reserved combo (win+l, alt+f4, ctrl+shift+esc, …)
-                // acts on the OS/shell rather than just the target app. Warn so an accidental lock /
-                // window-close / Task Manager isn't silent. Advisory only — the keys are still sent
-                // (synthesizing them can be the legitimate intent of an automation/test run).
+                // would act on the OS/shell rather than just the target app (lock the session, close the
+                // window, open Task Manager). Refuse to synthesize them via send-input — the blast radius
+                // beyond the target window makes silently sending them too dangerous for an automation run.
                 if (transport == KeyTransport.SendInput)
                 {
                     var systemCombos = SystemKeyGuard.FindSystemCombos(actions);
                     if (systemCombos.Count > 0)
                     {
-                        logger.LogWarning(
-                            "{Symbol} Synthesizing system-reserved key(s) via --via send-input: {Combos}. " +
-                            "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window), not just the target app.",
-                            UiSymbols.Warning, string.Join(", ", systemCombos));
+                        logger.LogError(
+                            "{Symbol} Refusing to synthesize system-reserved key(s) via --via send-input: {Combos}. " +
+                            "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window, ctrl+alt+del is intercepted by Windows), not just the target app.",
+                            UiSymbols.Error, string.Join(", ", systemCombos));
+                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                            $"Refusing to synthesize system-reserved key(s) via --via send-input: {string.Join(", ", systemCombos)}. " +
+                            "These act on the OS/shell rather than just the target app.");
+                        return 1;
                     }
                 }
 
