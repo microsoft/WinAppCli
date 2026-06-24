@@ -46,6 +46,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IStatusService, StatusService>()
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
+            // Azure Trusted Signing services
+            .AddSingleton<IAzureAuthService, AzureAuthService>()
+            .AddSingleton<IAzureSigningService, AzureSigningService>()
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
@@ -73,6 +76,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()
                 .UseCommandHandler<CertInfoCommand, CertInfoCommand.Handler>()
                 .UseCommandHandler<SignCommand, SignCommand.Handler>()
+                .UseCommandHandler<AzSignCommand, AzSignCommand.Handler>()
                 .UseCommandHandler<ToolCommand, ToolCommand.Handler>()
                 .UseCommandHandler<MSStoreCommand, MSStoreCommand.Handler>(false)
                 .UseCommandHandler<CreateExternalCatalogCommand, CreateExternalCatalogCommand.Handler>()
