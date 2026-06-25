@@ -300,7 +300,7 @@ extends:
                 waitforreleasecompletion: true
                 owners: '$(EsrpOwnersEmail)'
                 approvers: '$(EsrpApproversEmail)'
-                serviceendpointurl: 'https://msazurecloud.onmicrosoft.com/api.esrp.microsoft.com'
+                serviceendpointurl: 'https://api.esrp.microsoft.com'
                 mainpublisher: 'ESRPRELPACMAN'
                 domaintenantid: ${{ parameters.signingIdentity.tenantId }}
 
