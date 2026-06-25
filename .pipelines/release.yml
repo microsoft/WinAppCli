@@ -171,10 +171,9 @@ extends:
               pwsh: true
               targetType: 'inline'
               script: |
-                # 1ES release jobs cannot checkout the repo, so publish the files the
-                # MS Learn port step needs (port script + docs tree + version.json) as a
-                # pipeline artifact. Layout mirrors the repo so the script's $ProjectRoot
-                # (parent of scripts/) resolves docs/ and version.json correctly.
+                # Publish the files the MS Learn port step needs as an artifact
+                # (1ES release jobs can't checkout the repo). Layout mirrors the
+                # repo so the script's $ProjectRoot resolves docs/ and version.json.
                 $staging = "$(Build.ArtifactStagingDirectory)/mslearn-source"
                 New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
