@@ -428,7 +428,6 @@ extends:
           type: releaseJob
           isProduction: true
         steps:
-          - checkout: self
           - task: PowerShell@2
             displayName: "Create MS Learn Docs PR"
             env:
