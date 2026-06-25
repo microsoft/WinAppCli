@@ -165,6 +165,26 @@ extends:
             inputs:
               path: '$(Build.ArtifactStagingDirectory)/release-notes'
               artifactName: release-notes
+          - task: PowerShell@2
+            displayName: "Stage MS Learn doc source"
+            inputs:
+              pwsh: true
+              targetType: 'inline'
+              script: |
+                # 1ES release jobs cannot checkout the repo, so publish the files the
+                # MS Learn port step needs (port script + docs tree + version.json) as a
+                # pipeline artifact. Layout mirrors the repo so the script's $ProjectRoot
+                # (parent of scripts/) resolves docs/ and version.json correctly.
+                $staging = "$(Build.ArtifactStagingDirectory)/mslearn-source"
+                New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
+          - task: 1ES.PublishPipelineArtifact@1
+            displayName: Upload Artifact - MS Learn Source
+            inputs:
+              path: '$(Build.ArtifactStagingDirectory)/mslearn-source'
+              artifactName: mslearn-source
 
     - stage: Release_GitHub
       displayName: Create GitHub Release
@@ -427,8 +447,11 @@ extends:
         templateContext:
           type: releaseJob
           isProduction: true
+          inputs:
+          - input: pipelineArtifact
+            artifactName: mslearn-source
+            targetPath: $(Pipeline.Workspace)/mslearn-source
         steps:
-          - checkout: self
           - task: PowerShell@2
             displayName: "Create MS Learn Docs PR"
             env:
@@ -488,7 +511,7 @@ extends:
                 # Run the port script to generate MS Learn-ready docs
                 Write-Host "Running port script..."
                 $portOutput = "$tempDir\mslearn-docs"
-                & "$(System.DefaultWorkingDirectory)\scripts\port-mslearn-docs.ps1" `
+                & "$(Pipeline.Workspace)\mslearn-source\scripts\port-mslearn-docs.ps1" `
                   -OutputPath $portOutput `
                   -Version $version
                 if ($LASTEXITCODE -ne 0) {
