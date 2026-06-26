@@ -143,7 +143,7 @@ The easiest way to use the CLI is via WinGet (Windows Package Manager). In Termi
 
 `winget install Microsoft.winappcli --source winget`
 
-or if you use PowerShell terminal you can use native PowerShell way
+Or, if you prefer a PowerShell terminal, you can use the WinGet PowerShell cmdlet (from the `Microsoft.WinGet.Client` module):
 
 `Install-WinGetPackage Microsoft.winappcli`
 
