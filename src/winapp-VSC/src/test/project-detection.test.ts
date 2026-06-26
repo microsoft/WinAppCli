@@ -44,7 +44,7 @@ describe('project-detection', () => {
 	});
 
 	describe('detectProjectAt', () => {
-		it('detects a .NET executable project', () => {
+		it('detects a .NET executable project', async () => {
 			createFile(path.join(tempDir, 'MyApp.csproj'), `
 				<Project Sdk="Microsoft.NET.Sdk">
 					<PropertyGroup>
@@ -54,13 +54,13 @@ describe('project-detection', () => {
 				</Project>
 			`);
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, '.NET');
 			assert.strictEqual(result.projectFileName, 'MyApp.csproj');
 		});
 
-		it('detects a WinExe .NET project', () => {
+		it('detects a WinExe .NET project', async () => {
 			createFile(path.join(tempDir, 'WpfApp.csproj'), `
 				<Project Sdk="Microsoft.NET.Sdk">
 					<PropertyGroup>
@@ -69,12 +69,12 @@ describe('project-detection', () => {
 				</Project>
 			`);
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, '.NET');
 		});
 
-		it('does not detect a .NET test project', () => {
+		it('does not detect a .NET test project', async () => {
 			createFile(path.join(tempDir, 'MyApp.Tests.csproj'), `
 				<Project Sdk="Microsoft.NET.Sdk">
 					<PropertyGroup>
@@ -84,11 +84,11 @@ describe('project-detection', () => {
 				</Project>
 			`);
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.strictEqual(result, undefined);
 		});
 
-		it('does not detect a .NET library project', () => {
+		it('does not detect a .NET library project', async () => {
 			createFile(path.join(tempDir, 'MyLib.csproj'), `
 				<Project Sdk="Microsoft.NET.Sdk">
 					<PropertyGroup>
@@ -97,97 +97,97 @@ describe('project-detection', () => {
 				</Project>
 			`);
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.strictEqual(result, undefined);
 		});
 
-		it('detects an Electron project', () => {
+		it('detects an Electron project', async () => {
 			createFile(path.join(tempDir, 'package.json'), JSON.stringify({
 				name: 'my-electron-app',
 				dependencies: { electron: '^28.0.0' }
 			}));
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'Electron');
 			assert.strictEqual(result.projectFileName, 'package.json');
 		});
 
-		it('does not detect a non-Electron package.json', () => {
+		it('does not detect a non-Electron package.json', async () => {
 			createFile(path.join(tempDir, 'package.json'), JSON.stringify({
 				name: 'my-lib',
 				dependencies: { express: '^4.0.0' }
 			}));
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.strictEqual(result, undefined);
 		});
 
-		it('detects a Flutter project', () => {
+		it('detects a Flutter project', async () => {
 			createFile(path.join(tempDir, 'pubspec.yaml'), 'name: my_app\n');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'Flutter');
 			assert.strictEqual(result.projectFileName, 'pubspec.yaml');
 		});
 
-		it('detects a Rust project', () => {
+		it('detects a Rust project', async () => {
 			createFile(path.join(tempDir, 'Cargo.toml'), '[package]\nname = "my_app"\n');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'Rust');
 			assert.strictEqual(result.projectFileName, 'Cargo.toml');
 		});
 
-		it('detects a C++ project', () => {
+		it('detects a C++ project', async () => {
 			createFile(path.join(tempDir, 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.20)\n');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'C++');
 			assert.strictEqual(result.projectFileName, 'CMakeLists.txt');
 		});
 
-		it('detects a Tauri project', () => {
+		it('detects a Tauri project', async () => {
 			createFile(path.join(tempDir, 'src-tauri', 'tauri.conf.json'), '{}');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'Tauri');
 			assert.strictEqual(result.projectFileName, 'src-tauri/tauri.conf.json');
 		});
 
-		it('returns undefined for empty directory', () => {
-			const result = detectProjectAt(tempDir, tempDir);
+		it('returns undefined for empty directory', async () => {
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.strictEqual(result, undefined);
 		});
 
-		it('sets displayPath to "." for root directory', () => {
+		it('sets displayPath to "." for root directory', async () => {
 			createFile(path.join(tempDir, 'Cargo.toml'), '[package]\n');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.displayPath, '.');
 		});
 
-		it('sets relative displayPath for nested directory', () => {
+		it('sets relative displayPath for nested directory', async () => {
 			const nested = path.join(tempDir, 'apps', 'my-app');
 			createFile(path.join(nested, 'Cargo.toml'), '[package]\n');
 
-			const result = detectProjectAt(nested, tempDir);
+			const result = await detectProjectAt(nested, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.displayPath, 'apps/my-app');
 		});
 
-		it('prioritizes Tauri over Electron when both markers present', () => {
+		it('prioritizes Tauri over Electron when both markers present', async () => {
 			createFile(path.join(tempDir, 'package.json'), JSON.stringify({
 				dependencies: { electron: '^28.0.0' }
 			}));
 			createFile(path.join(tempDir, 'src-tauri', 'tauri.conf.json'), '{}');
 
-			const result = detectProjectAt(tempDir, tempDir);
+			const result = await detectProjectAt(tempDir, tempDir);
 			assert.ok(result);
 			assert.strictEqual(result.type, 'Tauri');
 		});
@@ -276,7 +276,7 @@ describe('project-detection', () => {
 	});
 
 	describe('getDisplayFilePath', () => {
-		it('formats root project path correctly', () => {
+		it('formats root project path correctly', async () => {
 			const project: DetectedProject = {
 				type: 'Rust',
 				directory: '/some/path',
@@ -286,7 +286,7 @@ describe('project-detection', () => {
 			assert.strictEqual(getDisplayFilePath(project), './Cargo.toml');
 		});
 
-		it('formats nested project path correctly', () => {
+		it('formats nested project path correctly', async () => {
 			const project: DetectedProject = {
 				type: '.NET',
 				directory: '/some/path/apps/myapp',
@@ -298,7 +298,7 @@ describe('project-detection', () => {
 	});
 
 	describe('getProjectLabel', () => {
-		it('formats label correctly', () => {
+		it('formats label correctly', async () => {
 			const project: DetectedProject = {
 				type: '.NET',
 				directory: '/some/path',

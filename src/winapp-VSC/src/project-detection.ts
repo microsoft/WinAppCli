@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 
@@ -45,38 +44,38 @@ const SKIP_DIRS = new Set([
  * Detects a project at a single directory (does not recurse).
  * Mirrors ProjectDetectionService.DetectProject from WinApp.Cli.
  */
-export function detectProjectAt(directory: string, searchRoot: string): DetectedProject | undefined {
+export async function detectProjectAt(directory: string, searchRoot: string): Promise<DetectedProject | undefined> {
 	const displayPath = getRelativeDisplayPath(directory, searchRoot);
 
 	// Tauri: check immediate subdirectories for tauri.conf.json
-	const tauriConf = findTauriConfFile(directory);
+	const tauriConf = await findTauriConfFile(directory);
 	if (tauriConf) {
 		return { type: 'Tauri', directory, displayPath, projectFileName: tauriConf };
 	}
 
 	// Electron: package.json with electron dependency
-	if (isElectronProject(directory)) {
+	if (await isElectronProject(directory)) {
 		return { type: 'Electron', directory, displayPath, projectFileName: 'package.json' };
 	}
 
 	// Flutter: pubspec.yaml
-	if (fs.existsSync(path.join(directory, 'pubspec.yaml'))) {
+	if (await fileExists(path.join(directory, 'pubspec.yaml'))) {
 		return { type: 'Flutter', directory, displayPath, projectFileName: 'pubspec.yaml' };
 	}
 
 	// .NET: *.csproj (only executable, non-test projects)
-	const csprojName = findExecutableCsproj(directory);
+	const csprojName = await findExecutableCsproj(directory);
 	if (csprojName) {
 		return { type: '.NET', directory, displayPath, projectFileName: csprojName };
 	}
 
 	// Rust: Cargo.toml
-	if (fs.existsSync(path.join(directory, 'Cargo.toml'))) {
+	if (await fileExists(path.join(directory, 'Cargo.toml'))) {
 		return { type: 'Rust', directory, displayPath, projectFileName: 'Cargo.toml' };
 	}
 
 	// C++: CMakeLists.txt
-	if (fs.existsSync(path.join(directory, 'CMakeLists.txt'))) {
+	if (await fileExists(path.join(directory, 'CMakeLists.txt'))) {
 		return { type: 'C++', directory, displayPath, projectFileName: 'CMakeLists.txt' };
 	}
 
@@ -95,7 +94,7 @@ export async function detectProjects(root: string, maxProjects: number = 10): Pr
 
 	while (queue.length > 0 && results.length < maxProjects) {
 		const current = queue.shift()!;
-		const detected = detectProjectAt(current, root);
+		const detected = await detectProjectAt(current, root);
 		if (detected) {
 			results.push(detected);
 			// Don't recurse into detected project directories
@@ -133,6 +132,15 @@ export async function detectProjects(root: string, maxProjects: number = 10): Pr
 	return results;
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+	try {
+		await fsp.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function getRelativeDisplayPath(directory: string, searchRoot: string): string {
 	const relative = path.relative(searchRoot, directory);
 	if (!relative || relative === '.') {
@@ -141,20 +149,20 @@ function getRelativeDisplayPath(directory: string, searchRoot: string): string {
 	return relative.replace(/\\/g, '/');
 }
 
-function findTauriConfFile(directory: string): string | undefined {
+async function findTauriConfFile(directory: string): Promise<string | undefined> {
 	try {
-		const entries = fs.readdirSync(directory, { withFileTypes: true });
+		const entries = await fsp.readdir(directory, { withFileTypes: true });
 		for (const entry of entries) {
 			if (!entry.isDirectory()) { continue; }
 			if (entry.name.startsWith('.')) { continue; }
 			const subDir = path.join(directory, entry.name);
 			try {
-				const stat = fs.lstatSync(subDir);
+				const stat = await fsp.lstat(subDir);
 				if (stat.isSymbolicLink()) { continue; }
 			} catch {
 				continue;
 			}
-			if (fs.existsSync(path.join(subDir, 'tauri.conf.json'))) {
+			if (await fileExists(path.join(subDir, 'tauri.conf.json'))) {
 				return `${entry.name}/tauri.conf.json`;
 			}
 		}
@@ -164,11 +172,11 @@ function findTauriConfFile(directory: string): string | undefined {
 	return undefined;
 }
 
-function isElectronProject(directory: string): boolean {
+async function isElectronProject(directory: string): Promise<boolean> {
 	const packageJsonPath = path.join(directory, 'package.json');
-	if (!fs.existsSync(packageJsonPath)) { return false; }
+	if (!await fileExists(packageJsonPath)) { return false; }
 	try {
-		const content = fs.readFileSync(packageJsonPath, 'utf-8');
+		const content = await fsp.readFile(packageJsonPath, 'utf-8');
 		const pkg = JSON.parse(content);
 		const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 		return 'electron' in deps;
@@ -177,14 +185,14 @@ function isElectronProject(directory: string): boolean {
 	}
 }
 
-function findExecutableCsproj(directory: string): string | undefined {
+async function findExecutableCsproj(directory: string): Promise<string | undefined> {
 	try {
-		const entries = fs.readdirSync(directory);
+		const entries = await fsp.readdir(directory);
 		for (const entry of entries) {
 			if (!entry.endsWith('.csproj')) { continue; }
 			const filePath = path.join(directory, entry);
 			try {
-				const content = fs.readFileSync(filePath, 'utf-8');
+				const content = await fsp.readFile(filePath, 'utf-8');
 				if (isExecutableCsproj(content)) {
 					return entry;
 				}

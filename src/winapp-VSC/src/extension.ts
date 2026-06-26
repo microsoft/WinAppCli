@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getWinappCliPath, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
-import { detectProjectAt, detectProjects, getProjectLabel, getDisplayFilePath, DetectedProject } from './project-detection';
+import { detectProjectAt, detectProjects, getDisplayFilePath } from './project-detection';
 import { glob } from 'glob';
 
 const WINAPP_DEBUG_TYPE = 'winapp';
@@ -68,6 +68,14 @@ async function runWinappCommand(extensionPath: string, command: string, cwd: str
 }
 
 /**
+ * Escapes a string for safe interpolation in a PowerShell single-quoted string.
+ * Single quotes in the value are doubled per PowerShell rules.
+ */
+function escapePowerShellArg(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
  * Get the current workspace folder path
  */
 function getWorkspacePath(): string | undefined {
@@ -119,24 +127,32 @@ async function resolveProjectDirectory(workspacePath: string): Promise<string | 
 	const appDirs: string[] = config.get('appDirectories', []);
 
 	if (appDirs.length > 0) {
-		if (appDirs.length === 1) {
-			return path.resolve(workspacePath, appDirs[0]);
-		}
-
-		// Multiple configured directories — show QuickPick
-		const items = appDirs.map(dir => ({
-			label: `$(folder) ${dir}`,
-			directory: path.resolve(workspacePath, dir)
-		}));
-
-		const picked = await vscode.window.showQuickPick(items, {
-			placeHolder: 'Which project would you like to target?'
+		// Validate paths are contained within workspace
+		const validDirs = appDirs.filter(dir => {
+			const resolved = path.resolve(workspacePath, dir);
+			const relative = path.relative(workspacePath, resolved);
+			return !relative.startsWith('..') && !path.isAbsolute(relative);
 		});
-		return picked?.directory;
+
+		if (validDirs.length === 0) {
+			vscode.window.showWarningMessage('All winapp.appDirectories entries resolve outside the workspace and were ignored.');
+		} else if (validDirs.length === 1) {
+			return path.resolve(workspacePath, validDirs[0]);
+		} else {
+			const items = validDirs.map(dir => ({
+				label: `$(folder) ${dir}`,
+				directory: path.resolve(workspacePath, dir)
+			}));
+
+			const picked = await vscode.window.showQuickPick(items, {
+				placeHolder: 'Which project would you like to target?'
+			});
+			return picked?.directory;
+		}
 	}
 
 	// If there's a project at the workspace root, use it directly
-	const rootProject = detectProjectAt(workspacePath, workspacePath);
+	const rootProject = await detectProjectAt(workspacePath, workspacePath);
 	if (rootProject) {
 		return workspacePath;
 	}
@@ -461,90 +477,20 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			// Check if there's a project at the workspace root
-			const rootProject = detectProjectAt(workspacePath, workspacePath);
-
-			let selectedPath: string;
-			if (rootProject) {
-				// Project found at root — use it directly
-				selectedPath = '.';
-			} else {
-				// No project at root — search for projects in the workspace
-				const projects = await vscode.window.withProgress(
-					{ location: vscode.ProgressLocation.Notification, title: 'Searching for app projects...' },
-					async () => detectProjects(workspacePath)
-				);
-
-				if (projects.length === 0) {
-					// No projects found — offer to initialize in current directory via QuickPick
-					const picked = await vscode.window.showQuickPick(
-						[
-							{ label: '$(folder) Current directory', description: './ — no project detected' }
-						],
-						{ placeHolder: 'No compatible app projects were found. Initialize with winapp here anyway?' }
-					);
-					if (!picked) {
-						return;
-					}
-					selectedPath = '.';
-				} else if (projects.length === 1) {
-					// Single project found — let user confirm via QuickPick
-					const project = projects[0];
-					const picked = await vscode.window.showQuickPick(
-						[
-							{
-								label: `$(file-code) ${project.type} project`,
-								description: getDisplayFilePath(project),
-								project
-							},
-							{
-								label: '$(folder) Current directory',
-								description: './ — no project detected',
-								project: undefined as typeof project | undefined
-							}
-						],
-						{ placeHolder: 'Which project would you like to initialize with winapp?' }
-					);
-					if (!picked) {
-						return;
-					}
-					selectedPath = picked.project
-						? (path.relative(workspacePath, picked.project.directory) || '.')
-						: '.';
-				} else {
-					// Multiple projects found — let user pick
-						const maxProjects = 10;
-						const items = projects.map(p => ({
-							label: `$(file-code) ${p.type} project`,
-							description: getDisplayFilePath(p),
-							project: p
-						}));
-						items.push({
-							label: '$(folder) Current directory',
-							description: './ — no project detected',
-							project: undefined as unknown as DetectedProject
-						});
-
-						const placeHolder = projects.length >= maxProjects
-							? 'Which project would you like to initialize with winapp? (Search stopped at 10 entries)'
-							: 'Which project would you like to initialize with winapp?';
-
-						const picked = await vscode.window.showQuickPick(items, { placeHolder });
-					if (!picked) {
-						return;
-					}
-					selectedPath = picked.project
-						? (path.relative(workspacePath, picked.project.directory) || '.')
-						: '.';
-				}
+			// Resolve project directory (honors appDirectories setting)
+			const projectDir = await resolveProjectDirectory(workspacePath);
+			if (!projectDir) {
+				return;
 			}
+
+			const selectedPath = path.relative(workspacePath, projectDir) || '.';
 
 			const sdkMode = await vscode.window.showQuickPick(
 				['stable', 'preview', 'experimental', 'none'],
 				{ placeHolder: 'Select SDK installation mode' }
 			);
 
-			let command = `init "${selectedPath}" --use-defaults`;
+			let command = `init ${escapePowerShellArg(selectedPath)} --use-defaults`;
 			if (sdkMode && sdkMode !== 'stable') {
 				command += ` --setup-sdks ${sdkMode}`;
 			}

@@ -62,7 +62,7 @@ To skip automatic scanning, add the `winapp.appDirectories` setting to your work
 
 **Supported project types:** .NET (WPF, WinForms, WinUI 3, Console), Electron, Tauri, Flutter, Rust, and C++ (CMake).
 
-The **WinApp: Initialize Project** command has additional behavior: when no project is at the root, it searches and lets you pick which project to initialize. If no projects are found at all, it offers to initialize in the current directory anyway.
+All commands, including **WinApp: Initialize Project**, follow the same resolution logic. When no projects are found, the command falls back to the workspace root.
 
 > **Note:** If more than 10 projects are discovered, the search stops and the QuickPick indicates that the list may be incomplete.
 
