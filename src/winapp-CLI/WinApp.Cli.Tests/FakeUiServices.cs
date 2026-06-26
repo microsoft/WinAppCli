@@ -134,18 +134,21 @@ internal class FakeUiSessionService : IUiSessionService
 internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
 {
     public record HoverCall(int ScreenX, int ScreenY);
-    public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick);
+    public record MoveCursorCall(int ScreenX, int ScreenY);
+    public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick, int SettleMs = 0);
     public record DragCall(int FromX, int FromY, int ToX, int ToY, bool RightButton, int HoldMs = 0, int DwellMs = 0);
     public record ScrollWheelCall(int ScreenX, int ScreenY, int Delta);
 
     public List<HoverCall> HoverCalls { get; } = [];
+    public List<MoveCursorCall> MoveCursorCalls { get; } = [];
     public List<ClickCall> ClickCalls { get; } = [];
     public List<DragCall> DragCalls { get; } = [];
     public List<ScrollWheelCall> ScrollWheelCalls { get; } = [];
 
     public void Hover(int screenX, int screenY) => HoverCalls.Add(new(screenX, screenY));
-    public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
-        => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick));
+    public void MoveCursor(int screenX, int screenY) => MoveCursorCalls.Add(new(screenX, screenY));
+    public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false, int settleMs = 50)
+        => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick, settleMs));
     public void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0)
         => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton, holdMs, dwellMs));
     public void ScrollWheel(int screenX, int screenY, int delta)
@@ -164,3 +167,34 @@ internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
     public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
         => SendCalls.Add(new(hwnd, actions, transport));
 }
+
+/// <summary>
+/// Fake foreground guard for testing — lets a test force the pre-injection foreground decision so the
+/// coordinate-gesture verbs can be exercised without a live, unlocked desktop. Proceeds by default.
+/// </summary>
+internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
+{
+    public record EnsureCall(long TargetHwnd, string Action);
+
+    public List<EnsureCall> Calls { get; } = [];
+
+    /// <summary>When <see langword="false"/>, emits the configured error and aborts the gesture.</summary>
+    public bool Allow { get; set; } = true;
+
+    /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
+    public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
+
+    public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
+    {
+        Calls.Add(new(targetHwnd, action));
+        if (Allow)
+        {
+            return true;
+        }
+
+        WinApp.Cli.Helpers.UiJsonError.Emit(json, DenyCode,
+            $"Foreground guard denied the {action} (test).");
+        return false;
+    }
+}
+

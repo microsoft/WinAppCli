@@ -458,7 +458,7 @@ Send synthetic keyboard input to a window. Supports named keys (down, enter, tab
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<keys>` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Quote multi-token strings, e.g. "ctrl+a delete". |
+| `<keys>` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a  b"). Quote multi-token strings, e.g. "ctrl+a delete". |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->

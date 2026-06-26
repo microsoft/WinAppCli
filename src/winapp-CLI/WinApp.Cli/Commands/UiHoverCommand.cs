@@ -39,6 +39,7 @@ internal class UiHoverCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IMouseInput mouseInput,
+        IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
         ILogger<UiHoverCommand> logger) : AsynchronousCommandLineAction
     {
@@ -113,6 +114,16 @@ internal class UiHoverCommand : Command, IShortDescription
                 }
                 centerX = stable.CenterX;
                 centerY = stable.CenterY;
+
+                // Verify the target STILL holds the foreground as the final gate before the OS-wide hover
+                // (F1) — matches click / drag / scroll --wheel. Checked here, after the awaited re-resolve,
+                // to close the focus-steal race; also yields a clean no_interactive_desktop error on a
+                // locked session instead of a misleading SendInput failure, and refuses to move the pointer
+                // over whatever window grabbed the foreground.
+                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "hover"))
+                {
+                    return 1;
+                }
 
                 // Move mouse to element center with a small wiggle to trigger hover detection
                 mouseInput.Hover(centerX, centerY);

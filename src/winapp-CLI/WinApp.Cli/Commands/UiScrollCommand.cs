@@ -60,6 +60,7 @@ internal class UiScrollCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IMouseInput mouseInput,
+        IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
         ILogger<UiScrollCommand> logger) : AsynchronousCommandLineAction
     {
@@ -154,7 +155,7 @@ internal class UiScrollCommand : Command, IShortDescription
                     // which another window could steal focus, so we check here — after the awaits, not
                     // before them — to close the race and avoid scrolling whatever window is on top. Also
                     // distinguishes a locked/secure desktop from a wrong-window foreground.
-                    if (!ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
+                    if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
                     {
                         return 1;
                     }

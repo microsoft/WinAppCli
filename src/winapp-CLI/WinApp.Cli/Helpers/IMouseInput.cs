@@ -15,9 +15,19 @@ internal interface IMouseInput
     void Hover(int screenX, int screenY);
 
     /// <summary>
+    /// Moves the cursor to the target without pressing a button. Lets the caller position the pointer,
+    /// run its own settle + confirm read, then issue <see cref="Click"/> with <c>settleMs: 0</c> so the
+    /// button-down happens immediately after a fresh position check.
+    /// </summary>
+    void MoveCursor(int screenX, int screenY);
+
+    /// <summary>
     /// Clicks at screen coordinates.
     /// </summary>
-    void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false);
+    /// <param name="settleMs">Cursor-settle pause (ms) after positioning, before the button-down. Pass
+    /// <c>0</c> when the caller already moved the cursor and confirmed the target hasn't moved, so no
+    /// extra unguarded settle window reopens the move-during-settle race.</param>
+    void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false, int settleMs = 50);
 
     /// <summary>
     /// Presses the mouse button at the from-point, moves to the to-point in steps, then releases.

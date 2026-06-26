@@ -21,6 +21,9 @@ internal class UiSendKeysCommand : Command, IShortDescription
     {
         Description = "Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), " +
                       "modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). " +
+                      "Use text=<literal> to type a value verbatim when it would otherwise be read as a key name or " +
+                      "combo (text=enter types \"enter\"; text=ctrl+a types \"ctrl+a\"); backslash escapes \\s \\t " +
+                      "\\n \\r \\\\ are supported (text=a\\s\\sb types \"a  b\"). " +
                       "Quote multi-token strings, e.g. \"ctrl+a delete\".",
         Arity = ArgumentArity.ZeroOrOne
     };
@@ -59,6 +62,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IKeyboardInput keyboardInput,
+        IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
         ILogger<UiSendKeysCommand> logger) : AsynchronousCommandLineAction
     {
@@ -139,7 +143,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // window. Verify the foreground belongs to the target before sending. (post-message posts
                 // straight to the target HWND's queue, so it isn't affected.)
                 if (transport == KeyTransport.SendInput &&
-                    !ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
+                    !foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
                 {
                     return 1;
                 }

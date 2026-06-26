@@ -75,6 +75,7 @@ internal class UiDragCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IMouseInput mouseInput,
+        IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
         ILogger<UiDragCommand> logger) : AsynchronousCommandLineAction
     {
@@ -168,7 +169,7 @@ internal class UiDragCommand : Command, IShortDescription
                 // not before them — to close the race and ensure the drag can't land on whatever window
                 // grabbed foreground mid-resolve. Also distinguishes a locked/secure desktop from a
                 // wrong-window foreground.
-                if (!ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
+                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
                 {
                     return 1;
                 }

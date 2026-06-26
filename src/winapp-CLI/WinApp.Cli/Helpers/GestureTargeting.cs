@@ -98,6 +98,43 @@ internal static class GestureTargeting
         return new StableTarget(TargetStatus.Ok, element, cx, cy);
     }
 
+    /// <summary>
+    /// Performs a single confirming read of <paramref name="selector"/> and checks it still occupies the
+    /// bounds the caller already settled on (<paramref name="expected"/>). Used immediately before a
+    /// button-down — after the cursor-settle delay — to close the residual race where a continuously
+    /// animating target drifts during the settle window <see cref="ResolveStableAsync"/> couldn't see,
+    /// so a reported success no longer hides a silent miss. Returns the element's current bounds on
+    /// success, or a <see cref="TargetStatus.Moving"/> / <see cref="TargetStatus.NotFound"/> /
+    /// <see cref="TargetStatus.ZeroSize"/> result (feed to <see cref="TryReport"/>) when it shifted,
+    /// vanished, or collapsed in that final window.
+    /// </summary>
+    public static async Task<StableTarget> ConfirmStillAsync(
+        IUiAutomationService uiAutomation,
+        UiSessionInfo session,
+        SelectorExpression selector,
+        UiElement expected,
+        CancellationToken cancellationToken)
+    {
+        var current = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+        if (current is null)
+        {
+            return new StableTarget(TargetStatus.NotFound, expected, 0, 0);
+        }
+
+        if (current.Width == 0 || current.Height == 0)
+        {
+            return new StableTarget(TargetStatus.ZeroSize, current, 0, 0);
+        }
+
+        if (!Settled(expected, current))
+        {
+            var (mx, my) = Center(current);
+            return new StableTarget(TargetStatus.Moving, current, mx, my);
+        }
+
+        return Ok(current);
+    }
+
     private static (int X, int Y) Center(UiElement element)
         => ((int)(element.X + element.Width / 2.0), (int)(element.Y + element.Height / 2.0));
 

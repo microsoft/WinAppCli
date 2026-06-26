@@ -259,6 +259,8 @@ winapp ui click btn-column1-a3f2 -a myapp --double      # double-click
 winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
+> Like the other input-injecting verbs, `click` brings the target to the foreground and **fails fast** (`no_interactive_desktop` on a locked/secure desktop, `foreground_not_target` if focus couldn't be transferred) rather than clicking the wrong window. It also **re-resolves the element just before the button-down**: after positioning the cursor it does one final position check, so a continuously moving/animating target fails with **`target_moved`** instead of reporting success after the click landed on empty space — a reported success means the target was still in place when the button went down.
+
 ### drag
 Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
 

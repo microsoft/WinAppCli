@@ -45,9 +45,12 @@ internal class UiClickCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IMouseInput mouseInput,
+        IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
         ILogger<UiClickCommand> logger) : AsynchronousCommandLineAction
     {
+        /// <summary>Cursor-settle pause (ms) before the final confirm read and button-down.</summary>
+        private const int CursorSettleMs = 50;
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -119,8 +122,37 @@ internal class UiClickCommand : Command, IShortDescription
                 centerX = stable.CenterX;
                 centerY = stable.CenterY;
 
-                // Perform the click via SendInput
-                mouseInput.Click(centerX, centerY, doubleClick, rightClick);
+                // Verify the target STILL holds the foreground as the final gate before the OS-wide click
+                // (F1) — matches drag / scroll --wheel. The re-resolve above awaits UIA reads during which
+                // focus could shift, so we check here, after the awaits. Also yields a clean
+                // no_interactive_desktop error on a locked session instead of a misleading SendInput failure.
+                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, clickType))
+                {
+                    return 1;
+                }
+
+                // Close the residual re-resolve→button-down race (F3/N5): position the cursor, let it
+                // settle, then re-confirm the target hasn't drifted during that settle window before
+                // pressing. ResolveStableAsync can read a continuously-animating target as "settled" by
+                // chance and the element then moves during the ~50 ms cursor settle, landing the click on
+                // empty space yet reporting success. By doing the settle here and a fresh confirm read
+                // immediately before the button-down (which itself uses settleMs: 0), a reported ✅ means
+                // the target was still in place when the button went down.
+                mouseInput.MoveCursor(centerX, centerY);
+                await Task.Delay(CursorSettleMs, cancellationToken);
+
+                var confirmed = await GestureTargeting.ConfirmStillAsync(
+                    uiAutomation, session, selector, stable.Element, cancellationToken);
+                if (!GestureTargeting.TryReport(confirmed, logger, json, selectorStr, clickType))
+                {
+                    return 1;
+                }
+                centerX = confirmed.CenterX;
+                centerY = confirmed.CenterY;
+
+                // Perform the click via SendInput — no extra settle, the cursor is already positioned and
+                // the target just confirmed in place.
+                mouseInput.Click(centerX, centerY, doubleClick, rightClick, settleMs: 0);
 
                 var elementId = (element.Selector ?? element.Id ?? "");
 

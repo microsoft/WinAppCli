@@ -31,11 +31,24 @@ internal static class MouseInput
         SendMove(screenX, screenY);
     }
 
-    public static void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
+    /// <summary>
+    /// Moves the cursor to the target position (no button action). Lets a caller position the pointer
+    /// and run its own settle + final confirm read before issuing the button-down via
+    /// <see cref="Click"/> with <c>settleMs: 0</c>, closing the settle-window race.
+    /// </summary>
+    public static void MoveCursor(int screenX, int screenY)
+    {
+        PInvoke.SetCursorPos(screenX, screenY);
+    }
+
+    public static void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false, int settleMs = 50)
     {
         // Move cursor to the target position
         PInvoke.SetCursorPos(screenX, screenY);
-        Thread.Sleep(50); // small delay for cursor settle
+        if (settleMs > 0)
+        {
+            Thread.Sleep(settleMs); // small delay for cursor settle
+        }
 
         // Build input events
         var downFlag = rightClick ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
