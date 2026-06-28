@@ -36,6 +36,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
             .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
             .AddSingleton<IWinmdService, WinmdService>()
+            .AddSingleton<IWinmdsLockfileService, WinmdsLockfileService>()
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
@@ -53,6 +54,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
             // UI Automation services
+            .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>();
@@ -93,6 +95,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiScreenshotCommand, UiScreenshotCommand.Handler>()
                 .UseCommandHandler<UiInvokeCommand, UiInvokeCommand.Handler>()
                 .UseCommandHandler<UiClickCommand, UiClickCommand.Handler>()
+                .UseCommandHandler<UiHoverCommand, UiHoverCommand.Handler>()
                 .UseCommandHandler<UiSetValueCommand, UiSetValueCommand.Handler>()
                 .UseCommandHandler<UiFocusCommand, UiFocusCommand.Handler>()
                 .UseCommandHandler<UiScrollIntoViewCommand, UiScrollIntoViewCommand.Handler>()

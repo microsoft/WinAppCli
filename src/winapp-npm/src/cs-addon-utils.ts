@@ -340,7 +340,7 @@ async function addCsBuildScripts(addonName: string, projectRoot: string, verbose
 
   if (packageJson.scripts[buildScriptName]) {
     if (verbose) {
-      console.log(`⚠️  Build script '${buildScriptName}' already exists, skipping`);
+      console.log(`⚠ Build script '${buildScriptName}' already exists, skipping`);
     }
   } else {
     packageJson.scripts[buildScriptName] = buildCommand;

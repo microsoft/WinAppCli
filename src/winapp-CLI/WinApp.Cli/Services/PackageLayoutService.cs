@@ -17,6 +17,24 @@ internal sealed class PackageLayoutService : IPackageLayoutService
     }
 
     /// <summary>
+    /// Returns the package-id segment for a path under the NuGet cache, or null if outside it.
+    /// </summary>
+    public static string? TryGetPackageIdFromPath(DirectoryInfo nugetCacheDir, string fullPath)
+    {
+        var normCache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(nugetCacheDir.FullName));
+        var normPath = Path.GetFullPath(fullPath);
+        if (!normPath.StartsWith(normCache + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !normPath.StartsWith(normCache + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rel = normPath.Substring(normCache.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var firstSep = rel.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        return firstSep <= 0 ? null : rel.Substring(0, firstSep).ToLowerInvariant();
+    }
+
+    /// <summary>
     /// Enumerates all existing package directories from the usedVersions dictionary.
     /// </summary>
     private static IEnumerable<DirectoryInfo> EnumeratePackageDirs(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions)

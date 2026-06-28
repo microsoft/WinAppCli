@@ -17,7 +17,7 @@ steps:
     filePath: $(System.DefaultWorkingDirectory)\scripts\build-cli.ps1
     arguments: "-Stable:$${{ parameters.stable }} -SkipMsix"
 - ${{ if eq(parameters['DoEsrp'], 'true') }}:
-  - task: EsrpCodeSigning@5
+  - task: EsrpCodeSigning@6
     displayName: Code Sign ESRP - CLI
     inputs:
       ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
@@ -68,7 +68,7 @@ steps:
     filePath: $(System.DefaultWorkingDirectory)\scripts\package-msix.ps1
     arguments: "-Stable:$${{ parameters.stable }}"
 - ${{ if eq(parameters['DoEsrp'], 'true') }}:
-  - task: EsrpCodeSigning@5
+  - task: EsrpCodeSigning@6
     displayName: Code Sign ESRP - MSIX Packages
     inputs:
       ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}
@@ -97,7 +97,7 @@ steps:
                 "ToolVersion": "1.0"
             }
         ]
-  - task: EsrpCodeSigning@5
+  - task: EsrpCodeSigning@6
     displayName: Code Sign ESRP - NuGet Packages
     inputs:
       ConnectedServiceName: ${{ parameters.signingIdentity.serviceName }}

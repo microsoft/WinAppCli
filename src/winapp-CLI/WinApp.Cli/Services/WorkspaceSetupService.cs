@@ -36,6 +36,7 @@ internal class WorkspaceSetupService(
     IBuildToolsService buildToolsService,
     ICppWinrtService cppWinrtService,
     IPackageLayoutService packageLayoutService,
+    IWinmdsLockfileService winmdsLockfileService,
     IPackageRegistrationService packageRegistrationService,
     INugetService nugetService,
     IManifestService manifestService,
@@ -72,6 +73,16 @@ internal class WorkspaceSetupService(
             // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
             logger.LogError(".NET project detected, but no winapp.yaml configuration file was found. The 'winapp restore' command is not supported for .NET projects without a winapp.yaml. Please run 'dotnet restore' to restore NuGet packages for this project.");
             return 1;
+        }
+
+        // Restore on a non-.NET project with no winapp.yaml — nothing to restore.
+        // No-op success rather than error: a project that doesn't declare SDK
+        // package versions in winapp.yaml simply has nothing for restore to do.
+        if (options.RequireExistingConfig && !configService.Exists())
+        {
+            logger.LogInformation("{UISymbol} No winapp.yaml found in {ConfigDir}. Nothing to restore.", UiSymbols.Note, options.ConfigDir);
+            logger.LogInformation("If this project needs Windows SDK packages, run 'winapp init' to set them up.");
+            return 0;
         }
 
         // Configuration / prompting phase
@@ -559,6 +570,14 @@ internal class WorkspaceSetupService(
                         {
                             return (2, "No .winmd files found for C++/WinRT projection.");
                         }
+
+                        // Cache the WinMD inventory for the npm JS-bindings pipeline.
+                        var yamlHash = (options.RequireExistingConfig && config?.Packages.Count > 0)
+                            ? YamlPackagesHasher.Compute(config.Packages)
+                            : YamlPackagesHasher.ComputeFromVersions(usedVersions
+                                .Where(kvp => NugetService.SDK_PACKAGES.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase)));
+                        await winmdsLockfileService.WriteAsync(
+                            localWinappDir, usedVersions, winmds, nugetCacheDir, yamlHash, cancellationToken);
 
                         // Run cppwinrt
                         taskContext.UpdateSubStatus("Generating C++/WinRT projections");

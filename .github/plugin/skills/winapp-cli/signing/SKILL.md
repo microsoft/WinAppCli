@@ -1,7 +1,7 @@
 ---
 name: winapp-signing
 description: Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues.
-version: 0.3.3
+version: 0.4.1
 ---
 ## When to use
 
@@ -17,7 +17,7 @@ Use this skill when:
 
 ## Key concepts
 
-**Publisher matching:** The publisher in your certificate (e.g., `CN=MyCompany`) must exactly match the `Publisher` attribute in `Package.appxmanifest`. Use `--manifest` when generating to auto-match.
+**Publisher matching:** The publisher in your certificate must exactly match the `Publisher` attribute in `Package.appxmanifest`. Any valid X.500 distinguished name is supported (e.g., `CN=MyCompany` or `OU=Team, O=Corp, C=US`). Use `--manifest` when generating to auto-match.
 
 **Dev vs. production certs:** `winapp cert generate` creates self-signed certificates for **local testing only**. For production distribution (Microsoft Store or enterprise), obtain a certificate from a trusted Certificate Authority.
 
@@ -127,7 +127,7 @@ Create a self-signed certificate for local testing only. Publisher must match th
 | `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from | (none) |
 | `--output` | Output path for the generated PFX file | (none) |
 | `--password` | Password for the generated PFX file | `password` |
-| `--publisher` | Publisher name for the generated certificate. If not specified, will be inferred from manifest. | (none) |
+| `--publisher` | Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. | (none) |
 | `--valid-days` | Number of days the certificate is valid | `365` |
 
 ### `winapp cert install`

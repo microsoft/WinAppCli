@@ -1,7 +1,7 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.3.3
+version: 0.4.1
 ---
 ## When to use
 
@@ -46,6 +46,9 @@ winapp init
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
 winapp init . --use-defaults
 
+# Non-interactive with JS bindings enabled
+winapp init . --use-defaults --add-js-bindings
+
 # Skip SDK installation (just manifest + config)
 winapp init . --use-defaults --setup-sdks none
 
@@ -59,6 +62,10 @@ After `init`, your project will contain:
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
 - `.gitignore` update — excludes `.winapp/` and `devcert.pfx`
+
+When JS bindings are enabled (via `--add-js-bindings` or by answering yes in interactive init), npm/Electron projects also get:
+- `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
+- `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
 ### Restore after cloning
 

@@ -61,29 +61,23 @@ internal partial class ManifestTemplateService : IManifestTemplateService
     }
 
     /// <summary>
-    /// Strips CN= prefix from publisher name if present
+    /// Strips CN= prefix from publisher name if present.
+    /// For non-CN DNs, returns the input unchanged.
     /// </summary>
     /// <param name="publisher">Publisher string</param>
     /// <returns>Publisher without CN= prefix</returns>
     public static string StripCnPrefix(string publisher)
     {
-        var trimmed = publisher.Trim().Trim('"', '\'');
-        return trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase)
-            ? trimmed[3..]
-            : trimmed;
+        return PublisherDnHelper.GetDisplayName(publisher);
     }
 
     /// <summary>
-    /// Ensures publisher name has CN= prefix
+    /// Returns true if the input is already a valid X.500 distinguished name
+    /// (e.g., "CN=Name", "OU=Finance, DC=corp, DC=com").
     /// </summary>
-    /// <param name="publisher">Publisher string</param>
-    /// <returns>Publisher with CN= prefix</returns>
-    private static string NormalizePublisher(string publisher)
+    internal static bool IsDistinguishedName(string input)
     {
-        var trimmed = publisher.Trim().Trim('"', '\'');
-        return trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase)
-            ? trimmed
-            : "CN=" + trimmed;
+        return PublisherDnHelper.IsDistinguishedName(input);
     }
 
     /// <summary>
@@ -115,6 +109,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         string template,
         string packageName,
         string publisherName,
+        string publisherDN,
         string version,
         string description)
     {
@@ -123,7 +118,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         var result = template
             .Replace("{PackageName}", packageName)
             .Replace("{ApplicationId}", applicationId)
-            .Replace("{PublisherName}", publisherName)
+            .Replace("{PublisherDN}", PublisherDnHelper.XmlEscape(publisherDN))
+            .Replace("{PublisherName}", PublisherDnHelper.XmlEscape(publisherName))
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
             .Replace("{Description}", description);
 
@@ -234,11 +230,12 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
-        // Normalize publisher name
-        publisherName = StripCnPrefix(NormalizePublisher(publisherName));
+        // Normalize publisher to a valid distinguished name
+        var publisherDN = PublisherDnHelper.Normalize(publisherName);
+        var publisherDisplayName = PublisherDnHelper.GetDisplayName(publisherDN);
 
         taskContext.AddDebugMessage($"Package name: {packageName}");
-        taskContext.AddDebugMessage($"Publisher: {publisherName}");
+        taskContext.AddDebugMessage($"Publisher: {publisherDN}");
         taskContext.AddDebugMessage($"Version: {version}");
         taskContext.AddDebugMessage($"Description: {description}");
         taskContext.AddDebugMessage($"Manifest template: {manifestTemplate}");
@@ -253,7 +250,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         var content = ApplyTemplateReplacements(
             template,
             packageName,
-            publisherName,
+            publisherDisplayName,
+            publisherDN,
             version,
             description);
 

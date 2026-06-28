@@ -40,7 +40,7 @@ npx winapp --help
 **Setup Commands:**
 
 - [`init`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#init) - Initialize project with Windows SDK and App SDK
-- [`restore`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#restore) - Restore packages and dependencies
+- [`restore`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#restore) - Restore packages and dependencies (also runs the bindings step when the `winapp.jsBindings` namespace is declared in `package.json`)
 - [`update`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#update) - Update packages and dependencies to latest versions
 
 **App Identity & Debugging:**
@@ -62,6 +62,7 @@ npx winapp --help
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-create-addon) - Generate native C# or C++ addons
+- [`node generate-bindings`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-generate-bindings) - Regenerate JS bindings for Windows App SDK APIs after editing `winapp.jsBindings`
 - [`node add-electron-debug-identity`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#node-add-electron-debug-identity) - Add identity to Electron processes
 
 The full CLI usage can be found here: [Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md)
