@@ -255,6 +255,7 @@ internal class FakeAzureAuthService : IAzureAuthService
     public bool ShouldFail { get; set; }
     public string FailureMessage { get; set; } = "Authentication failed";
     public bool IsInteractive => true;
+    public string? TenantId { get; set; } = "fake-tenant-id";
 
     public Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {

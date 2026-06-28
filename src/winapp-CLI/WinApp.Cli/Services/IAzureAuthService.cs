@@ -22,4 +22,10 @@ internal interface IAzureAuthService
     /// Whether the current environment supports interactive authentication.
     /// </summary>
     bool IsInteractive { get; }
+
+    /// <summary>
+    /// The Azure tenant ID used for authentication, if known.
+    /// Set from AZURE_TENANT_ID environment variable or user input during interactive login.
+    /// </summary>
+    string? TenantId { get; }
 }

@@ -370,6 +370,11 @@ internal class AzSignCommand : Command, IShortDescription
             writer.WriteString("Endpoint", metadata.Endpoint);
             writer.WriteString("CodeSigningAccountName", metadata.AccountName);
             writer.WriteString("CertificateProfileName", metadata.ProfileName);
+            // Exclude SharedTokenCacheCredential — it picks up stale consumer tokens from the MSAL
+            // shared cache and fails because the Azure.CodeSigning app is AAD-only
+            writer.WriteStartArray("ExcludeCredentials");
+            writer.WriteStringValue("SharedTokenCacheCredential");
+            writer.WriteEndArray();
             writer.WriteEndObject();
             await writer.FlushAsync(cancellationToken);
 
@@ -419,6 +424,13 @@ internal class AzSignCommand : Command, IShortDescription
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+
+            // Pass tenant ID to signtool so the dlib's Azure.Identity authenticates against the correct tenant
+            var tenantId = azureAuthService.TenantId;
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                psi.Environment["AZURE_TENANT_ID"] = tenantId;
+            }
 
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start signtool.exe process");
             var stdout = await p.StandardOutput.ReadToEndAsync(cancellationToken);
