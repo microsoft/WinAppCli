@@ -433,5 +433,57 @@ public class KeyStringParserTests
         Assert.AreEqual(1, actions.Count);
         Assert.AreEqual(" hi", ((TextInput)actions[0]).Text);
     }
+
+    // --- ParseVerbatim: whole-argument literal (the --verbatim flag) ---
+
+    [TestMethod]
+    public void ParseVerbatim_TypesEntireStringAsSingleLiteral()
+    {
+        // The phrase is all key names; verbatim types it as one literal instead of pressing the keys.
+        var actions = KeyStringParser.ParseVerbatim("down down enter");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("down down enter", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    [DataRow("enter")]            // collides with a named key
+    [DataRow("ctrl+a")]          // collides with a modifier combo
+    [DataRow("vk=0x42")]         // collides with the vk= escape
+    [DataRow("text=enter")]      // the text= prefix itself is typed literally, not interpreted
+    public void ParseVerbatim_DoesNotInterpretKeyTokens(string keys)
+    {
+        var actions = KeyStringParser.ParseVerbatim(keys);
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual(keys, ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void ParseVerbatim_PreservesExactWhitespace()
+    {
+        // Unlike Parse (which splits on whitespace and re-joins literal runs with a single space),
+        // verbatim keeps the string byte-for-byte: double spaces and tabs survive.
+        var actions = KeyStringParser.ParseVerbatim("a  b\tc");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("a  b\tc", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public void ParseVerbatim_DoesNotDecodeBackslashEscapes()
+    {
+        // Backslash escapes are a text= feature; verbatim types backslashes literally.
+        var actions = KeyStringParser.ParseVerbatim(@"a\sb");
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual(@"a\sb", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
+    public void ParseVerbatim_Empty_Throws(string keys)
+    {
+        Assert.ThrowsExactly<FormatException>(() => KeyStringParser.ParseVerbatim(keys));
+    }
 }
 

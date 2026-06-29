@@ -303,6 +303,7 @@ winapp ui send-keys "down down enter" -a myapp                 # arrow navigatio
 winapp ui send-keys "ctrl+a delete" -a myapp                   # select all, then delete
 winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp  # focus a field, then type text
 winapp ui send-keys "text=down text=down text=enter" -a myapp  # type the words, don't press the keys
+winapp ui send-keys "down down enter" -a myapp --verbatim      # same, but type the whole argument literally
 winapp ui send-keys "alt+f4" -a myapp                          # close window via accelerator
 winapp ui send-keys "vk=0x5D" -a myapp                         # a key with no friendly name (Apps/Menu key)
 winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide injection instead of PostMessage
@@ -314,10 +315,12 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 - **Modifier combos** — `ctrl`, `shift`, `alt`, `win` joined with `+`: `ctrl+shift+t`, `alt+f4`.
 - **Literal text** — any token that isn't a known key is typed character by character: `hello`. Adjacent literal words keep the space between them, so a quoted phrase like `"Hello world"` is typed verbatim (the space is preserved); a literal that merely contains `+` such as `C++` or `a+b` is typed as text, not parsed as a combo.
 - **Explicit literal escape** — prefix a token with `text=` to type it verbatim even when it collides with a key or modifier name: `text=enter` types the word "enter" instead of pressing Enter, and `text=ctrl+a` types the literal string. Mirrors the `vk=` escape; the escaped value still coalesces with adjacent literal words (`text=down low` → "down low"). Because tokens are whitespace-split (and adjacent literals re-join with a single space), use **backslash escapes inside a `text=` value** to type whitespace that wouldn't otherwise survive: `\s` → space, `\t` → tab, `\n` → newline, `\r` → carriage return, `\\` → literal backslash. So `text=a\s\sb` types "a  b" (double space), `text=line1\nline2` types a newline, and `text=\shi` keeps a leading space. An unrecognised escape (e.g. `\x`) is left verbatim.
+- **Whole-argument literal (`--verbatim`)** — when the *entire* payload is literal text, pass `--verbatim` instead of escaping every token with `text=`. It types the whole keys argument exactly as given — no named-key/combo/`vk=`/`text=` interpretation — and, unlike the normal path, preserves exact internal whitespace (no collapsing) without needing `\s`. So `send-keys "down down enter" --verbatim` types the words, and `send-keys "a  b" --verbatim` keeps the double space. Backslash escapes are **not** decoded in `--verbatim` mode (a `\s` is typed as a backslash and an "s"); use a `text=` token when you need an escaped control character.
 - **Raw virtual keys** — `vk=0xNN` (hex) or `vk=NN` (decimal) for keys without a friendly name.
 
 **Options:**
 - `--target <selector>` — Focus this element (via UIA) before sending keys. Without it, keys go to the app's currently focused element.
+- `--verbatim` — Type the entire keys argument as literal text (no key/combo/`vk=`/`text=` parsing) and preserve exact whitespace. The whole-argument form of the per-token `text=` escape.
 - `--via <transport>` — `post-message` (default) posts `WM_KEYDOWN`/`WM_KEYUP`/`WM_CHAR` to the target window's queue. It is HWND-targeted and bypasses UIPI (works across integrity levels). `send-input` injects OS-wide via `SendInput` and goes to the foreground window.
 
 **Choosing a transport / known limits:**

@@ -21,9 +21,10 @@ internal class UiSendKeysCommand : Command, IShortDescription
     {
         Description = "Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), " +
                       "modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). " +
-                      "Use text=<literal> to type a value verbatim when it would otherwise be read as a key name or " +
-                      "combo (text=enter types \"enter\"; text=ctrl+a types \"ctrl+a\"); backslash escapes \\s \\t " +
-                      "\\n \\r \\\\ are supported (text=a\\s\\sb types \"a  b\"). " +
+                      "Use text=<literal> to type a single value verbatim when it would otherwise be read as a key " +
+                      "name or combo (text=enter types \"enter\"; text=ctrl+a types \"ctrl+a\"); backslash escapes \\s \\t " +
+                      "\\n \\r \\\\ are supported (text=a\\s\\sb types \"a  b\"). To type the whole argument literally " +
+                      "without escaping each token, pass --verbatim instead. " +
                       "Quote multi-token strings, e.g. \"ctrl+a delete\".",
         Arity = ArgumentArity.ZeroOrOne
     };
@@ -42,10 +43,17 @@ internal class UiSendKeysCommand : Command, IShortDescription
         DefaultValueFactory = _ => "post-message"
     };
 
+    public static Option<bool> VerbatimOption { get; } = new("--verbatim")
+    {
+        Description = "Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, " +
+                      "and exact whitespace preserved. The whole-argument form of the per-token text= escape: " +
+                      "--verbatim \"down down enter\" types the words instead of pressing Down, Down, Enter."
+    };
+
     public UiSendKeysCommand()
         : base("send-keys", "Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), " +
                "modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. " +
-               "Use --target to focus an element first. " +
+               "Use --verbatim to type the whole argument literally, or --target to focus an element first. " +
                "Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). " +
                "For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.")
     {
@@ -54,6 +62,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         Options.Add(SharedUiOptions.WindowOption);
         Options.Add(TargetOption);
         Options.Add(ViaOption);
+        Options.Add(VerbatimOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -74,6 +83,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var target = parseResult.GetValue(TargetOption);
             var viaStr = parseResult.GetValue(ViaOption) ?? "post-message";
+            var verbatim = parseResult.GetValue(VerbatimOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
@@ -100,7 +110,9 @@ internal class UiSendKeysCommand : Command, IShortDescription
             IReadOnlyList<KeyAction> actions;
             try
             {
-                actions = KeyStringParser.Parse(keysStr);
+                // --verbatim types the whole argument literally (no key/combo/vk=/text= parsing, no
+                // whitespace collapsing); otherwise interpret the friendly key grammar token by token.
+                actions = verbatim ? KeyStringParser.ParseVerbatim(keysStr) : KeyStringParser.Parse(keysStr);
             }
             catch (FormatException ex)
             {

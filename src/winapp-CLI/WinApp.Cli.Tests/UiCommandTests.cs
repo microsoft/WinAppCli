@@ -989,6 +989,71 @@ public class UiCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
     }
 
+    [TestMethod]
+    public void SendKeys_VerbatimOption_DocumentedInDescription()
+    {
+        // The --verbatim flag must be discoverable via --help / cli-schema and explain it types literally.
+        StringAssert.Contains(UiSendKeysCommand.VerbatimOption.Description, "literal");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_Verbatim_TypesEntireArgumentAsLiteralText()
+    {
+        // Without --verbatim this presses Down, Down, Enter; with it, the words are typed verbatim as
+        // a single literal text action.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["down down enter", "-a", "TestApp", "--verbatim", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var actions = _fakeKeyboard.SendCalls[0].Actions;
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<WinApp.Cli.Helpers.TextInput>(actions[0]);
+        Assert.AreEqual("down down enter", ((WinApp.Cli.Helpers.TextInput)actions[0]).Text);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(1, result.GetProperty("actionCount").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task SendKeys_Verbatim_PreservesExactWhitespace()
+    {
+        // The normal path collapses internal whitespace to a single space; --verbatim keeps it exact.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["a  b", "-a", "TestApp", "--verbatim"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var actions = _fakeKeyboard.SendCalls[0].Actions;
+        Assert.AreEqual(1, actions.Count);
+        Assert.AreEqual("a  b", ((WinApp.Cli.Helpers.TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_Verbatim_SystemComboTextViaSendInput_IsSentAsText()
+    {
+        // With --verbatim, "win+l" is literal text (a TextInput), not a chord — the system-combo guard
+        // only inspects key chords, so the text is typed rather than refused even via send-input.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+l", "-a", "TestApp", "--via", "send-input", "--verbatim", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.IsInstanceOfType<WinApp.Cli.Helpers.TextInput>(_fakeKeyboard.SendCalls[0].Actions[0]);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_Verbatim_MissingKeys_ReturnsError()
+    {
+        // --verbatim still requires a value; an empty keys argument is rejected before injection.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--verbatim", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
     // ---------------------------------------------------------------------
     // drag (#498) — mouse drag gesture: drag <from> <to>, each a selector
     // (element center) or app x,y coordinates

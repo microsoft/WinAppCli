@@ -37,6 +37,8 @@ internal sealed record TextInput(string Text) : KeyAction;
 /// <item>Explicit literal text: <c>text=enter</c> types the word "enter" instead of pressing Enter.</item>
 /// <item>Anything else is treated as literal text and typed character by character.</item>
 /// </list>
+/// <see cref="ParseVerbatim"/> is the command-level counterpart to the per-token <c>text=</c> escape:
+/// it types the whole string literally with no interpretation at all.
 /// </summary>
 internal static class KeyStringParser
 {
@@ -129,6 +131,25 @@ internal static class KeyStringParser
         // literal-text tokens. Re-join adjacent literal runs with a single space so the phrase is
         // typed verbatim; runs separated by a key (e.g. "Hello enter world") stay distinct.
         return CoalesceText(actions);
+    }
+
+    /// <summary>
+    /// Treats the entire key string as one literal to type verbatim: no whitespace tokenizing, no
+    /// named-key / combo / <c>vk=</c> / <c>text=</c> interpretation, no whitespace collapsing, and no
+    /// backslash-escape decoding. The command-level counterpart to the per-token <c>text=</c> escape
+    /// (exposed as <c>--verbatim</c>), for when the whole payload is literal text that would otherwise
+    /// be read as keys — e.g. typing the word <c>enter</c>, the phrase <c>down down enter</c>, or text
+    /// with exact internal spacing that <see cref="Parse"/> would collapse.
+    /// </summary>
+    /// <exception cref="FormatException">The string is null, empty, or all whitespace.</exception>
+    public static IReadOnlyList<KeyAction> ParseVerbatim(string keys)
+    {
+        if (string.IsNullOrWhiteSpace(keys))
+        {
+            throw new FormatException("No text to send. Provide the literal text to type, e.g. \"down down enter\".");
+        }
+
+        return [new TextInput(keys)];
     }
 
     /// <summary>
