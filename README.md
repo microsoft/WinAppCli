@@ -143,6 +143,10 @@ The easiest way to use the CLI is via WinGet (Windows Package Manager). In Termi
 
 `winget install Microsoft.winappcli --source winget`
 
+Or, if you prefer a PowerShell terminal, you can use the WinGet PowerShell cmdlet (from the `Microsoft.WinGet.Client` module):
+
+`Install-WinGetPackage Microsoft.winappcli`
+
 ### NPM <a href="https://www.npmjs.com/package/@microsoft/winappcli"> <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM" height="24"></a>
 
 
