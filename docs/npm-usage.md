@@ -226,6 +226,7 @@ function manifestAddAlias(options?: ManifestAddAliasOptions): Promise<WinappResu
 | `appId` | `string \| undefined` | No | Application Id to add the alias to (default: first Application element) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
 | `name` | `string \| undefined` | No | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. |
+| `updateCsproj` | `boolean \| undefined` | No | Also set <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias> in the .NET project (.csproj) next to the manifest, so 'winapp run' / 'dotnet run' launch the app through this execution alias and keep console I/O in the current terminal. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1205,6 +1206,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `appId` | `string \| undefined` | No | Application Id to add the alias to (default: first Application element) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
 | `name` | `string \| undefined` | No | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. |
+| `updateCsproj` | `boolean \| undefined` | No | Also set <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias> in the .NET project (.csproj) next to the manifest, so 'winapp run' / 'dotnet run' launch the app through this execution alias and keep console I/O in the current terminal. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

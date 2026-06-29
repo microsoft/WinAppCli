@@ -91,11 +91,16 @@ Describe ".NET App Guide Workflow" {
                 } finally { Pop-Location }
             }
 
-            It "Should add execution alias to manifest" -Skip:$script:skip {
+            It "Should add execution alias to manifest and enable it in the csproj" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-WinappCommand -Arguments "manifest add-alias"
+                    Invoke-WinappCommand -Arguments "manifest add-alias --update-csproj"
                 } finally { Pop-Location }
+            }
+
+            It "Should set WinAppRunUseExecutionAlias in the csproj" -Skip:$script:skip {
+                $csproj = Get-ChildItem -Path $script:projectDir -Filter "*.csproj" | Select-Object -First 1
+                (Get-Content -Raw $csproj.FullName) | Should -Match "<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>"
             }
 
             It "Should run app with identity via winapp run" -Skip:$script:skip {

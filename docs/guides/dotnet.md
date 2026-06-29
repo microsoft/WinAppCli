@@ -122,21 +122,15 @@ To fix this, you'll add an execution alias to the manifest and tell the run inte
 
 > **Skip this step if you're building a UI app** (WPF, WinForms, WinUI). Those apps render their own window, so the default AUMID launch is what you want.
 
-1. Add the execution alias to your manifest:
+1. Add the execution alias to your manifest and enable it for `dotnet run` in one step:
 
    ```powershell
-   winapp manifest add-alias
+   winapp manifest add-alias --update-csproj
    ```
 
-   This adds a `uap5:ExecutionAlias` to `Package.appxmanifest` (defaulting to your project's exe name) so the app can be launched by name from a terminal.
+   This adds a `uap5:ExecutionAlias` to `Package.appxmanifest` (defaulting to your project's exe name) so the app can be launched by name from a terminal, and sets `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` in your `.csproj`. With this property set, `dotnet run` launches the app via its execution alias and inherits the current terminal's stdin/stdout/stderr so you see console output inline.
 
-2. Tell the `dotnet run` integration to use the alias. Open `dotnet-app.csproj` and add the following inside any `<PropertyGroup>` (or create a new `<PropertyGroup>` if needed):
-
-   ```xml
-   <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>
-   ```
-
-   With this property set, `dotnet run` launches the app via its execution alias and inherits the current terminal's stdin/stdout/stderr so you see console output inline.
+   To do the two steps separately, run `winapp manifest add-alias` and then add `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` to any `<PropertyGroup>` in `dotnet-app.csproj` yourself.
 
 ## 5. Debug with Identity
 

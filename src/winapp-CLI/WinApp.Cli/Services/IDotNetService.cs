@@ -106,6 +106,15 @@ internal interface IDotNetService
     Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Ensures the .csproj has <c>&lt;WinAppRunUseExecutionAlias&gt;true&lt;/WinAppRunUseExecutionAlias&gt;</c>.
+    /// Adds the element with an explanatory XML comment if missing, or updates it to <c>true</c> if set to <c>false</c>.
+    /// This makes <c>winapp run</c> / <c>dotnet run</c> launch the app through its execution alias so console I/O
+    /// stays in the current terminal.
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if it already had the correct setting.</returns>
+    Task<bool> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes <c>&lt;WindowsPackageType&gt;None&lt;/WindowsPackageType&gt;</c> if found in the .csproj,
     /// since this property prevents the app from running as a packaged application.
     /// </summary>

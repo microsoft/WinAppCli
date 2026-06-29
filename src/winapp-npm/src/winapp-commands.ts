@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.3
+ * Source schema version: 0.4.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -281,6 +281,8 @@ export interface ManifestAddAliasOptions extends CommonOptions {
   manifest?: string;
   /** Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. */
   name?: string;
+  /** Also set <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias> in the .NET project (.csproj) next to the manifest, so 'winapp run' / 'dotnet run' launch the app through this execution alias and keep console I/O in the current terminal. */
+  updateCsproj?: boolean;
 }
 
 /**
@@ -291,6 +293,7 @@ export async function manifestAddAlias(options: ManifestAddAliasOptions = {}): P
   if (options.appId) args.push('--app-id', options.appId);
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.name) args.push('--name', options.name);
+  if (options.updateCsproj) args.push('--update-csproj');
   return execCommand(args, options);
 }
 

@@ -82,6 +82,9 @@ internal class FakeDotNetService : IDotNetService
     public Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
         => _real.EnsureEnableMsixToolingAsync(csprojPath, cancellationToken);
 
+    public Task<bool> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+        => _real.EnsureWinAppRunUseExecutionAliasAsync(csprojPath, cancellationToken);
+
     public Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
         => _real.RemoveWindowsPackageTypeNoneAsync(csprojPath, cancellationToken);
 

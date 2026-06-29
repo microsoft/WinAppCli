@@ -40,6 +40,7 @@ public class ManifestAddAliasCommandTests : BaseCommandTests
         Assert.IsTrue(command.Options.Any(o => o.Name == "--name"), "Should have --name option");
         Assert.IsTrue(command.Options.Any(o => o.Name == "--manifest"), "Should have --manifest option");
         Assert.IsTrue(command.Options.Any(o => o.Name == "--app-id"), "Should have --app-id option");
+        Assert.IsTrue(command.Options.Any(o => o.Name == "--update-csproj"), "Should have --update-csproj option");
     }
 
     #endregion
@@ -743,6 +744,154 @@ public class ManifestAddAliasCommandTests : BaseCommandTests
     #endregion
 
     #region Helper methods
+
+    #region --update-csproj tests
+
+    [TestMethod]
+    public async Task AddAlias_UpdateCsproj_AddsWinAppRunUseExecutionAliasProperty()
+    {
+        // Arrange
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                     IgnorableNamespaces="uap10">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+        var csprojPath = CreateCsproj("""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--update-csproj"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var csproj = await File.ReadAllTextAsync(csprojPath);
+        Assert.Contains("<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>", csproj, "Should set the property to true");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_UpdateCsproj_UpdatesExistingFalseProperty()
+    {
+        // Arrange
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                     IgnorableNamespaces="uap10">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+        var csprojPath = CreateCsproj("""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <WinAppRunUseExecutionAlias>false</WinAppRunUseExecutionAlias>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--update-csproj"]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var csproj = await File.ReadAllTextAsync(csprojPath);
+        Assert.Contains("<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>", csproj, "Should update the property to true");
+        Assert.DoesNotContain("<WinAppRunUseExecutionAlias>false</WinAppRunUseExecutionAlias>", csproj, "Should not leave the false value");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_WithoutUpdateCsproj_DoesNotModifyCsproj()
+    {
+        // Arrange
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                     IgnorableNamespaces="uap10">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+        var csprojContent = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """;
+        var csprojPath = CreateCsproj(csprojContent);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Command should succeed");
+        var csproj = await File.ReadAllTextAsync(csprojPath);
+        Assert.AreEqual(csprojContent, csproj, "Csproj should be unchanged without --update-csproj");
+    }
+
+    [TestMethod]
+    public async Task AddAlias_UpdateCsproj_NoCsproj_StillSucceeds()
+    {
+        // Arrange - manifest but no .csproj next to it
+        var manifestPath = CreateManifest("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                     IgnorableNamespaces="uap10">
+              <Identity Name="test-app" Publisher="CN=test" Version="1.0.0.0" />
+              <Applications>
+                <Application Id="testApp" Executable="myapp.exe" EntryPoint="Windows.FullTrustApplication">
+                </Application>
+              </Applications>
+            </Package>
+            """);
+
+        var command = GetRequiredService<ManifestAddAliasCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifestPath, "--update-csproj"]);
+
+        // Assert - alias still added, no failure when no project is present
+        Assert.AreEqual(0, exitCode, "Command should succeed even when no .csproj is present");
+        var content = await File.ReadAllTextAsync(manifestPath);
+        Assert.Contains("uap5:ExecutionAlias", content, "Should still add the execution alias");
+    }
+
+    private string CreateCsproj(string content)
+    {
+        var path = Path.Combine(_tempDirectory.FullName, "test-app.csproj");
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    #endregion
 
     private string CreateManifest(string content)
     {

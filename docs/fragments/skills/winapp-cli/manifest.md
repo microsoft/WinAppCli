@@ -91,9 +91,14 @@ winapp manifest add-alias --name myapp
 
 # Target a specific manifest file
 winapp manifest add-alias --manifest ./path/to/Package.appxmanifest
+
+# Also enable the alias for 'winapp run' / 'dotnet run' (.NET projects)
+winapp manifest add-alias --update-csproj
 ```
 
 This adds a `uap5:AppExecutionAlias` extension to the manifest. If the alias already exists, the command reports it and exits successfully.
+
+With `--update-csproj`, the command also sets `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` in the `.csproj` next to the manifest (adding or updating the property), so `winapp run` / `dotnet run` launch the app through the alias and keep console I/O in the current terminal.
 
 > **When combined with `winapp run --with-alias`** or the `WinAppRunUseExecutionAlias` MSBuild property, this enables apps to run in the current terminal with inherited stdin/stdout/stderr instead of opening a new window.
 

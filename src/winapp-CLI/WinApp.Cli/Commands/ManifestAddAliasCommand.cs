@@ -17,6 +17,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
     public static Option<string> NameOption { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<string> AppIdOption { get; }
+    public static Option<bool> UpdateCsprojOption { get; }
 
     static ManifestAddAliasCommand()
     {
@@ -35,6 +36,12 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
         {
             Description = "Application Id to add the alias to (default: first Application element)"
         };
+
+        UpdateCsprojOption = new Option<bool>("--update-csproj")
+        {
+            Description = "Also set <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias> in the .NET project (.csproj) next to the manifest, " +
+                "so 'winapp run' / 'dotnet run' launch the app through this execution alias and keep console I/O in the current terminal."
+        };
     }
 
     public ManifestAddAliasCommand() : base("add-alias", "Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. " +
@@ -44,15 +51,17 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
         Options.Add(NameOption);
         Options.Add(ManifestOption);
         Options.Add(AppIdOption);
+        Options.Add(UpdateCsprojOption);
     }
 
-    public class Handler(IManifestService manifestService, ICurrentDirectoryProvider currentDirectoryProvider, ILogger<ManifestAddAliasCommand> logger) : AsynchronousCommandLineAction
+    public class Handler(IManifestService manifestService, IDotNetService dotNetService, ICurrentDirectoryProvider currentDirectoryProvider, ILogger<ManifestAddAliasCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var aliasName = parseResult.GetValue(NameOption);
             var manifestFile = parseResult.GetValue(ManifestOption);
             var appId = parseResult.GetValue(AppIdOption);
+            var updateCsproj = parseResult.GetValue(UpdateCsprojOption);
 
             // Find manifest
             FileInfo? resolvedManifest = manifestFile;
@@ -73,10 +82,18 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
             {
                 case AddExecutionAliasStatus.Added:
                     logger.LogInformation("{UISymbol} Added execution alias '{Alias}' to {Manifest}", UiSymbols.Check, result.AliasName, resolvedManifest.FullName);
+                    if (updateCsproj)
+                    {
+                        await UpdateCsprojAsync(resolvedManifest, cancellationToken);
+                    }
                     return 0;
 
                 case AddExecutionAliasStatus.AlreadyExists:
                     logger.LogInformation("{UISymbol} Execution alias '{Alias}' already exists in the manifest.", UiSymbols.Warning, result.AliasName);
+                    if (updateCsproj)
+                    {
+                        await UpdateCsprojAsync(resolvedManifest, cancellationToken);
+                    }
                     return 0;
 
                 case AddExecutionAliasStatus.ConflictingAliasExists:
@@ -113,6 +130,36 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
                 default:
                     logger.LogError("{UISymbol} Unexpected error adding execution alias.", UiSymbols.Error);
                     return 1;
+            }
+        }
+
+        private async Task UpdateCsprojAsync(FileInfo manifest, CancellationToken cancellationToken)
+        {
+            var projectDirectory = manifest.Directory;
+            if (projectDirectory == null || !projectDirectory.Exists)
+            {
+                logger.LogWarning("{UISymbol} Could not locate the project directory for the manifest; skipped updating the .csproj.", UiSymbols.Warning);
+                return;
+            }
+
+            var csprojFiles = dotNetService.FindCsproj(projectDirectory);
+            if (csprojFiles.Count == 0)
+            {
+                logger.LogWarning("{UISymbol} No .csproj found next to the manifest; skipped setting WinAppRunUseExecutionAlias.", UiSymbols.Warning);
+                return;
+            }
+
+            foreach (var csproj in csprojFiles)
+            {
+                var modified = await dotNetService.EnsureWinAppRunUseExecutionAliasAsync(csproj, cancellationToken);
+                if (modified)
+                {
+                    logger.LogInformation("{UISymbol} Set WinAppRunUseExecutionAlias=true in {Csproj}", UiSymbols.Check, csproj.FullName);
+                }
+                else
+                {
+                    logger.LogInformation("{UISymbol} WinAppRunUseExecutionAlias is already enabled in {Csproj}", UiSymbols.Check, csproj.FullName);
+                }
             }
         }
     }

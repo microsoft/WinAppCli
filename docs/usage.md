@@ -399,6 +399,7 @@ winapp manifest add-alias [options]
 - `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
 - `--manifest <path>` - Path to Package.appxmanifest (default: search current directory)
 - `--app-id <id>` - Application Id to add the alias to (default: first Application element)
+- `--update-csproj` - Also set `<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>` in the .NET project (`.csproj`) next to the manifest, so `winapp run` / `dotnet run` launch the app through this execution alias and keep console I/O in the current terminal.
 
 **What it does:**
 
@@ -406,6 +407,7 @@ winapp manifest add-alias [options]
 - Adds the `uap5` namespace declaration if not already present
 - Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
 - If the alias already exists, reports it and exits successfully
+- With `--update-csproj`, adds or updates the `WinAppRunUseExecutionAlias` MSBuild property in the adjacent `.csproj` (no-op if no `.csproj` is found)
 
 **Examples:**
 
@@ -418,6 +420,9 @@ winapp manifest add-alias --name myapp.exe
 
 # Add alias to specific manifest
 winapp manifest add-alias --manifest ./dist/Package.appxmanifest
+
+# Add alias and enable it for 'winapp run' / 'dotnet run' (.NET projects)
+winapp manifest add-alias --update-csproj
 ```
 
 #### manifest update-assets

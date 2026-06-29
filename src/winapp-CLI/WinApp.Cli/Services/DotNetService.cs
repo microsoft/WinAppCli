@@ -27,6 +27,8 @@ internal partial class DotNetService : IDotNetService
 
     private const string MSIXInfoComment = "<!-- Enables targets that generate package layout, required for running with winapp run or msix packaging -->";
 
+    private const string ExecutionAliasInfoComment = "<!-- Launches the app through its execution alias during 'winapp run'/'dotnet run' so console I/O stays in the current terminal. Requires a uap5:ExecutionAlias in the manifest (add one with 'winapp manifest add-alias'). -->";
+
     // NuGet package names for .NET WinAppSDK projects
     internal const string WINAPP_SDK_NUGET_PACKAGE = "Microsoft.WindowsAppSDK";
 
@@ -55,6 +57,9 @@ internal partial class DotNetService : IDotNetService
 
     [GeneratedRegex(@"<EnableMsixTooling>(.*?)</EnableMsixTooling>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex EnableMsixToolingElementRegex();
+
+    [GeneratedRegex(@"<WinAppRunUseExecutionAlias>(.*?)</WinAppRunUseExecutionAlias>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex WinAppRunUseExecutionAliasElementRegex();
 
     [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsPackageTypeNoneElementRegex();
@@ -562,6 +567,107 @@ internal partial class DotNetService : IDotNetService
         if (ridMatch.Success)
         {
             // Insert after the full closing </RuntimeIdentifier> tag
+            var insertPos = ridMatch.Index + ridMatch.Length;
+            content = content[..insertPos]
+                + Environment.NewLine + "    " + element
+                + content[insertPos..];
+            modified = true;
+        }
+        else
+        {
+            var tfmMatch = TargetFrameworkElementRegex().Match(content);
+            if (tfmMatch.Success)
+            {
+                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                content = content[..insertPos]
+                    + Environment.NewLine + "    " + element
+                    + content[insertPos..];
+                modified = true;
+            }
+            else
+            {
+                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
+                if (propGroupIdx >= 0)
+                {
+                    var closeTag = content.IndexOf('>', propGroupIdx);
+                    if (closeTag >= 0)
+                    {
+                        var insertPos = closeTag + 1;
+                        content = content[..insertPos]
+                            + Environment.NewLine + "    " + element
+                            + content[insertPos..];
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+        }
+
+        return modified;
+    }
+
+    /// <summary>
+    /// Ensures the .csproj has <c>&lt;WinAppRunUseExecutionAlias&gt;true&lt;/WinAppRunUseExecutionAlias&gt;</c>.
+    /// Adds the element with an explanatory XML comment if missing, or updates it to <c>true</c> if set to <c>false</c>.
+    /// </summary>
+    /// <returns>True if the .csproj was modified, false if it already had the correct setting.</returns>
+    public async Task<bool> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    {
+        if (!csprojPath.Exists)
+        {
+            return false;
+        }
+
+        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
+        var match = WinAppRunUseExecutionAliasElementRegex().Match(content);
+
+        if (match.Success)
+        {
+            var existingValue = match.Groups[1].Value.Trim();
+
+            if (string.Equals(existingValue, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Update existing element to true, adding a comment if one doesn't already exist
+            var replacement = "<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>";
+
+            var beforeMatch = content[..match.Index];
+            if (!beforeMatch.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
+            {
+                var lastNewline = beforeMatch.LastIndexOf('\n');
+                var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
+                replacement = $"{indent}{ExecutionAliasInfoComment}"
+                    + Environment.NewLine + replacement;
+                content = content[..(lastNewline + 1)]
+                    + replacement
+                    + content[(match.Index + match.Length)..];
+            }
+            else
+            {
+                content = content[..match.Index]
+                    + replacement
+                    + content[(match.Index + match.Length)..];
+            }
+
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+            return true;
+        }
+
+        // Insert WinAppRunUseExecutionAlias after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
+        var element =
+            ExecutionAliasInfoComment
+            + Environment.NewLine + "    <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>";
+
+        var modified = false;
+        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
+        if (ridMatch.Success)
+        {
             var insertPos = ridMatch.Index + ridMatch.Length;
             content = content[..insertPos]
                 + Environment.NewLine + "    " + element
