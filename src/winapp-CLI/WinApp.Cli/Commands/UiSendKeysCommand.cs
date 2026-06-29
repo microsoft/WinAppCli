@@ -91,7 +91,11 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (string.IsNullOrWhiteSpace(keysStr))
+            // For --verbatim, whitespace is legitimate content to type (the help promises exact
+            // whitespace preservation), so only reject a genuinely empty argument. Without --verbatim,
+            // a whitespace-only argument has no tokens to interpret, so it stays an error. (The IsNullOrEmpty
+            // operand is also what lets the compiler treat keysStr as non-null on the fall-through path.)
+            if (string.IsNullOrEmpty(keysStr) || (!verbatim && string.IsNullOrWhiteSpace(keysStr)))
             {
                 logger.LogError("{Symbol} Keys are required. Usage: winapp ui send-keys <keys> -a <app>", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
@@ -112,6 +116,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
             {
                 // --verbatim types the whole argument literally (no key/combo/vk=/text= parsing, no
                 // whitespace collapsing); otherwise interpret the friendly key grammar token by token.
+                // keysStr is non-null here: the guard above rejected null/empty.
                 actions = verbatim ? KeyStringParser.ParseVerbatim(keysStr) : KeyStringParser.Parse(keysStr);
             }
             catch (FormatException ex)
@@ -154,10 +159,26 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // grabbing focus, or a locked/secure desktop), injecting now would type into the wrong
                 // window. Verify the foreground belongs to the target before sending. (post-message posts
                 // straight to the target HWND's queue, so it isn't affected.)
-                if (transport == KeyTransport.SendInput &&
-                    !foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
+                if (transport == KeyTransport.SendInput)
                 {
-                    return 1;
+                    // Unlike a coordinate gesture (which targets a screen point), keystrokes have no
+                    // location — without a resolvable target window there is nothing to verify the
+                    // foreground against, so OS-wide injection would type blindly into whatever has
+                    // focus. Refuse rather than send to an unknown window.
+                    if (targetHwnd == 0)
+                    {
+                        logger.LogError(
+                            "{Symbol} --via send-input needs a resolvable target window, but none was found. Pass --window <hwnd>, ensure -a/--app resolves a window, or use --target to focus an element first.",
+                            UiSymbols.Error);
+                        UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                            "send-input needs a resolvable target window, but none was found — refusing OS-wide keyboard injection without a known target. Pass --window/--app or --target.");
+                        return 1;
+                    }
+
+                    if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
+                    {
+                        return 1;
+                    }
                 }
 
                 // WM_CHAR posted to a WinUI 3 / XAML host window is not turned into text by the XAML input
@@ -211,8 +232,12 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 }
                 else
                 {
-                    logger.LogInformation("{Symbol} Sent keys \"{Keys}\" via {Via}",
-                        UiSymbols.Check, keysStr, transport == KeyTransport.PostMessage ? "post-message" : "send-input");
+                    // Don't echo the raw keystrokes to the human log — in CI those logs are persisted and
+                    // shared, and key sequences may carry passwords / tokens being typed into a field. The
+                    // structured --json result still includes `keys` for callers that opt in (and it's
+                    // already on the command line); the plain log reports only the action count.
+                    logger.LogInformation("{Symbol} Sent {ActionCount} key action(s) via {Via}",
+                        UiSymbols.Check, actions.Count, transport == KeyTransport.PostMessage ? "post-message" : "send-input");
                 }
 
                 return 0;

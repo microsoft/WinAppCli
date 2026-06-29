@@ -16,10 +16,10 @@ internal static class ForegroundGuard
 {
     /// <summary>
     /// Returns <see langword="true"/> when the current foreground window is <paramref name="targetHwnd"/>
-    /// or belongs to the same process. A <paramref name="targetHwnd"/> of 0 (no resolvable window) is
-    /// treated as "can't verify" and returns <see langword="false"/>.
+    /// or the top-level root window that owns it. A <paramref name="targetHwnd"/> of 0 (no resolvable
+    /// window) is treated as "can't verify" and returns <see langword="false"/>.
     /// </summary>
-    public static unsafe bool ForegroundBelongsTo(long targetHwnd)
+    public static bool ForegroundBelongsTo(long targetHwnd)
     {
         if (targetHwnd == 0)
         {
@@ -38,12 +38,15 @@ internal static class ForegroundGuard
             return true;
         }
 
-        // The foreground is often the top-level ancestor of the resolved element HWND, so compare by
-        // owning process rather than requiring an exact handle match.
-        uint foregroundPid = 0, targetPid = 0;
-        Windows.Win32.PInvoke.GetWindowThreadProcessId(foreground, &foregroundPid);
-        Windows.Win32.PInvoke.GetWindowThreadProcessId(target, &targetPid);
-        return foregroundPid != 0 && foregroundPid == targetPid;
+        // The resolved element HWND is frequently a child / host window (a WinUI 3 input-site bridge,
+        // a control HWND); the window that actually holds the foreground is its top-level root. Accept
+        // only when the target's root window IS the foreground window. Compare by window ancestry, not
+        // by owning process: a PID match would also accept a *different* top-level window of the same
+        // process (common in multi-window apps) that merely happens to be foreground, which would let
+        // the injection land on the wrong window.
+        var targetRoot = Windows.Win32.PInvoke.GetAncestor(
+            target, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+        return !targetRoot.IsNull && targetRoot == foreground;
     }
 
     /// <summary>

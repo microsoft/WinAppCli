@@ -37,11 +37,16 @@ internal interface IMouseInput
     /// this performs a press-and-hold / long-press gesture.</param>
     /// <param name="dwellMs">Milliseconds to dwell at the destination after moving, before releasing —
     /// lets drop targets / merge overlays that arm from a sustained hover latch before the button-up.</param>
-    void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0);
+    /// <param name="settleMs">Cursor-settle pause (ms) after moving to the from-point, before the
+    /// button-down. Pass <c>0</c> when the caller already moved the cursor to the from-point and confirmed
+    /// the element hasn't moved, so no extra unguarded settle window reopens the move-during-settle race.</param>
+    void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0, int settleMs = 50);
 
     /// <summary>
     /// Rotates the mouse wheel at the given screen position. Positive delta scrolls up/away, negative down/toward.
     /// One notch is <c>120</c> units (WHEEL_DELTA).
     /// </summary>
-    void ScrollWheel(int screenX, int screenY, int delta);
+    /// <param name="settleMs">Cursor-settle pause (ms) after positioning, before the wheel rotation. Pass
+    /// <c>0</c> when the caller already moved the cursor and confirmed the target is stable.</param>
+    void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30);
 }

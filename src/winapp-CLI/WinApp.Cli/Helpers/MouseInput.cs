@@ -64,14 +64,19 @@ internal static class MouseInput
         }
     }
 
-    public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0)
+    public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0, int settleMs = 50)
     {
         var downFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
         var upFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP;
 
-        // Settle on the start point, then press the button
+        // Settle on the start point, then press the button. Pass settleMs: 0 when the caller has already
+        // moved the cursor to the from-point and confirmed the element hasn't drifted, so the button-down
+        // happens immediately after that fresh check rather than reopening an unguarded settle window.
         SendMove(fromScreenX, fromScreenY);
-        Thread.Sleep(50);
+        if (settleMs > 0)
+        {
+            Thread.Sleep(settleMs);
+        }
         SendButton(downFlag);
 
         var released = false;
@@ -119,11 +124,15 @@ internal static class MouseInput
         }
     }
 
-    public static void ScrollWheel(int screenX, int screenY, int delta)
+    public static void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30)
     {
-        // Position the cursor over the target so the wheel message is routed to the element under it
+        // Position the cursor over the target so the wheel message is routed to the element under it.
+        // Pass settleMs: 0 when the caller already moved the cursor and confirmed the target is stable.
         SendMove(screenX, screenY);
-        Thread.Sleep(30);
+        if (settleMs > 0)
+        {
+            Thread.Sleep(settleMs);
+        }
 
         Span<INPUT> inputs =
         [

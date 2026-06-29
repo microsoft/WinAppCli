@@ -122,10 +122,11 @@ internal class UiClickCommand : Command, IShortDescription
                 centerX = stable.CenterX;
                 centerY = stable.CenterY;
 
-                // Verify the target STILL holds the foreground as the final gate before the OS-wide click
+                // Verify the target STILL holds the foreground as the first gate before the OS-wide click
                 // (F1) — matches drag / scroll --wheel. The re-resolve above awaits UIA reads during which
                 // focus could shift, so we check here, after the awaits. Also yields a clean
                 // no_interactive_desktop error on a locked session instead of a misleading SendInput failure.
+                // (A second, final gate runs below, after the cursor-settle confirm read.)
                 if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, clickType))
                 {
                     return 1;
@@ -149,6 +150,14 @@ internal class UiClickCommand : Command, IShortDescription
                 }
                 centerX = confirmed.CenterX;
                 centerY = confirmed.CenterY;
+
+                // Final foreground gate after the awaited confirm read — the true last check before the
+                // OS-wide button-down (M3). Focus could have shifted during the cursor-settle + confirm
+                // read above, which the first gate (before those awaits) couldn't see.
+                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, clickType))
+                {
+                    return 1;
+                }
 
                 // Perform the click via SendInput — no extra settle, the cursor is already positioned and
                 // the target just confirmed in place.

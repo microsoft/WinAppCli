@@ -79,6 +79,9 @@ internal class UiDragCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         ILogger<UiDragCommand> logger) : AsynchronousCommandLineAction
     {
+        // Cursor-settle pause (ms) after positioning on the from-point, before the confirm read + press.
+        private const int CursorSettleMs = 50;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -163,18 +166,49 @@ internal class UiDragCommand : Command, IShortDescription
                 toX = toStable.X;
                 toY = toStable.Y;
 
-                // Verify the target STILL holds the foreground as the final gate immediately before the
-                // OS-wide drag. The stabilize re-resolve above performs awaited UIA reads (with delays);
-                // another window could steal focus during that gap, so we check here — after the awaits,
-                // not before them — to close the race and ensure the drag can't land on whatever window
-                // grabbed foreground mid-resolve. Also distinguishes a locked/secure desktop from a
-                // wrong-window foreground.
+                // Verify the target STILL holds the foreground as the first gate before the OS-wide drag.
+                // The stabilize re-resolve above performs awaited UIA reads (with delays); another window
+                // could steal focus during that gap, so we check here — after the awaits, not before them.
+                // Also distinguishes a locked/secure desktop from a wrong-window foreground. (For an element
+                // from-point a second, final gate runs below, after the cursor-settle confirm read.)
                 if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
                 {
                     return 1;
                 }
 
-                mouseInput.Drag(fromX, fromY, toX, toY, rightButton, holdMs, dwellMs);
+                // Close the residual re-resolve→button-down race for the from-point (mirrors click's F3
+                // fix): the button-down happens at <from>, and MouseInput.Drag's own pre-press settle is an
+                // unguarded window in which a still-animating from-element could drift, so the press grabs
+                // empty space yet the drag reports success. When <from> is an element, position the cursor
+                // on it, let it settle, confirm it hasn't moved, re-check the foreground, then press with
+                // settleMs: 0 — so a reported ✅ means the button went down on the element. A raw-coordinate
+                // from-point has nothing to confirm and keeps MouseInput.Drag's internal settle.
+                int dragSettleMs = 50;
+                if (from.Selector is not null && fromStable.StableElement is not null)
+                {
+                    mouseInput.MoveCursor(fromX, fromY);
+                    await Task.Delay(CursorSettleMs, cancellationToken);
+
+                    var confirmed = await GestureTargeting.ConfirmStillAsync(
+                        uiAutomation, session, from.Selector, fromStable.StableElement, cancellationToken);
+                    if (!GestureTargeting.TryReport(confirmed, logger, json, from.Token ?? "from", "drag"))
+                    {
+                        return 1;
+                    }
+                    fromX = confirmed.CenterX;
+                    fromY = confirmed.CenterY;
+
+                    // Final foreground gate after the awaited confirm read (focus could shift during it).
+                    if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
+                    {
+                        return 1;
+                    }
+
+                    // Cursor already positioned on the just-confirmed from-point; press without re-settling.
+                    dragSettleMs = 0;
+                }
+
+                mouseInput.Drag(fromX, fromY, toX, toY, rightButton, holdMs, dwellMs, settleMs: dragSettleMs);
 
                 var button = rightButton ? "right" : "left";
 
@@ -225,12 +259,12 @@ internal class UiDragCommand : Command, IShortDescription
         /// raw-coordinate endpoint has no element to verify and is returned unchanged. On a vanished or
         /// never-settling target it emits <c>target_moved</c> and returns Ok = <see langword="false"/>.
         /// </summary>
-        private async Task<(bool Ok, int X, int Y)> StabilizeAsync(
+        private async Task<(bool Ok, int X, int Y, UiElement? StableElement)> StabilizeAsync(
             Endpoint endpoint, UiSessionInfo session, string label, bool json, CancellationToken cancellationToken)
         {
             if (endpoint.Selector is null || endpoint.Element is null)
             {
-                return (true, endpoint.X, endpoint.Y);
+                return (true, endpoint.X, endpoint.Y, null);
             }
 
             var stable = await GestureTargeting.ResolveStableAsync(
@@ -241,10 +275,10 @@ internal class UiDragCommand : Command, IShortDescription
             // "from"/"to" endpoint label, so a target_moved error's selector field is actionable.
             if (!GestureTargeting.TryReport(stable, logger, json, endpoint.Token ?? label, "drag"))
             {
-                return (false, 0, 0);
+                return (false, 0, 0, null);
             }
 
-            return (true, stable.CenterX, stable.CenterY);
+            return (true, stable.CenterX, stable.CenterY, stable.Element);
         }
 
         /// <summary>
@@ -259,6 +293,19 @@ internal class UiDragCommand : Command, IShortDescription
             if (TryParsePoint(token, out int px, out int py))
             {
                 return new Endpoint(true, px, py, 0, null, null, null);
+            }
+
+            // A comma-separated token whose first field is an integer was meant as x,y coordinates but
+            // didn't parse (a trailing/extra field or a non-numeric one — "100,", "100,200,300", "100,x").
+            // Surface a precise "expected x,y" error instead of falling through to a selector lookup that
+            // reports a misleading "element not found".
+            if (LooksLikeCoordinates(token))
+            {
+                logger.LogError("{Symbol} <{Label}> looks like coordinates but isn't a valid x,y pair: '{Token}'. Use two integers, e.g. 100,200.",
+                    UiSymbols.Error, label, token);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    $"<{label}> looks like coordinates but isn't a valid x,y pair: '{token}'. Use two integers, e.g. 100,200.", token);
+                return new Endpoint(false, 0, 0, 0, null, null, null);
             }
 
             var selector = selectorService.Parse(token);
@@ -299,6 +346,20 @@ internal class UiDragCommand : Command, IShortDescription
 
             return int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out x)
                 && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out y);
+        }
+
+        /// <summary>
+        /// Whether a token that failed to parse as a point was nonetheless meant as coordinates: it has a
+        /// comma and its first field is an integer. Selectors are ids / <c>name=…</c> expressions that
+        /// don't start with a bare integer followed by a comma, so this only fires on malformed coordinate
+        /// input (e.g. <c>100,</c>, <c>100,200,300</c>, <c>100,abc</c>) — not on a selector that merely
+        /// contains a comma (e.g. <c>name=Save, Continue</c>).
+        /// </summary>
+        private static bool LooksLikeCoordinates(string token)
+        {
+            var parts = token.Split(',');
+            return parts.Length >= 2
+                && int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
         }
     }
 }

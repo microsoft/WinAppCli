@@ -141,10 +141,12 @@ internal static class KeyStringParser
     /// be read as keys — e.g. typing the word <c>enter</c>, the phrase <c>down down enter</c>, or text
     /// with exact internal spacing that <see cref="Parse"/> would collapse.
     /// </summary>
-    /// <exception cref="FormatException">The string is null, empty, or all whitespace.</exception>
+    /// <exception cref="FormatException">The string is null or empty.</exception>
     public static IReadOnlyList<KeyAction> ParseVerbatim(string keys)
     {
-        if (string.IsNullOrWhiteSpace(keys))
+        // Only a genuinely empty argument is "nothing to send". Whitespace is legitimate verbatim
+        // content (this method's whole point is exact preservation), so "   " types three spaces.
+        if (string.IsNullOrEmpty(keys))
         {
             throw new FormatException("No text to send. Provide the literal text to type, e.g. \"down down enter\".");
         }
@@ -223,15 +225,28 @@ internal static class KeyStringParser
             return false;
         }
 
-        var parts = token.Split('+', StringSplitOptions.RemoveEmptyEntries);
+        var parts = token.Split('+');
 
-        // Need at least one modifier + one main key, and every leading segment must be a known
-        // modifier. Otherwise it's an ordinary literal that happens to contain '+' ("C++", "a+b").
-        if (parts.Length < 2)
+        // Only a modifier-led token is meant as a combo. If the first segment isn't a known modifier,
+        // it's ordinary literal text that merely contains '+' ("a+b", "C++", "1+1", a bare "+"); let the
+        // caller fall back to literal text.
+        if (parts.Length < 2 || !Modifiers.ContainsKey(parts[0]))
         {
             return false;
         }
 
+        // It's modifier-led, so it's unambiguously meant as a combo. An empty segment now means a
+        // malformed combo — a doubled or trailing '+' ("ctrl++a", "ctrl+", "ctrl++"). Surface it instead
+        // of silently dropping the empty and pressing a *different* chord (e.g. "ctrl++a" → "ctrl+a").
+        if (Array.Exists(parts, string.IsNullOrEmpty))
+        {
+            throw new FormatException(
+                $"Malformed key combo '{token}': empty segment around '+'. Separate the modifiers and key with single '+' (e.g. ctrl+shift+t). " +
+                $"To type a literal '+', use text={token} or pass --verbatim.");
+        }
+
+        // Every segment except the last must be a known modifier; otherwise it's literal ("ctrl+a+b",
+        // where 'a' isn't a modifier).
         for (int i = 0; i < parts.Length - 1; i++)
         {
             if (!Modifiers.ContainsKey(parts[i]))

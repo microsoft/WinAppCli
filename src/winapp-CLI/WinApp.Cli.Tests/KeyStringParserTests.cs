@@ -125,6 +125,31 @@ public class KeyStringParserTests
     }
 
     [TestMethod]
+    [DataRow("ctrl++a")]        // doubled '+'
+    [DataRow("ctrl+")]          // trailing '+'
+    [DataRow("ctrl++")]         // trailing doubled '+'
+    [DataRow("shift++enter")]   // doubled '+' before a named key
+    [DataRow("ctrl+shift++t")]  // doubled '+' mid-combo
+    public void Parse_MalformedModifierChord_Throws(string token)
+    {
+        // A modifier-led token with an empty segment around '+' is an unambiguously malformed combo.
+        // Surface it instead of silently dropping the empty segment and pressing a *different* chord
+        // (e.g. "ctrl++a" must not quietly become "ctrl+a") (M1).
+        Assert.ThrowsExactly<FormatException>(() => KeyStringParser.Parse(token));
+    }
+
+    [TestMethod]
+    public void Parse_ModifierLedWithNonModifierMiddle_IsLiteralText()
+    {
+        // "ctrl+a+b" is modifier-led but 'a' (a non-final segment) isn't a modifier, so it isn't a valid
+        // combo and stays literal text rather than throwing — only empty segments are malformed (M1).
+        var actions = KeyStringParser.Parse("ctrl+a+b");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("ctrl+a+b", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
     public void Parse_QuotedPhrase_PreservesSpacesAsSingleLiteral()
     {
         // Regression for the "Hello world" → "Helloworld" whitespace-loss bug: adjacent literal words
@@ -479,10 +504,21 @@ public class KeyStringParserTests
     }
 
     [TestMethod]
+    public void ParseVerbatim_WhitespaceOnly_IsTypedLiterally()
+    {
+        // Whitespace is legitimate verbatim content (the whole point of --verbatim is exact preservation),
+        // so a whitespace-only argument types those spaces rather than erroring as "nothing to send" (M8).
+        var actions = KeyStringParser.ParseVerbatim("   ");
+        Assert.AreEqual(1, actions.Count);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("   ", ((TextInput)actions[0]).Text);
+    }
+
+    [TestMethod]
     [DataRow("")]
-    [DataRow("   ")]
     public void ParseVerbatim_Empty_Throws(string keys)
     {
+        // Only a genuinely empty argument is "nothing to send". (Whitespace is covered above.)
         Assert.ThrowsExactly<FormatException>(() => KeyStringParser.ParseVerbatim(keys));
     }
 }
