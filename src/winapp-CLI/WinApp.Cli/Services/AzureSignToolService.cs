@@ -15,11 +15,11 @@ internal class AzureSignToolService(
     IPackageInstallationService packageInstallationService,
     IWinappDirectoryService winappDirectoryService) : IAzureSignToolService
 {
-    internal const string TrustedSigningClientPackage = "Microsoft.ArtifactSigning.Client";
+    internal const string ArtifactSigningClientPackage = "Microsoft.ArtifactSigning.Client";
 
     // Pin to a known-good version so the DLL loaded into signtool is reproducible and
     // not silently upgraded to whatever happens to be latest in the NuGet feed.
-    internal const string TrustedSigningClientVersion = "1.0.128";
+    internal const string ArtifactSigningClientVersion = "1.0.128";
 
     private const string TimestampUrl = "http://timestamp.acs.microsoft.com";
 
@@ -84,36 +84,36 @@ internal class AzureSignToolService(
     internal async Task<FileInfo> EnsureTrustedSigningDlibAsync(TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Check if already available in NuGet cache
-        var dlibPath = FindTrustedSigningDlib(TrustedSigningClientVersion);
+        var dlibPath = FindTrustedSigningDlib(ArtifactSigningClientVersion);
         if (dlibPath != null)
         {
             return dlibPath;
         }
 
         // Download the pinned version of the package
-        await taskContext.AddSubTaskAsync($"Installing {TrustedSigningClientPackage} {TrustedSigningClientVersion}...", async (subContext, ct) =>
+        await taskContext.AddSubTaskAsync($"Installing {ArtifactSigningClientPackage} {ArtifactSigningClientVersion}...", async (subContext, ct) =>
         {
             var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
             var success = await packageInstallationService.EnsurePackageAsync(
                 globalWinappDir,
-                TrustedSigningClientPackage,
+                ArtifactSigningClientPackage,
                 subContext,
-                version: TrustedSigningClientVersion,
+                version: ArtifactSigningClientVersion,
                 cancellationToken: ct);
 
             if (!success)
             {
-                return (1, $"Failed to install {TrustedSigningClientPackage}.");
+                return (1, $"Failed to install {ArtifactSigningClientPackage}.");
             }
 
-            return (0, $"{TrustedSigningClientPackage} installed successfully.");
+            return (0, $"{ArtifactSigningClientPackage} installed successfully.");
         }, cancellationToken);
 
-        dlibPath = FindTrustedSigningDlib(TrustedSigningClientVersion);
+        dlibPath = FindTrustedSigningDlib(ArtifactSigningClientVersion);
         if (dlibPath == null)
         {
             throw new InvalidOperationException(
-                $"Could not find the Trusted Signing client library after installing {TrustedSigningClientPackage} {TrustedSigningClientVersion}.\n" +
+                $"Could not find the Trusted Signing client library after installing {ArtifactSigningClientPackage} {ArtifactSigningClientVersion}.\n" +
                 "Ensure the package contains the expected DLL structure.");
         }
 
@@ -123,7 +123,7 @@ internal class AzureSignToolService(
     private FileInfo? FindTrustedSigningDlib(string? version = null)
     {
         var nugetCache = nugetService.GetNuGetGlobalPackagesDir();
-        var packageDir = new DirectoryInfo(Path.Combine(nugetCache.FullName, TrustedSigningClientPackage.ToLowerInvariant()));
+        var packageDir = new DirectoryInfo(Path.Combine(nugetCache.FullName, ArtifactSigningClientPackage.ToLowerInvariant()));
 
         if (!packageDir.Exists)
         {
