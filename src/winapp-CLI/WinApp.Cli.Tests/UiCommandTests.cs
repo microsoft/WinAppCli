@@ -9,21 +9,27 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
-public class UiCommandTests : BaseCommandTests
+public partial class UiCommandTests : BaseCommandTests
 {
     private FakeUiAutomationService _fakeUia = null!;
     private FakeUiSessionService _fakeSession = null!;
     private FakeMouseInput _fakeMouse = null!;
+    private FakeKeyboardInput _fakeKeyboard = null!;
+    private FakeForegroundGuard _fakeForeground = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeUia = new FakeUiAutomationService();
         _fakeSession = new FakeUiSessionService();
         _fakeMouse = new FakeMouseInput();
+        _fakeKeyboard = new FakeKeyboardInput();
+        _fakeForeground = new FakeForegroundGuard();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
             .AddSingleton<IUiSessionService>(_fakeSession)
-            .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse);
+            .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
+            .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard)
+            .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground);
     }
 
     [TestMethod]
@@ -678,6 +684,165 @@ public class UiCommandTests : BaseCommandTests
         var command = GetRequiredService<UiHoverCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-tiny-0000", "-a", "TestApp", "--json"]);
         Assert.AreEqual(1, exitCode);
+    }
+
+    // ---------------------------------------------------------------------
+    // N5 — stable re-resolve before injection (moving/animating targets)
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Click_MovingTarget_ReturnsTargetMoved()
+    {
+        // The element's bounds keep changing on every read (an animating/scrolling target). The click
+        // must refuse rather than report a false success after landing on empty space.
+        const string sel = "btn-moving-1234";
+        var seq = new Queue<UiElement?>();
+        for (int i = 0; i < 4; i++)
+        {
+            seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 10 + i * 60, Y = 20, Width = 40, Height = 30 });
+        }
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ClickCalls.Count, "no click should be injected at a moving target");
+    }
+
+    [TestMethod]
+    public async Task Click_TargetSettlesAfterMove_UsesReResolvedCenter()
+    {
+        // The element moves once (initial read at X=10, then settles at X=200). The click must use the
+        // re-resolved, settled center (250), not the stale initial center (30).
+        const string sel = "btn-settle-1234";
+        var seq = new Queue<UiElement?>();
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 10, Y = 20, Width = 40, Height = 30 });   // initial center 30,35
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 200, Y = 20, Width = 100, Height = 30 }); // settled center 250,35
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMouse.ClickCalls.Count);
+        Assert.AreEqual(250, _fakeMouse.ClickCalls[0].ScreenX);
+        Assert.AreEqual(35, _fakeMouse.ClickCalls[0].ScreenY);
+    }
+
+    [TestMethod]
+    public async Task Click_TargetMovesDuringSettle_ReturnsTargetMoved()
+    {
+        // F3/N5 residual race: ResolveStableAsync sees the element settle (two equal reads), but the
+        // target then drifts during the cursor-settle window before the button-down. The final confirm
+        // read must catch it and refuse rather than report a false success after the click lands on
+        // empty space. Sequence: initial + stable re-read at X=100, then the confirm read finds X=500.
+        const string sel = "btn-drift-1234";
+        var seq = new Queue<UiElement?>();
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 100, Y = 20, Width = 40, Height = 30 }); // initial
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 100, Y = 20, Width = 40, Height = 30 }); // settles
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 500, Y = 20, Width = 40, Height = 30 }); // drifted on confirm
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ClickCalls.Count, "no button-down should fire when the target drifted during the settle");
+        Assert.AreEqual(1, _fakeMouse.MoveCursorCalls.Count, "the cursor was positioned before the confirm read");
+    }
+
+    [TestMethod]
+    public async Task Click_SettledTarget_PressesWithoutExtraSettle()
+    {
+        // The button-down must use settleMs:0 — the command already positioned the cursor, settled, and
+        // re-confirmed, so a second internal settle would reopen the move-during-settle window.
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-go-1234", X = 10, Y = 20, Width = 100, Height = 30 };
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-go-1234", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMouse.ClickCalls.Count);
+        Assert.AreEqual(0, _fakeMouse.ClickCalls[0].SettleMs);
+        Assert.AreEqual(1, _fakeMouse.MoveCursorCalls.Count);
+    }
+
+    // ---------------------------------------------------------------------
+    // F1 — foreground guard now also gates click / hover (parity with drag/scroll/send-keys)
+    // ---------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Click_ForegroundGuardDenies_AbortsWithoutClicking()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-go-1234", X = 10, Y = 20, Width = 100, Height = 30 };
+        _fakeForeground.Allow = false;
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-go-1234", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ClickCalls.Count, "no click should be injected when the foreground guard refuses");
+        Assert.AreEqual(1, _fakeForeground.Calls.Count);
+        Assert.AreEqual("click", _fakeForeground.Calls[0].Action);
+    }
+
+    [TestMethod]
+    public async Task Hover_ForegroundGuardDenies_AbortsWithoutHovering()
+    {
+        _fakeUia.FindSingleResult = new UiElement { Id = "e0", Type = "Button", Selector = "btn-info-5678", X = 50, Y = 60, Width = 120, Height = 40 };
+        _fakeForeground.Allow = false;
+
+        var command = GetRequiredService<UiHoverCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-info-5678", "-a", "TestApp", "--json", "--dwell-time", "0"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.HoverCalls.Count, "no hover should be injected when the foreground guard refuses");
+        Assert.AreEqual(1, _fakeForeground.Calls.Count);
+        Assert.AreEqual("hover", _fakeForeground.Calls[0].Action);
+    }
+
+    [TestMethod]
+    public async Task Click_ForegroundGuardAllows_InjectsAndPassesTargetHwnd()
+    {
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "e0", Type = "Button", Selector = "btn-go-1234",
+            X = 10, Y = 20, Width = 100, Height = 30, WindowHandle = 7777
+        };
+
+        var command = GetRequiredService<UiClickCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-go-1234", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMouse.ClickCalls.Count);
+        Assert.AreEqual(2, _fakeForeground.Calls.Count, "click checks the foreground twice on the success path: once before the cursor-settle confirm read and once immediately before the button-down");
+        Assert.AreEqual(7777, _fakeForeground.Calls[0].TargetHwnd);
+    }
+
+    [TestMethod]
+    public void SendKeys_KeysArgument_DocumentsTextEscape()
+    {
+        // F2: the text=<literal> escape must be discoverable via --help / cli-schema, not only the guide.
+        StringAssert.Contains(UiSendKeysCommand.KeysArgument.Description, "text=");
+    }
+
+    [TestMethod]
+    public async Task Scroll_Wheel_MovingTarget_ReturnsTargetMoved()
+    {
+        const string sel = "lst-moving-1234";
+        var seq = new Queue<UiElement?>();
+        for (int i = 0; i < 4; i++)
+        {
+            seq.Enqueue(new UiElement { Id = "e0", Type = "List", Selector = sel, X = 10, Y = 20 + i * 60, Width = 120, Height = 40 });
+        }
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiScrollCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--wheel", "-3", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count);
     }
 
     [TestMethod]
