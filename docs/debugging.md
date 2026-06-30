@@ -123,6 +123,16 @@ winapp run .\build\Debug --debug-output --symbols
 
 > **Important:** This attaches winapp as the debugger. Windows only allows one debugger per process, so you **cannot** also attach Visual Studio, VS Code, or WinDbg.
 
+#### WinUI stowed-exception triage
+
+Most WinUI crashes start inside a XAML event handler and surface as a **stowed exception** (`0xC000027B`) that is re-raised later from the dispatcher, so the normal stack no longer points at the real cause. When the crashed app loaded `Microsoft.UI.Xaml.dll`, winapp automatically runs an extra triage pass that decodes the stowed exception and the native XAML dispatch chain (`Microsoft.UI.Xaml` → `CXcpDispatcher` → `CoreMessagingXP` → CLR host). The result is appended to the debug log. No flag is needed — it is enabled automatically for WinUI dumps. Add `--symbols` for fully resolved function names in the dispatch chain.
+
+To make this work, winapp captures the crash dump with the terminating stowed exception's record (and its parameters, which point at the stowed-exception array) while keeping the first-chance thread context, so the standard managed analysis still recovers your original user frame *and* the triage pass can locate the stowed exception.
+
+This pass hosts DbgEng with the WinUI team's WinDbg JavaScript extension. The native debugging engine (`dbgeng.dll` and friends) comes from NuGet, and `JsProvider.dll` — the JavaScript scripting host, which is **not** on NuGet — is fetched on first use directly from the official WinDbg download (only the few hundred kilobytes needed are read, not the full package). Everything is cached under the winapp global directory, so subsequent runs are offline. If your environment blocks those downloads, install **Debugging Tools for Windows** (via the Windows SDK) or set the `WINAPP_DBGTOOLS_DIR` environment variable to a debugger directory that already contains `dbgeng.dll` and `JsProvider.dll`. When the binaries can't be obtained, the triage pass is skipped (the standard managed/native analysis still runs) and the log explains why.
+
+The triage pass runs in a short-lived child process. This is required: winapp's main process loads the system `dbghelp.dll` while capturing and analyzing the dump, and the modern engine `dbgeng.dll` cannot bind to that older, already-resident copy — a fresh process gives the engine a clean loader state. Decoding the stowed-exception structures also needs operating-system symbols (`combase.dll`), which `--symbols` downloads from the Microsoft public symbol server; on builds whose symbols aren't published there, the triage pass still identifies the stowed exception but cannot fully expand it.
+
 ## IDE setup
 
 ### VS Code

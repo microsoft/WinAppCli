@@ -13,6 +13,7 @@ public class CrashDumpServiceTests
 {
     private TestConsole _console = null!;
     private ILogger<CrashDumpService> _logger = null!;
+    private FakeXamlTriageService _xamlTriage = null!;
     private CrashDumpService _service = null!;
     private string _tempDir = null!;
 
@@ -21,7 +22,8 @@ public class CrashDumpServiceTests
     {
         _console = new TestConsole();
         _logger = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Debug)).CreateLogger<CrashDumpService>();
-        _service = new CrashDumpService(_console, _logger);
+        _xamlTriage = new FakeXamlTriageService();
+        _service = new CrashDumpService(_console, _logger, _xamlTriage);
         _tempDir = Path.Combine(Path.GetTempPath(), $"CrashDumpTest_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
     }
@@ -99,5 +101,20 @@ public class CrashDumpServiceTests
         // Assert — TestConsole wraps long paths, so check for the filename
         var output = _console.Output;
         Assert.IsTrue(output.Contains("invalid.dmp"), $"Expected dump filename in output: {output}");
+    }
+
+    [TestMethod]
+    public async Task AnalyzeDumpAsync_InvalidDump_DoesNotRunWinUiTriage()
+    {
+        // Arrange — an unreadable dump can't be inspected for WinUI modules, so triage must be skipped.
+        var dumpPath = Path.Combine(_tempDir, "invalid.dmp");
+        await File.WriteAllTextAsync(dumpPath, "not a dump");
+        var logPath = Path.Combine(_tempDir, "test.log");
+
+        // Act
+        await _service.AnalyzeDumpAsync(dumpPath, logPath);
+
+        // Assert
+        Assert.AreEqual(0, _xamlTriage.AnalyzeCalls.Count, "WinUI triage must not run for an unreadable/non-WinUI dump.");
     }
 }

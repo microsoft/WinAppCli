@@ -16,7 +16,9 @@ internal class FakeCrashDumpService : ICrashDumpService
 
     public string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
-        int savedExceptionCode, nuint savedExceptionAddress)
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode = 0, nuint crashExceptionAddress = 0,
+        nuint[]? crashExceptionParameters = null)
     {
         WriteCalls.Add((processId, savedThreadId));
         return FakeDumpPath;
