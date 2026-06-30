@@ -61,6 +61,9 @@ internal partial class DotNetService : IDotNetService
     [GeneratedRegex(@"<WinAppRunUseExecutionAlias>(.*?)</WinAppRunUseExecutionAlias>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex WinAppRunUseExecutionAliasElementRegex();
 
+    [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline)]
+    private static partial Regex XmlCommentRegex();
+
     [GeneratedRegex(@"[ \t]*<WindowsPackageType>None</WindowsPackageType>\r?\n?", RegexOptions.IgnoreCase)]
     private static partial Regex WindowsPackageTypeNoneElementRegex();
 
@@ -507,143 +510,60 @@ internal partial class DotNetService : IDotNetService
 
     public async Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
     {
-        if (!csprojPath.Exists)
-        {
-            return false;
-        }
+        var outcome = await EnsureBooleanPropertyTrueAsync(
+            csprojPath,
+            EnableMsixToolingElementRegex(),
+            "EnableMsixTooling",
+            MSIXInfoComment,
+            cancellationToken);
 
-        var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
-        var match = EnableMsixToolingElementRegex().Match(content);
-
-        if (match.Success)
-        {
-            var existingValue = match.Groups[1].Value.Trim();
-
-            if (string.Equals(existingValue, "true", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (string.Equals(existingValue, "false", StringComparison.OrdinalIgnoreCase))
-            {
-                // Update existing element from false to true, adding a comment if one doesn't already exist
-                var replacement = "<EnableMsixTooling>true</EnableMsixTooling>";
-
-                // Check if there's already a comment above the element
-                var beforeMatch = content[..match.Index];
-                if (!beforeMatch.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
-                {
-                    // Detect indentation from the EnableMsixTooling line
-                    var lastNewline = beforeMatch.LastIndexOf('\n');
-                    var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
-                    replacement = $"{indent}{MSIXInfoComment}"
-                        + Environment.NewLine + replacement;
-                    // Replace including the leading whitespace on this line
-                    content = content[..(lastNewline + 1)]
-                        + replacement
-                        + content[(match.Index + match.Length)..];
-                }
-                else
-                {
-                    content = content[..match.Index]
-                        + replacement
-                        + content[(match.Index + match.Length)..];
-                }
-
-                await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-                return true;
-            }
-
-            return false;
-        }
-
-        // Insert EnableMsixTooling after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
-        var element =
-            MSIXInfoComment
-            + Environment.NewLine + "    <EnableMsixTooling>true</EnableMsixTooling>";
-
-        var modified = false;
-        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
-        if (ridMatch.Success)
-        {
-            // Insert after the full closing </RuntimeIdentifier> tag
-            var insertPos = ridMatch.Index + ridMatch.Length;
-            content = content[..insertPos]
-                + Environment.NewLine + "    " + element
-                + content[insertPos..];
-            modified = true;
-        }
-        else
-        {
-            var tfmMatch = TargetFrameworkElementRegex().Match(content);
-            if (tfmMatch.Success)
-            {
-                var insertPos = tfmMatch.Index + tfmMatch.Length;
-                content = content[..insertPos]
-                    + Environment.NewLine + "    " + element
-                    + content[insertPos..];
-                modified = true;
-            }
-            else
-            {
-                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
-                if (propGroupIdx >= 0)
-                {
-                    var closeTag = content.IndexOf('>', propGroupIdx);
-                    if (closeTag >= 0)
-                    {
-                        var insertPos = closeTag + 1;
-                        content = content[..insertPos]
-                            + Environment.NewLine + "    " + element
-                            + content[insertPos..];
-                        modified = true;
-                    }
-                }
-            }
-        }
-
-        if (modified)
-        {
-            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-        }
-
-        return modified;
+        return outcome is CsprojPropertyOutcome.Added or CsprojPropertyOutcome.Updated;
     }
 
     /// <summary>
-    /// Ensures the .csproj has <c>&lt;WinAppRunUseExecutionAlias&gt;true&lt;/WinAppRunUseExecutionAlias&gt;</c>.
-    /// Adds the element with an explanatory XML comment if missing, or updates it to <c>true</c> if set to <c>false</c>.
+    /// Ensures a boolean MSBuild property is set to <c>true</c> in the given .csproj, preserving
+    /// existing formatting and comments. Adds the element (with an explanatory comment) when it is
+    /// missing, or rewrites it to <c>true</c> when present with any other value.
     /// </summary>
-    /// <returns>True if the .csproj was modified, false if it already had the correct setting.</returns>
-    public async Task<bool> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Matching is comment-aware: occurrences of the property (or the anchor elements used to find an
+    /// insertion point) inside an XML comment are ignored, so commented-out configuration is never
+    /// spliced into the live project.
+    /// </remarks>
+    private static async Task<CsprojPropertyOutcome> EnsureBooleanPropertyTrueAsync(
+        FileInfo csprojPath,
+        Regex propertyRegex,
+        string propertyName,
+        string comment,
+        CancellationToken cancellationToken)
     {
         if (!csprojPath.Exists)
         {
-            return false;
+            return CsprojPropertyOutcome.NotModified;
         }
 
         var content = await File.ReadAllTextAsync(csprojPath.FullName, cancellationToken);
-        var match = WinAppRunUseExecutionAliasElementRegex().Match(content);
+        var trueElement = $"<{propertyName}>true</{propertyName}>";
 
-        if (match.Success)
+        var match = FirstNonCommentMatch(content, propertyRegex);
+        if (match is not null)
         {
             var existingValue = match.Groups[1].Value.Trim();
-
             if (string.Equals(existingValue, "true", StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                return CsprojPropertyOutcome.AlreadyTrue;
             }
 
             // Update existing element to true, adding a comment if one doesn't already exist
-            var replacement = "<WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>";
-
+            var replacement = trueElement;
             var beforeMatch = content[..match.Index];
             if (!beforeMatch.TrimEnd().EndsWith("-->", StringComparison.Ordinal))
             {
+                // Detect indentation from the property line
                 var lastNewline = beforeMatch.LastIndexOf('\n');
                 var indent = lastNewline >= 0 ? beforeMatch[(lastNewline + 1)..] : "";
-                replacement = $"{indent}{ExecutionAliasInfoComment}"
-                    + Environment.NewLine + replacement;
+                replacement = $"{indent}{comment}" + Environment.NewLine + replacement;
+                // Replace including the leading whitespace on this line
                 content = content[..(lastNewline + 1)]
                     + replacement
                     + content[(match.Index + match.Length)..];
@@ -656,60 +576,107 @@ internal partial class DotNetService : IDotNetService
             }
 
             await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-            return true;
+            return CsprojPropertyOutcome.Updated;
         }
 
-        // Insert WinAppRunUseExecutionAlias after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
-        var element =
-            ExecutionAliasInfoComment
-            + Environment.NewLine + "    <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>";
+        // Insert the property after RuntimeIdentifier, TargetFramework, or at start of first PropertyGroup
+        var element = comment
+            + Environment.NewLine + "    " + trueElement;
 
-        var modified = false;
-        var ridMatch = RuntimeIdentifierElementRegex().Match(content);
-        if (ridMatch.Success)
+        var anchor = FirstNonCommentMatch(content, RuntimeIdentifierElementRegex())
+            ?? FirstNonCommentMatch(content, TargetFrameworkElementRegex());
+        if (anchor is not null)
         {
-            var insertPos = ridMatch.Index + ridMatch.Length;
+            var insertPos = anchor.Index + anchor.Length;
             content = content[..insertPos]
                 + Environment.NewLine + "    " + element
                 + content[insertPos..];
-            modified = true;
+            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+            return CsprojPropertyOutcome.Added;
         }
-        else
+
+        var propGroupIdx = FirstNonCommentIndex(content, "<PropertyGroup");
+        if (propGroupIdx >= 0)
         {
-            var tfmMatch = TargetFrameworkElementRegex().Match(content);
-            if (tfmMatch.Success)
+            var closeTag = content.IndexOf('>', propGroupIdx);
+            if (closeTag >= 0)
             {
-                var insertPos = tfmMatch.Index + tfmMatch.Length;
+                var insertPos = closeTag + 1;
                 content = content[..insertPos]
                     + Environment.NewLine + "    " + element
                     + content[insertPos..];
-                modified = true;
-            }
-            else
-            {
-                var propGroupIdx = content.IndexOf("<PropertyGroup", StringComparison.OrdinalIgnoreCase);
-                if (propGroupIdx >= 0)
-                {
-                    var closeTag = content.IndexOf('>', propGroupIdx);
-                    if (closeTag >= 0)
-                    {
-                        var insertPos = closeTag + 1;
-                        content = content[..insertPos]
-                            + Environment.NewLine + "    " + element
-                            + content[insertPos..];
-                        modified = true;
-                    }
-                }
+                await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
+                return CsprojPropertyOutcome.Added;
             }
         }
 
-        if (modified)
-        {
-            await File.WriteAllTextAsync(csprojPath.FullName, content, cancellationToken);
-        }
-
-        return modified;
+        return CsprojPropertyOutcome.NotModified;
     }
+
+    /// <summary>
+    /// Returns the first match of <paramref name="regex"/> in <paramref name="content"/> whose start
+    /// index does not fall inside an XML comment, or <c>null</c> if every match is commented out.
+    /// </summary>
+    private static Match? FirstNonCommentMatch(string content, Regex regex)
+    {
+        var comments = XmlCommentRegex().Matches(content);
+        for (var match = regex.Match(content); match.Success; match = match.NextMatch())
+        {
+            if (!IsInsideComment(match.Index, comments))
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the index of the first occurrence of <paramref name="token"/> (case-insensitive) that is
+    /// not inside an XML comment, or <c>-1</c> if every occurrence is commented out.
+    /// </summary>
+    private static int FirstNonCommentIndex(string content, string token)
+    {
+        var comments = XmlCommentRegex().Matches(content);
+        var index = content.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+        while (index >= 0)
+        {
+            if (!IsInsideComment(index, comments))
+            {
+                return index;
+            }
+
+            index = content.IndexOf(token, index + token.Length, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return -1;
+    }
+
+    private static bool IsInsideComment(int index, MatchCollection comments)
+    {
+        foreach (Match comment in comments)
+        {
+            if (index >= comment.Index && index < comment.Index + comment.Length)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Ensures the .csproj has <c>&lt;WinAppRunUseExecutionAlias&gt;true&lt;/WinAppRunUseExecutionAlias&gt;</c>.
+    /// Adds the element with an explanatory XML comment if missing, or updates it to <c>true</c> if set to another value.
+    /// </summary>
+    /// <returns>The outcome describing whether the property was added, updated, already correct, or could not be written.</returns>
+    public Task<CsprojPropertyOutcome> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+        => EnsureBooleanPropertyTrueAsync(
+            csprojPath,
+            WinAppRunUseExecutionAliasElementRegex(),
+            "WinAppRunUseExecutionAlias",
+            ExecutionAliasInfoComment,
+            cancellationToken);
 
     public async Task<bool> RemoveWindowsPackageTypeNoneAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
     {

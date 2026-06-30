@@ -84,7 +84,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
                     logger.LogInformation("{UISymbol} Added execution alias '{Alias}' to {Manifest}", UiSymbols.Check, result.AliasName, resolvedManifest.FullName);
                     if (updateCsproj)
                     {
-                        await UpdateCsprojAsync(resolvedManifest, cancellationToken);
+                        return await UpdateCsprojAsync(resolvedManifest, cancellationToken);
                     }
                     return 0;
 
@@ -92,7 +92,7 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
                     logger.LogInformation("{UISymbol} Execution alias '{Alias}' already exists in the manifest.", UiSymbols.Warning, result.AliasName);
                     if (updateCsproj)
                     {
-                        await UpdateCsprojAsync(resolvedManifest, cancellationToken);
+                        return await UpdateCsprojAsync(resolvedManifest, cancellationToken);
                     }
                     return 0;
 
@@ -133,34 +133,45 @@ internal class ManifestAddAliasCommand : Command, IShortDescription
             }
         }
 
-        private async Task UpdateCsprojAsync(FileInfo manifest, CancellationToken cancellationToken)
+        private async Task<int> UpdateCsprojAsync(FileInfo manifest, CancellationToken cancellationToken)
         {
             var projectDirectory = manifest.Directory;
             if (projectDirectory == null || !projectDirectory.Exists)
             {
-                logger.LogWarning("{UISymbol} Could not locate the project directory for the manifest; skipped updating the .csproj.", UiSymbols.Warning);
-                return;
+                logger.LogWarning("{UISymbol} --update-csproj was requested but the project directory for the manifest could not be located; WinAppRunUseExecutionAlias was not set.", UiSymbols.Warning);
+                return 1;
             }
 
             var csprojFiles = dotNetService.FindCsproj(projectDirectory);
             if (csprojFiles.Count == 0)
             {
-                logger.LogWarning("{UISymbol} No .csproj found next to the manifest; skipped setting WinAppRunUseExecutionAlias.", UiSymbols.Warning);
-                return;
+                logger.LogWarning("{UISymbol} --update-csproj was requested but no .csproj was found next to the manifest; WinAppRunUseExecutionAlias was not set.", UiSymbols.Warning);
+                return 1;
             }
 
+            var hadFailure = false;
             foreach (var csproj in csprojFiles)
             {
-                var modified = await dotNetService.EnsureWinAppRunUseExecutionAliasAsync(csproj, cancellationToken);
-                if (modified)
+                var outcome = await dotNetService.EnsureWinAppRunUseExecutionAliasAsync(csproj, cancellationToken);
+                switch (outcome)
                 {
-                    logger.LogInformation("{UISymbol} Set WinAppRunUseExecutionAlias=true in {Csproj}", UiSymbols.Check, csproj.FullName);
-                }
-                else
-                {
-                    logger.LogInformation("{UISymbol} WinAppRunUseExecutionAlias is already enabled in {Csproj}", UiSymbols.Check, csproj.FullName);
+                    case CsprojPropertyOutcome.Added:
+                    case CsprojPropertyOutcome.Updated:
+                        logger.LogInformation("{UISymbol} Set WinAppRunUseExecutionAlias=true in {Csproj}", UiSymbols.Check, csproj.FullName);
+                        break;
+
+                    case CsprojPropertyOutcome.AlreadyTrue:
+                        logger.LogInformation("{UISymbol} WinAppRunUseExecutionAlias is already enabled in {Csproj}", UiSymbols.Check, csproj.FullName);
+                        break;
+
+                    default:
+                        logger.LogWarning("{UISymbol} Could not set WinAppRunUseExecutionAlias in {Csproj} (no <PropertyGroup> found). Add <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias> manually.", UiSymbols.Warning, csproj.FullName);
+                        hadFailure = true;
+                        break;
                 }
             }
+
+            return hadFailure ? 1 : 0;
         }
     }
 }

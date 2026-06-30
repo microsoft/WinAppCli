@@ -111,8 +111,8 @@ internal interface IDotNetService
     /// This makes <c>winapp run</c> / <c>dotnet run</c> launch the app through its execution alias so console I/O
     /// stays in the current terminal.
     /// </summary>
-    /// <returns>True if the .csproj was modified, false if it already had the correct setting.</returns>
-    Task<bool> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
+    /// <returns>The outcome describing whether the property was added, updated, already correct, or could not be written.</returns>
+    Task<CsprojPropertyOutcome> EnsureWinAppRunUseExecutionAliasAsync(FileInfo csprojPath, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Removes <c>&lt;WindowsPackageType&gt;None&lt;/WindowsPackageType&gt;</c> if found in the .csproj,

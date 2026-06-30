@@ -156,6 +156,8 @@ Launch via execution alias (for console apps):
 </PropertyGroup>
 ```
 
+> **Tip:** `winapp manifest add-alias --update-csproj` adds the required `uap5:ExecutionAlias` to the manifest and sets this property in the adjacent `.csproj` for you.
+
 Register identity without launching:
 ```xml
 <PropertyGroup>

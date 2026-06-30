@@ -407,7 +407,7 @@ winapp manifest add-alias [options]
 - Adds the `uap5` namespace declaration if not already present
 - Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
 - If the alias already exists, reports it and exits successfully
-- With `--update-csproj`, adds or updates the `WinAppRunUseExecutionAlias` MSBuild property in the adjacent `.csproj` (no-op if no `.csproj` is found)
+- With `--update-csproj`, adds or updates the `WinAppRunUseExecutionAlias` MSBuild property in the adjacent `.csproj`. The execution alias is still added to the manifest, but the command exits non-zero if no `.csproj` is found or the property cannot be inserted (no `<PropertyGroup>`), so the situation is not silently ignored. Occurrences of the property inside XML comments are ignored and left intact.
 
 **Examples:**
 
