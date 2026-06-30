@@ -53,6 +53,7 @@ internal static class StoreHostBuilderExtensions
             // Azure Trusted Signing services
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
+            .AddSingleton<IAzureSignToolService, AzureSignToolService>()
             // UI Automation services
             .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<ISelectorService, SelectorService>()

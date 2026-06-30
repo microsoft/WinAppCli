@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
@@ -15,16 +16,16 @@ namespace WinApp.Cli.Services;
 /// DefaultAzureCredential fails — the Trusted Signing dlib requires
 /// AzureCliCredential for local interactive signing.
 /// </summary>
-internal class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole ansiConsole) : IAzureAuthService
+internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole ansiConsole) : IAzureAuthService
 {
-    public bool IsInteractive =>
+    public virtual bool IsInteractive =>
         Environment.UserInteractive
         && !Console.IsInputRedirected
         && Environment.GetEnvironmentVariable("CI") == null
         && Environment.GetEnvironmentVariable("TF_BUILD") == null
         && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == null;
 
-    public string? TenantId { get; private set; } = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
+    public string? TenantId { get; protected set; } = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
 
     public async Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {
@@ -74,13 +75,19 @@ internal class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole a
             {
                 tenantId = await ansiConsole.PromptAsync(
                     new TextPrompt<string>("Enter your [green]Azure Tenant ID[/] (found in Azure Portal > Azure AD > Overview):")
-                        .ValidationErrorMessage("[red]Tenant ID cannot be empty[/]")
-                        .Validate(input => !string.IsNullOrWhiteSpace(input)),
+                        .ValidationErrorMessage("[red]Enter a valid tenant ID — a GUID or a domain like contoso.onmicrosoft.com[/]")
+                        .Validate(IsValidTenantId),
                     cancellationToken);
                 TenantId = tenantId;
             }
+            else if (!IsValidTenantId(tenantId))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid AZURE_TENANT_ID value '{tenantId}'. " +
+                    "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
+            }
 
-            ansiConsole.MarkupLine("[yellow]Signing in via Azure CLI...[/]");
+            logger.LogInformation("Signing in via Azure CLI...");
             var success = await RunAzLoginAsync(azPath, tenantId, cancellationToken);
 
             if (!success)
@@ -89,14 +96,15 @@ internal class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole a
             }
 
             // Retry with the now-valid Azure CLI credential
-            var retryCredential = new AzureCliCredential();
+            var retryCredential = CreateAzureCliCredential();
             var retryToken = await retryCredential.GetTokenAsync(new TokenRequestContext([scope]), cancellationToken);
             logger.LogInformation("Authenticated via Azure CLI");
             return retryToken.Token;
         }
     }
 
-    private static DefaultAzureCredential CreateCredential()
+    /// <summary>Creates the primary credential chain. Virtual to allow tests to substitute a fake.</summary>
+    protected virtual TokenCredential CreateCredential()
     {
         var options = new DefaultAzureCredentialOptions
         {
@@ -112,7 +120,10 @@ internal class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole a
         return new DefaultAzureCredential(options);
     }
 
-    private static string? FindAzureCli()
+    /// <summary>Creates the Azure CLI credential used after an interactive 'az login'. Virtual for tests.</summary>
+    protected virtual TokenCredential CreateAzureCliCredential() => new AzureCliCredential();
+
+    protected virtual string? FindAzureCli()
     {
         // Check common install locations on Windows
         var candidates = new[]
@@ -159,22 +170,85 @@ internal class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole a
         return null;
     }
 
-    private static async Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)
+    protected virtual async Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)
     {
         var psi = new ProcessStartInfo
         {
             FileName = azPath,
-            Arguments = $"login --tenant {tenantId}",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = false // Allow browser interaction
         };
 
+        // Use ArgumentList rather than string interpolation so the (already validated)
+        // tenant value can never be smuggled in as extra arguments to the az.cmd target.
+        psi.ArgumentList.Add("login");
+        psi.ArgumentList.Add("--tenant");
+        psi.ArgumentList.Add(tenantId);
+
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Azure CLI");
-        await p.WaitForExitAsync(cancellationToken);
+
+        // Drain and forward both pipes concurrently. Reading neither (the previous behavior)
+        // can deadlock when az fills a redirected pipe, and forwarding lets the user see
+        // device-login instructions written to stdout/stderr.
+        var stdoutTask = ForwardStreamAsync(p.StandardOutput, cancellationToken);
+        var stderrTask = ForwardStreamAsync(p.StandardError, cancellationToken);
+
+        try
+        {
+            await p.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(p);
+            throw;
+        }
+
+        await Task.WhenAll(stdoutTask, stderrTask);
         return p.ExitCode == 0;
     }
+
+    private async Task ForwardStreamAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+        {
+            ansiConsole.WriteLine(line);
+        }
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup on cancellation
+        }
+    }
+
+    /// <summary>
+    /// Validates that a tenant identifier is a GUID or a DNS-style domain name. This both
+    /// prevents bad input from reaching the Azure CLI and rejects shell/argument metacharacters.
+    /// </summary>
+    internal static bool IsValidTenantId(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return false;
+        }
+
+        return Guid.TryParse(tenantId, out _) || TenantDomainRegex().IsMatch(tenantId);
+    }
+
+    [GeneratedRegex(@"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$")]
+    private static partial Regex TenantDomainRegex();
 
     private void LogAuthMethod(AccessToken token)
     {

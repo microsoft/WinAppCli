@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -12,6 +13,7 @@ public class AzSignCommandTests : BaseCommandTests
 {
     private FakeAzureAuthService _fakeAuthService = null!;
     private FakeAzureSigningService _fakeSigningService = null!;
+    private FakeAzureSignToolService _fakeSignToolService = null!;
     private AzSignCommand _command = null!;
 
     [TestInitialize]
@@ -19,6 +21,7 @@ public class AzSignCommandTests : BaseCommandTests
     {
         _fakeAuthService = (FakeAzureAuthService)GetRequiredService<IAzureAuthService>();
         _fakeSigningService = (FakeAzureSigningService)GetRequiredService<IAzureSigningService>();
+        _fakeSignToolService = (FakeAzureSignToolService)GetRequiredService<IAzureSignToolService>();
         _command = GetRequiredService<AzSignCommand>();
     }
 
@@ -26,7 +29,8 @@ public class AzSignCommandTests : BaseCommandTests
     {
         return services
             .AddSingleton<IAzureAuthService, FakeAzureAuthService>()
-            .AddSingleton<IAzureSigningService, FakeAzureSigningService>();
+            .AddSingleton<IAzureSigningService, FakeAzureSigningService>()
+            .AddSingleton<IAzureSignToolService, FakeAzureSignToolService>();
     }
 
     [TestMethod]
@@ -182,12 +186,14 @@ public class AzSignCommandTests : BaseCommandTests
             new CertificateProfile("myprofile", "PublicTrust", "Active")
         ];
 
-        // Will proceed through auto-selection but fail at dlib/signtool stage (expected in test env)
+        // Accept the confirmation prompt (single sub/account/profile are auto-selected first).
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
-        // It should fail at the signing stage (not at selection), so result is still 1
-        // but the error should be about the dlib/signing, not about subscription/account/profile selection
-        Assert.AreEqual(1, result);
+        // Reaches the signing stage and succeeds via the faked sign-tool service.
+        Assert.AreEqual(0, result);
+        Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");
         var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         Assert.IsFalse(allOutput.Contains("No Azure subscriptions found"), "Should not fail at subscription selection");
         Assert.IsFalse(allOutput.Contains("No Trusted Signing accounts found"), "Should not fail at account selection");
@@ -214,10 +220,13 @@ public class AzSignCommandTests : BaseCommandTests
             new CertificateProfile("myprofile", "PublicTrust", "Active")
         ];
 
+        // Account/profile are auto-selected (single), so the sign confirmation still prompts.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
         // Using --subscription flag should skip the subscription prompt
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
 
-        // Should get past selection without prompting (will fail at signing stage)
+        Assert.AreEqual(0, result);
         var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         Assert.IsFalse(allOutput.Contains("Select an Azure subscription"), "Should not prompt for subscription when flag is provided");
     }
@@ -241,12 +250,79 @@ public class AzSignCommandTests : BaseCommandTests
             new CertificateProfile("myprofile", "PublicTrust", "Active")
         ];
 
+        // No prompt input pushed: with account+profile supplied, no confirmation should be required.
         var result = await ParseAndInvokeWithCaptureAsync(_command,
             ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
 
-        // Should skip all prompting (will fail at signing since no signtool in test)
+        Assert.AreEqual(0, result);
+        Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage without prompting");
+        Assert.AreEqual("fake-tenant-id", _fakeSignToolService.LastTenantId, "Tenant ID should be forwarded to signtool");
         var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         Assert.IsFalse(allOutput.Contains("Select"), "Should not show any selection prompts when all flags are provided");
+        Assert.IsFalse(allOutput.Contains("Sign with profile"), "Should not show a confirmation prompt when account and profile are explicit");
+    }
+
+    [TestMethod]
+    public async Task AzSign_AllFlagsProvided_GeneratesMetadataAndCleansUp()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("myprofile", "PublicTrust", "Active")];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
+
+        Assert.AreEqual(0, result);
+
+        // The generated metadata file should contain the resolved signing identity...
+        Assert.IsNotNull(_fakeSignToolService.LastMetadataContent);
+        StringAssert.Contains(_fakeSignToolService.LastMetadataContent, "myaccount");
+        StringAssert.Contains(_fakeSignToolService.LastMetadataContent, "myprofile");
+        StringAssert.Contains(_fakeSignToolService.LastMetadataContent, "https://eus.codesigning.azure.net");
+
+        // ...and the temp file must be cleaned up afterward.
+        Assert.IsNotNull(_fakeSignToolService.LastMetadataFilePath);
+        Assert.IsFalse(File.Exists(_fakeSignToolService.LastMetadataFilePath!.FullName), "Generated metadata file should be deleted after signing");
+    }
+
+    [TestMethod]
+    public async Task AzSign_WithMetadataFile_UsesFileDirectly_DoesNotDelete()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(0, result);
+        Assert.AreEqual(1, _fakeSignToolService.CallCount);
+        Assert.AreEqual(metadataPath, _fakeSignToolService.LastMetadataFilePath!.FullName);
+        // A user-supplied metadata file must not be deleted.
+        Assert.IsTrue(File.Exists(metadataPath), "User-provided metadata file should not be deleted");
+    }
+
+    [TestMethod]
+    public async Task AzSign_SignToolFails_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("myprofile", "PublicTrust", "Active")];
+        _fakeSignToolService.ShouldFail = true;
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        StringAssert.Contains(allOutput, "signtool.exe execution failed");
     }
 }
 
@@ -254,7 +330,7 @@ internal class FakeAzureAuthService : IAzureAuthService
 {
     public bool ShouldFail { get; set; }
     public string FailureMessage { get; set; } = "Authentication failed";
-    public bool IsInteractive => true;
+    public bool IsInteractive { get; set; } = true;
     public string? TenantId { get; set; } = "fake-tenant-id";
 
     public Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
@@ -264,6 +340,41 @@ internal class FakeAzureAuthService : IAzureAuthService
             throw new InvalidOperationException(FailureMessage);
         }
         return Task.FromResult("fake-access-token");
+    }
+}
+
+internal class FakeAzureSignToolService : IAzureSignToolService
+{
+    public bool ShouldFail { get; set; }
+    public int CallCount { get; private set; }
+    public FileInfo? LastFilePath { get; private set; }
+    public FileInfo? LastMetadataFilePath { get; private set; }
+    public string? LastMetadataContent { get; private set; }
+    public string? LastTenantId { get; private set; }
+
+    public async Task SignAsync(
+        FileInfo filePath,
+        FileInfo metadataFilePath,
+        string? tenantId,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        LastFilePath = filePath;
+        LastMetadataFilePath = metadataFilePath;
+        LastTenantId = tenantId;
+
+        // Capture the metadata contents now, since the handler deletes generated files after we return.
+        metadataFilePath.Refresh();
+        if (metadataFilePath.Exists)
+        {
+            LastMetadataContent = await File.ReadAllTextAsync(metadataFilePath.FullName, cancellationToken);
+        }
+
+        if (ShouldFail)
+        {
+            throw new InvalidOperationException("signtool.exe execution failed with exit code 1.");
+        }
     }
 }
 

@@ -660,6 +660,31 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	// Register winapp.azSign command (Azure Trusted Signing)
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.azSign', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+
+			const filePath = await selectFile('Select file to sign with Azure Trusted Signing', {
+				'MSIX Packages': ['msix', 'msixbundle', 'appx'],
+				'Executables': ['exe', 'dll'],
+				'All files': ['*']
+			});
+
+			if (!filePath) {
+				vscode.window.showErrorMessage('A file to sign is required');
+				return;
+			}
+
+			// Signing identity is discovered interactively (subscription/account/profile) by the
+			// CLI, and authentication uses the standard Azure credential chain. No extra input needed.
+			await runWinappCommand(extensionPath, `az-sign "${filePath}"`, workspacePath);
+		})
+	);
+
 	// Register winapp.tool command
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.tool', async () => {

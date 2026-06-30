@@ -4,6 +4,7 @@ Use this skill when:
 - **Generating a development certificate** for local MSIX signing and testing
 - **Installing (trusting) a certificate** on a machine so MSIX packages can be installed
 - **Signing an MSIX package or executable** for distribution
+- **Signing with Azure Trusted Signing** (cloud-managed signing identity) via `winapp az-sign`
 
 ## Prerequisites
 
@@ -75,6 +76,25 @@ When packaging multiple architectures into an `.msixbundle`, only the bundle nee
 
 Note: The `package` command can sign automatically when you pass `--cert`, so you often don't need `sign` separately.
 
+### Sign with Azure Trusted Signing (cloud signing)
+
+For production-grade signing without managing a PFX file, use `winapp az-sign` to sign with [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/). The signing identity (certificate) is managed in Azure, so no private key ever lives on the machine.
+
+```powershell
+# Interactive: discover subscription, account, and profile (prompts for any not provided)
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips all discovery/prompting)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
+```
+
+**Authentication:** `az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). In CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or GitHub Actions OIDC / managed identity). Interactively, if no credentials are found and the Azure CLI is installed, `az-sign` runs `az login` for you.
+
+**Prerequisites:** An Azure Trusted Signing account and certificate profile (created in the Azure portal after identity validation), plus a role assignment granting your identity the **Trusted Signing Certificate Profile Signer** role.
+
 ## Recommended workflow
 
 1. **Generate cert** — `winapp cert generate` (auto-infers publisher from manifest)
@@ -103,3 +123,5 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 | "Certificate not trusted" | Cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `--if-exists overwrite` or `--if-exists skip` |
 | Signature invalid after time passes | No timestamp used during signing | Re-sign with `--timestamp http://timestamp.digicert.com` |
+| `az-sign` fails with "No credentials found" | No Azure auth in environment | Run `az login`, or set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` for CI/CD |
+| `az-sign` "No Trusted Signing accounts found" | No account in the subscription/resource group | Create a Trusted Signing account and certificate profile in the Azure portal |

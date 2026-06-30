@@ -11,12 +11,26 @@ namespace WinApp.Cli.Services;
 /// Calls Azure REST APIs to discover Trusted Signing resources.
 /// NativeAOT-compatible — uses raw HTTP with System.Text.Json.
 /// </summary>
-internal class AzureSigningService(ILogger<AzureSigningService> logger) : IAzureSigningService
+internal class AzureSigningService : IAzureSigningService
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
     private const string ArmBaseUrl = "https://management.azure.com";
     private const string SubscriptionsApiVersion = "2022-12-01";
     private const string TrustedSigningApiVersion = "2024-02-05-preview";
+
+    private readonly ILogger<AzureSigningService> logger;
+    private readonly HttpClient http;
+
+    public AzureSigningService(ILogger<AzureSigningService> logger) : this(logger, SharedHttp)
+    {
+    }
+
+    // Test seam: allows injecting an HttpClient backed by a stub message handler.
+    internal AzureSigningService(ILogger<AzureSigningService> logger, HttpClient httpClient)
+    {
+        this.logger = logger;
+        this.http = httpClient;
+    }
 
     public async Task<IReadOnlyList<AzureSubscription>> ListSubscriptionsAsync(string accessToken, CancellationToken cancellationToken = default)
     {
@@ -127,12 +141,12 @@ internal class AzureSigningService(ILogger<AzureSigningService> logger) : IAzure
         return profiles;
     }
 
-    private static async Task<string> GetArmResponseAsync(string url, string accessToken, CancellationToken cancellationToken)
+    private async Task<string> GetArmResponseAsync(string url, string accessToken, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-        var response = await Http.SendAsync(request, cancellationToken);
+        var response = await http.SendAsync(request, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)

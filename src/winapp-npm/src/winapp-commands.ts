@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.3
+ * Source schema version: 0.4.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -64,6 +64,39 @@ async function execCommand(args: string[], opts: CommonOptions): Promise<WinappR
   pushCommon(args, opts);
   const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(opts));
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+}
+
+// ---------------------------------------------------------------------------
+// az-sign
+// ---------------------------------------------------------------------------
+
+export interface AzSignOptions extends CommonOptions {
+  /** Path to the file to sign (exe, msix, or msixbundle) */
+  filePath: string;
+  /** Signing account name. Must be used with --resource-group */
+  account?: string;
+  /** Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. */
+  metadataFile?: string;
+  /** Certificate profile name. Must be used with --account */
+  profile?: string;
+  /** Resource group to narrow down signing accounts */
+  resourceGroup?: string;
+  /** Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. */
+  subscription?: string;
+}
+
+/**
+ * Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+ */
+export async function azSign(options: AzSignOptions): Promise<WinappResult> {
+  const args: string[] = ['az-sign'];
+  args.push(options.filePath);
+  if (options.account) args.push('--account', options.account);
+  if (options.metadataFile) args.push('--metadata-file', options.metadataFile);
+  if (options.profile) args.push('--profile', options.profile);
+  if (options.resourceGroup) args.push('--resource-group', options.resourceGroup);
+  if (options.subscription) args.push('--subscription', options.subscription);
+  return execCommand(args, options);
 }
 
 // ---------------------------------------------------------------------------

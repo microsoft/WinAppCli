@@ -70,9 +70,6 @@
         "--account": {
           "description": "Signing account name. Must be used with --resource-group",
           "hidden": false,
-          "aliases": [
-            "-a"
-          ],
           "valueType": "System.String",
           "hasDefaultValue": false,
           "arity": {

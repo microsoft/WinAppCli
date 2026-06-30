@@ -42,7 +42,10 @@ Does the project already have an appxmanifest.xml?
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
    │     └─ winapp create-debug-identity <exe-path>  (registers sparse package)
    ├─ Need to sign an existing MSIX or exe?
-   │  └─ winapp sign <file> <cert>
+   │  ├─ With a local dev/CA certificate (PFX)?
+   │  │  └─ winapp sign <file> <cert>
+   │  └─ With Azure Trusted Signing (cloud-managed identity, no local PFX)?
+   │     └─ winapp az-sign <file>
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
       └─ winapp tool <toolname> <args>
 
@@ -164,6 +167,18 @@ Want to inspect or interact with a running app's UI?
 **Key options:**
 - `--password <pwd>` — certificate password
 - `--timestamp <url>` — timestamp server URL (recommended for production to stay valid after cert expires)
+
+### `winapp az-sign <file-path>`
+**Purpose:** Code-sign an exe, MSIX, or MSIX bundle using Azure Trusted Signing (a cloud-managed signing identity — no local PFX).
+**When to use:** For production signing when the certificate is managed in Azure rather than as a local PFX file. Works in CI/CD and interactively.
+**Key options:**
+- `--subscription <id>` (`-s`) — Azure subscription ID (prompts if omitted and multiple exist)
+- `--resource-group <rg>` (`-r`) — resource group to narrow down signing accounts
+- `--account <name>` — signing account name (requires `--resource-group`)
+- `--profile <name>` (`-p`) — certificate profile name (requires `--account`)
+- `--metadata-file <path>` (`-m`) — reuse an existing `metadata.json`, skipping all prompting
+**Auth:** Uses `DefaultAzureCredential`. For CI/CD set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` (or OIDC/managed identity); interactively falls back to `az login`.
+**Requires:** An Azure Trusted Signing account + certificate profile, and the Trusted Signing Certificate Profile Signer role.
 
 ### `winapp manifest generate [directory]`
 **Purpose:** Create an `appxmanifest.xml` without full project setup.

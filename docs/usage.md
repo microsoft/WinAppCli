@@ -735,6 +735,49 @@ winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
 
 ---
 
+### az-sign
+
+Code-sign a file (exe, MSIX, or MSIX bundle) using [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) — a cloud-managed signing identity, so no private key (PFX) ever lives on the local machine.
+
+```bash
+winapp az-sign <file-path> [options]
+```
+
+**Arguments:**
+
+- `file-path` - Path to the file to sign (exe, msix, or msixbundle)
+
+**Options:**
+
+- `--subscription`, `-s` - Azure subscription ID. If omitted and multiple exist, you are prompted
+- `--resource-group`, `-r` - Resource group to narrow down signing accounts
+- `--account` - Signing account name. Must be used with `--resource-group`
+- `--profile`, `-p` - Certificate profile name. Must be used with `--account`
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips all prompting and signs directly
+
+**Authentication:**
+
+`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). Interactively, if no credentials are found and the Azure CLI is installed, `az-sign` runs `az login` for you.
+
+**Prerequisites:**
+
+An Azure Trusted Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Trusted Signing Certificate Profile Signer** role assigned to your identity.
+
+**Examples:**
+
+```bash
+# Interactive — discover/select subscription, account, and profile
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips discovery and prompting)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
+```
+
+---
+
 ### create-external-catalog
 
 Generate a `CodeIntegrityExternal.cat` catalog file containing hashes of executable files from specified directories. This catalog is used with the [TrustedLaunch](https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-trustedlaunch-trustedlaunch) flag in MSIX sparse package manifests ([AllowExternalContent](https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-uap10-allowexternalcontent)) to allow execution of external files not included in the package itself.

@@ -28,6 +28,7 @@
     "onCommand:winapp.certGenerate",
     "onCommand:winapp.certInstall",
     "onCommand:winapp.sign",
+    "onCommand:winapp.azSign",
     "onCommand:winapp.tool",
     "onCommand:winapp.getWinappPath",
     "onCommand:winapp.manifestAddAlias",
@@ -90,6 +91,11 @@
       {
         "command": "winapp.sign",
         "title": "Sign Package",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.azSign",
+        "title": "Sign Package with Azure Trusted Signing",
         "category": "WinApp"
       },
       {

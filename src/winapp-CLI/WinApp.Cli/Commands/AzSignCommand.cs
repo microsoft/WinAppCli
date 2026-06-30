@@ -3,13 +3,10 @@
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
-using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
-using WinApp.Cli.Tools;
 
 namespace WinApp.Cli.Commands;
 
@@ -42,7 +39,7 @@ internal class AzSignCommand : Command, IShortDescription
             Description = "Resource group to narrow down signing accounts"
         };
 
-        AccountOption = new Option<string?>("--account", "-a")
+        AccountOption = new Option<string?>("--account")
         {
             Description = "Signing account name. Must be used with --resource-group"
         };
@@ -71,16 +68,11 @@ internal class AzSignCommand : Command, IShortDescription
     public class Handler(
         IAzureAuthService azureAuthService,
         IAzureSigningService azureSigningService,
-        IBuildToolsService buildToolsService,
-        INugetService nugetService,
-        IPackageInstallationService packageInstallationService,
-        IWinappDirectoryService winappDirectoryService,
+        IAzureSignToolService azureSignToolService,
         IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
-        internal const string TrustedSigningClientPackage = "Microsoft.ArtifactSigning.Client";
-        private const string TimestampUrl = "http://timestamp.acs.microsoft.com";
         private const string ArmScope = "https://management.azure.com/.default";
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -105,6 +97,14 @@ internal class AzSignCommand : Command, IShortDescription
                 return 1;
             }
 
+            // Validate the metadata file exists before doing any Azure work, so an obvious
+            // input error fails fast rather than after an interactive login.
+            if (metadataFile != null && !metadataFile.Exists)
+            {
+                logger.LogError("Metadata file not found: {Path}", metadataFile.FullName);
+                return 1;
+            }
+
             try
             {
                 // Step 1: Authenticate
@@ -122,11 +122,6 @@ internal class AzSignCommand : Command, IShortDescription
 
                 if (metadataFile != null)
                 {
-                    if (!metadataFile.Exists)
-                    {
-                        logger.LogError("Metadata file not found: {Path}", metadataFile.FullName);
-                        return 1;
-                    }
                     metadataFilePath = metadataFile;
                     generatedMetadata = false;
                 }
@@ -141,18 +136,24 @@ internal class AzSignCommand : Command, IShortDescription
                         return 1;
                     }
 
-                    // Confirm selection (outside status context)
-                    var confirm = await ansiConsole.PromptAsync(
-                        new ConfirmationPrompt(
-                            $"Sign with profile [green]{metadata.Value.ProfileName}[/] in account [green]{metadata.Value.AccountName}[/]?")
-                        {
-                            DefaultValue = true
-                        },
-                        cancellationToken);
-
-                    if (!confirm)
+                    // Confirm selection (outside status context) unless the signing identity
+                    // was fully specified on the command line, or we're running non-interactively
+                    // (where a prompt would only hang/fail automated callers).
+                    var fullySpecified = account != null && profile != null;
+                    if (!fullySpecified && azureAuthService.IsInteractive)
                     {
-                        return 1;
+                        var confirm = await ansiConsole.PromptAsync(
+                            new ConfirmationPrompt(
+                                $"Sign with profile [green]{metadata.Value.ProfileName}[/] in account [green]{metadata.Value.AccountName}[/]?")
+                            {
+                                DefaultValue = true
+                            },
+                            cancellationToken);
+
+                        if (!confirm)
+                        {
+                            return 1;
+                        }
                     }
 
                     // Generate metadata.json
@@ -165,7 +166,7 @@ internal class AzSignCommand : Command, IShortDescription
                 {
                     return await statusService.ExecuteWithStatusAsync($"Signing: {filePath.Name}", async (taskContext, ct) =>
                     {
-                        await SignWithSignToolAsync(filePath, metadataFilePath, taskContext, ct);
+                        await azureSignToolService.SignAsync(filePath, metadataFilePath, azureAuthService.TenantId, taskContext, ct);
                         return (0, $"Successfully signed: {filePath.Name}");
                     }, cancellationToken);
                 }
@@ -379,154 +380,6 @@ internal class AzSignCommand : Command, IShortDescription
             await writer.FlushAsync(cancellationToken);
 
             return new FileInfo(tempPath);
-        }
-
-        private async Task SignWithSignToolAsync(FileInfo filePath, FileInfo metadataFilePath, TaskContext taskContext, CancellationToken cancellationToken)
-        {
-            // Ensure the Trusted Signing dlib is available
-            var dlibPath = await EnsureTrustedSigningDlibAsync(taskContext, cancellationToken);
-
-            // The dlib only ships as x64/x86. We must use the matching signtool architecture.
-            // Determine dlib architecture from its path (bin/x64/ or bin/x86/)
-            var dlibArch = dlibPath.Directory?.Name; // "x64" or "x86"
-
-            // Ensure signtool is installed, then find the matching architecture version
-            var signtoolPath = await buildToolsService.EnsureBuildToolAvailableAsync("signtool.exe", taskContext, cancellationToken: cancellationToken);
-
-            // If we're on ARM64 and the signtool resolved is arm64, swap to x64 to match the dlib
-            if (dlibArch != null && !signtoolPath.FullName.Contains($"\\{dlibArch}\\", StringComparison.OrdinalIgnoreCase))
-            {
-                // Try to find the x64 signtool alongside the resolved one
-                var signtoolDir = signtoolPath.Directory!;
-                var parentDir = signtoolDir.Parent;
-                if (parentDir != null)
-                {
-                    var matchingArchSigntool = new FileInfo(Path.Combine(parentDir.FullName, dlibArch, "signtool.exe"));
-                    if (matchingArchSigntool.Exists)
-                    {
-                        signtoolPath = matchingArchSigntool;
-                    }
-                }
-            }
-
-            // Build signtool arguments for Azure Trusted Signing
-            var arguments = $@"sign /v /debug /fd SHA256 /tr ""{TimestampUrl}"" /td SHA256 /dlib ""{dlibPath.FullName}"" /dmdf ""{metadataFilePath.FullName}"" ""{filePath.FullName}""";
-
-            taskContext.AddDebugMessage($"Using signtool: {signtoolPath.FullName}");
-            taskContext.AddDebugMessage($"Using dlib: {dlibPath.FullName}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = signtoolPath.FullName,
-                Arguments = arguments,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            // Pass tenant ID to signtool so the dlib's Azure.Identity authenticates against the correct tenant
-            var tenantId = azureAuthService.TenantId;
-            if (!string.IsNullOrEmpty(tenantId))
-            {
-                psi.Environment["AZURE_TENANT_ID"] = tenantId;
-            }
-
-            using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start signtool.exe process");
-            var stdout = await p.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderr = await p.StandardError.ReadToEndAsync(cancellationToken);
-            await p.WaitForExitAsync(cancellationToken);
-
-            if (!string.IsNullOrWhiteSpace(stdout))
-            {
-                taskContext.AddDebugMessage(stdout);
-            }
-
-            if (!string.IsNullOrWhiteSpace(stderr))
-            {
-                taskContext.AddDebugMessage(stderr);
-            }
-
-            if (p.ExitCode != 0)
-            {
-                var errorOutput = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout;
-                throw new InvalidOperationException($"signtool.exe execution failed with exit code {p.ExitCode}.\n{errorOutput}");
-            }
-
-            taskContext.AddDebugMessage("File signed successfully");
-        }
-
-        internal async Task<FileInfo> EnsureTrustedSigningDlibAsync(TaskContext taskContext, CancellationToken cancellationToken)
-        {
-            // Check if already available in NuGet cache
-            var dlibPath = FindTrustedSigningDlib();
-            if (dlibPath != null)
-            {
-                return dlibPath;
-            }
-
-            // Download the package
-            await taskContext.AddSubTaskAsync($"Installing {TrustedSigningClientPackage}...", async (subContext, ct) =>
-            {
-                var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
-                var success = await packageInstallationService.EnsurePackageAsync(
-                    globalWinappDir,
-                    TrustedSigningClientPackage,
-                    subContext,
-                    cancellationToken: ct);
-
-                if (!success)
-                {
-                    return (1, $"Failed to install {TrustedSigningClientPackage}.");
-                }
-
-                return (0, $"{TrustedSigningClientPackage} installed successfully.");
-            }, cancellationToken);
-
-            dlibPath = FindTrustedSigningDlib();
-            if (dlibPath == null)
-            {
-                throw new InvalidOperationException(
-                    $"Could not find the Trusted Signing client library after installing {TrustedSigningClientPackage}.\n" +
-                    "Ensure the package contains the expected DLL structure.");
-            }
-
-            return dlibPath;
-        }
-
-        private FileInfo? FindTrustedSigningDlib()
-        {
-            var nugetCache = nugetService.GetNuGetGlobalPackagesDir();
-            var packageDir = new DirectoryInfo(Path.Combine(nugetCache.FullName, TrustedSigningClientPackage.ToLowerInvariant()));
-
-            if (!packageDir.Exists)
-            {
-                return null;
-            }
-
-            // Find the latest version directory
-            var versionDirs = packageDir.GetDirectories()
-                .OrderByDescending(d => d.Name)
-                .ToArray();
-
-            foreach (var versionDir in versionDirs)
-            {
-                // The dlib is at: bin/x64/Azure.CodeSigning.Dlib.dll (x64 works on ARM64 via emulation)
-                var dlibFile = new FileInfo(Path.Combine(versionDir.FullName, "bin", "x64", "Azure.CodeSigning.Dlib.dll"));
-                if (dlibFile.Exists)
-                {
-                    return dlibFile;
-                }
-
-                // Fallback: search recursively for the DLL
-                var found = versionDir.GetFiles("Azure.CodeSigning.Dlib.dll", SearchOption.AllDirectories).FirstOrDefault();
-                if (found != null)
-                {
-                    return found;
-                }
-            }
-
-            return null;
         }
 
         private static void CleanupMetadataFile(FileInfo metadataFile)

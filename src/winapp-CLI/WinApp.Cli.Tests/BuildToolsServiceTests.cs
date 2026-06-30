@@ -163,7 +163,7 @@ public class BuildToolsServiceTests : BaseCommandTests
         File.WriteAllText(fakeToolPath, "@echo Hello from fake tool");
 
         // Act
-        var (stdout, stderr) = await _buildToolsService.RunBuildToolAsync(new GenericTool("echo.cmd"), "", TestTaskContext, true, TestContext.CancellationToken);
+        var (stdout, stderr) = await _buildToolsService.RunBuildToolAsync(new GenericTool("echo.cmd"), "", TestTaskContext, true, cancellationToken: TestContext.CancellationToken);
 
         // Assert
         Assert.Contains("Hello from fake tool", stdout);
@@ -179,7 +179,7 @@ public class BuildToolsServiceTests : BaseCommandTests
         // Act & Assert
         await Assert.ThrowsExactlyAsync<FileNotFoundException>(async () =>
         {
-            await _buildToolsService.RunBuildToolAsync(new GenericTool("nonexistent.exe"), "", TestTaskContext, true, TestContext.CancellationToken);
+            await _buildToolsService.RunBuildToolAsync(new GenericTool("nonexistent.exe"), "", TestTaskContext, true, cancellationToken: TestContext.CancellationToken);
         });
     }
 
@@ -326,7 +326,7 @@ public class BuildToolsServiceTests : BaseCommandTests
         {
             // Create a simple batch command that outputs something
             // This will either succeed (if BuildTools installs successfully) or throw an exception
-            await _buildToolsService.RunBuildToolAsync(new GenericTool("echo.cmd"), "test", TestTaskContext, true, TestContext.CancellationToken);
+            await _buildToolsService.RunBuildToolAsync(new GenericTool("echo.cmd"), "test", TestTaskContext, true, cancellationToken: TestContext.CancellationToken);
 
             // If we reach here, the auto-installation worked - test passes
         }
@@ -353,7 +353,7 @@ public class BuildToolsServiceTests : BaseCommandTests
         File.WriteAllText(batchFile, "@echo Hello from test tool");
 
         // Act
-        var (stdout, stderr) = await _buildToolsService.RunBuildToolAsync(new GenericTool("test.cmd"), "", TestTaskContext, true, TestContext.CancellationToken);
+        var (stdout, stderr) = await _buildToolsService.RunBuildToolAsync(new GenericTool("test.cmd"), "", TestTaskContext, true, cancellationToken: TestContext.CancellationToken);
 
         // Assert
         Assert.Contains("Hello from test tool", stdout);
@@ -383,7 +383,7 @@ public class BuildToolsServicePrintErrorsTests() : BaseCommandTests(configPaths:
         // Act: Run with printErrors=true - error SHOULD be printed via PrintErrorText
         var exception = await Assert.ThrowsExactlyAsync<BuildToolsService.InvalidBuildToolException>(async () =>
         {
-            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, printErrors: true, TestContext.CancellationToken);
+            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, printErrors: true, cancellationToken: TestContext.CancellationToken);
         });
 
         // Verify the exception captures the error info
@@ -410,7 +410,7 @@ public class BuildToolsServicePrintErrorsTests() : BaseCommandTests(configPaths:
         // Act: Run with printErrors=false - error should NOT be printed via PrintErrorText
         var exception = await Assert.ThrowsExactlyAsync<BuildToolsService.InvalidBuildToolException>(async () =>
         {
-            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, printErrors: false, TestContext.CancellationToken);
+            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, printErrors: false, cancellationToken: TestContext.CancellationToken);
         });
 
         // Verify the exception still captures the error info

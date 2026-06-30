@@ -310,14 +310,18 @@ internal partial class BuildToolsService(
     /// <param name="arguments">Arguments to pass to the tool</param>
     /// <param name="printErrors">Whether to print errors using the tool's PrintErrorText method</param>
     /// <param name="taskContext">Task context for logging</param>
+    /// <param name="toolPathOverride">Explicit executable path to run instead of resolving the tool by name</param>
+    /// <param name="environment">Additional environment variables to set on the child process</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Tuple containing (stdout, stderr)</returns>
-    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
+    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Ensure the build tool is available, installing BuildTools if necessary
-        var toolPath = await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
+        // Use the caller-supplied executable when provided (e.g. an architecture-matched
+        // signtool), otherwise ensure the build tool is available, installing BuildTools if necessary.
+        var toolPath = toolPathOverride
+            ?? await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
 
         var psi = new ProcessStartInfo
         {
@@ -329,12 +333,36 @@ internal partial class BuildToolsService(
             CreateNoWindow = true
         };
 
+        if (environment != null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                psi.Environment[key] = value;
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {tool.ExecutableName} process");
-        var stdout = await p.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await p.StandardError.ReadToEndAsync(cancellationToken);
-        await p.WaitForExitAsync(cancellationToken);
+
+        // Drain both pipes concurrently before awaiting exit. Reading stdout to completion
+        // before touching stderr can deadlock if the tool fills the stderr buffer (signtool
+        // /v /debug can) while we're still blocked on stdout.
+        var stdoutTask = p.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = p.StandardError.ReadToEndAsync(cancellationToken);
+
+        try
+        {
+            await p.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(p);
+            throw;
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         if (!string.IsNullOrWhiteSpace(stdout))
         {
@@ -359,6 +387,21 @@ internal partial class BuildToolsService(
         }
 
         return (stdout, stderr);
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup on cancellation
+        }
     }
 
     internal class InvalidBuildToolException : InvalidOperationException

@@ -59,6 +59,29 @@ Result returned by every command wrapper.
 
 These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).
 
+### `azSign()`
+
+Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+
+```typescript
+function azSign(options: AzSignOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `certGenerate()`
 
 Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
@@ -1108,6 +1131,20 @@ ManifestTemplates values.
 ```typescript
 type ManifestTemplates = "packaged" | "sparse"
 ```
+
+### `AzSignOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
 ### `CertGenerateOptions`
 
