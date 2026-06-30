@@ -10,7 +10,9 @@ Used by AI agents and developers for UI testing, debugging, and automation.
 
 `winapp ui` provides commands for inspecting and interacting with Windows app UIs.
 Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, Win32, Electron, and WinUI 3.
-Most commands drive the app through UIA patterns (no input injection); `ui click` is the exception and uses real mouse simulation for controls that don't support `InvokePattern`.
+Most commands drive the app through UIA patterns (no input injection). The exceptions inject real input: `ui click`/`ui hover`/`ui drag` use mouse simulation, and `ui send-keys` synthesizes keyboard input — for controls and scenarios that UIA patterns can't drive.
+
+> **Interactive-desktop requirement (input-injecting verbs).** `click`, `hover`, `drag`, `scroll --wheel`, and `send-keys --via send-input` synthesize OS-level input, so they need an **unlocked, interactive desktop** with the target window in the foreground. On a **locked workstation or secure desktop** (LogonUI/UAC) they can't inject and fail fast with **`no_interactive_desktop`** (distinct from the elevation/`foreground_not_target` cases). Everything else — `inspect`, `search`, `get-property`, `get-value`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot` — drives the app through UIA patterns and is **headless/locked-session friendly**. Prefer the UIA-pattern verbs in CI; reserve the injection verbs for scenarios that genuinely need real input. Before injecting, the gesture verbs also **re-resolve the target element** and refuse with **`target_moved`** if it's still animating/relocating, rather than landing input on empty space.
 
 ## Quick Start
 
@@ -257,6 +259,32 @@ winapp ui click btn-column1-a3f2 -a myapp --double      # double-click
 winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 ```
 
+> Like the other input-injecting verbs, `click` brings the target to the foreground and **fails fast** (`no_interactive_desktop` on a locked/secure desktop, `foreground_not_target` if focus couldn't be transferred) rather than clicking the wrong window. It also **re-resolves the element just before the button-down**: after positioning the cursor it does one final position check, so a continuously moving/animating target fails with **`target_moved`** instead of reporting success after the click landed on empty space — a reported success means the target was still in place when the button went down.
+
+### drag
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
+
+Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
+```bash
+winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp           # reorder: card center → slot center
+winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center → app coords (from inspect)
+winapp ui drag 120,200 480,200 -a myapp                       # raw app coords → app coords
+winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right  # right-button drag
+
+# Press-and-hold / long-press and drop-target dwell
+winapp ui drag tile-photo-7b3c tile-photo-7b3c -a myapp --hold-ms 600   # long-press: from == to, hold 600ms, no move
+winapp ui drag itm-card-9f8e pane-left-2c1a -a myapp --dwell-ms 350      # settle on the drop target before releasing
+```
+
+**Options:**
+- `--right` — Drag with the right mouse button instead of the left button.
+- `--hold-ms <ms>` — Hold the button down at the start before moving (default: 0). With `<from> == <to>` (no movement) this performs a **press-and-hold / long-press** gesture.
+- `--dwell-ms <ms>` — Dwell at the destination after moving, before releasing (default: 0). Lets **drop targets / merge overlays** that arm from a sustained hover (rather than the instant the cursor arrives) latch before the button-up.
+
+> Bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points.
+
+> Like `send-keys --via send-input`, `drag` injects OS-wide at screen coordinates after bringing the target to the foreground. If focus can't be brought to the target (e.g. focus-stealing prevention from a background process), the command **fails (`foreground_not_target`)** rather than dragging on the wrong window — focus or click the window first. On a locked/secure desktop it fails with **`no_interactive_desktop`**. Each element endpoint is **re-resolved immediately before the drag**; if it's still moving/resizing (an animating target), the command fails with **`target_moved`** instead of dragging to a stale point. (Bare `x,y` endpoints can't be re-verified, so they're used as-is.)
+
 ### hover
 Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses `SendInput` for realistic mouse movement with a small wiggle, then waits for a configurable dwell time.
 ```bash
@@ -267,6 +295,45 @@ winapp ui hover btn-info-a1b2 -a myapp; winapp ui screenshot -a myapp --capture-
 
 **Options:**
 - `--dwell-time <ms>` — Time in milliseconds to wait after hovering for effects to appear (default: 800, range: 0–10000)
+
+### send-keys
+Send synthetic keyboard input — the keyboard counterpart to `click`. UIA has no keyboard-injection pattern, so this drops to the Win32 layer. Use it for keyboard navigation (arrows, Tab, Enter, Esc), shortcuts (`ctrl+c`, `alt+f4`), and typing into controls that need per-keystroke events rather than `set-value`'s atomic write.
+```bash
+winapp ui send-keys "down down enter" -a myapp                 # arrow navigation then commit
+winapp ui send-keys "ctrl+a delete" -a myapp                   # select all, then delete
+winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp  # focus a field, then type text
+winapp ui send-keys "text=down text=down text=enter" -a myapp  # type the words, don't press the keys
+winapp ui send-keys "down down enter" -a myapp --verbatim      # same, but type the whole argument literally
+winapp ui send-keys "alt+f4" -a myapp                          # close window via accelerator
+winapp ui send-keys "vk=0x5D" -a myapp                         # a key with no friendly name (Apps/Menu key)
+winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide injection instead of PostMessage
+```
+
+**Key grammar** (whitespace-separated tokens, quote multi-token strings):
+- **Named keys** — `enter`/`return`, `tab`, `esc`/`escape`, `space`, `backspace`, `delete`/`del`, `insert`, `home`, `end`, `pageup`/`pgup`, `pagedown`/`pgdn`, `up`/`down`/`left`/`right`, `f1`–`f16`, `apps`, `printscreen`, `capslock`.
+- **Sequences** — multiple tokens are pressed in order: `down down enter`.
+- **Modifier combos** — `ctrl`, `shift`, `alt`, `win` joined with `+`: `ctrl+shift+t`, `alt+f4`.
+- **Literal text** — any token that isn't a known key is typed character by character: `hello`. Adjacent literal words keep the space between them, so a quoted phrase like `"Hello world"` is typed verbatim (the space is preserved); a literal that merely contains `+` such as `C++` or `a+b` is typed as text, not parsed as a combo.
+- **Explicit literal escape** — prefix a token with `text=` to type it verbatim even when it collides with a key or modifier name: `text=enter` types the word "enter" instead of pressing Enter, and `text=ctrl+a` types the literal string. Mirrors the `vk=` escape; the escaped value still coalesces with adjacent literal words (`text=down low` → "down low"). Because tokens are whitespace-split (and adjacent literals re-join with a single space), use **backslash escapes inside a `text=` value** to type whitespace that wouldn't otherwise survive: `\s` → space, `\t` → tab, `\n` → newline, `\r` → carriage return, `\\` → literal backslash. So `text=a\s\sb` types "a  b" (double space), `text=line1\nline2` types a newline, and `text=\shi` keeps a leading space. An unrecognised escape (e.g. `\x`) is left verbatim.
+- **Whole-argument literal (`--verbatim`)** — when the *entire* payload is literal text, pass `--verbatim` instead of escaping every token with `text=`. It types the whole keys argument exactly as given — no named-key/combo/`vk=`/`text=` interpretation — and, unlike the normal path, preserves exact internal whitespace (no collapsing) without needing `\s`. So `send-keys "down down enter" --verbatim` types the words, and `send-keys "a  b" --verbatim` keeps the double space. Backslash escapes are **not** decoded in `--verbatim` mode (a `\s` is typed as a backslash and an "s"); use a `text=` token when you need an escaped control character.
+- **Raw virtual keys** — `vk=0xNN` (hex) or `vk=NN` (decimal) for keys without a friendly name.
+
+**Options:**
+- `--target <selector>` — Focus this element (via UIA) before sending keys. Without it, keys go to the app's currently focused element.
+- `--verbatim` — Type the entire keys argument as literal text (no key/combo/`vk=`/`text=` parsing) and preserve exact whitespace. The whole-argument form of the per-token `text=` escape.
+- `--via <transport>` — `post-message` (default) posts `WM_KEYDOWN`/`WM_KEYUP`/`WM_CHAR` to the target window's queue. It is HWND-targeted and bypasses UIPI (works across integrity levels). `send-input` injects OS-wide via `SendInput` and goes to the foreground window.
+
+**Choosing a transport / known limits:**
+- `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
+- `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level. As a safety guard, `send-input` verifies the target window is actually in the foreground immediately before injecting and **fails (`foreground_not_target`) rather than typing into the wrong window** if focus could not be brought to it — focus or click the window first. On a **locked or secure desktop** it instead fails with **`no_interactive_desktop`** (no foreground window exists to inject into) — unlock the session, or use a UIA-pattern verb (`set-value`, `invoke`).
+- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **rejects them** (errors with `invalid_arguments` and sends nothing) because injecting them at the OS level has effects well beyond the target window (e.g. `win+l` would lock the session). If you genuinely need to deliver one to a window, use `--via post-message`, which is window-scoped and unaffected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
+
+**Per-keystroke events (KeyDown / TextChanged):**
+- **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).
+- **Literal typed text** (`hello`) differs by transport:
+  - `--via send-input` maps each character to its virtual key (plus Shift) on the active keyboard layout, so the target sees a genuine **`KeyDown` with the correct virtual key** followed by the OS-composed `WM_CHAR` (raising **`TextChanged`**) — i.e. one full keystroke per character. Characters not reachable on the current layout (or needing Ctrl/AltGr) fall back to a Unicode packet so the exact character still lands. **Use `send-input` when you need per-keystroke `KeyDown` fidelity** (e.g. driving a WinUI 3 / WPF `TextBox` whose handlers key off `KeyDown`). For a normal (non-elevated) WinUI 3 test host, bring its window to the foreground first (`winapp ui focus` / clicking it) since `send-input` targets the foreground window.
+  - `--via post-message` posts `WM_CHAR` per character, which does **not** raise a per-character `KeyDown`. **Caveat:** WinUI 3 / XAML apps (winapp's primary target) generally do **not** turn a posted `WM_CHAR` into text — the XAML input pipeline drops it, so typed literal text silently no-ops even though the command reports success (it emits a warning in this case). Classic Win32/WinForms `WM_CHAR`-driven edit controls do land the text (raising `TextChanged`). **Use `--via send-input` to type literal text into WinUI 3 / WPF apps**; reserve `post-message` typed text for classic Win32 controls or when you only need named keys/combos (which fire on both transports).
+
 
 ### set-value
 Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
@@ -324,7 +391,18 @@ winapp ui scroll pn-scrollview-bfef --to bottom -a myapp
 
 # If you target an element that's not scrollable, scroll walks up to find the nearest scrollable parent
 winapp ui scroll itm-someitem-a1b2 --direction down -a myapp
+
+# Synthesize real mouse-wheel input over the element (1 = one notch up, -1 = one notch down).
+# Use this to test handlers that respond to the wheel directly (zoom, custom scroll) rather than ScrollPattern.
+winapp ui scroll img-map-a1b2 --wheel -1 -a myapp
 ```
+
+**Options:**
+- `--direction <up|down|left|right>` — Scroll incrementally via `ScrollPattern`.
+- `--to <top|bottom>` — Jump to the start/end via `ScrollPattern`.
+- `--wheel <notches>` — Synthesize mouse-wheel input over the element's center via `SendInput`, in wheel notches (detents): `1` = one notch up/away, `-1` = one notch down/toward, `3` = three notches up. (Each notch is the Windows `WHEEL_DELTA` of 120 units that `SendInput` consumes; the CLI scales notches by 120 for you.) Bypasses `ScrollPattern`.
+
+> `--direction`, `--to`, and `--wheel` are mutually exclusive — pass exactly one. Because `--wheel` injects OS-wide input at screen coordinates, it brings the target to the foreground first and **fails (`foreground_not_target`)** if focus couldn't be transferred, rather than scrolling the wrong window.
 
 ### get-focused
 Show the element that currently has keyboard focus.

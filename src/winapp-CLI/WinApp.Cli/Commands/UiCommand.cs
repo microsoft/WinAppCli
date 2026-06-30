@@ -18,7 +18,9 @@ internal class UiCommand : Command, IShortDescription
         UiScreenshotCommand screenshotCommand,
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
+        UiDragCommand dragCommand,
         UiHoverCommand hoverCommand,
+        UiSendKeysCommand sendKeysCommand,
         UiSetValueCommand setValueCommand,
         UiFocusCommand focusCommand,
         UiScrollIntoViewCommand scrollIntoViewCommand,
@@ -37,7 +39,9 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(screenshotCommand);
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);
+        Subcommands.Add(dragCommand);
         Subcommands.Add(hoverCommand);
+        Subcommands.Add(sendKeysCommand);
         Subcommands.Add(setValueCommand);
         Subcommands.Add(focusCommand);
         Subcommands.Add(scrollIntoViewCommand);

@@ -31,6 +31,8 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiFocusResult))]
 [JsonSerializable(typeof(UiScrollIntoViewResult))]
 [JsonSerializable(typeof(UiHoverResult))]
+[JsonSerializable(typeof(UiSendKeysResult))]
+[JsonSerializable(typeof(UiDragResult))]
 [JsonSerializable(typeof(UiErrorResult))]
 [JsonSerializable(typeof(UiErrorInfo))]
 [JsonSerializable(typeof(UiFocusedResult))]
@@ -194,6 +196,7 @@ internal sealed class UiScrollResult
     public string ElementId { get; set; } = "";
     public string? Direction { get; set; }
     public string? To { get; set; }
+    public int? Wheel { get; set; }
     public long Hwnd { get; set; }
 }
 
@@ -221,5 +224,28 @@ internal sealed class UiHoverResult
     public int X { get; set; }
     public int Y { get; set; }
     public int DwellTimeMs { get; set; }
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiSendKeysResult
+{
+    public string Keys { get; set; } = "";
+    public string Via { get; set; } = "";
+    public int ActionCount { get; set; }
+    public string? Target { get; set; }
+    public long Hwnd { get; set; }
+}
+
+internal sealed class UiDragResult
+{
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
+    public int FromX { get; set; }
+    public int FromY { get; set; }
+    public int ToX { get; set; }
+    public int ToY { get; set; }
+    public string Button { get; set; } = "left";
+    public int HoldMs { get; set; }
+    public int DwellMs { get; set; }
     public long Hwnd { get; set; }
 }

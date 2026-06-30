@@ -14,6 +14,26 @@ internal class FakeUiAutomationService : IUiAutomationService
     public UiElement[] InspectResult { get; set; } = [];
     public UiElement[] SearchResult { get; set; } = [];
     public UiElement? FindSingleResult { get; set; }
+
+    /// <summary>
+    /// Optional per-call results for <see cref="FindSingleElementAsync"/>. When non-empty, the first
+    /// resolution of a *new* selector dequeues the next entry (so a single command resolving two
+    /// distinct selectors — e.g. a selector→selector drag — returns two distinct elements). Re-reads of
+    /// the same selector (the N5 stable-resolve) return the memoized element instead of draining the
+    /// queue. Falls back to <see cref="FindSingleResult"/> when empty.
+    /// </summary>
+    public Queue<UiElement?> FindSingleResults { get; } = new();
+
+    /// <summary>
+    /// Per-selector movement sequences for N5 stability tests. Each read of the keyed selector advances
+    /// the sequence (simulating an element whose bounds change between reads); once drained, the last
+    /// value sticks. Key by the selector's slug or query text. Enqueue the command's initial-resolve
+    /// element first, then one element per stability re-read.
+    /// </summary>
+    public Dictionary<string, Queue<UiElement?>> MovingResults { get; } = new();
+
+    private readonly Dictionary<string, UiElement?> _resolvedBySelector = new();
+    private readonly Dictionary<string, UiElement?> _lastMoving = new();
     public Dictionary<string, object?> PropertiesResult { get; set; } = [];
     public string InvokeResult { get; set; } = "InvokePattern";
     public (byte[] Pixels, int Width, int Height) ScreenshotResult { get; set; } = (new byte[4], 1, 1);
@@ -33,7 +53,34 @@ internal class FakeUiAutomationService : IUiAutomationService
         => Task.FromResult(SearchResult.Take(maxResults).ToArray());
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
-        => Task.FromResult(FindSingleResult);
+    {
+        var key = selector.Slug ?? selector.Query ?? string.Empty;
+
+        // Per-selector movement sequence (N5 stability tests): advance each read, last value sticks.
+        if (MovingResults.TryGetValue(key, out var seq))
+        {
+            var moving = seq.Count > 0 ? seq.Dequeue() : _lastMoving.GetValueOrDefault(key);
+            _lastMoving[key] = moving;
+            return Task.FromResult(moving);
+        }
+
+        // Re-read of an already-resolved selector → return the memoized element so the N5 re-resolve
+        // doesn't drain the cross-selector queue.
+        if (_resolvedBySelector.TryGetValue(key, out var memo))
+        {
+            return Task.FromResult(memo);
+        }
+
+        // First resolution of a new selector: dequeue the next distinct cross-selector result.
+        if (FindSingleResults.Count > 0)
+        {
+            var dequeued = FindSingleResults.Dequeue();
+            _resolvedBySelector[key] = dequeued;
+            return Task.FromResult(dequeued);
+        }
+
+        return Task.FromResult(FindSingleResult);
+    }
 
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
         => Task.FromResult(PropertiesResult);
@@ -87,12 +134,67 @@ internal class FakeUiSessionService : IUiSessionService
 internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
 {
     public record HoverCall(int ScreenX, int ScreenY);
-    public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick);
+    public record MoveCursorCall(int ScreenX, int ScreenY);
+    public record ClickCall(int ScreenX, int ScreenY, bool DoubleClick, bool RightClick, int SettleMs = 0);
+    public record DragCall(int FromX, int FromY, int ToX, int ToY, bool RightButton, int HoldMs = 0, int DwellMs = 0, int SettleMs = 50);
+    public record ScrollWheelCall(int ScreenX, int ScreenY, int Delta, int SettleMs = 30);
 
     public List<HoverCall> HoverCalls { get; } = [];
+    public List<MoveCursorCall> MoveCursorCalls { get; } = [];
     public List<ClickCall> ClickCalls { get; } = [];
+    public List<DragCall> DragCalls { get; } = [];
+    public List<ScrollWheelCall> ScrollWheelCalls { get; } = [];
 
     public void Hover(int screenX, int screenY) => HoverCalls.Add(new(screenX, screenY));
-    public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false)
-        => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick));
+    public void MoveCursor(int screenX, int screenY) => MoveCursorCalls.Add(new(screenX, screenY));
+    public void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false, int settleMs = 50)
+        => ClickCalls.Add(new(screenX, screenY, doubleClick, rightClick, settleMs));
+    public void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0, int settleMs = 50)
+        => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton, holdMs, dwellMs, settleMs));
+    public void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30)
+        => ScrollWheelCalls.Add(new(screenX, screenY, delta, settleMs));
 }
+
+/// <summary>
+/// Fake keyboard input for testing — records the actions/transport instead of issuing real input.
+/// </summary>
+internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
+{
+    public record SendCall(long Hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> Actions, WinApp.Cli.Helpers.KeyTransport Transport);
+
+    public List<SendCall> SendCalls { get; } = [];
+
+    public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
+        => SendCalls.Add(new(hwnd, actions, transport));
+}
+
+/// <summary>
+/// Fake foreground guard for testing — lets a test force the pre-injection foreground decision so the
+/// coordinate-gesture verbs can be exercised without a live, unlocked desktop. Proceeds by default.
+/// </summary>
+internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
+{
+    public record EnsureCall(long TargetHwnd, string Action);
+
+    public List<EnsureCall> Calls { get; } = [];
+
+    /// <summary>When <see langword="false"/>, emits the configured error and aborts the gesture.</summary>
+    public bool Allow { get; set; } = true;
+
+    /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
+    public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
+
+    public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
+    {
+        Calls.Add(new(targetHwnd, action));
+        if (Allow)
+        {
+            return true;
+        }
+
+        WinApp.Cli.Helpers.UiJsonError.Emit(json, DenyCode,
+            $"Foreground guard denied the {action} (test).");
+        return false;
+    }
+}
+
