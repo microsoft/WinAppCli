@@ -73,6 +73,23 @@ public class XamlTriageBinariesTests
 
         Assert.IsNotNull(resolved);
         Assert.IsFalse(resolved.HasSymSrv, "No symsrv.dll present, so HasSymSrv must be false.");
+        Assert.AreEqual(Path.Combine(dir, "winext", "JsProvider.dll"), resolved.JsProviderPath,
+            "The resolved JsProvider path must point at the winext copy so the child runner can .load it.");
+    }
+
+    [TestMethod]
+    public void ResolveExisting_JsProviderInRoot_PrefersRootPath()
+    {
+        var dir = Path.Combine(_tempDir, "root-layout");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "dbgeng.dll"), "");
+        File.WriteAllText(Path.Combine(dir, "JsProvider.dll"), "");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance);
+
+        Assert.IsNotNull(resolved);
+        Assert.AreEqual(Path.Combine(dir, "JsProvider.dll"), resolved.JsProviderPath);
     }
 
     [TestMethod]
@@ -93,5 +110,88 @@ public class XamlTriageBinariesTests
     {
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.KitsArch));
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.NuGetArch));
+    }
+
+    [TestMethod]
+    public void TryCopyFromGlobalCache_PinnedVersionPresent_CopiesFromPinned()
+    {
+        const string package = "Test.Package.Bits";
+        const string pinned = "2.0.0";
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "cache"));
+        // Pinned version + a numerically newer version; the newer one must be ignored.
+        WriteCachePackage(cache, package, pinned, "engine.dll", "pinned");
+        WriteCachePackage(cache, package, "9.9.9", "engine.dll", "newer");
+        var binDir = new DirectoryInfo(Path.Combine(_tempDir, "bin"));
+        binDir.Create();
+
+        var ok = XamlTriageBinaries.TryCopyFromGlobalCache(
+            package, pinned, ["engine.dll"], cache, binDir, NullLogger.Instance);
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual("pinned", File.ReadAllText(Path.Combine(binDir.FullName, "engine.dll")),
+            "The pinned version must win even when a higher version number exists in the cache.");
+    }
+
+    [TestMethod]
+    public void TryCopyFromGlobalCache_PinnedAbsent_FallsBackToNewest()
+    {
+        const string package = "Test.Package.Bits";
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "cache"));
+        WriteCachePackage(cache, package, "1.0.0", "engine.dll", "older");
+        WriteCachePackage(cache, package, "1.5.0", "engine.dll", "newer");
+        var binDir = new DirectoryInfo(Path.Combine(_tempDir, "bin"));
+        binDir.Create();
+
+        var ok = XamlTriageBinaries.TryCopyFromGlobalCache(
+            package, "2.0.0", ["engine.dll"], cache, binDir, NullLogger.Instance);
+
+        Assert.IsTrue(ok, "When the pinned version is missing, the newest cached version is an acceptable fallback.");
+        Assert.AreEqual("newer", File.ReadAllText(Path.Combine(binDir.FullName, "engine.dll")));
+    }
+
+    [TestMethod]
+    public void DbgPackageVersion_MatchesDirectoryPackagesProps()
+    {
+        var propsPath = FindUpwards("Directory.Packages.props",
+            p => File.ReadAllText(p).Contains("Microsoft.Debugging.Platform.DbgEng", StringComparison.Ordinal));
+        Assert.IsNotNull(propsPath, "Could not locate the Directory.Packages.props that pins the DbgEng package.");
+
+        var text = File.ReadAllText(propsPath);
+        var match = System.Text.RegularExpressions.Regex.Match(
+            text, "Microsoft\\.Debugging\\.Platform\\.DbgEng\"\\s+Version=\"([^\"]+)\"");
+        Assert.IsTrue(match.Success, "Could not find the DbgEng PackageVersion entry in Directory.Packages.props.");
+        Assert.AreEqual(XamlTriageBinaries.DbgPackageVersion, match.Groups[1].Value,
+            "XamlTriageBinaries.DbgPackageVersion drifted from the version pinned in Directory.Packages.props.");
+    }
+
+    private static void WriteCachePackage(DirectoryInfo cache, string package, string version, string file, string content)
+    {
+        var archDir = Path.Combine(cache.FullName, package.ToLowerInvariant(), version, "content", XamlTriageBinaries.NuGetArch);
+        Directory.CreateDirectory(archDir);
+        File.WriteAllText(Path.Combine(archDir, file), content);
+    }
+
+    private static string? FindUpwards(string fileName, Func<string, bool> predicate)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, fileName);
+            if (File.Exists(candidate))
+            {
+                try
+                {
+                    if (predicate(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                catch (IOException) { }
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
     }
 }

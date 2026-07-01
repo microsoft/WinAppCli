@@ -117,4 +117,43 @@ public class CrashDumpServiceTests
         // Assert
         Assert.AreEqual(0, _xamlTriage.AnalyzeCalls.Count, "WinUI triage must not run for an unreadable/non-WinUI dump.");
     }
+
+    [TestMethod]
+    public void SelectExceptionRecord_StowedWithParameters_UsesStowedRecord()
+    {
+        var (code, address, useStowed) = CrashDumpService.SelectExceptionRecord(
+            savedExceptionCode: unchecked((int)0xC0000005), savedExceptionAddress: 0x1000,
+            crashExceptionCode: unchecked((int)0xC000027B), crashExceptionAddress: 0x2000,
+            crashExceptionParameters: [0xDEAD, 1]);
+
+        Assert.IsTrue(useStowed, "A stowed exception with parameters must drive the dump's exception record.");
+        Assert.AreEqual(unchecked((int)0xC000027B), code);
+        Assert.AreEqual((nuint)0x2000, address);
+    }
+
+    [TestMethod]
+    public void SelectExceptionRecord_StowedWithoutParameters_FallsBackToFirstChance()
+    {
+        var (code, address, useStowed) = CrashDumpService.SelectExceptionRecord(
+            savedExceptionCode: unchecked((int)0xC0000005), savedExceptionAddress: 0x1000,
+            crashExceptionCode: unchecked((int)0xC000027B), crashExceptionAddress: 0x2000,
+            crashExceptionParameters: null);
+
+        Assert.IsFalse(useStowed, "Without stowed parameters there is nothing for !xamlstowed to read, so keep the first-chance record.");
+        Assert.AreEqual(unchecked((int)0xC0000005), code);
+        Assert.AreEqual((nuint)0x1000, address);
+    }
+
+    [TestMethod]
+    public void SelectExceptionRecord_NonStowedCrash_UsesFirstChance()
+    {
+        var (code, address, useStowed) = CrashDumpService.SelectExceptionRecord(
+            savedExceptionCode: unchecked((int)0xE0434352), savedExceptionAddress: 0x1000,
+            crashExceptionCode: unchecked((int)0xC0000005), crashExceptionAddress: 0x2000,
+            crashExceptionParameters: [0xDEAD, 1]);
+
+        Assert.IsFalse(useStowed, "A non-stowed terminating exception must not replace the record, even with parameters.");
+        Assert.AreEqual(unchecked((int)0xE0434352), code);
+        Assert.AreEqual((nuint)0x1000, address);
+    }
 }

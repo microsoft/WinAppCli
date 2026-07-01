@@ -64,6 +64,17 @@ internal static class WinDbgJsProviderAcquirer
             Directory.CreateDirectory(destDir.FullName);
             var targetPath = Path.Combine(destDir.FullName, TargetFileName);
             await File.WriteAllBytesAsync(targetPath, bytes, cancellationToken);
+
+            // Defense-in-depth: this DLL is loaded into the debugger process, so verify it carries a
+            // valid Authenticode signature from Microsoft before trusting it (the download is HTTPS
+            // from an official host, but this guards against tampering / a compromised mirror).
+            if (!AuthenticodeVerifier.IsTrustedMicrosoftSigned(targetPath, logger))
+            {
+                logger.LogDebug("Discarding {File}: it is not validly signed by Microsoft.", TargetFileName);
+                try { File.Delete(targetPath); } catch { /* best effort */ }
+                return false;
+            }
+
             logger.LogDebug("Acquired {File} ({Size} bytes) from WinDbg bundle into {Dir}.", TargetFileName, bytes.Length, destDir.FullName);
             return true;
         }

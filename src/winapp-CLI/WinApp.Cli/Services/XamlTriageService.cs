@@ -64,24 +64,39 @@ internal sealed class XamlTriageService(
             if (extPath == null)
             {
                 logger.LogDebug("WinUI triage skipped: could not obtain {Ext}.", ExtFileName);
-                return null;
+                return $"WinUI Triage: skipped — the WinUI debugger extension ({ExtFileName}) could not be " +
+                    "obtained (download blocked or its pinned hash did not match).";
             }
 
             // Run the DbgEng pass in a dedicated child process. The parent has already loaded the
             // system32 dbghelp.dll (dump capture + ClrMD analysis), which prevents the modern NuGet
             // dbgeng.dll from binding to its co-located dbghelp.dll. A clean process avoids that.
-            var output = await RunTriageProcessAsync(dumpPath, binaries, extPath, useSymbols, cancellationToken);
+            var (output, skipNote) = await RunTriageProcessAsync(dumpPath, binaries, extPath, useSymbols, cancellationToken);
+            if (skipNote != null)
+            {
+                return $"WinUI Triage: skipped — {skipNote}";
+            }
 
             if (string.IsNullOrWhiteSpace(output))
             {
-                return null;
+                return "WinUI Triage: skipped — the triage pass produced no output.";
             }
 
             var header = $"WinUI Triage (DbgEng + winui-dbgext.js, source: {binaries.Source}):";
-            var note = DescribeSymbolGap(output, useSymbols);
-            return note == null
+
+            // The user asked for symbols but the resolved engine layout has no symsrv.dll, so the
+            // child ran without symbol downloads; explain why the breakdown may be incomplete.
+            var symbolNote = useSymbols && !binaries.HasSymSrv
+                ? "Note: --symbols was requested but symsrv.dll was not found alongside the debugging " +
+                  $"engine ({binaries.Source}), so symbols could not be downloaded. Install Debugging " +
+                  $"Tools for Windows or point {XamlTriageBinaries.EnvOverride} at a layout that includes symsrv.dll."
+                : null;
+
+            var gapNote = DescribeSymbolGap(output, useSymbols);
+            var notes = string.Join("\n", new[] { symbolNote, gapNote }.Where(n => n != null));
+            return notes.Length == 0
                 ? $"{header}\n{output.Trim()}"
-                : $"{header}\n{note}\n\n{output.Trim()}";
+                : $"{header}\n{notes}\n\n{output.Trim()}";
         }
         catch (OperationCanceledException)
         {
@@ -125,11 +140,37 @@ internal sealed class XamlTriageService(
     }
 
     /// <summary>
+    /// Builds the argument list for the hidden <c>__xaml-triage</c> child verb. Extracted for
+    /// testability: <c>--symbols</c> is only forwarded when the user asked for symbols <em>and</em>
+    /// the resolved layout actually has <c>symsrv.dll</c>, and the resolved <c>JsProvider.dll</c>
+    /// path (which may be in a <c>winext</c> subfolder) is passed explicitly.
+    /// </summary>
+    internal static List<string> BuildTriageArgs(string dumpPath, ResolvedTriageBinaries binaries, string extPath, bool useSymbols)
+    {
+        var args = new List<string>
+        {
+            XamlTriageRunner.InternalVerb,
+            "--dump", dumpPath,
+            "--bin", binaries.BinDir,
+            "--jsprovider", binaries.JsProviderPath,
+            "--ext", extPath,
+        };
+        if (useSymbols && binaries.HasSymSrv)
+        {
+            args.Add("--symbols");
+        }
+
+        return args;
+    }
+
+    /// <summary>
     /// Spawns the hidden <c>__xaml-triage</c> verb in a fresh process and captures its stdout. The
     /// isolation is essential: see <see cref="XamlTriageRunner"/> for the dbghelp.dll loader-collision
     /// rationale. Works both as a published single-file executable and under <c>dotnet winapp.dll</c>.
+    /// Returns the captured output, or a short human-readable skip note describing why no output is
+    /// available (failed to start, timed out, or non-zero exit).
     /// </summary>
-    private async Task<string?> RunTriageProcessAsync(
+    private async Task<(string? Output, string? SkipNote)> RunTriageProcessAsync(
         string dumpPath, ResolvedTriageBinaries binaries, string extPath, bool useSymbols, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
@@ -143,30 +184,19 @@ internal sealed class XamlTriageService(
         // Re-invoke the current binary. When running under the dotnet host (dev/test), ProcessPath is
         // dotnet.exe and we must pass the managed entry assembly as the first argument.
         var processPath = Environment.ProcessPath!;
+        startInfo.FileName = processPath;
         if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            startInfo.FileName = processPath;
-            // Only reached under the dotnet host (dev/test), where the entry assembly has a real path.
-            // A single-file published winapp.exe takes the else-branch, so Location is never empty here.
-#pragma warning disable IL3000
-            startInfo.ArgumentList.Add(Assembly.GetEntryAssembly()!.Location);
-#pragma warning restore IL3000
-        }
-        else
-        {
-            startInfo.FileName = processPath;
+            // Only reached under the dotnet host (dev/test). Derive the managed entry DLL path from
+            // the app base directory + assembly simple name rather than Assembly.Location, which is
+            // empty for single-file apps and trips the IL3000 single-file/AOT analyzer.
+            var entryName = Assembly.GetEntryAssembly()!.GetName().Name;
+            startInfo.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, entryName + ".dll"));
         }
 
-        startInfo.ArgumentList.Add(XamlTriageRunner.InternalVerb);
-        startInfo.ArgumentList.Add("--dump");
-        startInfo.ArgumentList.Add(dumpPath);
-        startInfo.ArgumentList.Add("--bin");
-        startInfo.ArgumentList.Add(binaries.BinDir);
-        startInfo.ArgumentList.Add("--ext");
-        startInfo.ArgumentList.Add(extPath);
-        if (useSymbols && binaries.HasSymSrv)
+        foreach (var arg in BuildTriageArgs(dumpPath, binaries, extPath, useSymbols))
         {
-            startInfo.ArgumentList.Add("--symbols");
+            startInfo.ArgumentList.Add(arg);
         }
 
         using var process = new Process { StartInfo = startInfo };
@@ -178,7 +208,7 @@ internal sealed class XamlTriageService(
         if (!process.Start())
         {
             logger.LogDebug("WinUI triage child process failed to start.");
-            return null;
+            return (null, "the triage child process could not be started.");
         }
 
         process.BeginOutputReadLine();
@@ -189,12 +219,16 @@ internal sealed class XamlTriageService(
         try
         {
             await process.WaitForExitAsync(timeoutCts.Token);
+            // WaitForExitAsync returns once the process exits, but the async stdout/stderr readers may
+            // still have buffered data in flight. The parameterless overload blocks until those readers
+            // have flushed, so the StringBuilders are complete before we read them.
+            process.WaitForExit();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
             logger.LogDebug("WinUI triage child process timed out after {Timeout}.", TriageTimeout);
-            return null;
+            return (null, $"the triage child process timed out after {TriageTimeout.TotalMinutes:0} minutes.");
         }
         catch (OperationCanceledException)
         {
@@ -206,10 +240,10 @@ internal sealed class XamlTriageService(
         {
             logger.LogDebug("WinUI triage child process exited with code {Code}: {Error}",
                 process.ExitCode, stderr.ToString().Trim());
-            return null;
+            return (null, $"the triage child process exited with code {process.ExitCode}.");
         }
 
-        return stdout.ToString();
+        return (stdout.ToString(), null);
     }
 
     private static void TryKill(Process process)
@@ -237,7 +271,7 @@ internal sealed class XamlTriageService(
         Directory.CreateDirectory(extDir);
         var extPath = Path.Combine(extDir, ExtFileName);
 
-        if (File.Exists(extPath) && GitBlobSha1(await File.ReadAllBytesAsync(extPath, cancellationToken)) == ExtBlobSha1)
+        if (File.Exists(extPath) && MatchesPinnedExtensionHash(await File.ReadAllBytesAsync(extPath, cancellationToken)))
         {
             return extPath;
         }
@@ -248,11 +282,10 @@ internal sealed class XamlTriageService(
             using var http = new HttpClient();
             var bytes = await http.GetByteArrayAsync(url, cancellationToken);
 
-            var actual = GitBlobSha1(bytes);
-            if (actual != ExtBlobSha1)
+            if (!MatchesPinnedExtensionHash(bytes))
             {
                 logger.LogWarning("Downloaded {Ext} hash mismatch (expected {Expected}, got {Actual}); refusing to use it.",
-                    ExtFileName, ExtBlobSha1, actual);
+                    ExtFileName, ExtBlobSha1, GitBlobSha1(bytes));
                 return null;
             }
 
@@ -280,10 +313,17 @@ internal sealed class XamlTriageService(
         }
     }
 
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="content"/> matches the pinned <c>winui-dbgext.js</c>
+    /// git blob hash. This is the integrity gate that prevents a tampered or wrong extension from
+    /// being loaded into the debugger; exposed internally for testing.
+    /// </summary>
+    internal static bool MatchesPinnedExtensionHash(byte[] content) => GitBlobSha1(content) == ExtBlobSha1;
+
     /// <summary>Computes the git blob SHA-1 (<c>sha1("blob &lt;len&gt;\0" + content)</c>) of a buffer.</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350:Do Not Use Weak Cryptographic Algorithms",
         Justification = "SHA-1 is used only to reproduce git's content-addressed blob identity for integrity pinning, not for security.")]
-    private static string GitBlobSha1(byte[] content)
+    internal static string GitBlobSha1(byte[] content)
     {
         var header = Encoding.ASCII.GetBytes($"blob {content.Length}\0");
         var buffer = new byte[header.Length + content.Length];

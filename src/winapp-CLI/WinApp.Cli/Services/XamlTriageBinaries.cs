@@ -13,9 +13,11 @@ namespace WinApp.Cli.Services;
 /// extension (<c>!xamlstowed</c> / <c>!xamltriage</c>).
 /// </summary>
 /// <param name="BinDir">Directory containing <c>dbgeng.dll</c> (and co-located providers).</param>
+/// <param name="JsProviderPath">Full path to the resolved <c>JsProvider.dll</c> (may live in a
+/// <c>winext</c> subfolder rather than directly in <see cref="BinDir"/>).</param>
 /// <param name="HasSymSrv"><c>symsrv.dll</c> is co-located, enabling <c>srv*</c> symbol paths.</param>
 /// <param name="Source">Human-readable description of where the binaries were resolved from.</param>
-internal sealed record ResolvedTriageBinaries(string BinDir, bool HasSymSrv, string Source);
+internal sealed record ResolvedTriageBinaries(string BinDir, string JsProviderPath, bool HasSymSrv, string Source);
 
 /// <summary>
 /// Locates (and, when missing, downloads on first use) the host-architecture native
@@ -46,13 +48,20 @@ internal static class XamlTriageBinaries
 
     private const string FlatContainer = "https://api.nuget.org/v3-flatcontainer";
 
+    /// <summary>
+    /// Pinned native-debugger package version. Must stay in sync with the
+    /// <c>Microsoft.Debugging.Platform.*</c> entries in <c>Directory.Packages.props</c>; a unit test
+    /// asserts they match so runtime acquisition uses the same version that <c>dotnet restore</c> pins.
+    /// </summary>
+    public const string DbgPackageVersion = "20260319.1511.0";
+
     // Native engine bits available from NuGet. DbgEng ships the full engine layout (including
     // dbgmodel.dll and msdia140.dll), so no separate DbgX package is required. JsProvider.dll is
     // intentionally absent here — it is not on NuGet and is acquired from the WinDbg bundle instead.
-    private static readonly (string Package, string[] Files)[] NuGetComponents =
+    private static readonly (string Package, string Version, string[] Files)[] NuGetComponents =
     [
-        ("Microsoft.Debugging.Platform.DbgEng", ["dbgeng.dll", "dbghelp.dll", "dbgcore.dll", "dbgmodel.dll", "msdia140.dll"]),
-        ("Microsoft.Debugging.Platform.SymSrv", ["symsrv.dll"]),
+        ("Microsoft.Debugging.Platform.DbgEng", DbgPackageVersion, ["dbgeng.dll", "dbghelp.dll", "dbgcore.dll", "dbgmodel.dll", "msdia140.dll"]),
+        ("Microsoft.Debugging.Platform.SymSrv", DbgPackageVersion, ["symsrv.dll"]),
     ];
 
     /// <summary>Folder token used by the Windows Kits Debuggers layout for the host arch.</summary>
@@ -139,17 +148,20 @@ internal static class XamlTriageBinaries
             return null;
         }
 
-        // dbgeng searches its own directory and the winext subfolder for extension providers.
-        var hasJsProvider =
-            File.Exists(Path.Combine(dir, "JsProvider.dll")) ||
-            File.Exists(Path.Combine(dir, "winext", "JsProvider.dll"));
-        if (!hasJsProvider)
+        // dbgeng searches its own directory and the winext subfolder for extension providers, but the
+        // child runner must .load JsProvider.dll by explicit path, so capture where it actually lives.
+        var jsProviderPath = new[]
+        {
+            Path.Combine(dir, "JsProvider.dll"),
+            Path.Combine(dir, "winext", "JsProvider.dll"),
+        }.FirstOrDefault(File.Exists);
+        if (jsProviderPath == null)
         {
             return null;
         }
 
         var hasSymSrv = File.Exists(Path.Combine(dir, "symsrv.dll"));
-        return new ResolvedTriageBinaries(dir, hasSymSrv, source);
+        return new ResolvedTriageBinaries(dir, jsProviderPath, hasSymSrv, source);
     }
 
     /// <summary>
@@ -172,7 +184,7 @@ internal static class XamlTriageBinaries
         using var http = new HttpClient();
         var acquired = 0;
 
-        foreach (var (package, files) in NuGetComponents)
+        foreach (var (package, version, files) in NuGetComponents)
         {
             try
             {
@@ -182,13 +194,13 @@ internal static class XamlTriageBinaries
                     continue;
                 }
 
-                if (nugetCacheDir != null && TryCopyFromGlobalCache(package, files, nugetCacheDir, cacheBinDir, logger))
+                if (nugetCacheDir != null && TryCopyFromGlobalCache(package, version, files, nugetCacheDir, cacheBinDir, logger))
                 {
                     acquired++;
                     continue;
                 }
 
-                if (await TryMaterializePackageAsync(http, package, files, cacheBinDir, logger, cancellationToken))
+                if (await TryMaterializePackageAsync(http, package, version, files, cacheBinDir, logger, cancellationToken))
                 {
                     acquired++;
                 }
@@ -204,10 +216,13 @@ internal static class XamlTriageBinaries
 
     /// <summary>
     /// Copies the required files for a component from the NuGet global packages cache
-    /// (<c>&lt;cache&gt;/&lt;id&gt;/&lt;version&gt;/content/&lt;arch&gt;/</c>) when a restored copy exists.
+    /// (<c>&lt;cache&gt;/&lt;id&gt;/&lt;version&gt;/content/&lt;arch&gt;/</c>). Prefers the
+    /// <paramref name="pinnedVersion"/> (the version pinned in <c>Directory.Packages.props</c> and
+    /// guaranteed present after <c>dotnet restore</c>) and only falls back to the newest cached
+    /// version when the pinned one is absent, so dev/CI builds are deterministic.
     /// </summary>
-    private static bool TryCopyFromGlobalCache(
-        string package, string[] files, DirectoryInfo nugetCacheDir, DirectoryInfo cacheBinDir, ILogger logger)
+    internal static bool TryCopyFromGlobalCache(
+        string package, string pinnedVersion, string[] files, DirectoryInfo nugetCacheDir, DirectoryInfo cacheBinDir, ILogger logger)
     {
         var packageDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, package.ToLowerInvariant()));
         if (!packageDir.Exists)
@@ -215,7 +230,15 @@ internal static class XamlTriageBinaries
             return false;
         }
 
-        foreach (var versionDir in packageDir.EnumerateDirectories().OrderByDescending(d => d.Name, StringComparer.OrdinalIgnoreCase))
+        // Pinned version first (deterministic); then newest available as a graceful fallback.
+        var pinnedDir = new DirectoryInfo(Path.Combine(packageDir.FullName, pinnedVersion));
+        var candidates = new[] { pinnedDir }
+            .Where(d => d.Exists)
+            .Concat(packageDir.EnumerateDirectories()
+                .Where(d => !d.Name.Equals(pinnedVersion, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(d => d.Name, StringComparer.OrdinalIgnoreCase));
+
+        foreach (var versionDir in candidates)
         {
             var archDir = Path.Combine(versionDir.FullName, "content", NuGetArch);
             if (!Directory.Exists(archDir) || !files.All(f => File.Exists(Path.Combine(archDir, f))))
@@ -228,6 +251,12 @@ internal static class XamlTriageBinaries
                 File.Copy(Path.Combine(archDir, file), Path.Combine(cacheBinDir.FullName, file), overwrite: true);
             }
 
+            if (!versionDir.Name.Equals(pinnedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogDebug("Pinned version {Pinned} of {Package} not in NuGet cache; used {Used} instead.",
+                    pinnedVersion, package, versionDir.Name);
+            }
+
             logger.LogDebug("Copied {Count} file(s) for {Package} from NuGet global cache {Version}.", files.Length, package, versionDir.Name);
             return true;
         }
@@ -236,23 +265,10 @@ internal static class XamlTriageBinaries
     }
 
     private static async Task<bool> TryMaterializePackageAsync(
-        HttpClient http, string package, string[] files, DirectoryInfo cacheBinDir, ILogger logger, CancellationToken cancellationToken)
+        HttpClient http, string package, string pinnedVersion, string[] files, DirectoryInfo cacheBinDir, ILogger logger, CancellationToken cancellationToken)
     {
         var id = package.ToLowerInvariant();
-
-        // Resolve the latest stable version via the flat-container index.
-        using var indexResponse = await http.GetAsync($"{FlatContainer}/{id}/index.json", cancellationToken);
-        if (!indexResponse.IsSuccessStatusCode)
-        {
-            return false;
-        }
-
-        await using var indexStream = await indexResponse.Content.ReadAsStreamAsync(cancellationToken);
-        using var indexDoc = await JsonDocument.ParseAsync(indexStream, cancellationToken: cancellationToken);
-        var version = indexDoc.RootElement.GetProperty("versions").EnumerateArray()
-            .Select(v => v.GetString())
-            .Where(v => v != null && !v.Contains('-', StringComparison.Ordinal))
-            .LastOrDefault();
+        var version = await ResolveDownloadVersionAsync(http, id, pinnedVersion, logger, cancellationToken);
         if (string.IsNullOrEmpty(version))
         {
             return false;
@@ -298,6 +314,41 @@ internal static class XamlTriageBinaries
         {
             try { Directory.Delete(tempPkgDir, recursive: true); } catch { /* best effort */ }
         }
+    }
+
+    /// <summary>
+    /// Resolves the version to download: the pinned version when the flat-container index lists it
+    /// (the deterministic, expected path), otherwise the latest stable version as a graceful fallback.
+    /// </summary>
+    private static async Task<string?> ResolveDownloadVersionAsync(
+        HttpClient http, string id, string pinnedVersion, ILogger logger, CancellationToken cancellationToken)
+    {
+        using var indexResponse = await http.GetAsync($"{FlatContainer}/{id}/index.json", cancellationToken);
+        if (!indexResponse.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        await using var indexStream = await indexResponse.Content.ReadAsStreamAsync(cancellationToken);
+        using var indexDoc = await JsonDocument.ParseAsync(indexStream, cancellationToken: cancellationToken);
+        var versions = indexDoc.RootElement.GetProperty("versions").EnumerateArray()
+            .Select(v => v.GetString())
+            .Where(v => !string.IsNullOrEmpty(v))
+            .ToList();
+
+        if (versions.Any(v => string.Equals(v, pinnedVersion, StringComparison.OrdinalIgnoreCase)))
+        {
+            return pinnedVersion;
+        }
+
+        var latest = versions.LastOrDefault(v => !v!.Contains('-', StringComparison.Ordinal));
+        if (latest != null)
+        {
+            logger.LogDebug("Pinned version {Pinned} of {Id} not available on the feed; downloading {Latest} instead.",
+                pinnedVersion, id, latest);
+        }
+
+        return latest;
     }
 
     /// <summary>

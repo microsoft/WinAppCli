@@ -29,7 +29,7 @@ internal static class XamlTriageRunner
     /// </summary>
     public static int Run(string[] args)
     {
-        string? dump = null, bin = null, ext = null;
+        string? dump = null, bin = null, ext = null, jsProvider = null;
         var useSymbols = false;
         for (var i = 1; i < args.Length; i++)
         {
@@ -38,6 +38,7 @@ internal static class XamlTriageRunner
                 case "--dump" when i + 1 < args.Length: dump = args[++i]; break;
                 case "--bin" when i + 1 < args.Length: bin = args[++i]; break;
                 case "--ext" when i + 1 < args.Length: ext = args[++i]; break;
+                case "--jsprovider" when i + 1 < args.Length: jsProvider = args[++i]; break;
                 case "--symbols": useSymbols = true; break;
             }
         }
@@ -48,9 +49,13 @@ internal static class XamlTriageRunner
             return 2;
         }
 
+        // The provider may live in a winext subfolder; the parent passes its resolved path. Fall back
+        // to the engine directory for backward compatibility when it is not supplied.
+        jsProvider ??= Path.Combine(bin, "JsProvider.dll");
+
         try
         {
-            Console.Out.Write(RunDbgEngExtension(dump, bin, ext, useSymbols));
+            Console.Out.Write(RunDbgEngExtension(dump, bin, jsProvider, ext, useSymbols));
             return 0;
         }
         catch (Exception ex)
@@ -64,7 +69,7 @@ internal static class XamlTriageRunner
     /// Executes <c>.scriptload</c> + <c>!xamlstowed</c> + <c>!xamltriage</c> against the dump and
     /// returns the captured DbgEng output.
     /// </summary>
-    public static string RunDbgEngExtension(string dumpPath, string binDir, string extPath, bool useSymbols)
+    public static string RunDbgEngExtension(string dumpPath, string binDir, string jsProviderPath, string extPath, bool useSymbols)
     {
         using IDisposable dbgeng = IDebugClient.Create(binDir);
         IDebugClient client = (IDebugClient)dbgeng;
@@ -106,8 +111,13 @@ internal static class XamlTriageRunner
 
             // Register the JavaScript script provider (ships as JsProvider.dll alongside the engine).
             // Without this, '.scriptload <file>.js' fails with "No script provider ... for '.js'".
-            var jsProvider = Path.Combine(binDir, "JsProvider.dll").Replace('\\', '/');
-            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $".load \"{jsProvider}\"", DEBUG_EXECUTE.DEFAULT);
+            var jsProvider = jsProviderPath.Replace('\\', '/');
+            var loadHr = control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $".load \"{jsProvider}\"", DEBUG_EXECUTE.DEFAULT);
+            if (loadHr < 0)
+            {
+                return output + $"\nWinUI triage could not load the JavaScript provider " +
+                    $"({jsProviderPath}): HRESULT 0x{(uint)loadHr:X8}";
+            }
 
             // Load the JS extension, then run the stowed-exception + triage commands.
             // Forward slashes avoid escaping issues in the DbgEng command parser.

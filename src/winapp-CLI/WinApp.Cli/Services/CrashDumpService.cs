@@ -70,12 +70,9 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 // stays the first-chance one — it points to the user code that originally threw,
                 // before XAML's error handling replaced the stack with FailFastWithStowedExceptions,
                 // so ClrMD still recovers the managed user frames.
-                const int statusStowedException = unchecked((int)0xC000027B);
-                var useStowedRecord = crashExceptionCode == statusStowedException
-                    && crashExceptionParameters is { Length: > 0 };
-
-                var recordCode = useStowedRecord ? crashExceptionCode : savedExceptionCode;
-                var recordAddress = useStowedRecord ? crashExceptionAddress : savedExceptionAddress;
+                var (recordCode, recordAddress, useStowedRecord) = SelectExceptionRecord(
+                    savedExceptionCode, savedExceptionAddress,
+                    crashExceptionCode, crashExceptionAddress, crashExceptionParameters);
 
                 logger.LogDebug("Writing dump (thread {ThreadId}); exception record code 0x{Code:X8}{Stowed}.",
                     savedThreadId, recordCode, useStowedRecord ? " (stowed, with parameters)" : string.Empty);
@@ -166,6 +163,24 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
     }
 
+    /// <summary>
+    /// Chooses which exception the dump's exception record should describe. A terminating stowed
+    /// exception (<c>0xC000027B</c>) carrying parameters is preferred so WinUI triage can locate the
+    /// stowed-exception array; otherwise the first-chance exception is used. The thread CONTEXT is
+    /// always the first-chance one (handled by the caller) so ClrMD still recovers user frames.
+    /// Exposed internally for testing the selection logic without writing a real dump.
+    /// </summary>
+    internal static (int Code, nuint Address, bool UseStowed) SelectExceptionRecord(
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode, nuint crashExceptionAddress, nuint[]? crashExceptionParameters)
+    {
+        const int statusStowedException = unchecked((int)0xC000027B);
+        var useStowed = crashExceptionCode == statusStowedException && crashExceptionParameters is { Length: > 0 };
+        return useStowed
+            ? (crashExceptionCode, crashExceptionAddress, true)
+            : (savedExceptionCode, savedExceptionAddress, false);
+    }
+
     /// <inheritdoc/>
     public async Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
@@ -182,8 +197,8 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             if (isWinUi)
             {
                 console.MarkupLine(useSymbols
-                    ? "[dim]Running WinUI stowed-exception triage (downloading symbols may take a few minutes)...[/]"
-                    : "[dim]Running WinUI stowed-exception triage...[/]");
+                    ? "[dim]Running WinUI stowed-exception triage (first run may download debugger components and symbols; this can take a few minutes)...[/]"
+                    : "[dim]Running WinUI stowed-exception triage (first run may download debugger components)...[/]");
                 xamlTriage = await xamlTriageService.TryAnalyzeAsync(dumpPath, useSymbols);
             }
 

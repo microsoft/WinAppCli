@@ -61,4 +61,69 @@ public class XamlTriageServiceTests
 
         Assert.IsNull(XamlTriageService.DescribeSymbolGap(partial, useSymbols: true));
     }
+
+    [TestMethod]
+    public void GitBlobSha1_EmptyContent_MatchesGitVector()
+    {
+        // The well-known git blob hash of empty content: `git hash-object` of an empty file.
+        Assert.AreEqual("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", XamlTriageService.GitBlobSha1([]));
+    }
+
+    [TestMethod]
+    public void GitBlobSha1_KnownContent_MatchesGitVector()
+    {
+        // echo -n 'hello' | git hash-object --stdin => b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0
+        var bytes = System.Text.Encoding.ASCII.GetBytes("hello");
+        Assert.AreEqual("b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0", XamlTriageService.GitBlobSha1(bytes));
+    }
+
+    [TestMethod]
+    public void MatchesPinnedExtensionHash_TamperedContent_ReturnsFalse()
+    {
+        // Arbitrary content cannot match the pinned winui-dbgext.js hash, so the integrity gate
+        // must reject it (this is the rejection path that protects the debugger from a wrong/tampered script).
+        Assert.IsFalse(XamlTriageService.MatchesPinnedExtensionHash(System.Text.Encoding.UTF8.GetBytes("// not the real extension")));
+    }
+
+    [TestMethod]
+    public void BuildTriageArgs_WithSymbolsAndSymSrv_IncludesSymbolsAndResolvedPaths()
+    {
+        var binaries = new ResolvedTriageBinaries(@"C:\dbg", @"C:\dbg\winext\JsProvider.dll", HasSymSrv: true, "test");
+
+        var args = XamlTriageService.BuildTriageArgs(@"C:\crash.dmp", binaries, @"C:\ext.js", useSymbols: true);
+
+        Assert.AreEqual(XamlTriageRunner.InternalVerb, args[0]);
+        CollectionAssert.Contains(args, "--symbols");
+        AssertPairValue(args, "--dump", @"C:\crash.dmp");
+        AssertPairValue(args, "--bin", @"C:\dbg");
+        AssertPairValue(args, "--jsprovider", @"C:\dbg\winext\JsProvider.dll");
+        AssertPairValue(args, "--ext", @"C:\ext.js");
+    }
+
+    [TestMethod]
+    public void BuildTriageArgs_SymbolsRequestedButNoSymSrv_OmitsSymbols()
+    {
+        var binaries = new ResolvedTriageBinaries(@"C:\dbg", @"C:\dbg\JsProvider.dll", HasSymSrv: false, "test");
+
+        var args = XamlTriageService.BuildTriageArgs(@"C:\crash.dmp", binaries, @"C:\ext.js", useSymbols: true);
+
+        CollectionAssert.DoesNotContain(args, "--symbols");
+    }
+
+    [TestMethod]
+    public void BuildTriageArgs_NoSymbols_OmitsSymbols()
+    {
+        var binaries = new ResolvedTriageBinaries(@"C:\dbg", @"C:\dbg\JsProvider.dll", HasSymSrv: true, "test");
+
+        var args = XamlTriageService.BuildTriageArgs(@"C:\crash.dmp", binaries, @"C:\ext.js", useSymbols: false);
+
+        CollectionAssert.DoesNotContain(args, "--symbols");
+    }
+
+    private static void AssertPairValue(List<string> args, string flag, string expected)
+    {
+        var idx = args.IndexOf(flag);
+        Assert.IsTrue(idx >= 0 && idx + 1 < args.Count, $"Expected flag {flag} with a value.");
+        Assert.AreEqual(expected, args[idx + 1]);
+    }
 }
