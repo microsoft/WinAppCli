@@ -105,15 +105,11 @@ Then refresh debug identity with `npx winapp node add-electron-debug-identity`. 
 
 Running the snippet above in an Electron main process, the summary streams into the DevTools console chunk by chunk, followed by the final `Done:` line:
 
-<p align="center">
-  <img src="./assets/phi-silica-console.gif" width="900" alt="Electron DevTools console: the Phi Silica summary streams in one partial chunk at a time via op.progress(), followed by a final &quot;Done:&quot; line with the complete summary." />
-</p>
+![Electron DevTools console: the Phi Silica summary streams in one partial chunk at a time via op.progress(), followed by a final "Done:" line with the complete summary.](./assets/phi-silica-console.gif)
 
 The snippet above is the minimal shape. To see the projection driving a full app end-to-end, take a look at [**Electron on Windows Gallery**](https://github.com/microsoft/electron-on-windows-gallery) — an open-source sample gallery powered by this same setup, with samples for text generation, summarization, rewriting, OCR, image description, image scaling, and object extraction. Here are a few of the samples in action:
 
-<p align="center">
-  <img src="./assets/electron-gallery-samples.gif" width="900" alt="Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description — each driven by a handful of JavaScript against the generated bindings." />
-</p>
+![Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description — each driven by a handful of JavaScript against the generated bindings.](./assets/electron-gallery-samples.gif)
 
 ## Extending to Windows SDK and beyond
 
