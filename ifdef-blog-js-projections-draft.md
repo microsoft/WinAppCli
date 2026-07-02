@@ -25,6 +25,12 @@ In this post we'll walk through two common Windows API scenarios from JavaScript
 
 Both are written entirely in JavaScript. The same pattern extends to file pickers, WinML execution-provider discovery, and other WinRT surfaces — full walk-throughs live in the [Electron guides](https://github.com/microsoft/winappCli/tree/main/docs/guides/electron).
 
+For the full menu of what this unlocks, take a look at [**Electron on Windows Gallery**](https://github.com/microsoft/electron-on-windows-gallery) — an open-source sample gallery powered by this same setup, with samples for text generation, summarization, rewriting, OCR, image description, image scaling, and object extraction.
+
+<p align="center">
+  <img src="./assets/electron-gallery-samples.gif" width="720" alt="Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description — each driven by a handful of JavaScript against the generated bindings." />
+</p>
+
 ## How to add the projection to your Electron app
 
 ### Project setup
@@ -38,27 +44,36 @@ npx winapp init . --use-defaults --add-js-bindings
 
 `winapp` sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and writes typed bindings to `.winapp/bindings/`. For APIs that require package identity, like notifications and Phi Silica, run `npx winapp node add-electron-debug-identity` before starting Electron.
 
-### Show a native Windows notification
+### Show a rich Windows notification
 
-The notification sample is the smallest. From the Electron main process:
+Electron can already show a basic notification, but Windows App SDK notifications let you use richer Windows-native toast features like progress bars, actions, inputs, and scenarios. Here's a progress notification from the Electron main process:
 
 ```js
 const {
   AppNotificationBuilder,
   AppNotificationManager,
+  AppNotificationProgressBar,
 } = require('./.winapp/bindings/index.js');
+
+const progress = AppNotificationProgressBar
+  .create()
+  .setTitle('Processing with Windows AI')
+  .setStatus('Running locally')
+  .setValue(0.65)
+  .setValueStringOverride('65%');
 
 AppNotificationManager.default_.show(
   AppNotificationBuilder
     .create()
-    .addText('Hello from Electron!')
-    .addText('Powered by the Windows App SDK.')
+    .addText('Windows AI task running')
+    .addText('This notification uses a native Windows progress bar.')
+    .addProgressBar(progress)
     .buildNotification()
 );
 ```
-Run it, and Windows fires the same native toast you'd get from a C#/C++ app:
+Run it, and Windows fires the same native toast you'd get from a C#/C++ app — including the progress bar:
 
-![Windows toast notification from an Electron app titled "test-electron-app", reading "Hello from Electron!" and "This notification is powered by the Windows App SDK!"](./assets/electron-toast-hello-from-electron.png)
+![Windows toast notification from an Electron app titled "test-electron-app", reading "Windows AI task running" and showing a 65% progress bar labeled "Processing with Windows AI."](./assets/electron-toast-hello-from-electron.png)
 
 Full walk-through in the [Show a notification from JavaScript](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-notification.md) guide.
 
@@ -107,21 +122,19 @@ Running the snippet above in an Electron main process, the summary streams into 
 
 ![Electron DevTools console: the Phi Silica summary streams in one partial chunk at a time via op.progress(), followed by a final "Done:" line with the complete summary.](./assets/phi-silica-console.gif)
 
-The snippet above is the minimal shape. To see the projection driving a full app end-to-end, take a look at [**Electron on Windows Gallery**](https://github.com/microsoft/electron-on-windows-gallery) — an open-source sample gallery powered by this same setup, with samples for text generation, summarization, rewriting, OCR, image description, image scaling, and object extraction. Here are a few of the samples in action:
-
-![Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description — each driven by a handful of JavaScript against the generated bindings.](./assets/electron-gallery-samples.gif)
-
 ## Extending to Windows SDK and beyond
 
-By default `winapp` feeds codegen the supported Windows App SDK WinRT surface (UI-only packages like `Microsoft.WindowsAppSDK.WinUI` and `Microsoft.Web.WebView2` are excluded — see the scope note below). To pull in Windows SDK classes (for example to open a `FileOpenPicker`, decode an image with `BitmapDecoder`, or talk to `Windows.Web.Http.HttpClient`), add them to `package.json`:
+By default `winapp` feeds codegen the supported Windows App SDK WinRT surface (UI-only packages like `Microsoft.WindowsAppSDK.WinUI` and `Microsoft.Web.WebView2` are excluded — see the scope note below). To pull in Windows SDK APIs as well, list the entry-point classes you want in `package.json`. For example, add the Windows Clipboard API:
 
 ```jsonc
 {
   "winapp": {
     "jsBindings": {
       "additionalWinmds": [
-        { "namespace": "Windows.Storage",          "classes": ["StorageFile"] },
-        { "namespace": "Windows.Graphics.Imaging", "classes": ["BitmapDecoder"] }
+        {
+          "namespace": "Windows.ApplicationModel.DataTransfer",
+          "classes": ["Clipboard", "HtmlFormatHelper"]
+        }
       ]
     }
   }
@@ -129,6 +142,34 @@ By default `winapp` feeds codegen the supported Windows App SDK WinRT surface (U
 ```
 
 Then `npx winapp node generate-bindings`. The codegen transitively pulls in dependent types — you only list the entry-point classes.
+
+Now your Electron main process can write richer Windows clipboard content — for example, HTML that pastes as formatted text in Word, Outlook, or Teams:
+
+```js
+const {
+  Clipboard,
+  DataPackage,
+  HtmlFormatHelper,
+} = require('./.winapp/bindings/index.js');
+
+const html = HtmlFormatHelper.createHtmlFormat(`
+  <h2>Hello from Electron</h2>
+  <p>This was copied as <strong>HTML</strong> via Windows Clipboard APIs.</p>
+  <p><a href="https://github.com/microsoft/winappCli">Open winapp CLI on GitHub</a></p>
+`);
+
+const data = DataPackage.create();
+data.setHtmlFormat(html);
+
+Clipboard.setContent(data);
+Clipboard.flush();
+```
+
+`HtmlFormatHelper.createHtmlFormat` wraps your markup with the CF_HTML header Windows expects, so any HTML-aware target renders it as rich text.
+
+<p align="center">
+  <img src="./assets/clipboard-html-demo.gif" width="720" alt="Running the snippet from the Electron main process and pasting into Word — the copied content renders as a formatted heading, bold text, and a clickable link, exactly the way the source HTML was written." />
+</p>
 
 For third-party WinRT components, or to include a package `winapp` doesn't ship by default, point the entry directly at a `.winmd` file: `{ "winmdPath": "path/to/Foo.winmd", "namespace": "Foo.Bar", "classes": ["Baz"] }`.
 
@@ -146,7 +187,11 @@ npx winapp init . --use-defaults --add-js-bindings
 # without touching the system Node.
 mkdir .local-node
 copy (Get-Command node).Source .\.local-node\node.exe
+```
 
+For Phi Silica, add the same `systemAIModels` capability shown above to `Package.appxmanifest`, then register the loose-layout package and execution alias:
+
+```powershell
 # Add an execution alias, then register the loose-layout package.
 npx winapp manifest add-alias --name mynode.exe --manifest .\Package.appxmanifest
 npx winapp run . --exe .local-node\node.exe --no-launch
@@ -159,15 +204,32 @@ const { roInitialize } = require('@microsoft/dynwinrt');
 roInitialize(1); // MTA
 
 const {
-  AppNotificationBuilder,
-  AppNotificationManager,
+  AIFeatureReadyState,
+  LanguageModel,
+  TextRewriter,
+  TextRewriteTone,
 } = require('./.winapp/bindings/index.js');
 
-AppNotificationManager.default_.show(
-  AppNotificationBuilder.create()
-    .addText('Hello from Node.js!')
-    .buildNotification()
-);
+async function main() {
+  const readyState = LanguageModel.getReadyState();
+  if (readyState === AIFeatureReadyState.NotReady) {
+    await LanguageModel.ensureReadyAsync();
+  }
+
+  const model = await LanguageModel.createAsync();
+  try {
+    const rewriter = TextRewriter.createInstance(model);
+    const result = await rewriter.rewriteAsync(
+      'winapp makes it easier to use Windows APIs from JavaScript.',
+      TextRewriteTone.Professional
+    );
+    console.log(result.text);
+  } finally {
+    model.close();
+  }
+}
+
+main().catch(console.error);
 ```
 
 Run it through the alias:
@@ -176,7 +238,7 @@ Run it through the alias:
 mynode.exe app.js
 ```
 
-The toast fires from Node.js, but Windows is launching it through the registered package: `mynode.exe` resolves to `.local-node\node.exe`, passes `app.js` as the argument, and starts the process with package identity and the Windows App SDK runtime graph.
+The rewritten text prints from a plain Node.js process, but Windows is launching it through the registered package: `mynode.exe` resolves to `.local-node\node.exe`, passes `app.js` as the argument, and starts the process with package identity and the Windows App SDK runtime graph.
 
 When you're done experimenting, unregister the development package:
 
