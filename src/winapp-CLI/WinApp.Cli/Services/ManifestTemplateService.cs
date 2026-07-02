@@ -228,6 +228,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         ManifestTemplates manifestTemplate,
         string description,
         TaskContext taskContext,
+        string manifestFileName = "Package.appxmanifest",
+        string? executableName = null,
         CancellationToken cancellationToken = default)
     {
         // Normalize publisher to a valid distinguished name
@@ -255,8 +257,16 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             version,
             description);
 
+        // When a concrete executable name is provided (e.g. sparse identity packages
+        // that reference an external exe), replace the $targetnametoken$ build token so
+        // the manifest is self-contained and can be packed without --executable.
+        if (!string.IsNullOrWhiteSpace(executableName))
+        {
+            content = content.Replace("$targetnametoken$.exe", executableName);
+        }
+
         // Write manifest file
-        var manifestPath = Path.Combine(outputDirectory.FullName, "Package.appxmanifest");
+        var manifestPath = Path.Combine(outputDirectory.FullName, manifestFileName);
         await File.WriteAllTextAsync(manifestPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
         // Generate default assets

@@ -17,6 +17,11 @@ public record ManifestGenerationInfo(
     string Version,
     string Description);
 
+public record SparseInitResult(
+    FileInfo ManifestPath,
+    ManifestGenerationInfo Info,
+    DirectoryInfo AssetsDirectory);
+
 internal interface IManifestService
 {
     public Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
@@ -27,6 +32,22 @@ internal interface IManifestService
         string? description,
         string? executable,
         bool useDefaults,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates a sparse identity <c>appxmanifest.xml</c> (plus placeholder assets) for an
+    /// existing desktop executable. Infers metadata defaults from the exe via
+    /// <see cref="System.Diagnostics.FileVersionInfo"/>, optionally prompting for overrides.
+    /// The generated manifest references the external exe by name so it can be packed as an
+    /// identity-only MSIX with <c>winapp pack</c>.
+    /// </summary>
+    public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+        DirectoryInfo outputDirectory,
+        FileInfo executable,
+        string? packageName,
+        string? publisherName,
+        bool useDefaults,
+        TaskContext taskContext,
         CancellationToken cancellationToken = default);
 
     public Task GenerateManifestAsync(

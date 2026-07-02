@@ -170,10 +170,22 @@ Use the `microsoft/setup-winapp` action to install winapp on GitHub-hosted runne
 - The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `Package.appxmanifest`
 - For production distribution, use a certificate from a trusted CA and add `--timestamp` when signing with `winapp sign`
 
+## Sparse identity packages
+
+To grant identity to an app distributed by an existing installer (not as MSIX), build an **identity-only** sparse package: pass a sparse `appxmanifest.xml` (one declaring `uap10:AllowExternalContent="true"`) to `winapp pack` instead of a folder.
+
+```powershell
+# 1. Generate the sparse manifest for your exe (skips SDK install)
+winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
+# 2. Build & sign the identity-only .msix (just the manifest)
+winapp pack ./bin/Release/appxmanifest.xml --cert ./dev.pfx
+# 3. Embed identity into the exe, then register in your installer
+winapp embed-identity ./bin/Release/MyApp.exe
+```
+
+The `.msix` contains only the manifest — binaries and assets are resolved from the external content location at runtime via `Add-AppxPackage -ExternalLocation`. If you pack a folder whose manifest declares `AllowExternalContent`, `winapp pack` warns about any assets/binaries found. See the [Sparse Packaging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md).
+
 ## Related skills
-- Need a manifest first? See `winapp-manifest` to generate `Package.appxmanifest`
-- Need a certificate? See `winapp-signing` for certificate generation and management
-- Having issues? See `winapp-troubleshoot` for a command selection flowchart and error solutions
 
 ## Troubleshooting
 | Error | Cause | Solution |

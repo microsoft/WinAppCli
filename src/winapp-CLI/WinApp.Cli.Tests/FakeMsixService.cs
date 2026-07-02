@@ -44,6 +44,43 @@ internal class FakeMsixService : IMsixService
         return Task.FromResult(FakeIdentityResult);
     }
 
+    public List<(string ManifestPath, bool AutoSign)> CreateSparseIdentityCalls { get; } = [];
+    public List<(string Target, string ManifestPath)> EmbedIdentityCalls { get; } = [];
+
+    public Task<CreateMsixPackageResult> CreateSparseIdentityPackageAsync(
+        FileInfo manifestPath,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        CancellationToken cancellationToken = default)
+    {
+        CreateSparseIdentityCalls.Add((manifestPath.FullName, autoSign));
+        if (ExceptionToThrow != null)
+        {
+            throw ExceptionToThrow;
+        }
+        return Task.FromResult(new CreateMsixPackageResult(new FileInfo("fake.identity.msix"), autoSign));
+    }
+
+    public Task<MsixIdentityResult> EmbedIdentityAsync(
+        FileInfo target,
+        FileInfo manifestPath,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
+    {
+        EmbedIdentityCalls.Add((target.FullName, manifestPath.FullName));
+        if (ExceptionToThrow != null)
+        {
+            throw ExceptionToThrow;
+        }
+        return Task.FromResult(FakeIdentityResult);
+    }
+
     public Task<CreateMsixPackageResult> CreateMsixPackageAsync(
         DirectoryInfo inputFolder,
         FileSystemInfo? outputPath,

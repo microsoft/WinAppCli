@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Target the Windows 10 2004 (19041) SDK: the minimum for sparse packaging
+         (uap10:AllowExternalContent) and enough to project Windows.ApplicationModel. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>sparse_app</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+
+    <!-- Side-by-side (fusion) manifest. In XML mode, `winapp embed-identity app.manifest`
+         inserts/updates the <msix> element here, and this build embeds it into the exe. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,84 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using Microsoft.Extensions.Logging;
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using WinApp.Cli.Helpers;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Commands;
+
+internal class EmbedIdentityCommand : Command, IShortDescription
+{
+    public string ShortDescription => "Embed sparse package identity into an app's manifest";
+
+    public static Argument<FileInfo> TargetArgument { get; }
+    public static Option<FileInfo> ManifestOption { get; }
+
+    static EmbedIdentityCommand()
+    {
+        TargetArgument = new Argument<FileInfo>("target")
+        {
+            Description = "Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist)."
+        };
+        ManifestOption = new Option<FileInfo>("--manifest")
+        {
+            Description = "Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml)"
+        };
+        ManifestOption.AcceptExistingOnly();
+    }
+
+    public EmbedIdentityCommand() : base("embed-identity", "Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').")
+    {
+        Arguments.Add(TargetArgument);
+        Options.Add(ManifestOption);
+    }
+
+    public class Handler(IMsixService msixService, ICurrentDirectoryProvider currentDirectoryProvider, IStatusService statusService, ILogger<EmbedIdentityCommand> logger) : AsynchronousCommandLineAction
+    {
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var target = parseResult.GetRequiredValue(TargetArgument);
+            var manifest = parseResult.GetValue(ManifestOption) ?? ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+
+            if (!manifest.Exists)
+            {
+                logger.LogError("AppX manifest not found: {Manifest}. Pass --manifest, or generate one with 'winapp init --exe <exe> --sparse'.", manifest.FullName);
+                return 1;
+            }
+
+            var extension = target.Extension.ToLowerInvariant();
+            var isSupported = extension is ".exe" or ".xml" or ".manifest";
+            if (!isSupported)
+            {
+                logger.LogError("Unsupported target '{Target}'. Provide a .exe (EXE mode) or an .xml/.manifest file (XML mode).", target.Name);
+                return 1;
+            }
+
+            return await statusService.ExecuteWithStatusAsync("Embedding package identity...", async (taskContext, ct) =>
+            {
+                try
+                {
+                    var identity = await msixService.EmbedIdentityAsync(target, manifest, taskContext, ct);
+
+                    taskContext.AddStatusMessage($"{UiSymbols.Package} Package: {identity.PackageName}");
+                    taskContext.AddStatusMessage($"{UiSymbols.User} Publisher: {identity.Publisher}");
+                    taskContext.AddStatusMessage($"{UiSymbols.Id} App ID: {identity.ApplicationId}");
+
+                    if (extension is ".xml" or ".manifest")
+                    {
+                        taskContext.AddStatusMessage($"{UiSymbols.Info} Rebuild your app so the updated side-by-side manifest is embedded in the exe.");
+                    }
+
+                    return (0, "Package identity embedded successfully.");
+                }
+                catch (Exception ex)
+                {
+                    var baseEx = ex.GetBaseException();
+                    return (1, $"{UiSymbols.Error} Failed to embed package identity: {baseEx.Message}");
+                }
+            }, cancellationToken);
+        }
+    }
+}

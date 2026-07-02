@@ -180,9 +180,14 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 |--------|-------------|---------|
 | `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
+| `--exe` | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
+| `--name` | Override the package name (sparse only; default: inferred from the exe) | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
+| `--output-dir` | Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory) | (none) |
+| `--publisher` | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
+| `--sparse` | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. | (none) |
 | `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
 
 ### `winapp restore`

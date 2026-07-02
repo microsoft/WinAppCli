@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
@@ -13,6 +14,179 @@ namespace WinApp.Cli.Services;
 
 internal partial class MsixService
 {
+    /// <summary>
+    /// Namespace of the SxS assembly manifest root element.
+    /// </summary>
+    private static readonly XNamespace AsmV1Ns = "urn:schemas-microsoft-com:asm.v1";
+
+    /// <summary>
+    /// Namespace of the &lt;msix&gt; package-identity element embedded in a fusion manifest.
+    /// </summary>
+    private static readonly XNamespace MsixV1Ns = "urn:schemas-microsoft-com:msix.v1";
+
+    public async Task<CreateMsixPackageResult> CreateSparseIdentityPackageAsync(
+        FileInfo manifestPath,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!manifestPath.Exists)
+        {
+            throw new FileNotFoundException($"Sparse manifest not found at: {manifestPath}");
+        }
+
+        var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
+        var doc = AppxManifestDocument.Parse(manifestContent);
+
+        var allowExternalContent = doc.Document.Root?
+            .Element(AppxManifestDocument.DefaultNs + "Properties")?
+            .Element(AppxManifestDocument.Uap10Ns + "AllowExternalContent");
+        if (allowExternalContent == null || !string.Equals(allowExternalContent.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The manifest does not declare uap10:AllowExternalContent=\"true\", so it is not a sparse identity package. " +
+                "Generate one with 'winapp init --exe <exe> --sparse', or pass an input folder to package a full MSIX.");
+        }
+
+        var packageName = ManifestService.CleanPackageName(doc.IdentityName ?? "Package");
+        var extractedPublisher = publisher ?? doc.IdentityPublisher;
+
+        // Resolve output path: default to <PackageName>.identity.msix in the current directory.
+        var defaultFileName = $"{packageName}.identity.msix";
+        FileInfo outputMsixPath;
+        DirectoryInfo outputFolder;
+        if (outputPath == null)
+        {
+            outputFolder = currentDirectoryProvider.GetCurrentDirectoryInfo();
+            outputMsixPath = new FileInfo(Path.Combine(outputFolder.FullName, defaultFileName));
+        }
+        else if (Path.HasExtension(outputPath.Name) && string.Equals(Path.GetExtension(outputPath.Name), ".msix", StringComparison.OrdinalIgnoreCase))
+        {
+            outputMsixPath = new FileInfo(outputPath.FullName);
+            outputFolder = outputMsixPath.Directory!;
+        }
+        else
+        {
+            outputFolder = new DirectoryInfo(outputPath.FullName);
+            outputMsixPath = new FileInfo(Path.Combine(outputPath.FullName, defaultFileName));
+        }
+
+        if (!outputFolder.Exists)
+        {
+            outputFolder.Create();
+        }
+
+        // Stage a directory containing ONLY the manifest. Sparse identity packages carry no
+        // binaries or assets — those are resolved from the external content location at runtime.
+        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winapp-sparse-{Guid.NewGuid():N}"));
+        stagingDir.Create();
+        try
+        {
+            var stagedManifest = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
+            await File.WriteAllTextAsync(stagedManifest, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Packaging sparse identity manifest (external content): {manifestPath.Name}");
+
+            await CreateMsixPackageFromFolderAsync(stagingDir, outputMsixPath, taskContext, cancellationToken);
+
+            if (autoSign)
+            {
+                await SignMsixPackageAsync(outputFolder, certificatePassword, generateDevCert, installDevCert, packageName, extractedPublisher, outputMsixPath, certificatePath, manifestPath, taskContext, cancellationToken);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (stagingDir.Exists)
+                {
+                    stagingDir.Delete(recursive: true);
+                }
+            }
+            catch
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up staging directory: {stagingDir.FullName}");
+            }
+        }
+
+        return new CreateMsixPackageResult(outputMsixPath, autoSign);
+    }
+
+    public async Task<MsixIdentityResult> EmbedIdentityAsync(
+        FileInfo target,
+        FileInfo manifestPath,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
+    {
+        if (!manifestPath.Exists)
+        {
+            throw new FileNotFoundException(
+                $"AppX manifest not found at: {manifestPath}. Pass --manifest, or generate one with 'winapp init --exe <exe> --sparse'.");
+        }
+
+        var identity = await ParseAppxManifestFromPathAsync(manifestPath, cancellationToken);
+
+        var extension = target.Extension.ToLowerInvariant();
+        if (extension == ".exe")
+        {
+            if (!target.Exists)
+            {
+                throw new FileNotFoundException($"Executable not found at: {target}");
+            }
+
+            taskContext.AddDebugMessage($"Embedding <msix> identity into exe fusion manifest: {target.Name}");
+            await EmbedMsixIdentityToExeAsync(target, identity, taskContext, cancellationToken);
+        }
+        else
+        {
+            taskContext.AddDebugMessage($"Inserting <msix> identity into external SxS manifest: {target.Name}");
+            await EmbedIdentityIntoXmlManifestAsync(target, identity, cancellationToken);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Inserts or replaces the &lt;msix&gt; identity element in an external side-by-side manifest
+    /// XML file. Creates a minimal assembly manifest if the target file does not yet exist.
+    /// </summary>
+    private static async Task EmbedIdentityIntoXmlManifestAsync(FileInfo target, MsixIdentityResult identity, CancellationToken cancellationToken)
+    {
+        XDocument xdoc;
+        if (target.Exists)
+        {
+            var existing = await File.ReadAllTextAsync(target.FullName, cancellationToken);
+            xdoc = XDocument.Parse(existing);
+        }
+        else
+        {
+            xdoc = new XDocument(
+                new XDeclaration("1.0", "utf-8", "yes"),
+                new XElement(AsmV1Ns + "assembly", new XAttribute("manifestVersion", "1.0")));
+        }
+
+        var root = xdoc.Root
+            ?? throw new InvalidOperationException($"The manifest '{target.FullName}' has no root element.");
+
+        // Remove any existing <msix> element(s) so re-running the command is idempotent.
+        root.Elements(MsixV1Ns + "msix").Remove();
+
+        var msix = new XElement(MsixV1Ns + "msix",
+            new XAttribute("publisher", identity.Publisher),
+            new XAttribute("packageName", identity.PackageName),
+            new XAttribute("applicationId", identity.ApplicationId));
+        root.Add(msix);
+
+        await using var stream = new FileStream(target.FullName, FileMode.Create, FileAccess.Write);
+        await xdoc.SaveAsync(stream, SaveOptions.None, cancellationToken);
+    }
+
     public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs

@@ -33,6 +33,26 @@ internal partial class MsixService(
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
     /// <summary>
+    /// Returns true when the manifest content declares uap10:AllowExternalContent="true",
+    /// indicating a sparse identity package whose binaries/assets live at an external location.
+    /// </summary>
+    public static bool ManifestHasAllowExternalContent(string manifestContent)
+    {
+        try
+        {
+            var doc = AppxManifestDocument.Parse(manifestContent);
+            var el = doc.Document.Root?
+                .Element(AppxManifestDocument.DefaultNs + "Properties")?
+                .Element(AppxManifestDocument.Uap10Ns + "AllowExternalContent");
+            return el != null && string.Equals(el.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Parses an AppX manifest file and extracts the package identity information
     /// </summary>
     /// <param name="appxManifestPath">Path to the appxmanifest.xml file</param>
@@ -361,6 +381,28 @@ internal partial class MsixService(
 
         // Parse the manifest to extract identity, executable, and architecture info
         var manifestDoc = AppxManifestDocument.Parse(manifestContent);
+
+        // When packaging a FOLDER for a sparse (AllowExternalContent) package, warn about
+        // content that should live at the external location instead of inside the .msix.
+        if (ManifestHasAllowExternalContent(manifestContent))
+        {
+            var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".ico" };
+            var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll", ".so" };
+
+            var hasImages = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories)
+                .Any(f => imageExtensions.Contains(f.Extension));
+            var hasBinaries = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories)
+                .Any(f => binaryExtensions.Contains(f.Extension));
+
+            if (hasImages)
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Assets found in package folder. For sparse packages, assets should be deployed at the external location alongside your application, not inside the .msix.");
+            }
+            if (hasBinaries)
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Binaries found in package folder. Sparse packages are identity-only — application binaries should not be included in the .msix.");
+            }
+        }
 
         try
         {
@@ -898,7 +940,7 @@ internal partial class MsixService(
             if (app != null && isExe && app.Attribute(AppxManifestDocument.Uap10Ns + "TrustLevel") == null)
             {
                 app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "TrustLevel", "mediumIL");
-                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "packagedClassicApp");
+                    app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "win32App");
             }
 
             // Remove EntryPoint if present (not needed for sparse packages)

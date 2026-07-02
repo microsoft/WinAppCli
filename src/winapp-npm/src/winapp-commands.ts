@@ -217,6 +217,27 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
 }
 
 // ---------------------------------------------------------------------------
+// embed-identity
+// ---------------------------------------------------------------------------
+
+export interface EmbedIdentityOptions extends CommonOptions {
+  /** Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). */
+  target: string;
+  /** Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml) */
+  manifest?: string;
+}
+
+/**
+ * Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').
+ */
+export async function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult> {
+  const args: string[] = ['embed-identity'];
+  args.push(options.target);
+  if (options.manifest) args.push('--manifest', options.manifest);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // get-winapp-path
 // ---------------------------------------------------------------------------
 
@@ -245,12 +266,22 @@ export interface InitOptions extends CommonOptions {
   configDir?: string;
   /** Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. */
   configOnly?: boolean;
+  /** Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. */
+  exe?: string;
   /** Don't use configuration file for version management */
   ignoreConfig?: boolean;
+  /** Override the package name (sparse only; default: inferred from the exe) */
+  name?: string;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
+  /** Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory) */
+  outputDir?: string;
+  /** Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. */
+  publisher?: string;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
+  /** Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. */
+  sparse?: boolean;
   /** Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) */
   useDefaults?: boolean;
 }
@@ -263,9 +294,14 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.baseDirectory) args.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
   if (options.configOnly) args.push('--config-only');
+  if (options.exe) args.push('--exe', options.exe);
   if (options.ignoreConfig) args.push('--ignore-config');
+  if (options.name) args.push('--name', options.name);
   if (options.noGitignore) args.push('--no-gitignore');
+  if (options.outputDir) args.push('--output-dir', options.outputDir);
+  if (options.publisher) args.push('--publisher', options.publisher);
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
+  if (options.sparse) args.push('--sparse');
   if (options.useDefaults) args.push('--use-defaults');
   return execCommand(args, options);
 }

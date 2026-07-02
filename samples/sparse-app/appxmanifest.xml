@@ -3,23 +3,20 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2"
-  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap2 uap3 uap10 desktop desktop6 rescap">
+  IgnorableNamespaces="uap uap10 desktop6 rescap">
 
   <Identity
-    Name="{PackageName}"
-    Publisher="{PublisherDN}"
+    Name="SparseAppSample"
+    Publisher="CN=Sparse App Sample"
     Version="1.0.0.0"
     ProcessorArchitecture="neutral" />
 
   <Properties>
-    <DisplayName>{PackageName}</DisplayName>
-    <PublisherDisplayName>{PublisherName}</PublisherDisplayName>
+    <DisplayName>Sparse Packaging Sample</DisplayName>
+    <PublisherDisplayName>Sparse App Sample</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
     <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
@@ -30,28 +27,29 @@
   </Dependencies>
 
   <Resources>
-    <Resource Language="en-us"/>
+    <Resource Language="en-us" />
   </Resources>
 
   <Applications>
-    <Application Id="{ApplicationId}"
-      Executable="$targetnametoken$.exe"
+    <Application Id="SparseAppSample"
+      Executable="sparse-app.exe"
       uap10:RuntimeBehavior="win32App"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         AppListEntry="none"
-        DisplayName="{PackageName}"
-        Description="{Description}"
+        DisplayName="Sparse Packaging Sample"
+        Description="Minimal WPF app demonstrating winapp sparse identity packaging."
         BackgroundColor="transparent"
-        Square150x150Logo="Assets\MedTile.png"
-        Square44x44Logo="Assets\AppList.png">
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
     </Application>
   </Applications>
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources"/>
+    <rescap:Capability Name="unvirtualizedResources" />
     <rescap:Capability Name="allowElevation" />
   </Capabilities>
 </Package>
