@@ -46,6 +46,14 @@ internal static class XamlTriageBinaries
     /// </summary>
     public const string EnvOverride = "WINAPP_DBGTOOLS_DIR";
 
+    /// <summary>
+    /// <c>true</c> when <see cref="EnvOverride"/> is configured. The override is authoritative:
+    /// installed tools, the download-on-first-use cache, and cache acquisition are all skipped so the
+    /// override remains the single source of truth (see <see cref="CandidateDirectories"/>).
+    /// </summary>
+    public static bool IsEnvOverrideSet =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(EnvOverride));
+
     private const string FlatContainer = "https://api.nuget.org/v3-flatcontainer";
 
     /// <summary>
@@ -104,9 +112,9 @@ internal static class XamlTriageBinaries
     private static IEnumerable<(string Dir, string Source)> CandidateDirectories(DirectoryInfo cacheBinDir)
     {
         // An explicit override is authoritative: when set, only that directory is considered.
-        var overrideDir = Environment.GetEnvironmentVariable(EnvOverride);
-        if (!string.IsNullOrWhiteSpace(overrideDir))
+        if (IsEnvOverrideSet)
         {
+            var overrideDir = Environment.GetEnvironmentVariable(EnvOverride)!;
             yield return (overrideDir, $"{EnvOverride} override");
             yield break;
         }

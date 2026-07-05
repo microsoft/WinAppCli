@@ -113,6 +113,19 @@ public class XamlTriageBinariesTests
     }
 
     [TestMethod]
+    public void IsEnvOverrideSet_ReflectsEnvironmentVariable()
+    {
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, null);
+        Assert.IsFalse(XamlTriageBinaries.IsEnvOverrideSet, "No override set: IsEnvOverrideSet must be false.");
+
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, "   ");
+        Assert.IsFalse(XamlTriageBinaries.IsEnvOverrideSet, "Whitespace-only override must be treated as unset.");
+
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, _tempDir);
+        Assert.IsTrue(XamlTriageBinaries.IsEnvOverrideSet, "A non-empty override must report as set.");
+    }
+
+    [TestMethod]
     public void TryCopyFromGlobalCache_PinnedVersionPresent_CopiesFromPinned()
     {
         const string package = "Test.Package.Bits";

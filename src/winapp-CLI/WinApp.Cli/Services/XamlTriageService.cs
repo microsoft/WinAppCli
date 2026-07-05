@@ -40,8 +40,11 @@ internal sealed class XamlTriageService(
             // Resolve an existing debugger layout; if none, populate the download-on-first-use cache:
             // engine bits from NuGet (global cache or download) and JsProvider.dll from the WinDbg bundle.
             var binaries = XamlTriageBinaries.ResolveExisting(cacheBinDir, logger);
-            if (binaries == null)
+            if (binaries == null && !XamlTriageBinaries.IsEnvOverrideSet)
             {
+                // Only populate the download-on-first-use cache when no authoritative override is set;
+                // with an override configured, ResolveExisting never consults the cache, so acquiring
+                // into it would waste the download and still report triage as unavailable.
                 var nugetCacheDir = TryGetNuGetCacheDir();
                 await XamlTriageBinaries.TryAcquireFromNuGetAsync(cacheBinDir, nugetCacheDir, logger, cancellationToken);
 
