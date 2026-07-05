@@ -256,6 +256,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
+| [Sparse App](/samples/sparse-app/README.md) | WPF app with production sparse packaging (identity-only MSIX) and an Inno Setup installer |
 
 ## 🧩 VS Code Extension
 

@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -26,6 +27,34 @@ public class SparsePackagingTests : BaseCommandTests
         File.Copy(Path.Combine(Environment.SystemDirectory, "notepad.exe"), dest, overwrite: true);
         return dest;
     }
+
+    private const string MinimalSparseManifest = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                 IgnorableNamespaces="uap10">
+          <Identity Name="SparsePkg" Publisher="CN=TestPublisher" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+          <Properties>
+            <DisplayName>SparsePkg</DisplayName>
+            <PublisherDisplayName>Test</PublisherDisplayName>
+            <Logo>Assets\StoreLogo.png</Logo>
+            <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+          </Properties>
+        </Package>
+        """;
+
+    private const string NonSparseManifest = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 IgnorableNamespaces="">
+          <Identity Name="FullPkg" Publisher="CN=TestPublisher" Version="1.0.0.0" />
+          <Properties>
+            <DisplayName>FullPkg</DisplayName>
+            <PublisherDisplayName>Test</PublisherDisplayName>
+            <Logo>Assets\StoreLogo.png</Logo>
+          </Properties>
+        </Package>
+        """;
 
     [TestMethod]
     public async Task InitSparse_WithExe_GeneratesSparseIdentityManifest()
@@ -135,6 +164,104 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EmbedIdentity_UnsupportedExtension_ReturnsError()
+    {
+        // Arrange: a valid sparse manifest exists, but the target is an unsupported file type.
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults"]);
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var badTarget = Path.Combine(_tempDirectory.FullName, "notes.txt");
+
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [badTarget, "--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "An unsupported target extension should fail");
+    }
+
+    [TestMethod]
+    public async Task EmbedIdentity_ManifestNotFound_ReturnsError()
+    {
+        // Arrange: target lives in a directory with no manifest, and there is none in cwd either.
+        var isolated = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "isolated"));
+        var target = Path.Combine(isolated.FullName, "app.manifest");
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act (no --manifest, nothing to auto-detect)
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [target]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Missing identity manifest should fail");
+        Assert.IsFalse(File.Exists(target), "No SxS manifest should be written when identity can't be resolved");
+    }
+
+    [TestMethod]
+    public async Task CreateSparseIdentityPackage_MissingManifest_Throws()
+    {
+        var msixService = GetRequiredService<IMsixService>();
+        var missing = new FileInfo(Path.Combine(_tempDirectory.FullName, "does-not-exist.xml"));
+
+        await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
+            msixService.CreateSparseIdentityPackageAsync(missing, null, TestTaskContext, cancellationToken: TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task CreateSparseIdentityPackage_NonSparseManifest_Throws()
+    {
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifestPath.FullName, NonSparseManifest, TestContext.CancellationToken);
+        var msixService = GetRequiredService<IMsixService>();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            msixService.CreateSparseIdentityPackageAsync(manifestPath, null, TestTaskContext, cancellationToken: TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task CreateSparseIdentityPackage_MsixbundleOutput_Throws()
+    {
+        // A sparse identity package must be a single .msix, never a bundle. Passing a .msixbundle
+        // output must be rejected rather than silently creating a directory with that name.
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifestPath.FullName, MinimalSparseManifest, TestContext.CancellationToken);
+        var output = new FileInfo(Path.Combine(_tempDirectory.FullName, "SparsePkg.msixbundle"));
+        var msixService = GetRequiredService<IMsixService>();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            msixService.CreateSparseIdentityPackageAsync(manifestPath, output, TestTaskContext, cancellationToken: TestContext.CancellationToken));
+        Assert.IsFalse(Directory.Exists(output.FullName), "A directory must not be created for a rejected .msixbundle output");
+    }
+
+    [TestMethod]
+    public async Task GenerateCompleteManifest_EscapesSpecialCharsInDescriptionAndExe()
+    {
+        // Description is free text inferred from exe metadata; exe names can contain '&'.
+        // Both must be XML-escaped so the generated manifest stays well-formed.
+        var templateService = GetRequiredService<IManifestTemplateService>();
+        await templateService.GenerateCompleteManifestAsync(
+            _tempDirectory,
+            "EscapeTest",
+            "CN=Test",
+            "1.0.0.0",
+            ManifestTemplates.Sparse,
+            "Tom & Jerry's <app> \"quoted\"",
+            TestTaskContext,
+            manifestFileName: "appxmanifest.xml",
+            executableName: "a&b.exe",
+            cancellationToken: TestContext.CancellationToken);
+
+        var content = await File.ReadAllTextAsync(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+
+        // The manifest must parse as well-formed XML despite the special characters.
+        var doc = System.Xml.Linq.XDocument.Parse(content);
+        Assert.IsNotNull(doc.Root);
+        Assert.Contains("&amp;", content, "Ampersands must be escaped");
+        Assert.DoesNotContain("Tom & Jerry", content, "A raw, unescaped ampersand would be invalid XML");
+    }
+
+    [TestMethod]
     public void NormalizeManifestVersion_HandlesVariousInputs()
     {
         Assert.AreEqual("1.2.3.4", ManifestService.NormalizeManifestVersion("1.2.3.4"));
@@ -143,6 +270,44 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.IsNull(ManifestService.NormalizeManifestVersion("not-a-version"));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(null));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(""));
+    }
+
+    [TestMethod]
+    public void GetSparseFolderContentWarnings_SparseManifest_WarnsOnAssetsAndBinaries()
+    {
+        var folder = _tempDirectory.CreateSubdirectory("sparse-folder");
+        File.WriteAllText(Path.Combine(folder.FullName, "StoreLogo.png"), "png");
+        File.WriteAllText(Path.Combine(folder.FullName, "app.exe"), "MZ");
+
+        var warnings = MsixService.GetSparseFolderContentWarnings(folder, MinimalSparseManifest);
+
+        Assert.HasCount(2, warnings);
+        Assert.IsTrue(warnings.Any(w => w.Contains("Assets found")), "Expected an assets warning");
+        Assert.IsTrue(warnings.Any(w => w.Contains("Binaries found")), "Expected a binaries warning");
+    }
+
+    [TestMethod]
+    public void GetSparseFolderContentWarnings_OnlyManifest_NoWarnings()
+    {
+        var folder = _tempDirectory.CreateSubdirectory("manifest-only");
+        File.WriteAllText(Path.Combine(folder.FullName, "appxmanifest.xml"), MinimalSparseManifest);
+
+        var warnings = MsixService.GetSparseFolderContentWarnings(folder, MinimalSparseManifest);
+
+        Assert.IsEmpty(warnings);
+    }
+
+    [TestMethod]
+    public void GetSparseFolderContentWarnings_NonSparseManifest_NoWarnings()
+    {
+        var folder = _tempDirectory.CreateSubdirectory("non-sparse");
+        File.WriteAllText(Path.Combine(folder.FullName, "StoreLogo.png"), "png");
+        File.WriteAllText(Path.Combine(folder.FullName, "app.exe"), "MZ");
+
+        // Not a sparse manifest, so folder content warnings must not fire.
+        var warnings = MsixService.GetSparseFolderContentWarnings(folder, NonSparseManifest);
+
+        Assert.IsEmpty(warnings);
     }
 }
 

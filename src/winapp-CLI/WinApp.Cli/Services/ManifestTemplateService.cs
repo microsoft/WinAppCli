@@ -121,7 +121,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             .Replace("{PublisherDN}", PublisherDnHelper.XmlEscape(publisherDN))
             .Replace("{PublisherName}", PublisherDnHelper.XmlEscape(publisherName))
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
-            .Replace("{Description}", description);
+            .Replace("{Description}", PublisherDnHelper.XmlEscape(description));
 
         return result;
     }
@@ -262,7 +262,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         // the manifest is self-contained and can be packed without --executable.
         if (!string.IsNullOrWhiteSpace(executableName))
         {
-            content = content.Replace("$targetnametoken$.exe", executableName);
+            content = content.Replace("$targetnametoken$.exe", PublisherDnHelper.XmlEscape(executableName));
         }
 
         // Write manifest file

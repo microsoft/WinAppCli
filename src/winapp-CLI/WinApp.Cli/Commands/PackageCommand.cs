@@ -29,7 +29,7 @@ internal class PackageCommand : Command, IShortDescription
     {
         InputFolderArgument = new Argument<DirectoryInfo[]>("input-folder")
         {
-            Description = "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
+            Description = "One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
             Arity = ArgumentArity.OneOrMore
         };
         OutputOption = new Option<FileInfo>("--output")

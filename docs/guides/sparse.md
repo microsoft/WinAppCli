@@ -121,7 +121,17 @@ Registration and unregistration are the installer's job. The pattern is the same
   `Add-AppxPackage -Path "<install-dir>\MyApp.identity.msix" -ExternalLocation "<install-dir>"`.
 - **Uninstall:** run `Remove-AppxPackage <full-package-name>` before deleting files.
 
+> **Security:** the install directory is resolved at install time and may contain characters
+> (e.g. a single quote) that break out of a PowerShell string literal. Always escape or validate
+> the path before interpolating it into a `-Command` string — the WiX and NSIS snippets below
+> assume a trusted install path, while the Inno Setup example demonstrates safe escaping. Prefer
+> passing paths as arguments to a `-File` script over inline `-Command` interpolation.
+
 ### Inno Setup
+
+Build the PowerShell arguments in a `[Code]` function so the runtime install path is escaped
+for the single-quoted PowerShell literal (an install directory containing a `'` must not be able
+to inject script):
 
 ```pascal
 [Files]
@@ -129,14 +139,28 @@ Source: "dist\*"; DestDir: "{app}"; Flags: recursesubdirs
 Source: "MyApp.identity.msix"; DestDir: "{app}"
 
 [Run]
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-AppxPackage -Path '{app}\MyApp.identity.msix' -ExternalLocation '{app}'"""; \
-  Flags: runhidden
+Filename: "powershell.exe"; Parameters: "{code:RegisterParams}"; Flags: runhidden
 
 [UninstallRun]
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage *MyApp* | Remove-AppxPackage"""; \
   Flags: runhidden
+
+[Code]
+function EscapePSLiteral(const Value: string): string;
+var S: string;
+begin
+  S := Value; StringChange(S, '''', ''''''); Result := S;
+end;
+
+function RegisterParams(Param: string): string;
+var AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  Result := '-NoProfile -ExecutionPolicy Bypass -Command "Add-AppxPackage -Path ''' +
+    EscapePSLiteral(AppDir + '\MyApp.identity.msix') +
+    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + '''"';
+end;
 ```
 
 See the [sparse-app](../../samples/sparse-app) sample for a complete, working `setup.iss`.

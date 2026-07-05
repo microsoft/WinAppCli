@@ -266,7 +266,7 @@ internal class InitCommand : Command, IShortDescription
             ansiConsole.WriteLine();
             ansiConsole.MarkupLine("Next steps:");
             ansiConsole.MarkupLineInterpolated($"   1. Run [blue]winapp pack \"{sparseResult.ManifestPath.FullName}\" --cert <dev.pfx>[/] to create the signed identity .msix");
-            ansiConsole.MarkupLineInterpolated($"   2. Run [blue]winapp embed-identity \"{exe.FullName}\"[/] to connect your exe to the identity package");
+            ansiConsole.MarkupLineInterpolated($"   2. Run [blue]winapp embed-identity \"{exe.FullName}\" --manifest \"{sparseResult.ManifestPath.FullName}\"[/] to connect your exe to the identity package");
             ansiConsole.MarkupLine("   3. Register in your installer with [blue]Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>[/]");
 
             return 0;

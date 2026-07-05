@@ -120,32 +120,11 @@ internal partial class ManifestService(
         if (logoPath == null && !string.IsNullOrEmpty(executableAbsolute))
         {
             taskContext.AddDebugMessage($"No logo path provided, attempting to extract from executable: {executableAbsolute}");
-            Icon? extractedIcon = null;
-            try
+            extractedLogoPath = ExtractExeIconToTempPng(executableAbsolute);
+            if (extractedLogoPath != null)
             {
-                extractedIcon = ShellIcon.GetJumboIcon(executableAbsolute);
-                // save temporary
-                if (extractedIcon != null)
-                {
-                    string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-                    Directory.CreateDirectory(tempDir);
-
-                    extractedLogoPath = Path.Combine(tempDir, "StoreLogo.png");
-                    using (var stream = new FileStream(extractedLogoPath, FileMode.Create))
-                    {
-                        extractedIcon.ToBitmap().Save(stream, ImageFormat.Png);
-                    }
-
-                    logoPath = new FileInfo(extractedLogoPath);
-                    taskContext.AddDebugMessage($"Extracted logo path: {logoPath.FullName}");
-                }
-            }
-            finally
-            {
-                if (extractedIcon != null)
-                {
-                    extractedIcon.Dispose();
-                }
+                logoPath = new FileInfo(extractedLogoPath);
+                taskContext.AddDebugMessage($"Extracted logo path: {logoPath.FullName}");
             }
         }
 
@@ -238,27 +217,47 @@ internal partial class ManifestService(
     }
 
     /// <summary>
+    /// Extracts the jumbo icon from an executable and writes it to a temporary <c>StoreLogo.png</c>.
+    /// Returns the path to the temp PNG (the caller owns cleanup of the file and its directory),
+    /// or null if the executable has no extractable icon.
+    /// </summary>
+    private static string? ExtractExeIconToTempPng(string executablePath)
+    {
+        Icon? extractedIcon = null;
+        try
+        {
+            extractedIcon = ShellIcon.GetJumboIcon(executablePath);
+            if (extractedIcon == null)
+            {
+                return null;
+            }
+
+            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tempDir);
+            var logoPath = Path.Combine(tempDir, "StoreLogo.png");
+            using var stream = new FileStream(logoPath, FileMode.Create);
+            extractedIcon.ToBitmap().Save(stream, ImageFormat.Png);
+            return logoPath;
+        }
+        finally
+        {
+            extractedIcon?.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Extracts the jumbo icon from an executable and applies it to the manifest's assets.
     /// Silently no-ops if extraction fails.
     /// </summary>
     private async Task TryApplyExtractedLogoAsync(FileInfo manifestPath, FileInfo executable, TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? extractedLogoPath = null;
-        Icon? extractedIcon = null;
         try
         {
-            extractedIcon = ShellIcon.GetJumboIcon(executable.FullName);
-            if (extractedIcon == null)
+            extractedLogoPath = ExtractExeIconToTempPng(executable.FullName);
+            if (extractedLogoPath == null)
             {
                 return;
-            }
-
-            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempDir);
-            extractedLogoPath = Path.Combine(tempDir, "StoreLogo.png");
-            using (var stream = new FileStream(extractedLogoPath, FileMode.Create))
-            {
-                extractedIcon.ToBitmap().Save(stream, ImageFormat.Png);
             }
 
             await UpdateManifestAssetsAsync(manifestPath, new FileInfo(extractedLogoPath), taskContext, cancellationToken: cancellationToken);
@@ -269,7 +268,6 @@ internal partial class ManifestService(
         }
         finally
         {
-            extractedIcon?.Dispose();
             if (extractedLogoPath != null)
             {
                 try

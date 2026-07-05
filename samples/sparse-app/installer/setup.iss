@@ -48,8 +48,11 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
 ; Register the sparse identity package against the install directory (external location).
+; The PowerShell arguments are built in [Code] (RegisterParams) so the install path is safely
+; escaped for a single-quoted PowerShell literal — an install directory containing a quote
+; must not be able to inject additional script.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-AppxPackage -Path '{app}\{#MyMsixName}' -ExternalLocation '{app}'"""; \
+  Parameters: "{code:RegisterParams}"; \
   StatusMsg: "Registering package identity..."; \
   Flags: runhidden waituntilterminated
 ; Launch the app after install (optional).
@@ -57,7 +60,32 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: po
 
 [UninstallRun]
 ; Unregister the sparse package on uninstall (before files are removed).
+; MyPackagePattern is a compile-time constant (no runtime path), so no escaping is required.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage '{#MyPackagePattern}' | Remove-AppxPackage"""; \
   RunOnceId: "UnregisterSparse"; \
   Flags: runhidden waituntilterminated
+
+[Code]
+{ Escapes a value for safe embedding inside a PowerShell single-quoted string literal. }
+function EscapePSLiteral(const Value: string): string;
+var
+  S: string;
+begin
+  S := Value;
+  StringChange(S, '''', '''''');
+  Result := S;
+end;
+
+{ Builds the full powershell.exe argument string for registering the sparse package,
+  escaping the runtime-resolved install directory so it cannot break out of the literal. }
+function RegisterParams(Param: string): string;
+var
+  AppDir: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  Result :=
+    '-NoProfile -ExecutionPolicy Bypass -Command "Add-AppxPackage -Path ''' +
+    EscapePSLiteral(AppDir + '\{#MyMsixName}') +
+    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + '''"';
+end;

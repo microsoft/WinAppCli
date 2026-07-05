@@ -44,10 +44,7 @@ internal partial class MsixService
         var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
         var doc = AppxManifestDocument.Parse(manifestContent);
 
-        var allowExternalContent = doc.Document.Root?
-            .Element(AppxManifestDocument.DefaultNs + "Properties")?
-            .Element(AppxManifestDocument.Uap10Ns + "AllowExternalContent");
-        if (allowExternalContent == null || !string.Equals(allowExternalContent.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+        if (!doc.AllowsExternalContent)
         {
             throw new InvalidOperationException(
                 "The manifest does not declare uap10:AllowExternalContent=\"true\", so it is not a sparse identity package. " +
@@ -66,8 +63,18 @@ internal partial class MsixService
             outputFolder = currentDirectoryProvider.GetCurrentDirectoryInfo();
             outputMsixPath = new FileInfo(Path.Combine(outputFolder.FullName, defaultFileName));
         }
-        else if (Path.HasExtension(outputPath.Name) && string.Equals(Path.GetExtension(outputPath.Name), ".msix", StringComparison.OrdinalIgnoreCase))
+        else if (Path.HasExtension(outputPath.Name))
         {
+            // An extension means the caller intends a file. Only .msix is valid for a sparse
+            // identity package — reject .msixbundle and anything else rather than silently
+            // creating a directory with that name.
+            if (!string.Equals(Path.GetExtension(outputPath.Name), ".msix", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid --output '{outputPath.Name}'. Sparse identity packages must be a single '.msix' file " +
+                    "(bundles are not supported). Pass a '.msix' path or a directory.");
+            }
+
             outputMsixPath = new FileInfo(outputPath.FullName);
             outputFolder = outputMsixPath.Directory!;
         }

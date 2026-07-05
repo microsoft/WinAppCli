@@ -40,16 +40,43 @@ internal partial class MsixService(
     {
         try
         {
-            var doc = AppxManifestDocument.Parse(manifestContent);
-            var el = doc.Document.Root?
-                .Element(AppxManifestDocument.DefaultNs + "Properties")?
-                .Element(AppxManifestDocument.Uap10Ns + "AllowExternalContent");
-            return el != null && string.Equals(el.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            return AppxManifestDocument.Parse(manifestContent).AllowsExternalContent;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns warning messages for content found in a folder being packaged as a sparse
+    /// (AllowExternalContent) identity package. Assets and binaries should be deployed at the
+    /// external location alongside the application rather than inside the identity-only .msix.
+    /// Returns an empty list when the manifest is not a sparse manifest.
+    /// </summary>
+    public static IReadOnlyList<string> GetSparseFolderContentWarnings(DirectoryInfo inputFolder, string manifestContent)
+    {
+        var warnings = new List<string>();
+        if (!ManifestHasAllowExternalContent(manifestContent))
+        {
+            return warnings;
+        }
+
+        var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".ico" };
+        var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll", ".so" };
+
+        var files = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories).ToList();
+
+        if (files.Any(f => imageExtensions.Contains(f.Extension)))
+        {
+            warnings.Add($"{UiSymbols.Warning} Assets found in package folder. For sparse packages, assets should be deployed at the external location alongside your application, not inside the .msix.");
+        }
+        if (files.Any(f => binaryExtensions.Contains(f.Extension)))
+        {
+            warnings.Add($"{UiSymbols.Warning} Binaries found in package folder. Sparse packages are identity-only — application binaries should not be included in the .msix.");
+        }
+
+        return warnings;
     }
 
     /// <summary>
@@ -384,24 +411,9 @@ internal partial class MsixService(
 
         // When packaging a FOLDER for a sparse (AllowExternalContent) package, warn about
         // content that should live at the external location instead of inside the .msix.
-        if (ManifestHasAllowExternalContent(manifestContent))
+        foreach (var warning in GetSparseFolderContentWarnings(inputFolder, manifestContent))
         {
-            var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".ico" };
-            var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll", ".so" };
-
-            var hasImages = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories)
-                .Any(f => imageExtensions.Contains(f.Extension));
-            var hasBinaries = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories)
-                .Any(f => binaryExtensions.Contains(f.Extension));
-
-            if (hasImages)
-            {
-                taskContext.AddStatusMessage($"{UiSymbols.Warning} Assets found in package folder. For sparse packages, assets should be deployed at the external location alongside your application, not inside the .msix.");
-            }
-            if (hasBinaries)
-            {
-                taskContext.AddStatusMessage($"{UiSymbols.Warning} Binaries found in package folder. Sparse packages are identity-only — application binaries should not be included in the .msix.");
-            }
+            taskContext.AddStatusMessage(warning);
         }
 
         try

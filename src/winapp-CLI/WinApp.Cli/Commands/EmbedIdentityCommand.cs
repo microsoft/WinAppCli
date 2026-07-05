@@ -40,7 +40,19 @@ internal class EmbedIdentityCommand : Command, IShortDescription
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var target = parseResult.GetRequiredValue(TargetArgument);
-            var manifest = parseResult.GetValue(ManifestOption) ?? ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+
+            // Resolve the identity manifest: explicit --manifest wins; otherwise look next to the
+            // target (where 'winapp init --exe --sparse' writes appxmanifest.xml by default) and
+            // finally fall back to the current directory.
+            var manifest = parseResult.GetValue(ManifestOption);
+            if (manifest == null)
+            {
+                var targetDir = target.Directory?.FullName;
+                var besideTarget = targetDir != null ? ManifestHelper.FindManifest(targetDir) : null;
+                manifest = besideTarget?.Exists == true
+                    ? besideTarget
+                    : ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+            }
 
             if (!manifest.Exists)
             {

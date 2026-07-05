@@ -542,7 +542,34 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// Register winapp.manifestGenerate command
+	// Register winapp.embedIdentity command
+	context.subscriptions.push(
+		vscode.commands.registerCommand('winapp.embedIdentity', async () => {
+			const workspacePath = getWorkspacePath();
+			if (!workspacePath) {
+				return;
+			}
+			const target = await selectFile('Select target (.exe or .xml/.manifest)', {
+				'App or manifest': ['exe', 'xml', 'manifest'],
+				'All files': ['*']
+			});
+			if (!target) {
+				return;
+			}
+
+			let command = `embed-identity "${target}"`;
+
+			const manifest = await selectFile('Select sparse appxmanifest.xml (cancel to auto-detect)', {
+				'Manifest': ['xml'],
+				'All files': ['*']
+			});
+			if (manifest) {
+				command += ` --manifest "${manifest}"`;
+			}
+
+			await runWinappCommand(extensionPath, command, workspacePath);
+		})
+	);
 	context.subscriptions.push(
 		vscode.commands.registerCommand('winapp.manifestGenerate', async () => {
 			const workspacePath = getWorkspacePath();

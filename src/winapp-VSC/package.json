@@ -23,6 +23,7 @@
     "onCommand:winapp.pack",
     "onCommand:winapp.run",
     "onCommand:winapp.createDebugIdentity",
+    "onCommand:winapp.embedIdentity",
     "onCommand:winapp.manifestGenerate",
     "onCommand:winapp.manifestUpdateAssets",
     "onCommand:winapp.certGenerate",
@@ -65,6 +66,11 @@
       {
         "command": "winapp.createDebugIdentity",
         "title": "Create Debug Identity",
+        "category": "WinApp"
+      },
+      {
+        "command": "winapp.embedIdentity",
+        "title": "Embed Package Identity",
         "category": "WinApp"
       },
       {
