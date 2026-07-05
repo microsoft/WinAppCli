@@ -50,6 +50,15 @@ internal class UiSendKeysCommand : Command, IShortDescription
                       "--verbatim \"down down enter\" types the words instead of pressing Down, Down, Enter."
     };
 
+    public static Option<bool> AllowSystemKeysOption { get; } = new("--allow-system-keys")
+    {
+        Description = "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via " +
+                      "--via send-input, which are refused by default because they act on the OS/shell beyond the " +
+                      "target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v). No effect on " +
+                      "--via post-message (already window-scoped). Note: Windows still blocks secure sequences such as " +
+                      "ctrl+alt+del (SAS) from injected input regardless of this flag."
+    };
+
     public UiSendKeysCommand()
         : base("send-keys", "Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), " +
                "modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. " +
@@ -63,6 +72,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         Options.Add(TargetOption);
         Options.Add(ViaOption);
         Options.Add(VerbatimOption);
+        Options.Add(AllowSystemKeysOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -84,6 +94,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
             var target = parseResult.GetValue(TargetOption);
             var viaStr = parseResult.GetValue(ViaOption) ?? "post-message";
             var verbatim = parseResult.GetValue(VerbatimOption);
+            var allowSystemKeys = parseResult.GetValue(AllowSystemKeysOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
@@ -204,14 +215,26 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     var systemCombos = SystemKeyGuard.FindSystemCombos(actions);
                     if (systemCombos.Count > 0)
                     {
-                        logger.LogError(
-                            "{Symbol} Refusing to synthesize system-reserved key(s) via --via send-input: {Combos}. " +
-                            "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window, ctrl+alt+del is intercepted by Windows), not just the target app.",
-                            UiSymbols.Error, string.Join(", ", systemCombos));
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                            $"Refusing to synthesize system-reserved key(s) via --via send-input: {string.Join(", ", systemCombos)}. " +
-                            "These act on the OS/shell rather than just the target app.");
-                        return 1;
+                        if (!allowSystemKeys)
+                        {
+                            logger.LogError(
+                                "{Symbol} Refusing to synthesize system-reserved key(s) via --via send-input: {Combos}. " +
+                                "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window, ctrl+alt+del is intercepted by Windows), not just the target app. " +
+                                "Pass --allow-system-keys to opt in (e.g. to drive a global hotkey).",
+                                UiSymbols.Error, string.Join(", ", systemCombos));
+                            UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                                $"Refusing to synthesize system-reserved key(s) via --via send-input: {string.Join(", ", systemCombos)}. " +
+                                "These act on the OS/shell rather than just the target app. Pass --allow-system-keys to opt in.");
+                            return 1;
+                        }
+
+                        // Caller explicitly opted in with --allow-system-keys (e.g. to fire a global hotkey such as
+                        // PowerToys' win+shift+v). Record the bypass so it's auditable in persisted logs, then fall
+                        // through and inject. (Windows still blocks secure sequences like ctrl+alt+del regardless.)
+                        logger.LogWarning(
+                            "{Symbol} Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {Combos}. " +
+                            "These act on the OS/shell beyond the target app.",
+                            UiSymbols.Warning, string.Join(", ", systemCombos));
                     }
                 }
 

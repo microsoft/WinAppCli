@@ -291,4 +291,55 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeForeground.Calls.Count, "post-message does not consult the foreground guard");
     }
 
+    [TestMethod]
+    public async Task SendKeys_SystemCombo_ViaSendInput_WithAllowSystemKeys_Sends()
+    {
+        // --allow-system-keys opts in to OS/shell-wide combos (e.g. driving a global hotkey such as
+        // PowerToys' win+shift+v): the guard is bypassed and the combo reaches the keyboard transport.
+        _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target + default foreground allow → reach the guard
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+shift+v", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_NonSystemCombo_ViaSendInput_WithAllowSystemKeys_Unaffected()
+    {
+        // The flag only relaxes system-reserved combos; an ordinary combo behaves identically with or
+        // without it (no accidental change to the normal path).
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+a", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_SystemCombo_ViaSendInput_WithoutAllow_StaysRejected()
+    {
+        // Default (no flag) still refuses system combos on send-input — the opt-in must not weaken the
+        // default safety posture.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+l", "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public void SendKeys_AllowSystemKeysOption_DocumentedInDescription()
+    {
+        // Discoverable via --help / cli-schema and explains it applies to send-input.
+        StringAssert.Contains(UiSendKeysCommand.AllowSystemKeysOption.Description, "send-input");
+        StringAssert.Contains(UiSendKeysCommand.AllowSystemKeysOption.Description, "system");
+    }
+
 }
