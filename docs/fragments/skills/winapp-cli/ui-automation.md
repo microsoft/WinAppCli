@@ -195,6 +195,23 @@ winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
 winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
+### Watch live events
+Stream UIA / WinEvent notifications as they happen. `--json` emits NDJSON (one event per line) then a summary line.
+```powershell
+# Default events (focus, window-open, window-close, invoke, selection)
+winapp ui watch -a myapp
+
+# Scope to a selector's subtree, pick events, stop after 10s
+winapp ui watch btn-save-a1b2 -a myapp -e invoke -e property-changed --duration-sec 10 --json
+
+# Stop after N events and tee to a file
+winapp ui watch -a myapp --max-events 5 -o events.ndjson
+```
+- Events: `focus`, `window-open`, `window-close`, `invoke`, `selection`, `text-changed`, `property-changed`, `structure-changed`, `notification`, `live-region`.
+- `--property` filters `property-changed`; supported values are `Name`, `Value`, `ToggleState` (others are rejected).
+- Element-scoped events need a target window (`-w <HWND>` or an `--app` with a window); a selector that can't be resolved fails with `element_not_found`. Window open/close alone is process-scoped and needs no window.
+- `--event focus` is always process-scoped (UIA focus notifications are global), so even with a selector you get every focus change in the target process; other element events honor the selector's subtree.
+
 ## Tips
 - Use `--interactive` with `inspect` as your first command — it shows only what you can click
 - Chain commands with `;` to reduce round-trips (see note below on why not `&&`)

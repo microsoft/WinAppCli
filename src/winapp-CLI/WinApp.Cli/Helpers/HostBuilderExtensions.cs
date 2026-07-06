@@ -56,7 +56,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            .AddSingleton<IUiEventWatcher, UiEventWatcher>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -101,6 +102,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiScrollIntoViewCommand, UiScrollIntoViewCommand.Handler>()
                 .UseCommandHandler<UiScrollCommand, UiScrollCommand.Handler>()
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
+                .UseCommandHandler<UiWatchCommand, UiWatchCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();

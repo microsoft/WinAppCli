@@ -1089,11 +1089,40 @@ winapp ui [command] [options]
 - `focus` - Move keyboard focus
 - `scroll-into-view` - Scroll element visible
 - `wait-for` - Wait for element state
+- `watch` - Stream live UI events (focus, window open/close, invoke, property changes, ...)
 - `list-windows` - List all windows for an app
 - `get-focused` - Report the currently focused element
 
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+
+#### `winapp ui watch`
+
+Stream live UIA / WinEvent notifications from a running app as they occur. With `--json`, emits NDJSON (one compact JSON object per event line) followed by a summary line.
+
+```bash
+# Watch the default event set (focus, window-open, window-close, invoke, selection)
+winapp ui watch -a myapp
+
+# Watch specific events, scoped to a selector's subtree, for 10 seconds
+winapp ui watch btn-save-a1b2 -a myapp -e invoke -e property-changed --duration-sec 10 --json
+
+# Stop after the first 5 events and tee them to a file
+winapp ui watch -a myapp --max-events 5 -o events.ndjson
+```
+
+**Options:**
+- `-e, --event <event>` - Event to listen for (repeatable). Allowed: `focus`, `window-open`, `window-close`, `invoke`, `selection`, `text-changed`, `property-changed`, `structure-changed`, `notification`, `live-region`. Default: `focus, window-open, window-close, invoke, selection`.
+- `-p, --property <name>` - Property filter for `property-changed`. Supported: `Name`, `Value`, `ToggleState` (unsupported values are rejected up front).
+- `--duration-sec <n>` - Seconds to listen. `0` = until Ctrl+C.
+- `-n, --max-events <n>` - Stop after this many events. `0` = unlimited.
+- `-o, --output <path>` - Also write each event/summary line to a file.
+
+Notes:
+- A `selector` argument scopes element events to that element's subtree; if it can't be resolved you get `element_not_found` and a non-zero exit.
+- `--event focus` is always process-scoped, not subtree-scoped: UIA focus notifications are global, so even with a `selector` you get every focus change in the target process (other events still honor the selector's subtree).
+- Element-scoped events (everything except `window-open`/`window-close`) require a target window — pass `-w <HWND>` or an `--app` that resolves to a window. Window open/close alone is process-scoped and needs no window.
+- Events from other processes are never reported as the target's; a single window open/close emits once (paired CREATE+SHOW / DESTROY+HIDE are coalesced).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

@@ -26,6 +26,7 @@ internal class UiCommand : Command, IShortDescription
         UiScrollIntoViewCommand scrollIntoViewCommand,
         UiScrollCommand scrollCommand,
         UiWaitForCommand waitForCommand,
+        UiWatchCommand watchCommand,
         UiListWindowsCommand listWindowsCommand,
         UiGetFocusedCommand getFocusedCommand)
         : base("ui", "Inspect and interact with any running Windows app using UI Automation (UIA). " +
@@ -47,6 +48,7 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(scrollIntoViewCommand);
         Subcommands.Add(scrollCommand);
         Subcommands.Add(waitForCommand);
+        Subcommands.Add(watchCommand);
         Subcommands.Add(listWindowsCommand);
         Subcommands.Add(getFocusedCommand);
     }

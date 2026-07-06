@@ -200,6 +200,23 @@ winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
 winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
+### Watch live events
+Stream UIA / WinEvent notifications as they happen. `--json` emits NDJSON (one event per line) then a summary line.
+```powershell
+# Default events (focus, window-open, window-close, invoke, selection)
+winapp ui watch -a myapp
+
+# Scope to a selector's subtree, pick events, stop after 10s
+winapp ui watch btn-save-a1b2 -a myapp -e invoke -e property-changed --duration-sec 10 --json
+
+# Stop after N events and tee to a file
+winapp ui watch -a myapp --max-events 5 -o events.ndjson
+```
+- Events: `focus`, `window-open`, `window-close`, `invoke`, `selection`, `text-changed`, `property-changed`, `structure-changed`, `notification`, `live-region`.
+- `--property` filters `property-changed`; supported values are `Name`, `Value`, `ToggleState` (others are rejected).
+- Element-scoped events need a target window (`-w <HWND>` or an `--app` with a window); a selector that can't be resolved fails with `element_not_found`. Window open/close alone is process-scoped and needs no window.
+- `--event focus` is always process-scoped (UIA focus notifications are global), so even with a selector you get every focus change in the target process; other element events honor the selector's subtree.
+
 ## Tips
 - Use `--interactive` with `inspect` as your first command — it shows only what you can click
 - Chain commands with `;` to reduce round-trips (see note below on why not `&&`)
@@ -571,6 +588,29 @@ Wait for an element to appear, disappear, or have a property reach a target valu
 | `--property` | Property name to read or filter on | (none) |
 | `--timeout` | Timeout in milliseconds | `5000` |
 | `--value` | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui watch`
+
+Listen for UIA / WinEvent notifications from a running app and stream them as they occur. With --json, emits NDJSON (one compact JSON object per event line) followed by a summary line.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--duration-sec` | Seconds to listen. 0 = until Ctrl+C / cancellation. | (none) |
+| `--event` | Event type to listen for (repeatable). Allowed: focus, window-open, window-close, invoke, selection, text-changed, property-changed, structure-changed, notification, live-region. Default: focus, window-open, window-close, invoke, selection. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--max-events` | Stop after this many events. 0 = unlimited. | (none) |
+| `--output` | Save output to file path (e.g., screenshot) | (none) |
+| `--property` | Property name to read or filter on | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui list-windows`

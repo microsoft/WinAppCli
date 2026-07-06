@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -126,6 +127,53 @@ internal class FakeUiSessionService : IUiSessionService
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
         => Task.FromResult(SessionResult);
+}
+
+/// <summary>
+/// Fake event watcher for testing <c>ui watch</c> — records the request it received and replays a
+/// scripted set of events to the sink instead of touching real UIA / WinEvents. Never spins a message
+/// pump, so command-level tests are deterministic and fast.
+/// </summary>
+internal class FakeUiEventWatcher : IUiEventWatcher
+{
+    /// <summary>Events to replay to the sink, in order, on the next <see cref="WatchAsync"/> call.</summary>
+    public List<UiWatchEvent> ScriptedEvents { get; } = [];
+
+    /// <summary>Reported listen duration (ms) returned in the outcome.</summary>
+    public long DurationMs { get; set; } = 42;
+
+    /// <summary>The session passed to the most recent <see cref="WatchAsync"/> call.</summary>
+    public UiSessionInfo? LastSession { get; private set; }
+
+    /// <summary>The request passed to the most recent <see cref="WatchAsync"/> call.</summary>
+    public UiWatchRequest? LastRequest { get; private set; }
+
+    /// <summary>Number of times <see cref="WatchAsync"/> was invoked.</summary>
+    public int CallCount { get; private set; }
+
+    public Task<UiWatchOutcome> WatchAsync(
+        UiSessionInfo session,
+        UiWatchRequest request,
+        Action<UiWatchEvent> onEvent,
+        CancellationToken ct)
+    {
+        CallCount++;
+        LastSession = session;
+        LastRequest = request;
+
+        var emitted = 0;
+        foreach (var evt in ScriptedEvents)
+        {
+            onEvent(evt);
+            emitted++;
+            if (request.MaxEvents > 0 && emitted >= request.MaxEvents)
+            {
+                break;
+            }
+        }
+
+        return Task.FromResult(new UiWatchOutcome(emitted, DurationMs));
+    }
 }
 
 /// <summary>

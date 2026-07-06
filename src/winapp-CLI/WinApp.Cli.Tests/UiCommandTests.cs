@@ -16,6 +16,7 @@ public partial class UiCommandTests : BaseCommandTests
     private FakeMouseInput _fakeMouse = null!;
     private FakeKeyboardInput _fakeKeyboard = null!;
     private FakeForegroundGuard _fakeForeground = null!;
+    private FakeUiEventWatcher _fakeWatcher = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
@@ -24,9 +25,11 @@ public partial class UiCommandTests : BaseCommandTests
         _fakeMouse = new FakeMouseInput();
         _fakeKeyboard = new FakeKeyboardInput();
         _fakeForeground = new FakeForegroundGuard();
+        _fakeWatcher = new FakeUiEventWatcher();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
             .AddSingleton<IUiSessionService>(_fakeSession)
+            .AddSingleton<IUiEventWatcher>(_fakeWatcher)
             .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
             .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard)
             .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground);
