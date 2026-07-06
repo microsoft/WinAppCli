@@ -45,7 +45,7 @@ internal class UiStatusCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
 
                 if (json)
                 {

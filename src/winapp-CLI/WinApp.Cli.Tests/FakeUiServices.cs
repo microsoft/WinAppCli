@@ -124,7 +124,7 @@ internal class FakeUiSessionService : IUiSessionService
         WindowTitle = "Test Window"
     };
 
-    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
+    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct, bool restoreIfMinimized = true)
         => Task.FromResult(SessionResult);
 }
 

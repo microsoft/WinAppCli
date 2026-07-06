@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.CommandLine;
+using System.CommandLine.Parsing;
 
 namespace WinApp.Cli.Commands;
 
@@ -24,6 +25,7 @@ internal static class SharedUiOptions
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
     public static Option<bool> HideOffscreenOption { get; }
+    public static Option<bool> AllowMinimizedOption { get; }
 
     static SharedUiOptions()
     {
@@ -101,5 +103,19 @@ internal static class SharedUiOptions
         {
             Description = "Hide offscreen elements from output"
         };
+
+        AllowMinimizedOption = new Option<bool>("--allow-minimized")
+        {
+            Description = "Target the app as-is even when minimized. By default a minimized window is " +
+                          "restored first so its full UI tree is realized (minimized apps expose a sparser tree).",
+            Recursive = true
+        };
     }
+
+    /// <summary>
+    /// Whether <see cref="IUiSessionService"/> should restore the target window if it is minimized.
+    /// Honors the global <c>--allow-minimized</c> opt-out.
+    /// </summary>
+    public static bool ShouldRestoreMinimized(ParseResult parseResult)
+        => !parseResult.GetValue(AllowMinimizedOption);
 }

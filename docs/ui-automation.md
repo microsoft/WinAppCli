@@ -64,6 +64,17 @@ winapp ui screenshot -w 131906
 
 Use `-a` for discovery, `-w` for stable targeting. When `-a` matches multiple windows, the command lists them with HWNDs for you to pick.
 
+### Minimized windows
+
+A minimized app virtualizes its UI tree, so `inspect`/`search` and other commands see a sparser (or empty) tree than when it's on screen. By default, `ui` commands **restore a minimized target window** before acting on it, so you always get the full tree. Pass `--allow-minimized` to skip the restore and target the window as-is (e.g. to intentionally inspect the minimized-state tree):
+
+```bash
+winapp ui inspect -a myapp                     # restores the window if minimized (default)
+winapp ui inspect -a myapp --allow-minimized   # inspect the minimized window as-is
+```
+
+`--allow-minimized` is a global `ui` option, available on every subcommand.
+
 ## Selectors
 
 Target elements using the selector shown in `[brackets]` in inspect/search output.
@@ -442,7 +453,7 @@ winapp ui list-windows --show-hidden                        # include invisible 
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` or `search` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | Use `inspect` on the element to find an invokable child |
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
-| "Window has zero size" | Window is minimized | App will be auto-restored |
+| "Window has zero size" | Window is minimized | App is auto-restored by default; pass `--allow-minimized` to keep it minimized |
 | Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
 
 ## Common Patterns

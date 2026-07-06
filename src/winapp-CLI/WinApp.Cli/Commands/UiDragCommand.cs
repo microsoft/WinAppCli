@@ -109,7 +109,7 @@ internal class UiDragCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
 
                 if (string.IsNullOrWhiteSpace(arg0) || string.IsNullOrWhiteSpace(arg1))
                 {

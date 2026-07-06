@@ -128,7 +128,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
                 var targetHwnd = session.WindowHandle;
 
                 if (!string.IsNullOrWhiteSpace(target))

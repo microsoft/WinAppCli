@@ -16,5 +16,10 @@ internal interface IUiSessionService
     /// </summary>
     /// <param name="app">Process name, window title, or PID. Required unless hwnd is set.</param>
     /// <param name="hwnd">Direct window handle (from -w flag). Takes precedence over app.</param>
-    Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct);
+    /// <param name="restoreIfMinimized">
+    /// When <see langword="true"/> (default), a minimized target window is restored so its full UI
+    /// tree is realized before the caller reads or acts on it. Pass <see langword="false"/> to
+    /// inspect the window as-is (honors the global <c>--allow-minimized</c> opt-out).
+    /// </param>
+    Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct, bool restoreIfMinimized = true);
 }

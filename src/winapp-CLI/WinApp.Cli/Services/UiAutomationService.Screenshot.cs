@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.Logging;
 using Windows.Win32.UI.Accessibility;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -42,12 +43,8 @@ internal sealed partial class UiAutomationService
             throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
         }
 
-        // Check if window is minimized
-        if (Windows.Win32.PInvoke.IsIconic(hwnd))
-        {
-            Windows.Win32.PInvoke.ShowWindow(hwnd, Windows.Win32.UI.WindowsAndMessaging.SHOW_WINDOW_CMD.SW_RESTORE);
-            Thread.Sleep(300);
-        }
+        // Restore first if minimized, so the window has a non-zero size to capture.
+        WindowStateHelper.RestoreIfMinimized((nint)hwnd, _logger);
 
         // Get window dimensions
         Windows.Win32.PInvoke.GetWindowRect(hwnd, out var rect);

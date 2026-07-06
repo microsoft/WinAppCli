@@ -95,7 +95,7 @@ internal class UiWaitForCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
                 var selector = selectorService.Parse(selectorStr);
                 var sw = Stopwatch.StartNew();
 

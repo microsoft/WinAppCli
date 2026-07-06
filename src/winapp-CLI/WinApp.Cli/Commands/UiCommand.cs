@@ -49,5 +49,9 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(waitForCommand);
         Subcommands.Add(listWindowsCommand);
         Subcommands.Add(getFocusedCommand);
+
+        // Global opt-out that lets every ui subcommand target a minimized window as-is instead of
+        // restoring it first (the default). Recursive so it applies to all subcommands uniformly.
+        Options.Add(SharedUiOptions.AllowMinimizedOption);
     }
 }

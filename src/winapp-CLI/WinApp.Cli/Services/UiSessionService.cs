@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -12,12 +13,26 @@ internal sealed class UiSessionService(
     ILogger<UiSessionService> logger) : IUiSessionService
 {
 
-    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
+    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct, bool restoreIfMinimized = true)
+    {
+        var session = ResolveSessionCore(app, hwnd);
+
+        if (restoreIfMinimized)
+        {
+            // A minimized window virtualizes its UI tree, so inspect/search/screenshot see a sparser
+            // (or empty) tree than when it's on screen. Restore it first so callers get the full tree.
+            WindowStateHelper.RestoreIfMinimized((nint)session.WindowHandle, logger);
+        }
+
+        return Task.FromResult(session);
+    }
+
+    private UiSessionInfo ResolveSessionCore(string? app, long? hwnd)
     {
         // Direct HWND targeting — most stable, used after discovery
         if (hwnd is not null and > 0)
         {
-            return Task.FromResult(ResolveByHwnd(hwnd.Value));
+            return ResolveByHwnd(hwnd.Value);
         }
 
         if (string.IsNullOrWhiteSpace(app))
@@ -38,31 +53,31 @@ internal sealed class UiSessionService(
             }
             if (windows.Count > 1)
             {
-                return Task.FromResult(AutoSelectWindow(windows, app));
+                return AutoSelectWindow(windows, app);
             }
             // Single match
             var match = windows[0];
-            return Task.FromResult(CreateSession(match.Pid, match.Hwnd, match.Title));
+            return CreateSession(match.Pid, match.Hwnd, match.Title);
         }
 
         // Process found — check for multiple windows
         var processWindows = uiAutomation.FindWindowsByPid(process.Id);
         if (processWindows.Count > 1)
         {
-            return Task.FromResult(AutoSelectWindow(processWindows, app));
+            return AutoSelectWindow(processWindows, app);
         }
 
         if (processWindows.Count == 1)
         {
-            return Task.FromResult(CreateSession(process.Id, processWindows[0].Hwnd, processWindows[0].Title));
+            return CreateSession(process.Id, processWindows[0].Hwnd, processWindows[0].Title);
         }
 
-        return Task.FromResult(new UiSessionInfo
+        return new UiSessionInfo
         {
             ProcessId = process.Id,
             ProcessName = process.ProcessName,
             WindowTitle = GetMainWindowTitle(process)
-        });
+        };
     }
 
     /// <summary>

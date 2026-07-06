@@ -78,7 +78,7 @@ internal partial class UiInspectCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
                 Models.UiElement[] elements;
 
                 if (ancestors && selector is not null)

@@ -65,6 +65,7 @@ winapp ui invoke Submit -a myapp
 - **Invokable ancestor surfacing**: When a search result isn't invokable, the nearest invokable parent is shown with its selector
 - **`;` chaining**: Chain commands with `;` to run multiple operations in one call, reducing agent round-trips
 - **`-a` vs `-w`**: Use `-a` to find apps by name/title/PID. Use `-w <HWND>` for stable window targeting
+- **Minimized windows**: `ui` commands restore a minimized target window by default so its full UI tree is realized (minimized apps expose a sparser/empty tree). Pass the global `--allow-minimized` flag to inspect the window as-is without restoring it.
 - **Element markers**: `[on]`/`[off]` for toggles, `[collapsed]`/`[expanded]`, `[scroll:v]`/`[scroll:h]`/`[scroll:vh]` for scrollable containers, `[offscreen]`, `[disabled]`, `value="..."` for editable elements
 
 ## Usage
@@ -257,6 +258,7 @@ Full schemas with examples: `references/ui-json-envelope.md`.
 | "Element may have changed" | Slug hash doesn't match current element | Re-run `inspect` to get fresh slugs |
 | "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
+| Sparser tree when minimized | Minimized apps virtualize their UI tree | Restored by default; pass `--allow-minimized` to inspect as-is |
 | Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
 
 

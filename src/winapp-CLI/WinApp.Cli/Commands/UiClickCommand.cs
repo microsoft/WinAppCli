@@ -75,7 +75,7 @@ internal class UiClickCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
                 var selector = selectorService.Parse(selectorStr);
                 var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
 

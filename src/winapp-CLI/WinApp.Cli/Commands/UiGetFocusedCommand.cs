@@ -44,7 +44,7 @@ internal class UiGetFocusedCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken, SharedUiOptions.ShouldRestoreMinimized(parseResult));
                 var element = await uiAutomation.GetFocusedElementAsync(session, cancellationToken);
 
                 if (json)
