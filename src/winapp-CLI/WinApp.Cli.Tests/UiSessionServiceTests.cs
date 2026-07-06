@@ -66,6 +66,7 @@ public class UiSessionServiceTests
     {
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => [];
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => [];
+        public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect) { rect = default; return false; }
 
         public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct) => Task.FromResult<UiElement[]>([]);
         public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct) => Task.FromResult<UiElement[]>([]);

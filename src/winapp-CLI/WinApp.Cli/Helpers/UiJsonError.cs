@@ -23,6 +23,8 @@ internal static class UiJsonError
     public const string CodeForegroundNotTarget = "foreground_not_target";
     public const string CodeNoInteractiveDesktop = "no_interactive_desktop";
     public const string CodeTargetMoved = "target_moved";
+    public const string CodeNoTarget = "no_target";
+    public const string CodeInjectionUnsupported = "injection_unsupported";
 
     /// <summary>Write a JSON error envelope to stderr. No-op when <paramref name="json"/> is false.</summary>
     public static void Emit(bool json, string code, string message,

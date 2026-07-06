@@ -862,6 +862,51 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// ui pen
+// ---------------------------------------------------------------------------
+
+export interface UiPenOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
+  at?: string;
+  /** Use the eraser end of the pen instead of the tip. */
+  eraser?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". */
+  path?: string;
+  /** Pen pressure from 0.0 to 1.0 (default: 0.5). */
+  pressure?: number;
+  /** Pen tilt along the x-axis in degrees (-90 to 90, default: 0). */
+  tiltX?: number;
+  /** Pen tilt along the y-axis in degrees (-90 to 90, default: 0). */
+  tiltY?: number;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+ */
+export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'pen'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.eraser) args.push('--eraser');
+  if (options.json) args.push('--json');
+  if (options.path) args.push('--path', options.path);
+  if (options.pressure !== undefined) args.push('--pressure', options.pressure.toString());
+  if (options.tiltX !== undefined) args.push('--tilt-x', options.tiltX.toString());
+  if (options.tiltY !== undefined) args.push('--tilt-y', options.tiltY.toString());
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui screenshot
 // ---------------------------------------------------------------------------
 
@@ -1076,6 +1121,54 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
   const args: string[] = ['ui', 'status'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui touch
+// ---------------------------------------------------------------------------
+
+export interface UiTouchOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
+  at?: string;
+  /** Distance in pixels for pinch/stretch (finger spread) or a directionless swipe. */
+  distance?: number;
+  /** Glide time in milliseconds for moving gestures (swipe/pinch/stretch). */
+  durationMs?: number;
+  /** Number of touch contacts (default: 1). Pinch/stretch always use 2. */
+  fingers?: number;
+  /** Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). */
+  gesture?: string;
+  /** Milliseconds to hold contacts down before lifting (long-press hold time). */
+  holdMs?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** End point x,y for a swipe (app coordinates). */
+  toPoint?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+ */
+export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'touch'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.distance !== undefined) args.push('--distance', options.distance.toString());
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
+  if (options.fingers !== undefined) args.push('--fingers', options.fingers.toString());
+  if (options.gesture) args.push('--gesture', options.gesture);
+  if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
+  if (options.json) args.push('--json');
+  if (options.toPoint) args.push('--to-point', options.toPoint);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

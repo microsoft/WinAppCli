@@ -43,6 +43,29 @@ internal class FakeUiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => WindowsByTitleResult;
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => WindowsByPidResult;
 
+    /// <summary>The rectangle returned for any nonzero handle (default: 0,0 – 1920,1080).</summary>
+    public WinApp.Cli.Helpers.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
+
+    /// <summary>When <see langword="false"/>, reports the window rect as unreadable (returns false).</summary>
+    public bool WindowRectAllow { get; set; } = true;
+
+    /// <summary>Records each <see cref="TryGetWindowRect"/> call so tests can distinguish the
+    /// hwnd-0 rejection (no lookup) from the out-of-bounds rejection (lookup happened).</summary>
+    public List<long> WindowRectCalls { get; } = [];
+
+    public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+    {
+        WindowRectCalls.Add(hwnd);
+        if (!WindowRectAllow || hwnd == 0)
+        {
+            rect = default;
+            return false;
+        }
+
+        rect = WindowRect;
+        return true;
+    }
+
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
         => Task.FromResult(InspectResult);
 
@@ -153,6 +176,44 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
         => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton, holdMs, dwellMs, settleMs));
     public void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30)
         => ScrollWheelCalls.Add(new(screenX, screenY, delta, settleMs));
+}
+
+/// <summary>
+/// Fake pointer input for testing — records injected touch contacts and pen strokes instead of
+/// issuing real synthetic-pointer injection.
+/// </summary>
+internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
+{
+    public record TouchCall(
+        WinApp.Cli.Helpers.TouchGesture Gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> ContactPaths,
+        int HoldMs,
+        int DurationMs);
+
+    public record PenCall(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> Path,
+        float Pressure,
+        int TiltX,
+        int TiltY,
+        bool Eraser);
+
+    public List<TouchCall> TouchCalls { get; } = [];
+    public List<PenCall> PenCalls { get; } = [];
+
+    public void Touch(
+        WinApp.Cli.Helpers.TouchGesture gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> contactPaths,
+        int holdMs,
+        int durationMs)
+        => TouchCalls.Add(new(gesture, contactPaths, holdMs, durationMs));
+
+    public void Pen(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> path,
+        float pressure,
+        int tiltX,
+        int tiltY,
+        bool eraser)
+        => PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser));
 }
 
 /// <summary>

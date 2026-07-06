@@ -19,6 +19,8 @@ internal class UiCommand : Command, IShortDescription
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
         UiDragCommand dragCommand,
+        UiTouchCommand touchCommand,
+        UiPenCommand penCommand,
         UiHoverCommand hoverCommand,
         UiSendKeysCommand sendKeysCommand,
         UiSetValueCommand setValueCommand,
@@ -40,6 +42,8 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);
         Subcommands.Add(dragCommand);
+        Subcommands.Add(touchCommand);
+        Subcommands.Add(penCommand);
         Subcommands.Add(hoverCommand);
         Subcommands.Add(sendKeysCommand);
         Subcommands.Add(setValueCommand);

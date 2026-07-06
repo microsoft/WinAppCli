@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -21,6 +22,15 @@ internal interface IUiAutomationService
     /// Find all top-level windows for a specific process ID.
     /// </summary>
     List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid);
+
+    /// <summary>
+    /// Resolve a top-level window's screen rectangle via <c>GetWindowRect</c>. Returns
+    /// <see langword="false"/> (and a default rect) when the handle is 0, invalid, or unreadable —
+    /// callers must treat that as "no verifiable target window". Used to bounds-check
+    /// <c>ui touch</c>/<c>ui pen</c> coordinates before any OS-wide injection.
+    /// </summary>
+    bool TryGetWindowRect(long hwnd, out PointerRect rect);
+
     
     Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct);
     Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct);

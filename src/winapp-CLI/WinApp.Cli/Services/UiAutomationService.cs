@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Microsoft.Extensions.Logging;
 using Windows.Win32.UI.Accessibility;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -35,6 +36,38 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int targetPid)
     {
         return EnumerateWindows((pid, title) => pid == targetPid);
+    }
+
+    public bool TryGetWindowRect(long hwnd, out PointerRect rect)
+    {
+        rect = default;
+        if (hwnd == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            Windows.Win32.Foundation.RECT r;
+            bool ok;
+            unsafe
+            {
+                ok = Windows.Win32.PInvoke.GetWindowRect(
+                    new Windows.Win32.Foundation.HWND((nint)hwnd), &r);
+            }
+
+            if (!ok)
+            {
+                return false;
+            }
+
+            rect = new PointerRect(r.left, r.top, r.right, r.bottom);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static List<(nint Hwnd, int Pid, string Title)> EnumerateWindows(Func<int, string, bool> filter)
