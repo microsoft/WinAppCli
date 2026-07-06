@@ -195,6 +195,27 @@ winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
 winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
+### Audit accessibility & contrast
+```powershell
+# Audit the whole window (all areas, basic level) — exits non-zero if any FAIL is found (CI gate)
+winapp ui audit -a myapp
+
+# Machine-readable report ({ summary, issues }); write it to a file too
+winapp ui audit -a myapp --json -o audit.json
+
+# Scope to specific areas (repeatable). Areas: names, keyboard, screen-reader, contrast, roles
+winapp ui audit -a myapp --area names --area keyboard
+
+# Go deeper: 'thorough' adds heuristic rules (e.g. tab-order coherence) and applies WCAG AAA contrast
+winapp ui audit -a myapp --level thorough
+
+# Contrast only, at the default basic level (WCAG AA thresholds)
+winapp ui audit -a myapp --area contrast
+```
+- `--area` selects one or more audit areas (default: all). Contrast requires a window pixel capture; it is measured only when the `contrast` area is selected.
+- `--level basic` (default) runs fast essential rules with WCAG **AA** contrast thresholds (normal 4.5, large 3.0); `--level thorough` adds heuristic/deeper rules (e.g. keyboard tab-order) and applies WCAG **AAA** contrast thresholds (normal 7.0, large 4.5).
+- Non-client chrome (title-bar caption buttons, scrollbar parts) is suppressed, and the same defect surfaced by multiple areas is de-duplicated, so counts aren't inflated. Elements on a different window/HWND than the captured one are reported as "not measured" for contrast rather than mis-scored.
+
 ## Tips
 - Use `--interactive` with `inspect` as your first command — it shows only what you can click
 - Chain commands with `;` to reduce round-trips (see note below on why not `&&`)

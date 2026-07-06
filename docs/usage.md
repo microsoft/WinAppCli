@@ -1091,9 +1091,28 @@ winapp ui [command] [options]
 - `wait-for` - Wait for element state
 - `list-windows` - List all windows for an app
 - `get-focused` - Report the currently focused element
+- `audit` - Audit the UI for accessibility and contrast issues (names, keyboard, screen-reader, contrast, roles); exits non-zero on any failure so it can gate CI
 
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+
+**`ui audit` options:**
+- `--area <area>` - Accessibility area(s) to audit (repeatable). Allowed: `names`, `keyboard`, `screen-reader`, `contrast`, `roles`, `all`. Default: all.
+- `--level <level>` - Audit depth: `basic` (essential rules + WCAG **AA** contrast thresholds: normal 4.5, large 3.0) or `thorough` (deeper rules such as keyboard tab-order + WCAG **AAA** contrast thresholds: normal 7.0, large 4.5). Default: `basic`.
+- `-o, --output <path>` - Write the report (text, or JSON with `--json`) to a file.
+
+```powershell
+# Gate CI on accessibility failures (non-zero exit when any FAIL is found)
+winapp ui audit -a myapp
+
+# Contrast only, machine-readable report to a file
+winapp ui audit -a myapp --area contrast --json -o audit.json
+
+# Deeper sweep across all areas (adds tab-order, applies AAA contrast thresholds)
+winapp ui audit -a myapp --level thorough
+```
+
+Contrast is measured only when the `contrast` area is selected; it captures the target window's pixels and samples each text element's bounds. Elements belonging to a different window/HWND than the captured one are reported as "not measured" rather than sampled against the wrong pixels. Non-client chrome (title-bar caption buttons, scrollbar parts) is suppressed, and a defect surfaced by multiple areas is de-duplicated so counts aren't inflated.
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

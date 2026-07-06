@@ -200,6 +200,27 @@ winapp ui wait-for btn-submit-a1b2 -a myapp --timeout 5000
 winapp ui wait-for itm-status-c3d4 -a myapp --value "Complete" --timeout 5000
 ```
 
+### Audit accessibility & contrast
+```powershell
+# Audit the whole window (all areas, basic level) — exits non-zero if any FAIL is found (CI gate)
+winapp ui audit -a myapp
+
+# Machine-readable report ({ summary, issues }); write it to a file too
+winapp ui audit -a myapp --json -o audit.json
+
+# Scope to specific areas (repeatable). Areas: names, keyboard, screen-reader, contrast, roles
+winapp ui audit -a myapp --area names --area keyboard
+
+# Go deeper: 'thorough' adds heuristic rules (e.g. tab-order coherence) and applies WCAG AAA contrast
+winapp ui audit -a myapp --level thorough
+
+# Contrast only, at the default basic level (WCAG AA thresholds)
+winapp ui audit -a myapp --area contrast
+```
+- `--area` selects one or more audit areas (default: all). Contrast requires a window pixel capture; it is measured only when the `contrast` area is selected.
+- `--level basic` (default) runs fast essential rules with WCAG **AA** contrast thresholds (normal 4.5, large 3.0); `--level thorough` adds heuristic/deeper rules (e.g. keyboard tab-order) and applies WCAG **AAA** contrast thresholds (normal 7.0, large 4.5).
+- Non-client chrome (title-bar caption buttons, scrollbar parts) is suppressed, and the same defect surfaced by multiple areas is de-duplicated, so counts aren't inflated. Elements on a different window/HWND than the captured one are reported as "not measured" for contrast rather than mis-scored.
+
 ## Tips
 - Use `--interactive` with `inspect` as your first command — it shows only what you can click
 - Chain commands with `;` to reduce round-trips (see note below on why not `&&`)
@@ -595,4 +616,25 @@ Show the element that currently has keyboard focus in the target app.
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--json` | Format output as JSON | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui audit`
+
+Audit the currently visible view of a running app for accessibility and contrast issues. Walks the element tree and evaluates modular audit areas (names, keyboard, screen-reader, contrast, roles) at a chosen level (basic/thorough). Audits one view at a time — it does not navigate; drive the other ui commands (invoke, send-keys) to move through other pages/tabs/states and audit each. Exits non-zero when any fail-severity issue is found, so it can gate CI.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--area` | Accessibility area(s) to audit (repeatable). Allowed: names, keyboard, screen-reader, contrast, roles, all. Default: all. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--level` | Audit depth: basic (essential rules + WCAG AA contrast thresholds) or thorough (deeper rules + WCAG AAA contrast thresholds). Default: basic. | `basic` |
+| `--output` | Save output to file path (e.g., screenshot) | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |

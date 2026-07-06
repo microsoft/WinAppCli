@@ -28,6 +28,13 @@ internal interface IUiAutomationService
     Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct);
     Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct);
     Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
+
+    /// <summary>
+    /// Capture the full target window's pixels (BGRA, top-down) along with the screen-space
+    /// origin of the buffer's top-left pixel. Used by the accessibility audit to sample
+    /// text/background luminance within element bounding rectangles for contrast analysis.
+    /// </summary>
+    Task<(byte[] Pixels, int Width, int Height, int OriginX, int OriginY)> CaptureWindowAsync(UiSessionInfo session, CancellationToken ct);
     Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct);
     Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct);

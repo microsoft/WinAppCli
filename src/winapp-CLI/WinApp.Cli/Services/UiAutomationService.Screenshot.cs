@@ -16,6 +16,33 @@ internal sealed partial class UiAutomationService
     {
         _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
 
+        var capture = await CaptureWindowRawAsync(session, captureScreen, focus, ct).ConfigureAwait(false);
+
+        // If a selector was provided, crop to the element's bounding rectangle
+        if (!string.IsNullOrEmpty(elementId))
+        {
+            var cropped = CropToElement(capture.Pixels, capture.Width, capture.Height, elementId, session, capture.Root, capture.OriginLeft, capture.OriginTop);
+            if (cropped is not null)
+            {
+                return cropped.Value;
+            }
+        }
+
+        return (capture.Pixels, capture.Width, capture.Height);
+    }
+
+    public async Task<(byte[] Pixels, int Width, int Height, int OriginX, int OriginY)> CaptureWindowAsync(UiSessionInfo session, CancellationToken ct)
+    {
+        _logger.LogDebug("Capturing full window pixels of process {Pid} for contrast analysis", session.ProcessId);
+        var capture = await CaptureWindowRawAsync(session, captureScreen: false, focus: false, ct).ConfigureAwait(false);
+        return (capture.Pixels, capture.Width, capture.Height, capture.OriginLeft, capture.OriginTop);
+    }
+
+    private readonly record struct WindowCaptureResult(
+        byte[] Pixels, int Width, int Height, int OriginLeft, int OriginTop, IUIAutomationElement Root);
+
+    private async Task<WindowCaptureResult> CaptureWindowRawAsync(UiSessionInfo session, bool captureScreen, bool focus, CancellationToken ct)
+    {
         var root = GetRootElement(session);
         if (root is null)
         {
@@ -103,17 +130,7 @@ internal sealed partial class UiAutomationService
             pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
         }
 
-        // If a selector was provided, crop to the element's bounding rectangle
-        if (!string.IsNullOrEmpty(elementId))
-        {
-            var cropped = CropToElement(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
-            if (cropped is not null)
-            {
-                return cropped.Value;
-            }
-        }
-
-        return (pixelData, width, height);
+        return new WindowCaptureResult(pixelData, width, height, cropOriginLeft, cropOriginTop, root);
     }
 
 

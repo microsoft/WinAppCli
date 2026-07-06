@@ -39,6 +39,10 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiScreenshotWindowInfo))]
 [JsonSerializable(typeof(WindowInfo))]
 [JsonSerializable(typeof(WindowInfo[]))]
+[JsonSerializable(typeof(UiAuditResult))]
+[JsonSerializable(typeof(UiAuditSummary))]
+[JsonSerializable(typeof(UiAuditIssue))]
+[JsonSerializable(typeof(UiAuditIssue[]))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",
@@ -189,9 +193,7 @@ internal sealed class UiGetValueResult
 {
     public string ElementId { get; set; } = "";
     public string? Text { get; set; }
-}
-
-internal sealed class UiScrollResult
+}internal sealed class UiScrollResult
 {
     public string ElementId { get; set; } = "";
     public string? Direction { get; set; }
@@ -248,4 +250,45 @@ internal sealed class UiDragResult
     public int HoldMs { get; set; }
     public int DwellMs { get; set; }
     public long Hwnd { get; set; }
+}
+
+/// <summary>Top-level result for <c>ui audit</c>. Shape: { summary, issues }.</summary>
+internal sealed class UiAuditResult
+{
+    public UiAuditSummary Summary { get; set; } = new();
+    public UiAuditIssue[] Issues { get; set; } = [];
+}
+
+/// <summary>Roll-up counts across all evaluated rule checks.</summary>
+internal sealed class UiAuditSummary
+{
+    /// <summary>Number of individual rule checks that passed.</summary>
+    public int Pass { get; set; }
+    /// <summary>Number of warn-severity issues.</summary>
+    public int Warn { get; set; }
+    /// <summary>Number of fail-severity issues (drives the non-zero CI exit code).</summary>
+    public int Fail { get; set; }
+}
+
+/// <summary>A single accessibility/contrast finding.</summary>
+internal sealed class UiAuditIssue
+{
+    /// <summary>Rule identifier: names, keyboard, roles, tab-order, contrast.</summary>
+    public string RuleId { get; set; } = "";
+    /// <summary>"fail" or "warn".</summary>
+    public string Severity { get; set; } = "";
+    /// <summary>Stable selector slug of the offending element, when available.</summary>
+    public string? Selector { get; set; }
+    /// <summary>Accessible name of the element, when available.</summary>
+    public string? Name { get; set; }
+    /// <summary>Human-readable explanation of the finding.</summary>
+    public string Message { get; set; } = "";
+
+    /// <summary>
+    /// Internal correlation tag for the underlying defect (e.g. "missing-name"). Used by the
+    /// orchestrator to collapse the SAME root cause when several areas surface it for one element.
+    /// Not serialized.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? RootCause { get; set; }
 }

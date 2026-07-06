@@ -37,6 +37,12 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Dictionary<string, object?> PropertiesResult { get; set; } = [];
     public string InvokeResult { get; set; } = "InvokePattern";
     public (byte[] Pixels, int Width, int Height) ScreenshotResult { get; set; } = (new byte[4], 1, 1);
+
+    /// <summary>Configurable full-window capture returned by <see cref="CaptureWindowAsync"/> (used by the audit's contrast checks).</summary>
+    public (byte[] Pixels, int Width, int Height, int OriginX, int OriginY) WindowCaptureResult { get; set; } = (new byte[4], 1, 1, 0, 0);
+
+    /// <summary>When set, <see cref="CaptureWindowAsync"/> throws to simulate an unavailable capture.</summary>
+    public Exception? WindowCaptureException { get; set; }
     public List<(nint Hwnd, int Pid, string Title)> WindowsByTitleResult { get; set; } = [];
     public List<(nint Hwnd, int Pid, string Title)> WindowsByPidResult { get; set; } = [];
 
@@ -87,6 +93,15 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
         => Task.FromResult(ScreenshotResult);
+
+    public Task<(byte[] Pixels, int Width, int Height, int OriginX, int OriginY)> CaptureWindowAsync(UiSessionInfo session, CancellationToken ct)
+    {
+        if (WindowCaptureException is not null)
+        {
+            throw WindowCaptureException;
+        }
+        return Task.FromResult(WindowCaptureResult);
+    }
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
         => Task.FromResult(InvokeResult);

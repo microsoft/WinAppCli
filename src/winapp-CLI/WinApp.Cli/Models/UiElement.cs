@@ -54,6 +54,12 @@ internal sealed class UiElement
     /// <summary>True when this element supports a directly invokable UIA pattern (Invoke/Toggle/SelectionItem/ExpandCollapse). Used by --interactive filtering.</summary>
     public bool IsInvokable { get; set; }
 
+    /// <summary>True when the element can receive keyboard focus (UIA IsKeyboardFocusable).
+    /// Populated during the inspect tree walk; used by the accessibility audit's keyboard rule.
+    /// Not part of the serialized inspect output.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsKeyboardFocusable { get; set; }
+
     /// <summary>True when the element has additional descendants that were not included
     /// because the inspect depth limit was reached. Hint to re-run with a deeper --depth.</summary>
     public bool? HasMoreChildren { get; set; }

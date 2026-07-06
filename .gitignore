@@ -226,3 +226,6 @@ devcert.pfx
 
 # Do not ignore the targets and props files in the build folder, which are needed for consuming the NuGet package
 !/src/winapp-NuGet/build/
+# Local scratch / validation working dirs (PR5 UI audit) — never commit
+/scratch/
+/validation/

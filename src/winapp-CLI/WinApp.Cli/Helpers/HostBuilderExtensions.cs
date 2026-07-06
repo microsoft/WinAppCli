@@ -7,6 +7,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers.UiAudit;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Helpers;
@@ -56,7 +57,15 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            // UI audit area engines + orchestrator (one engine per --area).
+            .AddSingleton<IUiAuditAreaEngine, NamesAreaEngine>()
+            .AddSingleton<IUiAuditAreaEngine, KeyboardAreaEngine>()
+            .AddSingleton<IUiAuditAreaEngine, ScreenReaderAreaEngine>()
+            .AddSingleton<IUiAuditAreaEngine, ContrastAreaEngine>()
+            .AddSingleton<IUiAuditAreaEngine, RolesAreaEngine>()
+            .AddSingleton<IUiAuditAreaEngine, EventsAreaEngine>()
+            .AddSingleton<UiAuditOrchestrator>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -103,6 +112,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                .UseCommandHandler<UiAuditCommand, UiAuditCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 

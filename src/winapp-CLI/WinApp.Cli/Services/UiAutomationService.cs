@@ -1905,6 +1905,7 @@ return Task.FromResult<UiElement?>(null);
             ClassName = SafeGetBstr(() => element.get_CurrentClassName()),
             IsEnabled = element.get_CurrentIsEnabled(),
             IsOffscreen = element.get_CurrentIsOffscreen(),
+            IsKeyboardFocusable = SafeGetBool(() => element.get_CurrentIsKeyboardFocusable()),
             X = rect.left,
             Y = rect.top,
             Width = rect.right - rect.left,
@@ -2008,6 +2009,18 @@ return Task.FromResult<UiElement?>(null);
         catch
         {
             return null;
+        }
+    }
+
+    private static bool SafeGetBool(Func<Windows.Win32.Foundation.BOOL> getter)
+    {
+        try
+        {
+            return getter();
+        }
+        catch
+        {
+            return false;
         }
     }
 
