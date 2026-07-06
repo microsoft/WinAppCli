@@ -28,6 +28,12 @@ internal interface IUiAutomationService
     Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct);
     Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct);
     Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
+
+    /// <summary>
+    /// Records the target window (or an element's region) to an H.264 MP4 at the
+    /// requested frame rate for the requested duration, encoding incrementally.
+    /// </summary>
+    Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct);
     Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct);
     Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct);

@@ -104,6 +104,26 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
+### Record video (H.264 MP4)
+Record the window — or a single element's region — to an MP4. Frames are captured via Windows
+Graphics Capture (PrintWindow fallback) and encoded incrementally with Media Foundation, so long
+captures never buffer in memory.
+```powershell
+# Record a window for 10s at 15 fps
+winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
+
+# Record until Ctrl+C, downscaled so the longest edge is 1280px
+winapp ui record -a myapp --duration-sec 0 --max-edge 1280 --output capture.mp4
+
+# Record a single element's region
+winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
+
+# Include overlays/popups (captures from screen; may include occluding windows)
+winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
+```
+- `--duration-sec 0` records until Ctrl+C; the MP4 is finalized on exit.
+- The `--json` envelope reports `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path used (`wgc`, `printwindow`, or `screen`).
+
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
 ```powershell
@@ -371,6 +391,29 @@ Capture the target window or element as a PNG image. When multiple windows exist
 | `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
 | `--focus` | Bring the target window to the foreground before capture. Already implied by --capture-screen. | (none) |
 | `--json` | Format output as JSON | (none) |
+| `--output` | Save output to file path (e.g., screenshot) | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui record`
+
+Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. Use --duration-sec 0 to record until Ctrl+C. Use --capture-screen to include overlays/popups.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
+| `--duration-sec` | Recording duration in seconds. 0 = record until Ctrl+C. | (none) |
+| `--fps` | Frames per second to capture | `15` |
+| `--json` | Format output as JSON | (none) |
+| `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
 | `--output` | Save output to file path (e.g., screenshot) | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 

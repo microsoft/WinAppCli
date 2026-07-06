@@ -1080,6 +1080,7 @@ winapp ui [command] [options]
 - `get-property` - Read element properties
 - `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
+- `record` - Record a window/element region to an H.264 MP4 video (Windows Graphics Capture + Media Foundation)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
@@ -1095,5 +1096,33 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+
+#### ui record
+
+Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
+captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
+Media Foundation, so long recordings never buffer in memory.
+
+```bash
+# Record a window for 10 seconds at 15 fps
+winapp ui record -a Calculator --duration-sec 10 --fps 15 -o demo.mp4
+
+# Record until Ctrl+C, downscaled so the longest edge is 1280px
+winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
+
+# Record just one element's region
+winapp ui record -a "My App" btn-save-1234 -o button.mp4
+```
+
+**Record options:**
+- `--duration-sec <n>` - Recording length in seconds. `0` records until Ctrl+C (default `0`).
+- `--fps <n>` - Frames per second to capture (default `15`).
+- `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
+- `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
+- `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>.mp4`).
+
+With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
+`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
+(`wgc`, `printwindow`, or `screen`).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

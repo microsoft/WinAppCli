@@ -88,6 +88,23 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
         => Task.FromResult(ScreenshotResult);
 
+    /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
+    public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
+
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct)
+    {
+        await File.WriteAllBytesAsync(options.OutputPath, new byte[16], ct);
+        var size = new FileInfo(options.OutputPath).Length;
+        return new RecordCaptureResult
+        {
+            Frames = RecordResult.Frames,
+            Width = RecordResult.Width,
+            Height = RecordResult.Height,
+            FileSize = size,
+            Mode = RecordResult.Mode,
+        };
+    }
+
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
         => Task.FromResult(InvokeResult);
 

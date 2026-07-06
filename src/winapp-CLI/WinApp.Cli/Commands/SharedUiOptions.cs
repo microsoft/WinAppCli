@@ -24,6 +24,9 @@ internal static class SharedUiOptions
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
     public static Option<bool> HideOffscreenOption { get; }
+    public static Option<int> DurationSecOption { get; }
+    public static Option<int> FpsOption { get; }
+    public static Option<int> MaxEdgeOption { get; }
 
     static SharedUiOptions()
     {
@@ -100,6 +103,24 @@ internal static class SharedUiOptions
         HideOffscreenOption = new Option<bool>("--hide-offscreen")
         {
             Description = "Hide offscreen elements from output"
+        };
+
+        DurationSecOption = new Option<int>("--duration-sec")
+        {
+            Description = "Recording duration in seconds. 0 = record until Ctrl+C.",
+            DefaultValueFactory = _ => 0
+        };
+
+        FpsOption = new Option<int>("--fps")
+        {
+            Description = "Frames per second to capture",
+            DefaultValueFactory = _ => 15
+        };
+
+        MaxEdgeOption = new Option<int>("--max-edge")
+        {
+            Description = "Downscale so the longest edge is at most this many pixels (0 = no downscale)",
+            DefaultValueFactory = _ => 0
         };
     }
 }

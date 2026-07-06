@@ -99,6 +99,26 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
+### Record video (H.264 MP4)
+Record the window — or a single element's region — to an MP4. Frames are captured via Windows
+Graphics Capture (PrintWindow fallback) and encoded incrementally with Media Foundation, so long
+captures never buffer in memory.
+```powershell
+# Record a window for 10s at 15 fps
+winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
+
+# Record until Ctrl+C, downscaled so the longest edge is 1280px
+winapp ui record -a myapp --duration-sec 0 --max-edge 1280 --output capture.mp4
+
+# Record a single element's region
+winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
+
+# Include overlays/popups (captures from screen; may include occluding windows)
+winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
+```
+- `--duration-sec 0` records until Ctrl+C; the MP4 is finalized on exit.
+- The `--json` envelope reports `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path used (`wgc`, `printwindow`, or `screen`).
+
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
 ```powershell
