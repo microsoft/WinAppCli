@@ -107,16 +107,7 @@ internal class AzSignCommand : Command, IShortDescription
 
             try
             {
-                // Step 1: Authenticate
-                var accessToken = await azureAuthService.GetAccessTokenAsync(ArmScope, cancellationToken);
-
-                if (string.IsNullOrEmpty(accessToken))
-                {
-                    logger.LogError("Failed to authenticate with Azure.");
-                    return 1;
-                }
-
-                // Step 2-4: Determine what to sign with
+                // Determine what to sign with
                 FileInfo metadataFilePath;
                 bool generatedMetadata;
 
@@ -127,6 +118,16 @@ internal class AzSignCommand : Command, IShortDescription
                 }
                 else
                 {
+                    // Authenticate for ARM resource discovery (not needed when metadata file is provided,
+                    // since the dlib authenticates independently for the signing data plane)
+                    var accessToken = await azureAuthService.GetAccessTokenAsync(ArmScope, cancellationToken);
+
+                    if (string.IsNullOrEmpty(accessToken))
+                    {
+                        logger.LogError("Failed to authenticate with Azure.");
+                        return 1;
+                    }
+
                     // Discover resources (may involve REST calls shown in status)
                     var metadata = await DiscoverAndSelectResourcesAsync(
                         accessToken, subscription, resourceGroup, account, profile, cancellationToken);
@@ -258,10 +259,16 @@ internal class AzSignCommand : Command, IShortDescription
                 resolvedProfileName = selectedProfile;
             }
 
-            // Determine endpoint from account URI or fall back to location-based
-            var endpoint = accountUri ?? $"https://{resolvedAccountName}.codesigning.azure.net";
+            // The endpoint must come from the account's accountUri property (regional, e.g. https://eus.codesigning.azure.net)
+            if (string.IsNullOrEmpty(accountUri))
+            {
+                throw new InvalidOperationException(
+                    $"Signing account '{resolvedAccountName}' does not have an endpoint URI. " +
+                    "The account may still be provisioning. Please try again in a few minutes, " +
+                    "or specify a metadata file with --metadata-file.");
+            }
 
-            return new SigningMetadata(endpoint, resolvedAccountName, resolvedProfileName);
+            return new SigningMetadata(accountUri, resolvedAccountName, resolvedProfileName);
         }
 
         private async Task<string?> SelectSubscriptionAsync(
@@ -352,13 +359,14 @@ internal class AzSignCommand : Command, IShortDescription
                 return profiles[0].Name;
             }
 
-            var choices = profiles.Select(p => p.Name).ToList();
+            var choices = profiles.Select(p => $"{p.Name} ({p.ProfileType})").ToList();
             var prompt = new SelectionPrompt<string>()
                 .Title("Select a certificate profile:")
                 .AddChoices(choices);
 
             var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
-            return selected;
+            // Strip the profile type suffix to get just the name
+            return selected[..selected.LastIndexOf(" (")];
         }
 
         private static async Task<FileInfo> GenerateMetadataFileAsync(SigningMetadata metadata, CancellationToken cancellationToken)

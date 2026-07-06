@@ -10,7 +10,7 @@ internal interface IAzureAuthService
 {
     /// <summary>
     /// Acquires an access token for the specified resource scope.
-    /// Tries environment credentials, workload identity, managed identity, Azure CLI, then device code flow.
+    /// Tries environment credentials, workload identity, managed identity, and then Azure CLI.
     /// </summary>
     /// <param name="scope">The OAuth2 scope (e.g., "https://management.azure.com/.default")</param>
     /// <param name="cancellationToken">Cancellation token</param>
