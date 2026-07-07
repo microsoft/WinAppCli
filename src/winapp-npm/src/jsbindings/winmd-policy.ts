@@ -13,9 +13,8 @@ const DEFAULT_REF_ONLY_PACKAGES = new Set<string>(
 
 // Dropped transitive winmds expose UI/HWND/Composition surfaces that headless Node can't drive.
 // Users can force-emit a dropped winmd via `winapp.jsBindings.additionalWinmds` (explicit opt-in).
-const DEFAULT_SKIPPED_PACKAGES = new Set<string>(
-  ['Microsoft.WindowsAppSDK.WinUI', 'Microsoft.Web.WebView2'].map((p) => p.toLowerCase())
-);
+// LOCAL EXPERIMENT: temporarily emit WinUI to explore Tier 1/2 UI support from JS.
+const DEFAULT_SKIPPED_PACKAGES = new Set<string>(['Microsoft.Web.WebView2'].map((p) => p.toLowerCase()));
 
 // Categorize a single package ID. Precedence:
 //   skip > refOnly > emit (default)
