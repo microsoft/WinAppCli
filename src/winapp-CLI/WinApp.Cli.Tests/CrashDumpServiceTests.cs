@@ -119,6 +119,32 @@ public class CrashDumpServiceTests
     }
 
     [TestMethod]
+    public async Task RunXamlTriageGuardedAsync_TriageThrows_ReturnsNoneAndDoesNotPropagate()
+    {
+        // Fail-open contract: even if the triage service throws (e.g. an internal HttpClient timeout
+        // surfacing as OperationCanceledException on a slow first-run download), the crash-analysis flow
+        // must not be derailed — otherwise the already-computed managed crash stack is discarded as
+        // "Analysis failed." This guards the H1 regression.
+        _xamlTriage.ThrowOnAnalyze = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+
+        var result = await _service.RunXamlTriageGuardedAsync(Path.Combine(_tempDir, "any.dmp"), useSymbols: false);
+
+        Assert.AreEqual(XamlTriageOutcome.None, result.Outcome, "A thrown triage failure must degrade to None, not propagate.");
+        Assert.AreEqual(1, _xamlTriage.AnalyzeCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task RunXamlTriageGuardedAsync_TriageSucceeds_PassesResultThrough()
+    {
+        _xamlTriage.FakeResult = XamlTriageResult.Succeeded("full breakdown", "0xc000027b — boom");
+
+        var result = await _service.RunXamlTriageGuardedAsync(Path.Combine(_tempDir, "any.dmp"), useSymbols: true);
+
+        Assert.AreEqual(XamlTriageOutcome.Succeeded, result.Outcome);
+        Assert.AreEqual("0xc000027b — boom", result.Verdict);
+    }
+
+    [TestMethod]
     public void SelectExceptionRecord_StowedWithParameters_UsesStowedRecord()
     {
         var (code, address, useStowed) = CrashDumpService.SelectExceptionRecord(

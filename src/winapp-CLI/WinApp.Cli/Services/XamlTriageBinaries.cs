@@ -4,7 +4,9 @@
 using Microsoft.Extensions.Logging;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
@@ -63,14 +65,30 @@ internal static class XamlTriageBinaries
     /// </summary>
     public const string DbgPackageVersion = "20260319.1511.0";
 
+    // Expected SHA-512 (hex) of each pinned .nupkg, matching NuGet's own `.nupkg.sha512` for the
+    // pinned version. Compiled in so the integrity check does not trust the same feed the package is
+    // fetched from: a mirrored/compromised flat-container feed cannot serve altered native DLLs that
+    // would then be loaded into the debugger process. Regenerate if DbgPackageVersion changes.
+    private const string DbgEngPackageSha512 =
+        "54cf706d6d49151f1b28d5c2eb9bfe2d989ddf461965b03c380409f0ad4e3b8628aedaabdf351b53d80c0cefe4a3dbc45e9d3efa233a86866923d41e062e8d70";
+    private const string SymSrvPackageSha512 =
+        "61dea5162daacf8c9bb601c67258add2f806c34781b4feceb90c1cfe214870f0454761e6e9102c5f294ca44c31c9512604b9e20a64242ecc0807b1383d128ab0";
+
     // Native engine bits available from NuGet. DbgEng ships the full engine layout (including
     // dbgmodel.dll and msdia140.dll), so no separate DbgX package is required. JsProvider.dll is
     // intentionally absent here — it is not on NuGet and is acquired from the WinDbg bundle instead.
-    private static readonly (string Package, string Version, string[] Files)[] NuGetComponents =
+    private static readonly (string Package, string Version, string Sha512, string[] Files)[] NuGetComponents =
     [
-        ("Microsoft.Debugging.Platform.DbgEng", DbgPackageVersion, ["dbgeng.dll", "dbghelp.dll", "dbgcore.dll", "dbgmodel.dll", "msdia140.dll"]),
-        ("Microsoft.Debugging.Platform.SymSrv", DbgPackageVersion, ["symsrv.dll"]),
+        ("Microsoft.Debugging.Platform.DbgEng", DbgPackageVersion, DbgEngPackageSha512, ["dbgeng.dll", "dbghelp.dll", "dbgcore.dll", "dbgmodel.dll", "msdia140.dll"]),
+        ("Microsoft.Debugging.Platform.SymSrv", DbgPackageVersion, SymSrvPackageSha512, ["symsrv.dll"]),
     ];
+
+    /// <summary>
+    /// The pinned NuGet debugger packages and their expected <c>.nupkg</c> SHA-512 (hex). Exposed for a
+    /// drift test that verifies the compiled-in hashes still match the restored packages.
+    /// </summary>
+    internal static IReadOnlyList<(string Package, string Version, string Sha512)> PinnedPackages =>
+        NuGetComponents.Select(c => (c.Package, c.Version, c.Sha512)).ToList();
 
     /// <summary>Folder token used by the Windows Kits Debuggers layout for the host arch.</summary>
     public static string KitsArch => RuntimeInformation.ProcessArchitecture switch
@@ -93,17 +111,38 @@ internal static class XamlTriageBinaries
     /// <summary>
     /// Resolves an existing directory that contains both <c>dbgeng.dll</c> and
     /// <c>JsProvider.dll</c> for the host architecture, or <c>null</c> when none is found.
+    /// <para>
+    /// The resolved <c>JsProvider.dll</c> is re-verified as validly Microsoft-signed on every resolve,
+    /// not only at download time: it is loaded into the debugger process, and a cache-hit would
+    /// otherwise trust a copy that could have been replaced on disk since it was acquired.
+    /// </para>
     /// </summary>
-    public static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger)
+    public static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger) =>
+        ResolveExisting(cacheBinDir, logger, path => AuthenticodeVerifier.IsTrustedMicrosoftSigned(path, logger));
+
+    /// <summary>
+    /// Testable core of <see cref="ResolveExisting(DirectoryInfo, ILogger)"/> with an injectable
+    /// <paramref name="jsProviderVerifier"/> so unit tests can exercise resolution without requiring a
+    /// real Authenticode-signed <c>JsProvider.dll</c>.
+    /// </summary>
+    internal static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger, Func<string, bool> jsProviderVerifier)
     {
         foreach (var (dir, source) in CandidateDirectories(cacheBinDir))
         {
             var resolved = TryDirectory(dir, source);
-            if (resolved != null)
+            if (resolved == null)
             {
-                logger.LogDebug("Resolved WinUI triage debugging binaries from {Source}: {Dir}", source, dir);
-                return resolved;
+                continue;
             }
+
+            if (!jsProviderVerifier(resolved.JsProviderPath))
+            {
+                logger.LogDebug("Rejecting WinUI triage binaries from {Source}: {Path} is not validly Microsoft-signed.", source, resolved.JsProviderPath);
+                continue;
+            }
+
+            logger.LogDebug("Resolved WinUI triage debugging binaries from {Source}: {Dir}", source, dir);
+            return resolved;
         }
 
         return null;
@@ -180,10 +219,56 @@ internal static class XamlTriageBinaries
         File.Exists(Path.Combine(cacheBinDir.FullName, "dbgeng.dll"));
 
     /// <summary>
+    /// When <see cref="EnvOverride"/> is set but the override directory is not a usable debugger
+    /// layout, returns a human-readable description of the override directory and which required
+    /// component(s) are missing. Returns <c>null</c> when no override is configured.
+    /// </summary>
+    public static string? DescribeOverrideGap()
+    {
+        if (!IsEnvOverrideSet)
+        {
+            return null;
+        }
+
+        var overrideDir = Environment.GetEnvironmentVariable(EnvOverride)!;
+        if (!Directory.Exists(overrideDir))
+        {
+            return $"the {EnvOverride} override directory '{overrideDir}' does not exist";
+        }
+
+        var missing = new List<string>();
+        if (!File.Exists(Path.Combine(overrideDir, "dbgeng.dll")))
+        {
+            missing.Add("dbgeng.dll");
+        }
+
+        var hasJsProvider = File.Exists(Path.Combine(overrideDir, "JsProvider.dll"))
+            || File.Exists(Path.Combine(overrideDir, "winext", "JsProvider.dll"));
+        if (!hasJsProvider)
+        {
+            missing.Add("JsProvider.dll");
+        }
+
+        if (missing.Count == 0)
+        {
+            return null;
+        }
+
+        return $"the {EnvOverride} override directory '{overrideDir}' is missing {string.Join(" and ", missing)}";
+    }
+
+    /// <summary>
     /// Best-effort population of the cache directory with the NuGet-available native debugging bits.
     /// Prefers copying from the NuGet global packages cache (populated by <c>dotnet restore</c>) and
     /// falls back to downloading the flat-container <c>.nupkg</c> on first use. Does not acquire
     /// <c>JsProvider.dll</c>. Returns the number of component packages successfully materialized.
+    /// <para>
+    /// This intentionally does <em>not</em> delegate to <c>INugetService</c>: that path performs no
+    /// package-integrity verification, whereas the DLLs materialized here are loaded into the debugger
+    /// process and are therefore version-pinned and checked against a compiled-in SHA-512 content hash
+    /// (see <see cref="VerifyPackageHash"/>) before extraction. Reusing the general downloader would
+    /// silently drop that guarantee, so the bespoke download is deliberate.
+    /// </para>
     /// </summary>
     public static async Task<int> TryAcquireFromNuGetAsync(
         DirectoryInfo cacheBinDir, DirectoryInfo? nugetCacheDir, ILogger logger, CancellationToken cancellationToken)
@@ -192,7 +277,7 @@ internal static class XamlTriageBinaries
         using var http = new HttpClient();
         var acquired = 0;
 
-        foreach (var (package, version, files) in NuGetComponents)
+        foreach (var (package, version, sha512, files) in NuGetComponents)
         {
             try
             {
@@ -208,7 +293,7 @@ internal static class XamlTriageBinaries
                     continue;
                 }
 
-                if (await TryMaterializePackageAsync(http, package, version, files, cacheBinDir, logger, cancellationToken))
+                if (await TryMaterializePackageAsync(http, package, version, sha512, files, cacheBinDir, logger, cancellationToken))
                 {
                     acquired++;
                 }
@@ -256,7 +341,7 @@ internal static class XamlTriageBinaries
 
             foreach (var file in files)
             {
-                File.Copy(Path.Combine(archDir, file), Path.Combine(cacheBinDir.FullName, file), overwrite: true);
+                AtomicFile.Copy(Path.Combine(archDir, file), Path.Combine(cacheBinDir.FullName, file));
             }
 
             if (!versionDir.Name.Equals(pinnedVersion, StringComparison.OrdinalIgnoreCase))
@@ -273,7 +358,7 @@ internal static class XamlTriageBinaries
     }
 
     private static async Task<bool> TryMaterializePackageAsync(
-        HttpClient http, string package, string pinnedVersion, string[] files, DirectoryInfo cacheBinDir, ILogger logger, CancellationToken cancellationToken)
+        HttpClient http, string package, string pinnedVersion, string expectedSha512, string[] files, DirectoryInfo cacheBinDir, ILogger logger, CancellationToken cancellationToken)
     {
         var id = package.ToLowerInvariant();
         var version = await ResolveDownloadVersionAsync(http, id, pinnedVersion, logger, cancellationToken);
@@ -282,7 +367,16 @@ internal static class XamlTriageBinaries
             return false;
         }
 
-        // Download and extract the .nupkg (a zip archive) to a temp directory.
+        // Integrity is anchored to the pinned version's compiled-in content hash. We only have a hash
+        // for the pinned version, so refuse to download (and later load native code from) any other
+        // version rather than extracting unverified bits into the debugger process.
+        if (!string.Equals(version, pinnedVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogDebug("Skipping {Id} {Version}: only pinned version {Pinned} has a verified content hash.", id, version, pinnedVersion);
+            return false;
+        }
+
+        // Download the whole .nupkg into memory so its hash can be verified before anything is extracted.
         var nupkgUrl = $"{FlatContainer}/{id}/{version}/{id}.{version}.nupkg";
         using var nupkgResponse = await http.GetAsync(nupkgUrl, cancellationToken);
         if (!nupkgResponse.IsSuccessStatusCode)
@@ -290,11 +384,18 @@ internal static class XamlTriageBinaries
             return false;
         }
 
+        var nupkgBytes = await nupkgResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+        if (!VerifyPackageHash(nupkgBytes, expectedSha512))
+        {
+            logger.LogWarning("Refusing {Id} {Version}: downloaded package hash did not match the pinned value; the feed may be compromised or mirrored.", id, version);
+            return false;
+        }
+
         var tempPkgDir = Path.Combine(Path.GetTempPath(), $"winapp-dbgtools-{id}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempPkgDir);
         try
         {
-            await using (var nupkgStream = await nupkgResponse.Content.ReadAsStreamAsync(cancellationToken))
+            using (var nupkgStream = new MemoryStream(nupkgBytes, writable: false))
             using (var archive = new ZipArchive(nupkgStream, ZipArchiveMode.Read))
             {
                 archive.ExtractToDirectory(tempPkgDir, overwriteFiles: true);
@@ -306,7 +407,7 @@ internal static class XamlTriageBinaries
                 var source = FindBestArchMatch(tempPkgDir, file);
                 if (source != null)
                 {
-                    File.Copy(source, Path.Combine(cacheBinDir.FullName, file), overwrite: true);
+                    AtomicFile.Copy(source, Path.Combine(cacheBinDir.FullName, file));
                     copied++;
                 }
             }
@@ -325,8 +426,9 @@ internal static class XamlTriageBinaries
     }
 
     /// <summary>
-    /// Resolves the version to download: the pinned version when the flat-container index lists it
-    /// (the deterministic, expected path), otherwise the latest stable version as a graceful fallback.
+    /// Confirms the flat-container index lists the pinned version. Only the pinned version can be
+    /// integrity-verified (its content hash is compiled in), so any other version is rejected rather
+    /// than downloaded — there is deliberately no "latest" fallback for native code the debugger loads.
     /// </summary>
     private static async Task<string?> ResolveDownloadVersionAsync(
         HttpClient http, string id, string pinnedVersion, ILogger logger, CancellationToken cancellationToken)
@@ -349,14 +451,20 @@ internal static class XamlTriageBinaries
             return pinnedVersion;
         }
 
-        var latest = versions.LastOrDefault(v => !v!.Contains('-', StringComparison.Ordinal));
-        if (latest != null)
-        {
-            logger.LogDebug("Pinned version {Pinned} of {Id} not available on the feed; downloading {Latest} instead.",
-                pinnedVersion, id, latest);
-        }
+        logger.LogDebug("Pinned version {Pinned} of {Id} is not available on the feed; skipping download.", pinnedVersion, id);
+        return null;
+    }
 
-        return latest;
+    /// <summary>
+    /// Verifies a downloaded <c>.nupkg</c>'s SHA-512 against the compiled-in pinned hash before any of
+    /// its native DLLs are extracted and loaded into the debugger process. The comparison is
+    /// case-insensitive hex and does not consult the feed, so a mirrored or compromised flat-container
+    /// cannot substitute altered content. Returns <c>false</c> on any mismatch (fail closed).
+    /// </summary>
+    internal static bool VerifyPackageHash(byte[] nupkgBytes, string expectedSha512Hex)
+    {
+        var actual = Convert.ToHexString(SHA512.HashData(nupkgBytes));
+        return string.Equals(actual, expectedSha512Hex, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -194,12 +194,14 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             // module list. Recovers the stowed exception (0xC000027B) and the XAML dispatch
             // chain that the ClrMD/DbgEng passes alone cannot surface.
             string? xamlTriage = null;
+            XamlTriageResult? xamlTriageResult = null;
             if (isWinUi)
             {
                 console.MarkupLine(useSymbols
                     ? "[dim]Running WinUI stowed-exception triage (first run may download debugger components and symbols; this can take a few minutes)...[/]"
                     : "[dim]Running WinUI stowed-exception triage (first run may download debugger components)...[/]");
-                xamlTriage = await xamlTriageService.TryAnalyzeAsync(dumpPath, useSymbols);
+                xamlTriageResult = await RunXamlTriageGuardedAsync(dumpPath, useSymbols);
+                xamlTriage = xamlTriageResult.LogText;
             }
 
             // ClrMD found managed exception — no need for native fallback
@@ -229,10 +231,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 console.MarkupLine("[red][[CRASH ANALYSIS]][/]");
                 console.WriteLine(summary);
                 console.MarkupLine("[red]=====================================[/]");
-                if (!string.IsNullOrWhiteSpace(xamlTriage))
-                {
-                    console.MarkupLine("[dim]WinUI stowed-exception triage written to the debug log.[/]");
-                }
+                WriteXamlTriageConsole(xamlTriageResult);
 
                 console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
                 console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
@@ -281,10 +280,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 console.MarkupLine("[red]=====================================[/]");
             }
 
-            if (!string.IsNullOrWhiteSpace(xamlTriage))
-            {
-                console.MarkupLine("[dim]WinUI stowed-exception triage written to the debug log.[/]");
-            }
+            WriteXamlTriageConsole(xamlTriageResult);
 
             console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
             console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
@@ -299,6 +295,59 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             console.MarkupLine($"\n[red]Crash dump:[/] {dumpPath.EscapeMarkup()}");
             console.MarkupLine($"[dim]Analysis failed. Open in WinDbg:[/] [blue]windbg -z \"{dumpPath.EscapeMarkup()}\"[/]");
             console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
+        }
+    }
+
+    /// <summary>
+    /// Invokes the WinUI triage service, guaranteeing the crash-analysis flow is never derailed by a
+    /// triage failure. <see cref="IXamlTriageService.TryAnalyzeAsync"/> is contracted to fail open, but
+    /// this local guard is defense-in-depth: any escaping exception (e.g. an internal <c>HttpClient</c>
+    /// timeout surfacing as <see cref="OperationCanceledException"/> on a slow first-run download) is
+    /// logged and swallowed so the already-computed managed/native crash stack is still emitted rather
+    /// than discarded by the outer handler as "Analysis failed."
+    /// </summary>
+    internal async Task<XamlTriageResult> RunXamlTriageGuardedAsync(string dumpPath, bool useSymbols)
+    {
+        try
+        {
+            return await xamlTriageService.TryAnalyzeAsync(dumpPath, useSymbols);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "WinUI triage pass failed; continuing with the standard crash analysis.");
+            return XamlTriageResult.None;
+        }
+    }
+
+    /// <summary>
+    /// Surfaces an accurate WinUI-triage line in the console based on the outcome: the headline verdict
+    /// (or a "written to the debug log" pointer) on success, a distinct "skipped" note when tooling was
+    /// unavailable, and nothing when triage was not applicable. Avoids the previous behavior of always
+    /// claiming triage was written to the log even when it was skipped.
+    /// </summary>
+    private void WriteXamlTriageConsole(XamlTriageResult? result)
+    {
+        if (result == null)
+        {
+            return;
+        }
+
+        switch (result.Outcome)
+        {
+            case XamlTriageOutcome.Succeeded:
+                if (!string.IsNullOrWhiteSpace(result.Verdict))
+                {
+                    console.MarkupLine($"[yellow]WinUI stowed exception:[/] {result.Verdict.EscapeMarkup()}");
+                }
+
+                console.MarkupLine("[dim]WinUI stowed-exception triage written to the debug log.[/]");
+                break;
+            case XamlTriageOutcome.Skipped:
+                console.MarkupLine("[dim]WinUI stowed-exception triage was skipped (see the debug log for details).[/]");
+                break;
+            case XamlTriageOutcome.None:
+            default:
+                break;
         }
     }
 

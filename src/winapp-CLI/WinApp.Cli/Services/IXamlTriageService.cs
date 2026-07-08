@@ -17,13 +17,14 @@ namespace WinApp.Cli.Services;
 internal interface IXamlTriageService
 {
     /// <summary>
-    /// Runs the WinUI triage pass against a dump and returns formatted output suitable
-    /// for appending to the debug log, or <c>null</c> when triage is not applicable.
+    /// Runs the WinUI triage pass against a dump and returns a structured result: a real
+    /// stowed-exception breakdown, a graceful skip (with an explanatory note for the log), or
+    /// nothing when triage was not applicable.
     /// </summary>
     /// <remarks>
     /// This method never throws for missing tooling or unsupported scenarios — it
-    /// degrades gracefully, logging diagnostics and returning either an explanatory
-    /// note (so the absence is recorded in the log) or <c>null</c>.
+    /// degrades gracefully, logging diagnostics and returning a
+    /// <see cref="XamlTriageOutcome.Skipped"/> note or <see cref="XamlTriageResult.None"/>.
     /// </remarks>
     /// <param name="dumpPath">Path to the minidump file (must contain Microsoft.UI.Xaml).</param>
     /// <param name="useSymbols">
@@ -31,6 +32,6 @@ internal interface IXamlTriageService
     /// full native dispatch chain resolves to function names. First run downloads symbols.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Formatted triage text for the log, or <c>null</c> when nothing was produced.</returns>
-    Task<string?> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default);
+    /// <returns>A <see cref="XamlTriageResult"/> describing the outcome.</returns>
+    Task<XamlTriageResult> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default);
 }

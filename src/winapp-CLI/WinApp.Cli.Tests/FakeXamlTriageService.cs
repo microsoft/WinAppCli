@@ -13,11 +13,19 @@ internal class FakeXamlTriageService : IXamlTriageService
 {
     public List<(string DumpPath, bool UseSymbols)> AnalyzeCalls { get; } = [];
 
-    public string? FakeResult { get; set; }
+    public XamlTriageResult FakeResult { get; set; } = XamlTriageResult.None;
 
-    public Task<string?> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default)
+    /// <summary>When set, <see cref="TryAnalyzeAsync"/> throws this instead of returning a result.</summary>
+    public Exception? ThrowOnAnalyze { get; set; }
+
+    public Task<XamlTriageResult> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default)
     {
         AnalyzeCalls.Add((dumpPath, useSymbols));
+        if (ThrowOnAnalyze != null)
+        {
+            throw ThrowOnAnalyze;
+        }
+
         return Task.FromResult(FakeResult);
     }
 }

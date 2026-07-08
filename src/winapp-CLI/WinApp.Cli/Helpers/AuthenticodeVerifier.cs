@@ -21,10 +21,19 @@ internal static unsafe partial class AuthenticodeVerifier
 
     private const uint WTD_UI_NONE = 2;
     private const uint WTD_REVOKE_NONE = 0;
+    private const uint WTD_REVOKE_WHOLECHAIN = 1;
     private const uint WTD_CHOICE_FILE = 1;
     private const uint WTD_STATEACTION_VERIFY = 1;
     private const uint WTD_STATEACTION_CLOSE = 2;
     private const uint WTD_REVOCATION_CHECK_NONE = 0x00000010;
+    private const uint WTD_CACHE_ONLY_URL_RETRIEVAL = 0x00001000;
+
+    // HRESULTs distinguishing "certificate is revoked" (hard fail) from "revocation data unavailable"
+    // (soft fail — acceptable offline, where only the signature itself can be checked).
+    private const int CERT_E_REVOKED = unchecked((int)0x800B010C);
+    private const int CERT_E_REVOCATION_FAILURE = unchecked((int)0x800B010E);
+    private const int CRYPT_E_REVOCATION_OFFLINE = unchecked((int)0x80092013);
+    private const int CRYPT_E_NO_REVOCATION_CHECK = unchecked((int)0x80092012);
 
     /// <summary>
     /// Returns <c>true</c> only when <paramref name="filePath"/> has a valid Authenticode signature
@@ -41,7 +50,7 @@ internal static unsafe partial class AuthenticodeVerifier
                 return false;
             }
 
-            if (!VerifyTrust(filePath))
+            if (!VerifyTrust(filePath, logger))
             {
                 logger.LogDebug("Authenticode trust verification failed for {File}.", filePath);
                 return false;
@@ -62,7 +71,34 @@ internal static unsafe partial class AuthenticodeVerifier
         }
     }
 
-    private static bool VerifyTrust(string filePath)
+    private static bool VerifyTrust(string filePath, ILogger logger)
+    {
+        // Prefer full-chain revocation using locally cached CRLs only (no network fetch, so a
+        // locked-down/offline environment does not hang). A definitively revoked certificate is a hard
+        // failure; when revocation data simply cannot be obtained offline, fall back to a signature-only
+        // check so the gate still works — the signature and Microsoft-signer checks remain in force.
+        var hr = VerifyTrustCore(filePath, WTD_REVOKE_WHOLECHAIN, WTD_CACHE_ONLY_URL_RETRIEVAL);
+        if (hr == 0)
+        {
+            return true;
+        }
+
+        if (hr is CERT_E_REVOKED)
+        {
+            logger.LogDebug("Authenticode certificate for {File} is revoked.", filePath);
+            return false;
+        }
+
+        if (hr is CERT_E_REVOCATION_FAILURE or CRYPT_E_REVOCATION_OFFLINE or CRYPT_E_NO_REVOCATION_CHECK)
+        {
+            logger.LogDebug("Revocation data unavailable for {File} (0x{Hr:X8}); falling back to signature-only verification.", filePath, hr);
+            return VerifyTrustCore(filePath, WTD_REVOKE_NONE, WTD_REVOCATION_CHECK_NONE) == 0;
+        }
+
+        return false;
+    }
+
+    private static int VerifyTrustCore(string filePath, uint revocationChecks, uint provFlags)
     {
         var pPath = Marshal.StringToHGlobalUni(filePath);
         try
@@ -79,11 +115,11 @@ internal static unsafe partial class AuthenticodeVerifier
             {
                 cbStruct = (uint)sizeof(WINTRUST_DATA),
                 dwUIChoice = WTD_UI_NONE,
-                fdwRevocationChecks = WTD_REVOKE_NONE,
+                fdwRevocationChecks = revocationChecks,
                 dwUnionChoice = WTD_CHOICE_FILE,
                 pInfo = (IntPtr)(&fileInfo),
                 dwStateAction = WTD_STATEACTION_VERIFY,
-                dwProvFlags = WTD_REVOCATION_CHECK_NONE,
+                dwProvFlags = provFlags,
             };
 
             var action = GenericVerifyV2;
@@ -93,7 +129,7 @@ internal static unsafe partial class AuthenticodeVerifier
             data.dwStateAction = WTD_STATEACTION_CLOSE;
             WinVerifyTrust(IntPtr.Zero, ref action, ref data);
 
-            return result == 0;
+            return result;
         }
         finally
         {
@@ -109,9 +145,16 @@ internal static unsafe partial class AuthenticodeVerifier
 #pragma warning disable SYSLIB0057
         var subject = X509Certificate.CreateFromSignedFile(filePath).Subject;
 #pragma warning restore SYSLIB0057
-        return subject.Contains("O=Microsoft Corporation", StringComparison.OrdinalIgnoreCase)
-            || subject.Contains("CN=Microsoft", StringComparison.OrdinalIgnoreCase);
+        return IsMicrosoftSubject(subject);
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when an X.509 subject distinguished name identifies Microsoft as the signer.
+    /// Extracted for unit testing the signer-identity gate independently of the native trust check.
+    /// </summary>
+    internal static bool IsMicrosoftSubject(string subject) =>
+        subject.Contains("O=Microsoft Corporation", StringComparison.OrdinalIgnoreCase)
+        || subject.Contains("CN=Microsoft", StringComparison.OrdinalIgnoreCase);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WINTRUST_FILE_INFO

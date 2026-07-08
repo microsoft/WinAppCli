@@ -63,17 +63,23 @@ internal static class WinDbgJsProviderAcquirer
 
             Directory.CreateDirectory(destDir.FullName);
             var targetPath = Path.Combine(destDir.FullName, TargetFileName);
-            await File.WriteAllBytesAsync(targetPath, bytes, cancellationToken);
+
+            // Stage to a temp file, verify it, then atomically publish. Writing the 23 MB DLL directly
+            // to its final path would let a concurrent run (or this run's later ResolveExisting) observe
+            // and .load a partially-written or not-yet-verified DLL.
+            var stagedPath = await AtomicFile.WriteStagedAsync(targetPath, bytes, cancellationToken);
 
             // Defense-in-depth: this DLL is loaded into the debugger process, so verify it carries a
             // valid Authenticode signature from Microsoft before trusting it (the download is HTTPS
             // from an official host, but this guards against tampering / a compromised mirror).
-            if (!AuthenticodeVerifier.IsTrustedMicrosoftSigned(targetPath, logger))
+            if (!AuthenticodeVerifier.IsTrustedMicrosoftSigned(stagedPath, logger))
             {
                 logger.LogDebug("Discarding {File}: it is not validly signed by Microsoft.", TargetFileName);
-                try { File.Delete(targetPath); } catch { /* best effort */ }
+                AtomicFile.DiscardStaged(stagedPath);
                 return false;
             }
+
+            AtomicFile.Publish(stagedPath, targetPath);
 
             logger.LogDebug("Acquired {File} ({Size} bytes) from WinDbg bundle into {Dir}.", TargetFileName, bytes.Length, destDir.FullName);
             return true;

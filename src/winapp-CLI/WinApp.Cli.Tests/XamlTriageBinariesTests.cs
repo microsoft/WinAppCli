@@ -13,6 +13,10 @@ public class XamlTriageBinariesTests
     private string _tempDir = null!;
     private string? _originalOverride;
 
+    // Pass-through verifier for tests that use dummy (unsigned) binary files: resolution logic is under
+    // test here, not the real Authenticode gate (covered by AuthenticodeVerifierTests + the L4 test).
+    private static readonly Func<string, bool> AcceptAny = _ => true;
+
     [TestInitialize]
     public void Setup()
     {
@@ -53,7 +57,7 @@ public class XamlTriageBinariesTests
         File.WriteAllText(Path.Combine(dir, "symsrv.dll"), "");
         Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
 
-        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance);
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance, AcceptAny);
 
         Assert.IsNotNull(resolved);
         Assert.AreEqual(dir, resolved.BinDir);
@@ -69,12 +73,91 @@ public class XamlTriageBinariesTests
         File.WriteAllText(Path.Combine(dir, "winext", "JsProvider.dll"), "");
         Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
 
-        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance);
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance, AcceptAny);
 
         Assert.IsNotNull(resolved);
         Assert.IsFalse(resolved.HasSymSrv, "No symsrv.dll present, so HasSymSrv must be false.");
         Assert.AreEqual(Path.Combine(dir, "winext", "JsProvider.dll"), resolved.JsProviderPath,
             "The resolved JsProvider path must point at the winext copy so the child runner can .load it.");
+    }
+
+    [TestMethod]
+    public void DescribeOverrideGap_NoOverride_ReturnsNull()
+    {
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, null);
+
+        Assert.IsNull(XamlTriageBinaries.DescribeOverrideGap());
+    }
+
+    [TestMethod]
+    public void DescribeOverrideGap_MissingDirectory_ReportsNonexistent()
+    {
+        var missing = Path.Combine(_tempDir, "does-not-exist");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, missing);
+
+        var gap = XamlTriageBinaries.DescribeOverrideGap();
+
+        Assert.IsNotNull(gap);
+        StringAssert.Contains(gap, "does not exist");
+        StringAssert.Contains(gap, missing);
+    }
+
+    [TestMethod]
+    public void DescribeOverrideGap_EmptyDir_ListsBothMissingComponents()
+    {
+        var dir = Path.Combine(_tempDir, "override-empty");
+        Directory.CreateDirectory(dir);
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        var gap = XamlTriageBinaries.DescribeOverrideGap();
+
+        Assert.IsNotNull(gap);
+        StringAssert.Contains(gap, "dbgeng.dll");
+        StringAssert.Contains(gap, "JsProvider.dll");
+    }
+
+    [TestMethod]
+    public void DescribeOverrideGap_EngineOnly_ListsOnlyJsProvider()
+    {
+        var dir = Path.Combine(_tempDir, "override-engine-only");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "dbgeng.dll"), "");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        var gap = XamlTriageBinaries.DescribeOverrideGap();
+
+        Assert.IsNotNull(gap);
+        StringAssert.Contains(gap, "JsProvider.dll");
+        Assert.IsFalse(gap.Contains("dbgeng.dll"), "dbgeng.dll is present, so it must not be listed as missing.");
+    }
+
+    [TestMethod]
+    public void DescribeOverrideGap_FullLayout_ReturnsNull()
+    {
+        var dir = Path.Combine(_tempDir, "override-full");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "dbgeng.dll"), "");
+        File.WriteAllText(Path.Combine(dir, "JsProvider.dll"), "");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        Assert.IsNull(XamlTriageBinaries.DescribeOverrideGap(),
+            "A complete override layout has no gap to describe.");
+    }
+
+    [TestMethod]
+    public void ResolveExisting_JsProviderFailsVerification_ReturnsNull()
+    {
+        // L4: a full layout on disk whose JsProvider.dll fails Authenticode verification (e.g. it was
+        // replaced in the cache after download) must be rejected rather than loaded into the debugger.
+        var dir = Path.Combine(_tempDir, "tampered");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "dbgeng.dll"), "");
+        File.WriteAllText(Path.Combine(dir, "JsProvider.dll"), "");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance, _ => false);
+
+        Assert.IsNull(resolved, "A JsProvider.dll that fails signature verification must not resolve.");
     }
 
     [TestMethod]
@@ -86,7 +169,7 @@ public class XamlTriageBinariesTests
         File.WriteAllText(Path.Combine(dir, "JsProvider.dll"), "");
         Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
 
-        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance);
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance, AcceptAny);
 
         Assert.IsNotNull(resolved);
         Assert.AreEqual(Path.Combine(dir, "JsProvider.dll"), resolved.JsProviderPath);
@@ -175,6 +258,56 @@ public class XamlTriageBinariesTests
         Assert.IsTrue(match.Success, "Could not find the DbgEng PackageVersion entry in Directory.Packages.props.");
         Assert.AreEqual(XamlTriageBinaries.DbgPackageVersion, match.Groups[1].Value,
             "XamlTriageBinaries.DbgPackageVersion drifted from the version pinned in Directory.Packages.props.");
+    }
+
+    [TestMethod]
+    public void VerifyPackageHash_MatchingSha512_ReturnsTrue()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes("winapp-dbgtools-package-content");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA512.HashData(bytes));
+
+        Assert.IsTrue(XamlTriageBinaries.VerifyPackageHash(bytes, expected),
+            "The exact pinned content hash must verify.");
+        Assert.IsTrue(XamlTriageBinaries.VerifyPackageHash(bytes, expected.ToLowerInvariant()),
+            "Hash comparison must be case-insensitive so lower-case hex pins also verify.");
+    }
+
+    [TestMethod]
+    public void VerifyPackageHash_TamperedContent_ReturnsFalse()
+    {
+        var original = System.Text.Encoding.UTF8.GetBytes("winapp-dbgtools-package-content");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA512.HashData(original));
+        var tampered = System.Text.Encoding.UTF8.GetBytes("winapp-dbgtools-package-contenX");
+
+        Assert.IsFalse(XamlTriageBinaries.VerifyPackageHash(tampered, expected),
+            "A single altered byte must fail the integrity check so mirrored/compromised feeds are rejected.");
+    }
+
+    [TestMethod]
+    public void PinnedPackages_Sha512_MatchesRestoredNupkg()
+    {
+        // Guards against a mistyped or stale pinned hash: the packages are restore-only PackageReferences,
+        // so their .nupkg is present in the NuGet global cache. If this can't be located (e.g. a clean
+        // machine that restored elsewhere), the assertion is inconclusive rather than a false failure.
+        var cache = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (string.IsNullOrEmpty(cache))
+        {
+            cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        }
+
+        foreach (var (package, version, expectedSha) in XamlTriageBinaries.PinnedPackages)
+        {
+            var id = package.ToLowerInvariant();
+            var nupkg = Path.Combine(cache, id, version, $"{id}.{version}.nupkg");
+            if (!File.Exists(nupkg))
+            {
+                Assert.Inconclusive($"Pinned package not found in NuGet cache: {nupkg}");
+            }
+
+            var actual = Convert.ToHexString(System.Security.Cryptography.SHA512.HashData(File.ReadAllBytes(nupkg)));
+            Assert.IsTrue(StringComparer.OrdinalIgnoreCase.Equals(expectedSha, actual),
+                $"Pinned SHA-512 for {package} {version} drifted from the restored .nupkg. Expected {expectedSha}, got {actual.ToLowerInvariant()}. Update the compiled-in hash.");
+        }
     }
 
     private static void WriteCachePackage(DirectoryInfo cache, string package, string version, string file, string content)

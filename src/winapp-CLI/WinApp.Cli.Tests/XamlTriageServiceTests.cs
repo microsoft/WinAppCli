@@ -126,4 +126,57 @@ public class XamlTriageServiceTests
         Assert.IsTrue(idx >= 0 && idx + 1 < args.Count, $"Expected flag {flag} with a value.");
         Assert.AreEqual(expected, args[idx + 1]);
     }
+
+    [TestMethod]
+    public void ShouldPropagateCancellation_InternalHttpTimeout_DoesNotPropagate()
+    {
+        // HttpClient.Timeout surfaces as a TaskCanceledException whose token is unrelated to the
+        // caller's. Swallowing it lets the already-computed managed crash stack survive (regression:
+        // an internal first-run download timeout used to discard the ClrMD stack).
+        using var caller = new CancellationTokenSource();
+        var timeout = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+
+        Assert.IsFalse(
+            XamlTriageService.ShouldPropagateCancellation(timeout, caller.Token),
+            "An internal timeout with a non-cancelled caller token must not propagate out of the fail-open triage pass.");
+    }
+
+    [TestMethod]
+    public void ShouldPropagateCancellation_CallerCancelled_Propagates()
+    {
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+        var oce = new OperationCanceledException(caller.Token);
+
+        Assert.IsTrue(
+            XamlTriageService.ShouldPropagateCancellation(oce, caller.Token),
+            "Genuine caller cancellation must propagate so the run can abort promptly.");
+    }
+
+    [TestMethod]
+    public void TryExtractVerdict_CodeAndMessage_ReturnsCompactVerdict()
+    {
+        var output =
+            "Stowed Exception found\n" +
+            "Error Code: 0x80004005\n" +
+            "Error Message: The parameter is incorrect.\n" +
+            "Stack:\n";
+
+        var verdict = XamlTriageService.TryExtractVerdict(output);
+
+        Assert.AreEqual("0x80004005 — The parameter is incorrect.", verdict);
+    }
+
+    [TestMethod]
+    public void TryExtractVerdict_CodeOnly_ReturnsCode()
+    {
+        Assert.AreEqual("0xC000027B", XamlTriageService.TryExtractVerdict("HRESULT = 0xC000027B\nsome stack"));
+    }
+
+    [TestMethod]
+    public void TryExtractVerdict_NoRecognizableFields_ReturnsNull()
+    {
+        Assert.IsNull(XamlTriageService.TryExtractVerdict("just a native stack with no error code"));
+        Assert.IsNull(XamlTriageService.TryExtractVerdict(""));
+    }
 }

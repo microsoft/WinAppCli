@@ -14,7 +14,7 @@ namespace WinApp.Cli.Services;
 /// directly, producing the stowed-exception breakdown and XAML dispatch triage that the
 /// standard ClrMD/DbgEng passes cannot recover.
 /// </summary>
-internal sealed class XamlTriageService(
+internal sealed partial class XamlTriageService(
     ILogger<XamlTriageService> logger,
     IWinappDirectoryService winappDirectoryService,
     INugetService nugetService) : IXamlTriageService
@@ -29,7 +29,7 @@ internal sealed class XamlTriageService(
     private static readonly TimeSpan TriageTimeout = TimeSpan.FromMinutes(5);
 
     /// <inheritdoc/>
-    public async Task<string?> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default)
+    public async Task<XamlTriageResult> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -60,15 +60,16 @@ internal sealed class XamlTriageService(
             if (binaries == null)
             {
                 logger.LogDebug("WinUI triage skipped: debugging binaries (incl. JsProvider.dll) unavailable.");
-                return UnavailableNote();
+                return XamlTriageResult.Skipped(UnavailableNote());
             }
 
             var extPath = await EnsureExtensionAsync(dbgToolsRoot, cancellationToken);
             if (extPath == null)
             {
                 logger.LogDebug("WinUI triage skipped: could not obtain {Ext}.", ExtFileName);
-                return $"WinUI Triage: skipped — the WinUI debugger extension ({ExtFileName}) could not be " +
-                    "obtained (download blocked or its pinned hash did not match).";
+                return XamlTriageResult.Skipped(
+                    $"WinUI Triage: skipped — the WinUI debugger extension ({ExtFileName}) could not be " +
+                    "obtained (download blocked or its pinned hash did not match).");
             }
 
             // Run the DbgEng pass in a dedicated child process. The parent has already loaded the
@@ -77,12 +78,12 @@ internal sealed class XamlTriageService(
             var (output, skipNote) = await RunTriageProcessAsync(dumpPath, binaries, extPath, useSymbols, cancellationToken);
             if (skipNote != null)
             {
-                return $"WinUI Triage: skipped — {skipNote}";
+                return XamlTriageResult.Skipped($"WinUI Triage: skipped — {skipNote}");
             }
 
             if (string.IsNullOrWhiteSpace(output))
             {
-                return "WinUI Triage: skipped — the triage pass produced no output.";
+                return XamlTriageResult.Skipped("WinUI Triage: skipped — the triage pass produced no output.");
             }
 
             var header = $"WinUI Triage (DbgEng + winui-dbgext.js, source: {binaries.Source}):";
@@ -97,20 +98,93 @@ internal sealed class XamlTriageService(
 
             var gapNote = DescribeSymbolGap(output, useSymbols);
             var notes = string.Join("\n", new[] { symbolNote, gapNote }.Where(n => n != null));
-            return notes.Length == 0
+            var logText = notes.Length == 0
                 ? $"{header}\n{output.Trim()}"
                 : $"{header}\n{notes}\n\n{output.Trim()}";
+            return XamlTriageResult.Succeeded(logText, TryExtractVerdict(output));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (ShouldPropagateCancellation(ex, cancellationToken))
         {
+            // Genuine caller cancellation propagates; internal HttpClient.Timeout cancellations fall
+            // through to the fail-open handler below so the already-computed managed stack survives.
             throw;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "WinUI triage pass failed.");
-            return null;
+            return XamlTriageResult.None;
         }
     }
+
+    /// <summary>
+    /// Decides whether an <see cref="OperationCanceledException"/> from the triage pipeline represents
+    /// genuine caller cancellation (rethrow) versus an internal <see cref="HttpClient"/> timeout
+    /// (swallow, so the already-computed managed crash stack is preserved by the caller). Only the
+    /// caller's own token being cancelled counts as genuine cancellation — internal download timeouts
+    /// surface as <see cref="TaskCanceledException"/> with an unrelated token and must not propagate.
+    /// </summary>
+    internal static bool ShouldPropagateCancellation(OperationCanceledException ex, CancellationToken callerToken)
+    {
+        _ = ex;
+        return callerToken.IsCancellationRequested;
+    }
+
+    /// <summary>
+    /// Best-effort extraction of a concise one-line verdict (error code and/or message) from the raw
+    /// extension output, so the console can show the headline finding instead of only pointing at the
+    /// log. Returns <c>null</c> when no recognizable error code/message line is present.
+    /// </summary>
+    internal static string? TryExtractVerdict(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return null;
+        }
+
+        string? code = null;
+        string? message = null;
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (code == null)
+            {
+                var m = ErrorCodeRegex().Match(line);
+                if (m.Success)
+                {
+                    code = m.Groups[1].Value.Trim();
+                }
+            }
+
+            if (message == null)
+            {
+                var m = ErrorMessageRegex().Match(line);
+                if (m.Success && m.Groups[1].Value.Trim().Length > 0)
+                {
+                    message = m.Groups[1].Value.Trim();
+                }
+            }
+
+            if (code != null && message != null)
+            {
+                break;
+            }
+        }
+
+        if (code == null && message == null)
+        {
+            return null;
+        }
+
+        return string.Join(" — ", new[] { code, message }.Where(p => !string.IsNullOrEmpty(p)));
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?:error\s*code|hresult)\s*[:=]\s*(0x[0-9a-fA-F]+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex ErrorCodeRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"error\s*(?:message|text)\s*[:=]\s*(.+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex ErrorMessageRegex();
 
     /// <summary>
     /// Detects the "operating-system symbols unavailable" failure shape — the extension identifies the
@@ -335,10 +409,24 @@ internal sealed class XamlTriageService(
         return Convert.ToHexStringLower(SHA1.HashData(buffer));
     }
 
-    private static string UnavailableNote() =>
-        "WinUI Triage: skipped — the debugger components required for stowed-exception analysis " +
-        "(dbgeng.dll + JsProvider.dll) could not be obtained.\n" +
-        "The engine bits come from NuGet and JsProvider.dll is extracted from the WinDbg download; " +
-        "if your environment blocks those, install Debugging Tools for Windows (Windows SDK) or set " +
-        $"the {XamlTriageBinaries.EnvOverride} environment variable to a debugger directory that contains them.";
+    private static string UnavailableNote()
+    {
+        // When an authoritative override is configured, the cache/installed-tools paths are skipped,
+        // so telling the user to "set WINAPP_DBGTOOLS_DIR" (which is already set) is misleading.
+        // Point them at the specific gap in their override directory instead.
+        var overrideGap = XamlTriageBinaries.DescribeOverrideGap();
+        if (overrideGap != null)
+        {
+            return "WinUI Triage: skipped — " + overrideGap + ".\n" +
+                $"The {XamlTriageBinaries.EnvOverride} override is authoritative, so only that directory is " +
+                "consulted. Populate it with a full debugger layout (dbgeng.dll + JsProvider.dll), or unset " +
+                $"{XamlTriageBinaries.EnvOverride} to use installed Debugging Tools for Windows or the download-on-first-use cache.";
+        }
+
+        return "WinUI Triage: skipped — the debugger components required for stowed-exception analysis " +
+            "(dbgeng.dll + JsProvider.dll) could not be obtained.\n" +
+            "The engine bits come from NuGet and JsProvider.dll is extracted from the WinDbg download; " +
+            "if your environment blocks those, install Debugging Tools for Windows (Windows SDK) or set " +
+            $"the {XamlTriageBinaries.EnvOverride} environment variable to a debugger directory that contains them.";
+    }
 }
