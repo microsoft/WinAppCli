@@ -403,13 +403,15 @@ try
                         $pesterConfig = New-PesterConfiguration
                         $pesterConfig.Run.Path = $NuGetTestsPath
                         $pesterConfig.Run.Exit = $false
+                        $pesterConfig.Run.PassThru = $true
                         $pesterConfig.Output.Verbosity = 'Normal'
                         $pesterResult = Invoke-Pester -Configuration $pesterConfig
-                        if ($pesterResult.FailedCount -gt 0) {
+                        if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
                             if ($FailOnTestFailure) {
-                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed"
+                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
+                                exit 1
                             } else {
-                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failure(s) — continuing"
+                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
                             }
                         } else {
                             Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
