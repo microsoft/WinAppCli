@@ -235,6 +235,67 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EmbedIdentity_NonSparseManifest_ReturnsError()
+    {
+        // embed-identity only applies to sparse (AllowExternalContent) packages. A full package
+        // manifest must be rejected, and no SxS manifest should be written.
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(manifestPath, NonSparseManifest, TestContext.CancellationToken);
+        var target = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [target, "--manifest", manifestPath]);
+
+        Assert.AreEqual(1, exitCode, "A non-sparse manifest should be rejected by embed-identity");
+        Assert.IsFalse(File.Exists(target), "No SxS manifest should be written for a non-sparse manifest");
+    }
+
+    [TestMethod]
+    public void ResolveSparseOutputPath_ExistingDottedDirectory_TreatedAsFolder()
+    {
+        // A directory whose name contains a dot (e.g. 'release.v2') must be treated as the output
+        // folder, not misread as an invalid file extension.
+        var dottedDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "release.v2"));
+
+        var (outputMsix, outputFolder) = MsixService.ResolveSparseOutputPath(
+            new DirectoryInfo(dottedDir.FullName), "SparsePkg.identity.msix", _tempDirectory);
+
+        Assert.AreEqual(dottedDir.FullName, outputFolder.FullName);
+        Assert.AreEqual(Path.Combine(dottedDir.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
+    }
+
+    [TestMethod]
+    public void ResolveSparseOutputPath_Null_UsesCurrentDirectoryDefault()
+    {
+        var (outputMsix, outputFolder) = MsixService.ResolveSparseOutputPath(
+            null, "SparsePkg.identity.msix", _tempDirectory);
+
+        Assert.AreEqual(_tempDirectory.FullName, outputFolder.FullName);
+        Assert.AreEqual(Path.Combine(_tempDirectory.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
+    }
+
+    [TestMethod]
+    public void ResolveSparseOutputPath_MsixFile_TreatedAsFile()
+    {
+        var target = new FileInfo(Path.Combine(_tempDirectory.FullName, "custom.msix"));
+
+        var (outputMsix, outputFolder) = MsixService.ResolveSparseOutputPath(
+            target, "SparsePkg.identity.msix", _tempDirectory);
+
+        Assert.AreEqual(target.FullName, outputMsix.FullName);
+        Assert.AreEqual(_tempDirectory.FullName, outputFolder.FullName);
+    }
+
+    [TestMethod]
+    public void ResolveSparseOutputPath_MsixbundleFile_Throws()
+    {
+        var target = new FileInfo(Path.Combine(_tempDirectory.FullName, "custom.msixbundle"));
+
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            MsixService.ResolveSparseOutputPath(target, "SparsePkg.identity.msix", _tempDirectory));
+    }
+
+    [TestMethod]
     public async Task GenerateCompleteManifest_EscapesSpecialCharsInDescriptionAndExe()
     {
         // Description is free text inferred from exe metadata; exe names can contain '&'.

@@ -401,7 +401,7 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 // ---------------------------------------------------------------------------
 
 export interface PackageOptions extends CommonOptions {
-  /** One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
+  /** One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
   inputFolder: string | string[];
   /** Path to signing certificate (will auto-sign if provided) */
   cert?: string;

@@ -1202,7 +1202,7 @@
       ],
       "arguments": {
         "input-folder": {
-          "description": "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
+          "description": "One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
           "order": 0,
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo[]",

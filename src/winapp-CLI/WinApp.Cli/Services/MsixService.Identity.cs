@@ -56,33 +56,8 @@ internal partial class MsixService
 
         // Resolve output path: default to <PackageName>.identity.msix in the current directory.
         var defaultFileName = $"{packageName}.identity.msix";
-        FileInfo outputMsixPath;
-        DirectoryInfo outputFolder;
-        if (outputPath == null)
-        {
-            outputFolder = currentDirectoryProvider.GetCurrentDirectoryInfo();
-            outputMsixPath = new FileInfo(Path.Combine(outputFolder.FullName, defaultFileName));
-        }
-        else if (Path.HasExtension(outputPath.Name))
-        {
-            // An extension means the caller intends a file. Only .msix is valid for a sparse
-            // identity package — reject .msixbundle and anything else rather than silently
-            // creating a directory with that name.
-            if (!string.Equals(Path.GetExtension(outputPath.Name), ".msix", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Invalid --output '{outputPath.Name}'. Sparse identity packages must be a single '.msix' file " +
-                    "(bundles are not supported). Pass a '.msix' path or a directory.");
-            }
-
-            outputMsixPath = new FileInfo(outputPath.FullName);
-            outputFolder = outputMsixPath.Directory!;
-        }
-        else
-        {
-            outputFolder = new DirectoryInfo(outputPath.FullName);
-            outputMsixPath = new FileInfo(Path.Combine(outputPath.FullName, defaultFileName));
-        }
+        var (outputMsixPath, outputFolder) = ResolveSparseOutputPath(
+            outputPath, defaultFileName, currentDirectoryProvider.GetCurrentDirectoryInfo());
 
         if (!outputFolder.Exists)
         {
@@ -125,6 +100,48 @@ internal partial class MsixService
         return new CreateMsixPackageResult(outputMsixPath, autoSign);
     }
 
+    /// <summary>
+    /// Resolves where a sparse identity .msix should be written. An existing directory (even one
+    /// whose name contains a dot) is used as the output folder; a non-existent path with an
+    /// extension is treated as a file and must be '.msix' (bundles are rejected); anything else is
+    /// treated as a target directory.
+    /// </summary>
+    internal static (FileInfo OutputMsix, DirectoryInfo OutputFolder) ResolveSparseOutputPath(
+        FileSystemInfo? outputPath, string defaultFileName, DirectoryInfo currentDirectory)
+    {
+        if (outputPath == null)
+        {
+            return (new FileInfo(Path.Combine(currentDirectory.FullName, defaultFileName)), currentDirectory);
+        }
+
+        if (Directory.Exists(outputPath.FullName))
+        {
+            // An existing directory is always treated as the output folder, even if its name
+            // contains a dot (e.g. './release.v2') that Path.HasExtension would misread as a file.
+            var dir = new DirectoryInfo(outputPath.FullName);
+            return (new FileInfo(Path.Combine(dir.FullName, defaultFileName)), dir);
+        }
+
+        if (Path.HasExtension(outputPath.Name))
+        {
+            // An extension on a non-existent path means the caller intends a file. Only .msix is
+            // valid for a sparse identity package — reject .msixbundle and anything else rather
+            // than silently creating a directory with that name.
+            if (!string.Equals(Path.GetExtension(outputPath.Name), ".msix", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid --output '{outputPath.Name}'. Sparse identity packages must be a single '.msix' file " +
+                    "(bundles are not supported). Pass a '.msix' path or a directory.");
+            }
+
+            var file = new FileInfo(outputPath.FullName);
+            return (file, file.Directory!);
+        }
+
+        var folder = new DirectoryInfo(outputPath.FullName);
+        return (new FileInfo(Path.Combine(folder.FullName, defaultFileName)), folder);
+    }
+
     public async Task<MsixIdentityResult> EmbedIdentityAsync(
         FileInfo target,
         FileInfo manifestPath,
@@ -137,7 +154,20 @@ internal partial class MsixService
                 $"AppX manifest not found at: {manifestPath}. Pass --manifest, or generate one with 'winapp init --exe <exe> --sparse'.");
         }
 
-        var identity = await ParseAppxManifestFromPathAsync(manifestPath, cancellationToken);
+        var manifestContent = await File.ReadAllTextAsync(manifestPath.FullName, Encoding.UTF8, cancellationToken);
+
+        // embed-identity connects an app to a sparse identity package (one registered with
+        // 'Add-AppxPackage -ExternalLocation'), which requires AllowExternalContent. Refuse a
+        // non-sparse manifest so we don't embed an identity that can never be registered that way.
+        if (!AppxManifestDocument.Parse(manifestContent).AllowsExternalContent)
+        {
+            throw new InvalidOperationException(
+                $"Manifest '{manifestPath.Name}' is not a sparse identity manifest (missing <uap10:AllowExternalContent>true). " +
+                "embed-identity only applies to sparse packages registered with 'Add-AppxPackage -ExternalLocation'. " +
+                "Generate one with 'winapp init --exe <exe> --sparse'.");
+        }
+
+        var identity = ParseAppxManifestAsync(manifestContent);
 
         var extension = target.Extension.ToLowerInvariant();
         if (extension == ".exe")
