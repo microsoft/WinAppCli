@@ -952,7 +952,7 @@ internal partial class MsixService(
             if (app != null && isExe && app.Attribute(AppxManifestDocument.Uap10Ns + "TrustLevel") == null)
             {
                 app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "TrustLevel", "mediumIL");
-                    app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "win32App");
+                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "win32App");
             }
 
             // Remove EntryPoint if present (not needed for sparse packages)

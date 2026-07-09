@@ -26,7 +26,7 @@
 #define PublishDir "bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 
 [Setup]
-AppId={{7C2E4A1E-9E2B-4C7E-9D1F-SPARSE0000001}
+AppId={{7C2E4A1E-9E2B-4C7E-9D1F-0A1B2C3D4E5F}
 AppName={#MyAppName}
 AppVersion=1.0.0.0
 DefaultDirName={autopf}\SparseAppSample
