@@ -140,7 +140,7 @@ Want to inspect or interact with a running app's UI?
 - `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to one beside the target, then `./appxmanifest.xml`)
 **Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
-
+### `winapp run <input-folder>`
 **Purpose:** Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the app — simulating a full MSIX install for debugging.
 **When to use:** The **preferred command** for iterative development and debugging with package identity. Use this whenever your exe lives inside the build output folder (most .NET, C++, Rust, Flutter, Tauri projects).
 **Key options:**
