@@ -104,6 +104,7 @@ $SkillCommandMap = @{
     "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot"    = @("get-winapp-path", "tool", "store")
     "frameworks"      = @()       # No auto-generated command sections — links to guides
+    "maui"            = @()       # No auto-generated command sections — links to guides
     "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui get-value", "ui screenshot", "ui record", "ui invoke", "ui click", "ui drag", "ui touch", "ui pen", "ui hover", "ui send-keys", "ui set-value", "ui focus", "ui scroll-into-view", "ui scroll", "ui wait-for", "ui list-windows", "ui get-focused")
 }
 
@@ -248,7 +249,7 @@ function Format-CommandSections {
 }
 
 # Generate each skill
-$SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "ui-automation")
+$SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "maui", "ui-automation")
 $SkillDescriptions = @{
     "setup"        = "Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning."
     "package"      = "Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline."
@@ -257,6 +258,7 @@ $SkillDescriptions = @{
     "manifest"     = "Create and edit Windows app manifest files (Package.appxmanifest or appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions."
     "troubleshoot" = "Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation."
     "frameworks"      = "Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app."
+    "maui"            = "Package and sign .NET MAUI Windows apps with winapp, resolving the resizetizer manifest dependency. Use when packaging or signing a .NET MAUI Windows app, building a MAUI MSIX or signed unpackaged build in CI, or fixing 'manifest contains unresolved placeholders (`$placeholder`$)' errors from winapp package."
     "ui-automation"   = "Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron."
 }
 

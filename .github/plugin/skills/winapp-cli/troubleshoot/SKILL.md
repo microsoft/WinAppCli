@@ -24,6 +24,7 @@ Use this skill when:
 | "Failed to add package identity" | Stale debug identity or untrusted cert | `Get-AppxPackage *yourapp* \| Remove-AppxPackage` to clean up, then `winapp cert install` and retry |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `winapp cert generate --if-exists overwrite` or `--if-exists skip` |
 | "Manifest already exists" | `Package.appxmanifest` already present | Use `winapp manifest generate --if-exists overwrite` or edit manifest directly |
+| "manifest contains unresolved placeholders: `$placeholder$`" (.NET MAUI) | Passed winapp the source `Platforms/Windows/Package.appxmanifest` | Point `--manifest` at the resizetizer-resolved manifest (`obj\...\resizetizer\m\Package.appxmanifest`) — see `winapp-maui` |
 | `run` / `create-debug-identity` registration error `0x800704EC` | Developer Mode is disabled | Enable it in **Settings → Privacy & security → For developers**, or `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Value 1`, then retry |
 | `run` / `create-debug-identity` registration error `0x80073CFB` | Package already registered with a conflicting identity | Run `winapp unregister` (or `winapp unregister --force` if the package was registered from a different project tree), then retry |
 
@@ -127,6 +128,7 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 - **Packaging**: `winapp-package` — creating MSIX installers
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs
 - **Frameworks**: `winapp-frameworks` — framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
+- **MAUI**: `winapp-maui` — packaging/signing .NET MAUI Windows apps and resolving the resizetizer manifest
 
 
 ## Command Reference
