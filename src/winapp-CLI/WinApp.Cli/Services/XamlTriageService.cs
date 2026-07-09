@@ -109,6 +109,13 @@ internal sealed partial class XamlTriageService(
             // through to the fail-open handler below so the already-computed managed stack survives.
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            // Internal download timeout (not caller-requested). Fail open without dumping the raw
+            // TaskCanceledException stack to the console — the caller keeps the managed crash stack.
+            logger.LogDebug("WinUI triage pass timed out acquiring debugging tools; skipping triage.");
+            return XamlTriageResult.None;
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "WinUI triage pass failed.");
@@ -317,6 +324,15 @@ internal sealed partial class XamlTriageService(
         {
             logger.LogDebug("WinUI triage child process exited with code {Code}: {Error}",
                 process.ExitCode, stderr.ToString().Trim());
+
+            // STATUS_BREAKPOINT is the signature of loading a JsProvider.dll built against a different
+            // engine version than the pinned dbgeng.dll — the version-compat gate should prevent this,
+            // but surface a clearer verdict than a raw negative exit code if it ever slips through.
+            if (process.ExitCode == unchecked((int)0x80000003))
+            {
+                return (null, "the triage child process crashed on startup (STATUS_BREAKPOINT), which usually means the JsProvider.dll build does not match the debugging engine.");
+            }
+
             return (null, $"the triage child process exited with code {process.ExitCode}.");
         }
 

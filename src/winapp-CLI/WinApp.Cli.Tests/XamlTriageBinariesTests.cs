@@ -13,9 +13,10 @@ public class XamlTriageBinariesTests
     private string _tempDir = null!;
     private string? _originalOverride;
 
-    // Pass-through verifier for tests that use dummy (unsigned) binary files: resolution logic is under
-    // test here, not the real Authenticode gate (covered by AuthenticodeVerifierTests + the L4 test).
-    private static readonly Func<string, bool> AcceptAny = _ => true;
+    // Pass-through validator for tests that use dummy (unsigned) binary files: resolution logic is under
+    // test here, not the real Authenticode/version gate (covered by AuthenticodeVerifierTests, the L4
+    // test, and the VersionsMatch tests below).
+    private static readonly Func<ResolvedTriageBinaries, bool> AcceptAny = _ => true;
 
     [TestInitialize]
     public void Setup()
@@ -193,6 +194,31 @@ public class XamlTriageBinariesTests
     {
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.KitsArch));
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.NuGetArch));
+    }
+
+    [TestMethod]
+    [DataRow("10.0.29547.1002", "10.0.29547.1002", true, DisplayName = "Identical")]
+    [DataRow("10.0.29547.1002 (WinBuild.160101.0800)", "10.0.29547.1002", true, DisplayName = "Trailing FileVersion decoration ignored")]
+    [DataRow("10.0.29547.1002", "10.0.29617.1000", false, DisplayName = "Different build")]
+    [DataRow(null, "10.0.29547.1002", false, DisplayName = "Null engine version")]
+    [DataRow("10.0.29547.1002", null, false, DisplayName = "Null provider version")]
+    [DataRow("not-a-version", "10.0.29547.1002", false, DisplayName = "Unparseable")]
+    public void VersionsMatch_ComparesNumericComponent(string? a, string? b, bool expected)
+    {
+        Assert.AreEqual(expected, XamlTriageBinaries.VersionsMatch(a, b));
+    }
+
+    [TestMethod]
+    public void PinnedJsProviderProductVersion_MatchesEngineDrift_Guard()
+    {
+        // Drift guard mirroring the .nupkg SHA-512 pins: the JsProvider bundle build MUST equal the
+        // engine build shipped by the pinned Microsoft.Debugging.Platform.DbgEng NuGet package. If the
+        // engine package version is bumped, PinnedBundleUrl + PinnedJsProviderProductVersion must be
+        // bumped in lockstep, or the runtime compat gate will fail-close and triage will be skipped.
+        // Expected engine build for DbgPackageVersion 20260319.1511.0.
+        const string expectedEngineBuild = "10.0.29547.1002";
+        Assert.AreEqual(Version.Parse(expectedEngineBuild), Version.Parse(WinDbgJsProviderAcquirer.PinnedJsProviderProductVersion),
+            "JsProvider bundle build drifted from the pinned engine build; update PinnedBundleUrl to a WinDbg bundle whose JsProvider matches the engine, and this constant.");
     }
 
     [TestMethod]

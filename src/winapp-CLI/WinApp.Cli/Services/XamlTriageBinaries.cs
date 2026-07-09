@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -112,20 +113,24 @@ internal static class XamlTriageBinaries
     /// Resolves an existing directory that contains both <c>dbgeng.dll</c> and
     /// <c>JsProvider.dll</c> for the host architecture, or <c>null</c> when none is found.
     /// <para>
-    /// The resolved <c>JsProvider.dll</c> is re-verified as validly Microsoft-signed on every resolve,
-    /// not only at download time: it is loaded into the debugger process, and a cache-hit would
-    /// otherwise trust a copy that could have been replaced on disk since it was acquired.
+    /// On every resolve (including cache hits) the <c>JsProvider.dll</c> is re-verified as validly
+    /// Microsoft-signed <em>and</em> checked to be the same build as the co-located <c>dbgeng.dll</c>:
+    /// it is loaded into the debugger process, and a copy that was replaced on disk, or that drifted
+    /// from the engine build (which crashes the triage child with STATUS_BREAKPOINT), must be rejected
+    /// so the cache self-heals instead of silently breaking triage.
     /// </para>
     /// </summary>
     public static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger) =>
-        ResolveExisting(cacheBinDir, logger, path => AuthenticodeVerifier.IsTrustedMicrosoftSigned(path, logger));
+        ResolveExisting(cacheBinDir, logger, b =>
+            AuthenticodeVerifier.IsTrustedMicrosoftSigned(b.JsProviderPath, logger)
+            && IsProviderCompatibleWithEngine(b.BinDir, b.JsProviderPath, logger));
 
     /// <summary>
     /// Testable core of <see cref="ResolveExisting(DirectoryInfo, ILogger)"/> with an injectable
-    /// <paramref name="jsProviderVerifier"/> so unit tests can exercise resolution without requiring a
-    /// real Authenticode-signed <c>JsProvider.dll</c>.
+    /// <paramref name="validator"/> so unit tests can exercise resolution without requiring a real
+    /// Authenticode-signed, version-matched <c>JsProvider.dll</c>.
     /// </summary>
-    internal static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger, Func<string, bool> jsProviderVerifier)
+    internal static ResolvedTriageBinaries? ResolveExisting(DirectoryInfo cacheBinDir, ILogger logger, Func<ResolvedTriageBinaries, bool> validator)
     {
         foreach (var (dir, source) in CandidateDirectories(cacheBinDir))
         {
@@ -135,9 +140,9 @@ internal static class XamlTriageBinaries
                 continue;
             }
 
-            if (!jsProviderVerifier(resolved.JsProviderPath))
+            if (!validator(resolved))
             {
-                logger.LogDebug("Rejecting WinUI triage binaries from {Source}: {Path} is not validly Microsoft-signed.", source, resolved.JsProviderPath);
+                logger.LogDebug("Rejecting WinUI triage binaries from {Source}: {Path} failed signature/version validation.", source, resolved.JsProviderPath);
                 continue;
             }
 
@@ -219,6 +224,87 @@ internal static class XamlTriageBinaries
         File.Exists(Path.Combine(cacheBinDir.FullName, "dbgeng.dll"));
 
     /// <summary>
+    /// Returns <c>true</c> when the <c>JsProvider.dll</c> at <paramref name="jsProviderPath"/> is the
+    /// same product build as the <c>dbgeng.dll</c> in <paramref name="binDir"/>. Loading a JsProvider
+    /// from a different engine build crashes the triage child with STATUS_BREAKPOINT, so a mismatch (or
+    /// an unreadable/corrupt engine whose version can't be read) is treated as incompatible.
+    /// </summary>
+    internal static bool IsProviderCompatibleWithEngine(string binDir, string jsProviderPath, ILogger logger)
+    {
+        var engineVersion = TryGetProductVersion(Path.Combine(binDir, "dbgeng.dll"));
+        var providerVersion = TryGetProductVersion(jsProviderPath);
+        if (!VersionsMatch(engineVersion, providerVersion))
+        {
+            logger.LogDebug(
+                "Engine/JsProvider build mismatch: dbgeng.dll={Engine}, JsProvider.dll={Provider}. A mismatched provider crashes the triage child.",
+                engineVersion ?? "<unreadable>", providerVersion ?? "<unreadable>");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Compares two file version strings for equality on their numeric <c>a.b.c.d</c> component,
+    /// tolerating trailing decorations (e.g. <c>"10.0.29547.1002 (WinBuild.160101.0800)"</c>). Returns
+    /// <c>false</c> when either value is missing or unparseable. Extracted for unit testing.
+    /// </summary>
+    internal static bool VersionsMatch(string? a, string? b)
+    {
+        var na = NormalizeVersion(a);
+        var nb = NormalizeVersion(b);
+        return na != null && na == nb;
+    }
+
+    private static string? NormalizeVersion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var token = value.Trim().Split(' ')[0];
+        return Version.TryParse(token, out var parsed) ? parsed.ToString() : null;
+    }
+
+    private static string? TryGetProductVersion(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? FileVersionInfo.GetVersionInfo(path).ProductVersion : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="path"/> exists and looks like an intact PE image (starts
+    /// with the <c>MZ</c> signature and is not implausibly small). Used to detect a truncated/corrupt
+    /// cached engine DLL so it is re-acquired instead of poisoning the cache across runs — unlike
+    /// <c>JsProvider.dll</c>, the engine DLLs are not otherwise re-verified on a cache hit.
+    /// </summary>
+    private static bool IsUsablePeFile(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < 4096)
+            {
+                return false;
+            }
+
+            using var stream = info.OpenRead();
+            return stream.ReadByte() == 'M' && stream.ReadByte() == 'Z';
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// When <see cref="EnvOverride"/> is set but the override directory is not a usable debugger
     /// layout, returns a human-readable description of the override directory and which required
     /// component(s) are missing. Returns <c>null</c> when no override is configured.
@@ -281,7 +367,7 @@ internal static class XamlTriageBinaries
         {
             try
             {
-                if (files.All(f => File.Exists(Path.Combine(cacheBinDir.FullName, f))))
+                if (files.All(f => IsUsablePeFile(Path.Combine(cacheBinDir.FullName, f))))
                 {
                     acquired++;
                     continue;

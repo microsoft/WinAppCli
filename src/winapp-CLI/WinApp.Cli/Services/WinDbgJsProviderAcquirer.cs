@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
-using System.Xml.Linq;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
@@ -25,11 +24,23 @@ namespace WinApp.Cli.Services;
 /// </remarks>
 internal static class WinDbgJsProviderAcquirer
 {
-    // Stable entry point published by the WinDbg team; resolves to the current MainBundle URI.
-    private const string AppInstallerUrl = "https://windbg.download.prss.microsoft.com/dbazure/prod/1-0-0/windbg.appinstaller";
+    // JsProvider.dll ships only in the WinDbg .msixbundle, and it MUST match the debugger engine
+    // build we pin via NuGet (Microsoft.Debugging.Platform.DbgEng). A JsProvider from a different
+    // engine build makes the triage child process crash immediately with STATUS_BREAKPOINT
+    // (0x80000003) and triage is silently skipped. The WinDbg "current" appinstaller rolls forward
+    // independently of the NuGet engine pin, so we deliberately do NOT resolve it; instead we pin the
+    // exact bundle whose JsProvider build equals the pinned engine build. When the engine NuGet
+    // version is bumped, bump this bundle URL (and PinnedJsProviderProductVersion) in lockstep — a
+    // runtime engine/provider version check (see XamlTriageBinaries.IsProviderCompatibleWithEngine)
+    // fails closed if they ever diverge.
+    private const string PinnedBundleUrl = "https://windbg.download.prss.microsoft.com/dbazure/prod/1-2603-20001-0/windbg.msixbundle";
 
-    // Pinned fallback used when the appinstaller cannot be parsed (kept reasonably current).
-    private const string FallbackBundleUrl = "https://windbg.download.prss.microsoft.com/dbazure/prod/1-2603-20001-0/windbg.msixbundle";
+    /// <summary>
+    /// Product version of <c>JsProvider.dll</c> shipped by <see cref="PinnedBundleUrl"/>. Must equal
+    /// the <c>dbgeng.dll</c> product version shipped by the pinned <c>Microsoft.Debugging.Platform.DbgEng</c>
+    /// NuGet package; a drift test asserts this stays in sync.
+    /// </summary>
+    internal const string PinnedJsProviderProductVersion = "10.0.29547.1002";
 
     private const string TargetFileName = "JsProvider.dll";
     private const int MaxReadAttempts = 5;
@@ -50,10 +61,8 @@ internal static class WinDbgJsProviderAcquirer
 
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-            var bundleUrl = await ResolveBundleUrlAsync(http, logger, cancellationToken);
-
-            var reader = new HttpRangeReader(http, bundleUrl);
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            var reader = new HttpRangeReader(http, PinnedBundleUrl);
             var bytes = await ExtractJsProviderAsync(reader, msixName, pathPrefix, cancellationToken);
             if (bytes == null)
             {
@@ -64,9 +73,9 @@ internal static class WinDbgJsProviderAcquirer
             Directory.CreateDirectory(destDir.FullName);
             var targetPath = Path.Combine(destDir.FullName, TargetFileName);
 
-            // Stage to a temp file, verify it, then atomically publish. Writing the 23 MB DLL directly
-            // to its final path would let a concurrent run (or this run's later ResolveExisting) observe
-            // and .load a partially-written or not-yet-verified DLL.
+            // Stage to a temp file, verify it, then atomically publish. Writing the DLL directly to its
+            // final path would let a concurrent run (or this run's later ResolveExisting) observe and
+            // .load a partially-written or not-yet-verified DLL.
             var stagedPath = await AtomicFile.WriteStagedAsync(targetPath, bytes, cancellationToken);
 
             // Defense-in-depth: this DLL is loaded into the debugger process, so verify it carries a
@@ -75,6 +84,17 @@ internal static class WinDbgJsProviderAcquirer
             if (!AuthenticodeVerifier.IsTrustedMicrosoftSigned(stagedPath, logger))
             {
                 logger.LogDebug("Discarding {File}: it is not validly signed by Microsoft.", TargetFileName);
+                AtomicFile.DiscardStaged(stagedPath);
+                return false;
+            }
+
+            // The staged JsProvider must match the already-present engine build; loading a mismatched
+            // provider crashes the triage child with STATUS_BREAKPOINT. Reject a mismatch here (fail
+            // closed) rather than publishing a provider that would silently break triage — this guards
+            // against a future engine bump that outpaces the pinned bundle.
+            if (!XamlTriageBinaries.IsProviderCompatibleWithEngine(destDir.FullName, stagedPath, logger))
+            {
+                logger.LogDebug("Discarding {File}: its build does not match the debugging engine.", TargetFileName);
                 AtomicFile.DiscardStaged(stagedPath);
                 return false;
             }
@@ -149,30 +169,6 @@ internal static class WinDbgJsProviderAcquirer
         Architecture.X86 => ("windbg_win-x86.msix", "x86"),
         _ => (null, null),
     };
-
-    private static async Task<string> ResolveBundleUrlAsync(HttpClient http, ILogger logger, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var xml = await http.GetStringAsync(AppInstallerUrl, cancellationToken);
-            var doc = XDocument.Parse(xml);
-            var uri = doc.Descendants()
-                .FirstOrDefault(e => e.Name.LocalName == "MainBundle")?
-                .Attribute("Uri")?.Value;
-
-            if (!string.IsNullOrWhiteSpace(uri))
-            {
-                logger.LogDebug("Resolved WinDbg bundle URI from appinstaller: {Uri}", uri);
-                return uri;
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogDebug(ex, "Failed to resolve WinDbg bundle URI from appinstaller; using pinned fallback.");
-        }
-
-        return FallbackBundleUrl;
-    }
 
     /// <summary>An <see cref="IRangeReader"/> backed by HTTP range requests with retry-on-transient.</summary>
     private sealed class HttpRangeReader(HttpClient http, string url) : IRangeReader
