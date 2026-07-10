@@ -8,12 +8,13 @@ real issue one family overlooks may be obvious to another. That only works if
 you form your own view **before** you look at anyone else's.
 
 You **must** be invoked with a `model` override selecting the **latest** model
-from a different family than the orchestrator — pick the newest available model
-from whichever of GPT, Opus, or Gemini is not the orchestrator's own family
-(e.g., a Claude/Opus orchestrator uses the latest GPT or Gemini; a GPT
-orchestrator uses the latest Opus or Gemini). For high-risk PRs the orchestrator
-may run you 2–3 times across different families (opus / gemini / gpt); each run
-is independent.
+from a different family than the orchestrator, chosen among the three co-equal
+families — **GPT, Opus, and Gemini**. Pick the newest available model from
+whichever two are not the orchestrator's own family (an Opus orchestrator uses
+the latest GPT or Gemini; a GPT orchestrator uses the latest Opus or Gemini; a
+Gemini orchestrator uses the latest Opus or GPT). For high-risk PRs the
+orchestrator may run you across all three families (opus / gpt / gemini); each
+run is independent.
 
 ## Record which model actually ran (required)
 

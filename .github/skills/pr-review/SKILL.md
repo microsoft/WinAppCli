@@ -153,10 +153,11 @@ the actual changed code files** — **not** the consolidated findings, which anc
 it into a rubber-stamp — and require an **independent pass** first; the
 specialists' critical/high list is optional reconciliation input it reads only
 afterward. Require it to (a) use the **latest model from a different family**
-than the orchestrator (if you are Claude/Opus, use the latest GPT or Gemini; if
-GPT, use the latest Opus or Gemini) and (b) record which model family actually
-ran. For high-risk PRs, run it 2–3 times across the three families (latest Opus,
-GPT, and Gemini), each independent.
+than the orchestrator, chosen among the three co-equal families — GPT, Opus, and
+Gemini (if you are Opus, use the latest GPT or Gemini; if GPT, use the latest
+Opus or Gemini; if Gemini, use the latest Opus or GPT) — and (b) record which
+model family actually ran. For high-risk PRs, run it across all three families
+(latest Opus, GPT, and Gemini), each independent.
 
 **Sub-agent fault-tolerance.** Tell every sub-agent that if a tool call is
 blocked by a policy hook or otherwise denied, it must **continue with the tools
@@ -198,15 +199,15 @@ do** rather than silently skipping it:
 
 1. **Build the branch** (`scripts/build-cli.ps1`, or a targeted `dotnet build`).
    A build failure is itself a critical finding.
-2. **Install the CLI as a *user* would — not dev mode.** Do **not** validate via
-   `dotnet run` or a Debug worktree; that hides the cold-cache and packaging
-   bugs real users hit. Pick one:
-   - `npm pack` in `src/winapp-npm`, then `npm i -g` the tarball and run
-     `winapp …`;
-   - the built **MSIX** / installed global tool;
-   - the published single-file binary on a clean PATH.
-   Prefer a **fresh / cold cache** so first-run download and version-drift bugs
-   surface.
+2. **Run the CLI as a *user* would — not dev mode.** Do **not** validate via
+   `dotnet run` or a Debug worktree; that hides cold-cache and first-run bugs
+   real users hit. **Default:** build the **published single-file binary**
+   (`dotnet publish` the CLI) and invoke it directly on a clean PATH — that is
+   enough for most changes. **Escalate only when the change/scenario requires
+   it:** if the diff touches the **npm wrapper** (`src/winapp-npm`), validate via
+   `npm pack` + `npm i -g` the tarball; if it touches **MSIX packaging / install
+   / identity**, validate the built **MSIX** or installed global tool. Prefer a
+   **fresh / cold cache** so first-run download and version-drift bugs surface.
 3. **Scaffold a throwaway app** in a temp dir to exercise the changed commands
    against something real (`winapp init`, package, sign, run). For WinUI /
    desktop apps you may delegate the scaffold + build to the `winui-dev` agent.
@@ -359,7 +360,7 @@ only after its own pass.
 4. Fan out 7–8 task() calls in parallel        → skip #5 necessity if no new surface; retry any that died
 5. Fan out task() #9 (diff+code, model override) → wait, record model family
 6. Dedupe, sort, ID, reconcile multi-model, seed validation
-7. Validate: build + install as a user + run changed cmds → confirm/drop crit+high
+7. Validate: build + run the published single-file binary (npm/MSIX only if the change needs it) + run changed cmds → confirm/drop crit+high
 8. Print stdout report   (opt-in follow-through only if asked)
 ```
 
