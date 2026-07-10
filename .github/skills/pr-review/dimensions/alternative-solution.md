@@ -70,8 +70,20 @@ Team Lead Test.
 
 ## Cross-cutting checks
 
+DRY runs both directions — reusing what already exists **and** factoring out
+what this PR repeats:
+
 - Does this change duplicate logic that already exists in another command,
   service, or helper? Search for similar patterns and recommend reuse.
+- **Same logic implemented more than once in this PR.** If the diff repeats the
+  same or near-identical block across multiple commands / methods / files (e.g.
+  copy-pasted argument parsing, error handling, cache/lookup logic, or a
+  duplicated command description), recommend extracting a single shared
+  helper/method and calling it from each site. Cite the specific duplicated
+  locations, and watch for near-duplicates that will silently drift out of sync.
+- **Reimplementing something that already exists.** If the new code re-derives
+  behavior an existing command/service/helper already provides, recommend
+  calling the existing one instead of standing up a parallel implementation.
 - Could a new method be a simple call to an existing helper plus a 2-3 line
   wrapper? If so, recommend the wrapper.
 - Is a new abstraction premature (one caller, no anticipated second)?
@@ -90,6 +102,8 @@ Team Lead Test.
 
 - Re-implementing existing helper logic (manifest XML, PRI, selectors) →
   medium.
+- Non-trivial logic duplicated across 3+ sites (will drift out of sync) →
+  medium; a small localized copy-paste → low.
 - Wrong service-pattern choice that will need rework → medium.
 - File size now over hard limit → medium.
 - Minor "could reuse helper X" with marginal benefit → low.
