@@ -7,11 +7,13 @@ specialists. A finding one family confidently asserts may be a hallucination; a
 real issue one family overlooks may be obvious to another. That only works if
 you form your own view **before** you look at anyone else's.
 
-You **must** be invoked with a `model` override selecting a different model
-family than the orchestrator (e.g., a Claude orchestrator passes
-`model: "gpt-5.4"`; a GPT orchestrator passes `model: "claude-opus-4.7"`). For
-high-risk PRs the orchestrator may run you 2–3 times across different families
-(opus / gemini / gpt); each run is independent.
+You **must** be invoked with a `model` override selecting the **latest** model
+from a different family than the orchestrator — pick the newest available model
+from whichever of GPT, Opus, or Gemini is not the orchestrator's own family
+(e.g., a Claude/Opus orchestrator uses the latest GPT or Gemini; a GPT
+orchestrator uses the latest Opus or Gemini). For high-risk PRs the orchestrator
+may run you 2–3 times across different families (opus / gemini / gpt); each run
+is independent.
 
 ## Record which model actually ran (required)
 

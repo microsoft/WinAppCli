@@ -144,11 +144,11 @@ For #9 (multi-model), wait until #1–#8 finish first. Pass it the **raw diff pl
 the actual changed code files** — **not** the consolidated findings, which anchor
 it into a rubber-stamp — and require an **independent pass** first; the
 specialists' critical/high list is optional reconciliation input it reads only
-afterward. Require it to (a) use a **different model family** than the
-orchestrator (if you are Claude, override to `gpt-5.4`; if GPT, to
-`claude-opus-4.7`) and (b) record which model family actually ran. For high-risk
-PRs, run it 2–3 times across different families (opus / gemini / gpt), each
-independent.
+afterward. Require it to (a) use the **latest model from a different family**
+than the orchestrator (if you are Claude/Opus, use the latest GPT or Gemini; if
+GPT, use the latest Opus or Gemini) and (b) record which model family actually
+ran. For high-risk PRs, run it 2–3 times across the three families (latest Opus,
+GPT, and Gemini), each independent.
 
 **Sub-agent fault-tolerance.** Tell every sub-agent that if a tool call is
 blocked by a policy hook or otherwise denied, it must **continue with the tools
