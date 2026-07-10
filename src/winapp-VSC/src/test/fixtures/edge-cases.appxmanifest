@@ -30,6 +30,9 @@
     <PublisherDisplayName>This Is A Very Long Publisher Display Name That Tests How The Editor Handles Extended Text &lt;img src=x onerror=alert(1)&gt;</PublisherDisplayName>
     <Logo>Assets\A\Very\Deep\Nested\Directory\Structure\StoreLogo.png</Logo>
     <Description><![CDATA[This is a description with <special> chars & "quotes" that use CDATA — تطبيق اختباري и кириллица]]></Description>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on"/>
+    </uap10:PackageIntegrity>
     <!-- Trailing comment in Properties -->
   </Properties>
 

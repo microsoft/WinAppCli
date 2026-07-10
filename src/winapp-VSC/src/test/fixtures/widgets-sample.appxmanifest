@@ -4,9 +4,10 @@
 	xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 	xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
 	xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
 	xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
 	xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-	IgnorableNamespaces="uap uap3 rescap mp">
+	IgnorableNamespaces="uap uap3 uap10 rescap mp">
 
 	<Identity
 		Name="testtest"
@@ -19,6 +20,9 @@
 		<PublisherDisplayName>Microsoft Corporation</PublisherDisplayName>
 		<Logo>Images\StoreLogo.png</Logo>
 	  <Description>ddd</Description>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on"/>
+    </uap10:PackageIntegrity>
 	</Properties>
 
 	<Dependencies>
