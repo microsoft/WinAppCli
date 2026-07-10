@@ -3,7 +3,7 @@ name: Docs Update Check
 on:
   pull_request:
     types: [opened, synchronize, labeled, unlabeled]
-    branches: [main]
+    branches: [main, winui-devex]
 
 permissions:
   contents: read

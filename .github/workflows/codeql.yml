@@ -15,7 +15,7 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "winui-devex" ]
   schedule:
     - cron: '35 20 * * 0'
 

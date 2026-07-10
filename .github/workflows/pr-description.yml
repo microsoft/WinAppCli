@@ -3,7 +3,7 @@ name: AI PR Description
 on:
   pull_request_target:
     types: [opened, synchronize]
-    branches: [main]
+    branches: [main, winui-devex]
 
 permissions:
   contents: read

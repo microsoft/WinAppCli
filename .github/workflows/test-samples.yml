@@ -2,7 +2,7 @@ name: Test Samples & Guides
 
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "winui-devex" ]
   workflow_dispatch:
     inputs:
       sample:
