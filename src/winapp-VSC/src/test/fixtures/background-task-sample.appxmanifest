@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<Package xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4" xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7" xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+<Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/win32dependencies/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap10 rescap">
+  IgnorableNamespaces="com mp uap uap3 uap4 uap5 uap7 uap10 win32dependencies rescap">
 
   <Identity
     Name="6b1ec254-6909-4115-a6f6-1133733eb38e"
