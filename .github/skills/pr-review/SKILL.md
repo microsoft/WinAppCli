@@ -284,25 +284,6 @@ If a sub-agent returned zero findings, list its dimension as `✓ clean` in the
 Coverage block and include its short "what I checked" note in a final
 `Coverage notes` section so the user can see scope, not just verdict.
 
-## Multi-PR / multi-target mode
-
-When the user asks to review **several PRs or targets in one run** ("review
-#583, #573 and #587", "review all the UI-input PRs"), don't make them re-ask per
-PR:
-
-1. Enumerate the targets (PR numbers, branches, or refs).
-2. For **each** target, run the full workflow (scope → fan-out → validate →
-   consolidate) inside its **own trackable sub-agent**, launched in parallel and
-   named per target (e.g. `review-pr-583`) so progress is visible and a stall is
-   obvious.
-3. Apply the same fault-tolerance rule: if a per-PR sub-agent dies, retry it
-   once; if it still fails, report that target as `✗ skipped + reason` rather
-   than dropping it.
-4. Print **one report per target**, then a short **cross-PR roll-up**: shared
-   findings, ordering / stacking risks, and — when the user is deciding what to
-   ship — a per-PR "ship / stage / hold" line drawn from the
-   necessity-and-simplicity dimension.
-
 ## Rules the orchestrator must enforce
 
 - **Parallelism in one turn.** Fan out the specialists (#1–#8, skipping #5 on
