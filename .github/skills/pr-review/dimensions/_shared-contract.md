@@ -11,8 +11,8 @@ Start with exactly one line:
 ```
 
 Where `<dimension name>` is one of: `security`, `correctness`, `cli-ux`,
-`alternative-solution`, `test-coverage`, `docs-and-samples`, `packaging`,
-`multi-model`.
+`alternative-solution`, `necessity-and-simplicity`, `test-coverage`,
+`docs-and-samples`, `packaging`, `multi-model`.
 
 ## Per-finding block
 
@@ -22,6 +22,7 @@ Each finding is a level-2 heading followed by labeled bullets:
 ## <relative file path>:<start_line>-<end_line>
 - **Severity**: critical | high | medium | low
 - **Confidence**: high | medium | low
+- **Validation**: static-only (needs runtime confirmation) | validated
 - **Domain**: <dimension name>
 - **Finding**: <one-line statement of what is wrong>
 - **Evidence**: <specific code evidence — quote 1-3 lines, cite line refs in the diff>
@@ -35,6 +36,10 @@ Notes:
   For `working` / `staged` / `all` scopes this means the working-tree or staged
   state, not a committed version.
 - For findings that span discontiguous regions, emit them as separate findings.
+- **Validation** starts as `static-only (needs runtime confirmation)` for every
+  finding you emit — you are reading the diff, not running it. The orchestrator
+  flips it to `validated` in the Validate phase when a runtime check confirms
+  the finding, and drops the finding if a runtime check refutes it.
 
 ## Trailing "what I checked" note
 

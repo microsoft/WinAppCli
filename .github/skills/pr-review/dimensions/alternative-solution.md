@@ -1,9 +1,35 @@
 # Alternative-solution review
 
 You are reviewing a PR diff for the `microsoft/winappcli` repo and asking:
-**is there a simpler, more idiomatic, or already-existing way to do this in
-this codebase?** Apply the shared output contract in `_shared-contract.md`.
+**is there a simpler, more idiomatic, or already-existing way to do this —
+either in this codebase or in the surrounding ecosystem (a standard tool,
+pattern, or API)?** Apply the shared output contract in `_shared-contract.md`.
 Set `Domain: alternative-solution` on every finding.
+
+(Scope, necessity, and "should this ship at all" belong to the
+`necessity-and-simplicity` dimension — stay focused on *how* the work is done.
+But do not self-censor a genuine "there's a better approach" critique just
+because it borders on scope; raise the concrete alternative here and let that
+dimension own the necessity framing.)
+
+## Required output: name a concrete alternative
+
+Do not stop at "uses `AppxManifestDocument` correctly." Every run must produce
+**at least one concrete, named alternative** — an in-repo helper/service/pattern
+*or* an ecosystem tool/library/API — with a one-line tradeoff, backed by a quick
+search (grep the repo for the helper, or draw on ecosystem knowledge). Examples
+of the bar to clear:
+
+- "Extend the existing `wait-for` command instead of adding a new streaming
+  watch — reuses its polling loop, one fewer command to maintain."
+- "Resolve selectors through `SelectorService` rather than re-parsing slugs — a
+  grep shows it already handles the ambiguous-match case."
+- "For the accessibility pass, lean on Accessibility Insights / Axe and frame it
+  as a quick lint, not a WCAG audit."
+
+If after searching you genuinely find no better alternative, say so in
+`## What I checked` **and name what you searched for**, so the sign-off is
+verifiable. A silent "no alternatives" is not acceptable.
 
 ## Repo-specific patterns to enforce
 
@@ -52,9 +78,11 @@ Set `Domain: alternative-solution` on every finding.
 ## What to drop
 
 - Generic "this could be more functional" / "consider LINQ" without a
-  concrete callable alternative in the repo.
-- Refactor suggestions that exceed the scope of the PR ("rewrite this whole
-  service") — note them only as `low` with a tight recommendation, or skip.
+  concrete callable alternative.
+- A wholesale "rewrite this entire service" with no incremental path — offer the
+  smallest concrete reuse instead. Do **not** drop a critique just because it
+  touches scope or necessity; hand that framing to the
+  `necessity-and-simplicity` dimension and keep your concrete alternative here.
 
 ## Severity guide for this dimension
 
