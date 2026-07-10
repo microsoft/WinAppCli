@@ -209,14 +209,11 @@ npm init -y
 npm install --save-dev @microsoft/winappcli
 npx winapp init . --use-defaults --add-js-bindings
 
-# winapp run needs a node.exe inside the project. A junction is a directory
-# alias, so this is a zero-byte pointer to your system Node instead of a copy.
+# winapp run needs an .exe inside the project. Alias .local-node to your Node install.
 New-Item -ItemType Junction -Path .\.local-node -Target (Split-Path (Get-Command node).Source)
 ```
 
-For Phi Silica, also add the same `systemAIModels` capability shown above to `Package.appxmanifest`.
-
-Write `app.js`:
+We'll call Phi Silica again from Node.js, so add the same `systemAIModels` capability to `Package.appxmanifest`. Then in `app.js`, use `TextRewriter` to polish a sentence:
 
 ```js
 const { roInitialize } = require('@microsoft/dynwinrt');
@@ -254,10 +251,10 @@ main().catch(console.error);
 Run the script under a registered package identity in one shot:
 
 ```powershell
-npx winapp run . --exe .local-node\node.exe --args "app.js" --unregister-on-exit
+npx winapp run . --exe .local-node\node.exe --with-alias --args "app.js" --unregister-on-exit
 ```
 
-The rewritten text prints from a plain Node.js process, but Windows is launching it through a registered dev package: `winapp run` registers the loose-layout package, starts `.local-node\node.exe app.js` with package identity and the Windows App SDK runtime graph, then unregisters when the process exits (`--unregister-on-exit`), so no manual cleanup.
+The rewritten text prints straight to your terminal. Under the hood, `winapp run` registers the loose-layout package, launches `.local-node\node.exe app.js` with package identity and the Windows App SDK runtime graph, and unregisters on exit (`--unregister-on-exit`). `--with-alias` uses the manifest's execution alias so stdout streams back to the launching terminal (without it, packaged apps run detached).
 
 For an iteration-friendly variant using a persistent execution alias (`mynode.exe app.js` from any terminal) and packaging notes, see the full [Plain Node.js dev-mode guide](https://github.com/microsoft/dynwinrt/blob/main/docs/guides/node/dev-mode.md).
 
