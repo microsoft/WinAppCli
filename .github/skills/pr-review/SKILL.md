@@ -119,14 +119,22 @@ buckets in this repo:
 
 ### 4. Fan out parallel sub-agents
 
-Launch all 8 specialist dimension sub-agents (#1–#8) in **the same response**
+Launch the specialist dimension sub-agents (#1–#8) in **the same response**
 using the `task` tool, mode `"sync"`, agent type `general-purpose` (or `explore`
 for read-only dimensions — see per-dimension files). Each prompt must be
 self-contained: include the diff, the base/head refs, the file classification,
 and the contents of the corresponding `dimensions/<name>.md` file as
 instructions.
 
-The 9 dimensions and their fragment files:
+**#5 (necessity & simplicity) is conditional.** Launch it **only when the diff
+adds new user-facing surface** — a new command / verb / subcommand, a new public
+flag / option / API, or a materially new capability. For bug fixes, refactors,
+perf, docs, tests, and dependency / CI / packaging changes, **skip it** and mark
+it `n/a (no new surface)` in the Coverage block. A non-feature PR fans out 7
+specialists; a feature PR fans out all 8.
+
+The 9 dimensions and their fragment files — **8 always-on + 1 conditional**
+(necessity & simplicity, feature PRs only):
 
 | # | Dimension | Fragment | Default agent |
 |---|-----------|----------|---------------|
@@ -134,7 +142,7 @@ The 9 dimensions and their fragment files:
 | 2 | correctness & edge cases (incl. regression) | `dimensions/correctness.md` | general-purpose |
 | 3 | CLI UX & usability | `dimensions/cli-ux.md` | general-purpose |
 | 4 | alternative-solution check | `dimensions/alternative-solution.md` | general-purpose |
-| 5 | necessity & simplicity | `dimensions/necessity-and-simplicity.md` | general-purpose |
+| 5 | necessity & simplicity — *conditional, feature PRs only* | `dimensions/necessity-and-simplicity.md` | general-purpose |
 | 6 | test coverage | `dimensions/test-coverage.md` | general-purpose |
 | 7 | docs & samples sync | `dimensions/docs-and-samples.md` | explore |
 | 8 | packaging & release impact | `dimensions/packaging.md` | general-purpose |
@@ -243,7 +251,7 @@ Coverage
   correctness           ...
   cli-ux                ...
   alternative-solution  ...
-  necessity-simplicity  ...
+  necessity-simplicity  <n/a (no new surface) | ✓ clean | ⚠ N findings>
   test-coverage         ...
   docs-and-samples      ...
   packaging             ...
@@ -296,8 +304,8 @@ PR:
 
 ## Rules the orchestrator must enforce
 
-- **Parallelism in one turn.** Fan out all of #1–#8 in a single response; run
-  #9 (multi-model) after they return.
+- **Parallelism in one turn.** Fan out the specialists (#1–#8, skipping #5 on
+  non-feature PRs) in a single response; run #9 (multi-model) after they return.
 - **Validate high/critical for real.** Build and run the branch to confirm or
   drop critical/high findings (see the Validate phase). This **replaces** the
   old "no build/test execution" rule. Still flag staleness you can see
@@ -348,14 +356,14 @@ only after its own pass.
 1. git diff --stat origin/main...HEAD          → 12 files, +340/-87
 2. git diff origin/main...HEAD                 → captured for sub-agents
 3. Map files to areas                          → mostly Services + Commands + 1 doc
-4. Fan out 8 task() calls in parallel          → wait; retry any that died
+4. Fan out 7–8 task() calls in parallel        → skip #5 necessity if no new surface; retry any that died
 5. Fan out task() #9 (diff+code, model override) → wait, record model family
 6. Dedupe, sort, ID, reconcile multi-model, seed validation
 7. Validate: build + install as a user + run changed cmds → confirm/drop crit+high
 8. Print stdout report   (opt-in follow-through only if asked)
 ```
 
-## Example consolidated stdout
+## Example consolidated stdout (feature PR)
 
 ```
 PR Review — feat/sparse-trustedlaunch vs origin/main  (4 commits, 9 files, +312/-58)
@@ -410,6 +418,46 @@ Coverage notes
   alternative-solution: Inspected new sparse-package code paths against
     AppxManifestDocument and ManifestHelper — uses both correctly.
   packaging: Inspected version.json, npm wrapper, NuGet targets — no impact.
+```
+
+## Example consolidated stdout (non-feature PR — bug fix)
+
+A bug fix / refactor adds no new command, flag, or capability, so the
+orchestrator **skips** necessity & simplicity and marks it `n/a`:
+
+```
+PR Review — fix/stream-empty-file vs origin/main  (2 commits, 3 files, +41/-12)
+
+Summary
+  Critical: 1   High: 0   Medium: 1   Low: 0
+
+Coverage
+  security              ✓ clean
+  correctness           ⚠ 1 finding
+  cli-ux                ✓ clean
+  alternative-solution  ✓ clean
+  necessity-simplicity  n/a (no new surface)
+  test-coverage         ⚠ 1 finding
+  docs-and-samples      ✓ clean
+  packaging             ✓ clean
+  multi-model           ✓ 1/1 critical confirmed  ·  models: gemini
+  regression            ✓ fixes a regression; no new behavior change
+  validation            ✓ 1/1 critical validated at runtime
+
+Findings
+  C1  src/winapp-CLI/.../StreamService.cs:77-84   correctness    Watch writes an empty file when the source never flushes
+  M1  src/winapp-CLI/.../StreamService.cs:77-84   test-coverage  No regression test pins the non-empty-output fix
+
+Details
+## C1  src/winapp-CLI/WinApp.Cli/Services/StreamService.cs:77-84
+- Severity: critical
+- Confidence: high
+- Validation: validated
+- Domain: correctness
+- Multi-model: confirmed
+- Finding: On a cold cache the streaming watch still closes the output file before the first flush, producing a 0-byte file.
+- Evidence: Reproduced on the npm-installed CLI (cold cache): `winapp ... --watch` left out.log empty until the fix at line 80 moved the flush ahead of Dispose.
+- Recommendation: Keep the fix; add the regression test from M1 so the empty-file case can't silently return.
 ```
 
 ## Opt-in follow-through
