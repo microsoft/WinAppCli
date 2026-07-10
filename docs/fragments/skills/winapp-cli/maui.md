@@ -35,8 +35,8 @@ After a **Windows-targeted build or publish**, MAUI produces two fully-usable re
 
 | Manifest | Path (relative to project) | State |
 |----------|----------------------------|-------|
-| **Publish-output manifest (preferred)** | `bin\<Config>\<TFM>\<RID>\AppxManifest.xml` | Fully resolved — **no tokens left at all** |
-| **Resizetizer manifest** | `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest` | MAUI `$placeholder$` tokens resolved; `$targetnametoken$`/`$targetentrypoint$` remain (winapp resolves these via `--executable`) |
+| **Resizetizer manifest (reliable for `WindowsPackageType=None`)** | `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest` | MAUI `$placeholder$` tokens resolved; `$targetnametoken$`/`$targetentrypoint$` remain (winapp resolves these via `--executable`) |
+| **Publish-output manifest (MSIX-oriented builds)** | `bin\<Config>\<TFM>\<RID>\AppxManifest.xml` | Fully resolved when produced by your build; may be absent in `WindowsPackageType=None` workflows |
 
 Where:
 - `<Config>` = `Debug` or `Release`
@@ -85,7 +85,7 @@ winapp package .\publish\win-x64 `
 
 `--executable MyApp.exe` resolves the remaining `$targetnametoken$`/`$targetentrypoint$` in the resizetizer manifest.
 
-> **Shortcut:** MAUI also drops a fully-resolved `AppxManifest.xml` into the publish output folder, and `winapp package` auto-detects a manifest in the input folder. So `winapp package .\publish\win-x64 --cert .\devcert.pfx` (no `--manifest`) often works too. Prefer explicit `--manifest` in CI so failures are obvious and never fall back to the source manifest.
+> For MAUI `WindowsPackageType=None` pipelines, do **not** rely on manifest auto-detection from the publish folder. The explicit `obj\...\resizetizer\m\Package.appxmanifest` + `--executable` path above is the reliable flow.
 
 ### 3. Sign the unpackaged build
 
@@ -131,18 +131,30 @@ Build each architecture, then pack its resolved manifest. Store a self-signed (o
 
 - name: Sign unpackaged binaries (x64)
   shell: pwsh
+  env:
+    SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
   run: |
     Get-ChildItem .\publish\win-x64 -Filter *.exe |
-      ForEach-Object { winapp sign $_.FullName $env:SIGN_PFX_PATH --password "${{ secrets.SIGN_PFX_PASSWORD }}" --quiet }
+      ForEach-Object { winapp sign $_.FullName $env:SIGN_PFX_PATH --password $env:SIGN_PFX_PASSWORD --quiet }
 
 - name: Pack signed MSIX (x64)
   shell: pwsh
+  env:
+    SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
   run: |
     $manifest = ".\MyApp\obj\Release\net10.0-windows10.0.19041.0\win-x64\resizetizer\m\Package.appxmanifest"
     if (-not (Test-Path $manifest)) { throw "Resolved manifest not found: $manifest" }
     winapp package .\publish\win-x64 --manifest $manifest --executable MyApp.exe `
-      --cert $env:SIGN_PFX_PATH --cert-password "${{ secrets.SIGN_PFX_PASSWORD }}" `
+      --cert $env:SIGN_PFX_PATH --cert-password $env:SIGN_PFX_PASSWORD `
       --output .\artifacts\MyApp-win-x64.msix --quiet
+
+- name: Cleanup signing cert
+  if: always()
+  shell: pwsh
+  run: |
+    if ($env:SIGN_PFX_PATH -and (Test-Path $env:SIGN_PFX_PATH)) {
+      Remove-Item -Path $env:SIGN_PFX_PATH -Force
+    }
 ```
 
 Repeat the publish + sign + pack steps for `win-arm64` (swap `-r win-arm64` and the `win-arm64` manifest path).
@@ -151,6 +163,18 @@ Repeat the publish + sign + pack steps for `win-arm64` (swap `-r win-arm64` and 
 - Use `-q`/`--quiet` to reduce log noise.
 - A **self-signed** cert produces a valid signature but does **not** clear SmartScreen reputation for other users — only an OV/EV cert from a trusted CA builds reputation. See `winapp-signing`.
 - Add `devcert.pfx` and decoded PFX paths to `.gitignore`; never commit certificates.
+
+### End-to-end validation script
+
+For a practical repo-level check of the MAUI workflow, run:
+
+```powershell
+.\scripts\test-samples.ps1 -Samples maui-app
+```
+
+This executes `samples\maui-app\test.Tests.ps1`, which creates a MAUI app from scratch, publishes the Windows head, packages with the generated resizetizer manifest, and signs the unpackaged executable.
+
+The repository also includes a concrete MAUI sample project under `samples\maui-app\`.
 
 ## Tips
 

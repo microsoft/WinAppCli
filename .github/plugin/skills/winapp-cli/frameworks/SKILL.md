@@ -18,7 +18,7 @@ Each framework has a detailed guide — refer to the links below rather than try
 |-----------|---------------|-------|
 | **Electron** | `npm install --save-dev @microsoft/winappcli` | [Electron setup guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md) |
 | **.NET** (WPF, WinForms, Console) | `winget install Microsoft.winappcli` | [.NET guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md) |
-| **.NET MAUI** | `winget install Microsoft.winappcli` | See the `winapp-maui` skill |
+| **.NET MAUI** | `winget install Microsoft.winappcli` | [MAUI guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/maui.md) + `winapp-maui` skill |
 | **C++** (CMake, MSBuild) | `winget install Microsoft.winappcli` | [C++ guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md) |
 | **Rust** | `winget install Microsoft.winappcli` | [Rust guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/rust.md) |
 | **Flutter** | `winget install Microsoft.winappcli` | [Flutter guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/flutter.md) |
