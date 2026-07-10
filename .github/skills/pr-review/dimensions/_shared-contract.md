@@ -78,6 +78,14 @@ Specifically, **drop**:
 - Coverage gaps with concrete impact.
 - Doc/sample/packaging drift caused by this change.
 
+## No quotas — a clean result is a valid result
+
+No dimension is required to produce a finding. Zero findings is a legitimate,
+valuable outcome that tells the developer this area is solid. **Never invent,
+inflate, or lower the bar on a finding just to avoid an empty report** — a
+manufactured finding fails the Team Lead Test by definition. When you have
+nothing to flag, say so and record what you checked in `## What I checked`.
+
 ## Severity guide
 
 | Severity | Meaning |

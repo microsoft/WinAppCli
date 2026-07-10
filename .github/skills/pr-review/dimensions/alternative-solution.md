@@ -12,13 +12,13 @@ But do not self-censor a genuine "there's a better approach" critique just
 because it borders on scope; raise the concrete alternative here and let that
 dimension own the necessity framing.)
 
-## Required output: name a concrete alternative
+## Do the search, then report only what's real
 
-Do not stop at "uses `AppxManifestDocument` correctly." Every run must produce
-**at least one concrete, named alternative** — an in-repo helper/service/pattern
-*or* an ecosystem tool/library/API — with a one-line tradeoff, backed by a quick
-search (grep the repo for the helper, or draw on ecosystem knowledge). Examples
-of the bar to clear:
+Don't stop at "uses `AppxManifestDocument` correctly" — actually look for a
+simpler or more idiomatic path: grep the repo for an existing
+helper/service/pattern, and consider whether a standard ecosystem
+tool/library/API would do the job. If you find a genuinely better approach,
+surface it as a finding with a one-line tradeoff. Examples of the bar to clear:
 
 - "Extend the existing `wait-for` command instead of adding a new streaming
   watch — reuses its polling loop, one fewer command to maintain."
@@ -27,9 +27,11 @@ of the bar to clear:
 - "For the accessibility pass, lean on Accessibility Insights / Axe and frame it
   as a quick lint, not a WCAG audit."
 
-If after searching you genuinely find no better alternative, say so in
-`## What I checked` **and name what you searched for**, so the sign-off is
-verifiable. A silent "no alternatives" is not acceptable.
+There is **no quota**. If the change already takes the simplest reasonable
+approach, that is a clean pass — say so in `## What I checked` and name what you
+searched for, so the sign-off is verifiable. Never invent or stretch an
+alternative just to have something to report; a forced alternative fails the
+Team Lead Test.
 
 ## Repo-specific patterns to enforce
 
