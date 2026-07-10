@@ -9,42 +9,77 @@ today?** Apply the shared output contract in `_shared-contract.md`. Set
 This is the **anti-"blindly trust the spec"** dimension and the reason the skill
 exists. A spec is a set of claims about reality; several of them are usually
 load-bearing and at least one is often wrong, stale, or hand-wavy. Your job is
-to **independently verify each load-bearing assumption against the real thing**
-and flag the ones that don't hold. Do not accept a claim because the spec states
-it confidently.
+to **independently verify each load-bearing assumption against the real thing —
+preferring a cheap experiment over a code-read for anything mechanical** — and
+flag the ones that don't hold. Do not accept a claim because the spec states it
+confidently, and do not stop at "the code looks like it does X"; where you can
+*run* it cheaply, run it.
 
 ## Method
 
-1. **Enumerate the load-bearing assumptions.** Read the spec and extract every
-   claim the approach depends on — about the CLI's current behavior, a tool's
-   flags, an API's existence/shape, the manifest schema, the build flow, or
-   platform behavior.
-2. **Verify each against reality** by reading the actual source or checking real
-   tool/API behavior:
-   - CLI behavior → read the relevant `src/winapp-CLI/WinApp.Cli/Commands/` and
-     `Services/` code and `docs/cli-schema.json`. Does the command/option/flow
-     the spec assumes actually exist and behave as claimed?
-   - SDK tools (`makeappx`, `signtool`, `makepri`, `cppwinrt`, `pri.exe`) → does
-     the flag/behavior the spec relies on actually exist? Check how the repo
-     invokes them today (e.g., `MsixService`, cert/signing services).
-   - Windows / Windows App SDK APIs → does the API exist, is it callable from
-     the target framework, does it require identity/elevation/capability the
-     spec doesn't mention?
-   - Manifest → does the appxmanifest schema actually allow the element/attribute
-     the spec assumes? Cross-check `AppxManifestDocument` and existing manifest
-     handling.
-   - Build → does `scripts/build-cli.ps1` / the packaging flow accommodate this,
-     or does it assume steps that don't exist?
-3. **Label each assumption** in your evidence as **verified**, **unverified**, or
-   **false**, and cite where you checked (`path:line`, tool behavior, API docs).
+1. **Identify the 1–3 load-bearing assumptions.** Read the spec and extract the
+   handful of claims the *whole design rests on* — the ones that, if false, sink
+   or reshape the approach. Do not try to verify every minor claim; concentrate
+   your effort on the riskiest, most load-bearing ones. Typical shapes: how a
+   tool behaves or what it outputs, an API's existence/shape/requirements, a
+   command's flag or precedence semantics, a file/artifact format, whether a
+   build step works, or a "this won't change existing behavior" claim.
+2. **Verify each with the cheapest *sufficient* method — prefer an actual
+   experiment for anything mechanical.** Reading code tells you what the code
+   *says*; an experiment tells you what actually *happens*. For mechanical
+   claims, run a cheap, scoped experiment in a **temp directory** rather than
+   reasoning from a code-read:
+   - Tool behavior / output shape → invoke the real tool on a throwaway input
+     and inspect its actual output and exit behavior.
+   - Command semantics → run the real command and observe its true
+     flag/precedence/default behavior.
+   - Build / packaging / signing mechanic → build a small throwaway project (or
+     package/sign a throwaway input) in a temp dir and inspect the resulting
+     artifact.
+   - API existence/shape/requirements → prefer authoritative vendor docs; where
+     feasible, a tiny throwaway call.
+   Keep experiments cheap and confined to temp dirs; never touch the repo tree.
+   Reading the repo's own code (`Commands/`, `Services/`, `docs/cli-schema.json`,
+   `AppxManifestDocument`, `scripts/build-cli.ps1`) is still valuable for
+   *repo-internal* behavior — but it is not a substitute for an experiment on an
+   external tool/API/build mechanic.
+3. **Apply the evidence hierarchy.** Rank the evidence behind each verdict, and
+   reach for the strongest feasible level:
+
+   **empirical experiment you ran  >  authoritative vendor docs  >  code-read  >
+   spec assertion (never sufficient on its own).**
+
+4. **Tag each load-bearing claim** as **verified** (evidence confirms it),
+   **refuted** (evidence contradicts it), or **unproven** (you could not close
+   it with the effort available). Cite the evidence: quote the experiment output
+   you saw, the doc, or the `path:line`. An **unproven** load-bearing claim is a
+   finding in its own right — surface it and recommend the specific spike that
+   would close it (the orchestrator routes these into "Must prove before ship").
+
+## Backward-compatibility is a load-bearing assumption
+
+When the spec **modifies existing behavior**, treat any "this won't change
+existing behavior" / "X stays untouched" / "fully backward-compatible" claim as
+a load-bearing assumption and verify it **specifically**, not by trust:
+
+- Find the **exact shared code path / tool / artifact** the change and the
+  existing behavior both go through.
+- Confirm the new path is genuinely **disjoint** from the existing one (or, if
+  shared, that existing callers hit identical behavior).
+- Look for the concrete **regression surface** — the inputs, configs, or
+  callers that could be affected.
+- Where feasible, **prove it empirically**: exercise the existing behavior
+  before and after the proposed mechanic on a throwaway input and confirm it is
+  unchanged. If you cannot, tag the compat claim **unproven** and flag it.
 
 ## What to flag
 
-- **False assumption.** The code/tool/API does not work the way the spec claims.
-  This is the highest-value finding — trace it and cite the real behavior.
-- **Unverified load-bearing assumption.** A claim the whole approach rests on
-  that you could not confirm. Surface it (don't silently drop it) and recommend
-  the specific check or spike that would confirm it.
+- **Refuted assumption.** An experiment, authoritative docs, or the real
+  code/tool/API show it does not work the way the spec claims. This is the
+  highest-value finding — cite the experiment output or behavior you observed.
+- **Unproven load-bearing assumption.** A claim the whole approach rests on that
+  you could not close with the effort available. Surface it (don't silently drop
+  it) and recommend the specific experiment/spike that would close it.
 - **Hand-wavy mechanics.** "We'll just hook into X" where X's real shape makes
   that non-trivial or impossible.
 - **Stale grounding.** The spec describes repo/tool behavior as it *used* to be;
@@ -59,13 +94,17 @@ it confidently.
 
 ## Severity guide for this dimension
 
-- A **false** load-bearing assumption that breaks the proposed approach →
+- A **refuted** load-bearing assumption that breaks the proposed approach →
   critical.
-- An **unverified** assumption the approach depends on, needing a spike before
+- An **unproven** assumption the approach depends on, needing a spike before
   commitment → high (medium if there's a clear fallback).
+- A refuted/unproven **backward-compat** claim (the change may disturb existing
+  behavior) → high, or critical if it would silently break existing users.
 - A secondary assumption that's off but easily worked around → medium.
 - A minor factual imprecision with no design impact → low (often just drop it).
 
-If every load-bearing assumption checks out against reality, say so explicitly in
-the `Bottom line`, list what you verified in `What I checked`, and emit zero
-findings. A verified "the assumptions hold" is a high-value result here.
+If every load-bearing assumption checks out against reality — ideally proven by a
+cheap experiment — say so explicitly in the `Bottom line`, list what you verified
+(and how) in `What I checked`, and emit zero findings. A verified "the
+assumptions hold, and here's the experiment that shows it" is a high-value result
+here.

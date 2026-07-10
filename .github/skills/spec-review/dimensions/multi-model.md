@@ -26,20 +26,38 @@ This is not a rubber stamp. Do your **own** research against reality before you
 look at anyone's conclusions.
 
 1. **Independently research the spec** the way the specialists were asked to:
-   read the real code (`Commands/`, `Services/`, `docs/cli-schema.json`), check
-   real tool/API behavior, and form your own view on the two questions that
-   matter most: *should this be built?* and *do its load-bearing assumptions
-   actually hold?* Do **not** trust the spec's self-description — verify.
+   read the real code (`Commands/`, `Services/`, `docs/cli-schema.json`) **and,
+   for anything mechanical, run your own cheap experiment** — invoke the real
+   tool, build a throwaway project in a temp dir, test the real command behavior
+   — rather than only re-reasoning over the specialists' text. Form your own view
+   on the two questions that matter most: *should this be built?* and *do its
+   load-bearing assumptions actually hold?* Do **not** trust the spec's
+   self-description, and do **not** merely agree or disagree with the other
+   models on paper — check reality yourself.
 2. **Cross-check the other dimensions' key conclusions** (the orchestrator passes
    you the recommendation-affecting findings and the proposed overall
    recommendation). For each, decide: confirmed / disputed / downgrade / upgrade
-   — based on your own research, not deference.
+   — based on your own research (ideally your own experiment), not deference.
 3. **Surface blind spots** the specialists missed — especially a necessity
-   objection or a false assumption that the same-family specialists all glossed
+   objection or a refuted assumption that the same-family specialists all glossed
    over. Emit these as normal finding blocks.
 4. **Give your own overall recommendation** (proceed / proceed-with-changes /
    reconsider) and note where it diverges from the orchestrator's, with the
    research that drove the difference.
+
+## Agreement is the strongest signal; resolve factual splits with evidence
+
+- When your independent research **reaches the same conclusion** as a specialist
+  from a *different* model family, that agreement is the highest-confidence
+  signal in the whole review — say so plainly (the orchestrator tallies
+  "confirmed by N families"). Independent multi-family agreement beats any single
+  model's confidence.
+- When you **disagree with another family on a factual claim** (does the
+  tool/API/build actually behave this way?), do not settle it by preference or by
+  which model is "smarter." Resolve it against an **authoritative source or a
+  quick experiment**, and record the resolution plus the evidence that settled
+  it. A factual dispute closed by an experiment is worth more than three models
+  reasoning in agreement.
 
 ## Output — in addition to standard findings
 
@@ -56,8 +74,11 @@ Then, **for each key conclusion the orchestrator gave you**, emit:
 ```markdown
 ## Cross-check: <original finding id or the conclusion in one line>
 - **Verdict**: confirmed | disputed | downgrade | upgrade
-- **Notes**: <your independent reasoning — cite the real code/tool/API you
-  checked; if disputing, say what the original got wrong>
+- **Method**: experiment | authoritative docs | code-read | reasoning-only
+- **Notes**: <your independent evidence — if you ran an experiment, say what you
+  did and what you observed; otherwise cite the real code/tool/API/docs you
+  checked. If disputing, say what the original got wrong. If you resolved a
+  factual split, record the evidence that settled it.>
 ```
 
 `Verdict` semantics:

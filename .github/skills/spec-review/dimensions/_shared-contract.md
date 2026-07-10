@@ -7,7 +7,11 @@ proposal *before* it is built. Your value comes from **independent research
 against reality** — the actual `microsoft/winappcli` codebase, the Windows SDK
 tools, Windows APIs, the build flow, and the wider ecosystem — **not** from
 restating or trusting the spec's own claims. Verify load-bearing statements
-yourself.
+yourself, and for anything *mechanical* **prefer a cheap experiment over a
+code-read**: invoke the real tool and inspect its output, build a throwaway
+project in a temp directory, or test a command's real behavior. You do not
+implement the feature or touch the repo/spec — but running cheap, scoped
+experiments in temp directories to confirm how things actually work is expected.
 
 ## Header line
 
@@ -45,8 +49,10 @@ about, followed by labeled bullets:
 - **Confidence**: high | medium | low
 - **Domain**: <dimension name>
 - **Finding**: <one-line statement of the concern>
-- **Evidence**: <what your INDEPENDENT research found — cite real files as
-  `path:line`, real tool/API behavior, repo patterns, or ecosystem facts.
+- **Evidence**: <what your INDEPENDENT research found. Prefer an experiment you
+  ran ("invoked <tool> on a throwaway input and its output was …", "built a
+  throwaway project in a temp dir and observed …"); otherwise cite real files as
+  `path:line`, authoritative vendor docs, repo patterns, or ecosystem facts.
   Do NOT cite the spec as evidence for itself.>
 - **Recommendation**: <concrete next step — e.g. descope, stage, use existing
   helper X, prototype Y first, adopt alternative Z, answer question Q>
@@ -56,9 +62,15 @@ Notes:
 
 - The anchor identifies the spec claim/section under review (e.g.
   `§Approach — "shell out to makeappx with --foo"`). Keep it short.
-- **Evidence must come from reality, not the spec.** If you could not verify a
-  claim, that is itself a finding (mark `Confidence: low` or `medium` and say
-  what you could not confirm) — see `feasibility-vs-reality`.
+- **Evidence must come from reality, not the spec**, and for *mechanical* claims
+  (tool output, API/command behavior, file/artifact format, build step) a cheap
+  **experiment you ran** is the strongest evidence — reach for it before a
+  code-read. Evidence hierarchy: **experiment > authoritative vendor docs >
+  code-read > spec assertion (never sufficient alone).** If you could not verify
+  a load-bearing claim, that is itself a finding (mark `Confidence: low` or
+  `medium` and say what you could not confirm) — see `feasibility-vs-reality`.
+- Experiments are expected but must stay **cheap, scoped, and confined to temp
+  directories** — never modify the repo working tree or the spec.
 - Emit discontiguous concerns as separate findings.
 
 ## Open questions
@@ -108,7 +120,7 @@ Specifically, **drop**:
 **Keep**:
 
 - The feature not fitting winapp's mission, or duplicating existing capability.
-- Load-bearing assumptions that are false, unverified, or hand-wavy.
+- Load-bearing assumptions that are refuted, unproven, or hand-wavy.
 - A materially simpler / safer / more idiomatic approach that exists.
 - Real risks: compat/migration breakage, missing edge cases, release blockers.
 - CLI UX / API incoherence users will trip over, or breaking changes.
@@ -137,11 +149,16 @@ not code-level blast radius.
 
 ## Confidence guide
 
-Confidence reflects how well your **independent research** grounds the finding.
+Confidence reflects how well your **independent research** grounds the finding,
+following the evidence hierarchy (**experiment > authoritative docs > code-read >
+spec assertion**).
 
-- **high**: Verified directly against real code, tool/API behavior, or the build
-  — you read it and cite it.
-- **medium**: Partially verified; some inference from repo/ecosystem context.
+- **high**: Proven empirically (you ran an experiment and observed the result) or
+  verified directly against real code / authoritative vendor docs — you can cite
+  exactly what you saw.
+- **medium**: Partially verified; a code-read or docs plus some inference from
+  repo/ecosystem context, without an experiment to close it.
 - **low**: Plausible concern you could not fully confirm. Say what you could not
-  verify. (An unverifiable-but-load-bearing spec assumption is worth surfacing at
-  low/medium confidence rather than dropping.)
+  verify and what experiment would close it. (An unverifiable-but-load-bearing
+  spec assumption is worth surfacing at low/medium confidence rather than
+  dropping.)
