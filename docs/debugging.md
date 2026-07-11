@@ -137,7 +137,7 @@ The triage pass runs in a short-lived child process. This is required: winapp's 
 
 ### VS Code
 
-The [WinApp VS Code extension](https://github.com/microsoft/WinAppCli/blob/main/src/winapp-VSC/README.md) provides a custom **`winapp` debug type** that launches your app with package identity and attaches the debugger — all from a single **F5** press.
+The **[WinApp VS Code extension](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp)** provides a custom **`winapp` debug type** that launches your app with package identity and attaches the debugger — all from a single **F5** press. Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp); its source and issue tracker live in the [microsoft/WinAppVSCE](https://github.com/microsoft/WinAppVSCE) repository.
 
 #### One-press F5 debugging with identity
 
