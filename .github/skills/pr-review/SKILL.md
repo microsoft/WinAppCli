@@ -110,7 +110,6 @@ buckets in this repo:
 | `src/winapp-CLI/WinApp.Cli.Tests/` | test-coverage |
 | `src/winapp-npm/` | packaging, CLI UX (npm wrapper) |
 | `src/winapp-NuGet/` | packaging |
-| `src/winapp-VSC/` | packaging, CLI UX |
 | `docs/`, `README.md`, `samples/` | docs-and-samples |
 | `docs/fragments/skills/`, `.github/plugin/` | docs-and-samples (shipped Copilot plugin) |
 | `scripts/` | packaging |

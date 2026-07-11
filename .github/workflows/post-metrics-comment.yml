@@ -89,7 +89,6 @@ jobs:
               'npm-package',
               'msix-x64', 'msix-arm64',
               'nuget-package',
-              'vscode-extension',
             ]);
             const labels = {
               'cli-win-x64': 'CLI (x64)',
@@ -98,7 +97,6 @@ jobs:
               'msix-x64': 'MSIX (x64)',
               'msix-arm64': 'MSIX (ARM64)',
               'nuget-package': 'NuGet Package',
-              'vscode-extension': 'VS Code Extension',
             };
 
             // safeNum: coerce to a finite non-negative number or 0
@@ -195,7 +193,6 @@ jobs:
                 'msix-x64': 'msix-packages',
                 'msix-arm64': 'msix-packages',
                 'nuget-package': 'nuget-packages',
-                'vscode-extension': 'vscode-extension',
               };
               const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${sourceRunId}`;
               for (const [sizeKey, artifactName] of Object.entries(artifactNameMap)) {
