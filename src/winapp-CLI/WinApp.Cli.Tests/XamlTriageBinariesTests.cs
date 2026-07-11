@@ -209,16 +209,37 @@ public class XamlTriageBinariesTests
     }
 
     [TestMethod]
-    public void PinnedJsProviderProductVersion_MatchesEngineDrift_Guard()
+    public void PinnedJsProviderProductVersion_MatchesRestoredEngineBuild()
     {
         // Drift guard mirroring the .nupkg SHA-512 pins: the JsProvider bundle build MUST equal the
-        // engine build shipped by the pinned Microsoft.Debugging.Platform.DbgEng NuGet package. If the
-        // engine package version is bumped, PinnedBundleUrl + PinnedJsProviderProductVersion must be
-        // bumped in lockstep, or the runtime compat gate will fail-close and triage will be skipped.
-        // Expected engine build for DbgPackageVersion 20260319.1511.0.
-        const string expectedEngineBuild = "10.0.29547.1002";
-        Assert.AreEqual(Version.Parse(expectedEngineBuild), Version.Parse(WinDbgJsProviderAcquirer.PinnedJsProviderProductVersion),
-            "JsProvider bundle build drifted from the pinned engine build; update PinnedBundleUrl to a WinDbg bundle whose JsProvider matches the engine, and this constant.");
+        // engine build shipped by the pinned Microsoft.Debugging.Platform.DbgEng NuGet package —
+        // loading a mismatched provider crashes the triage child with STATUS_BREAKPOINT, and the
+        // runtime compat gate then fail-closes triage. Rather than compare two hand-maintained
+        // constants (which wouldn't notice a DbgPackageVersion bump that ships a new engine build),
+        // read the *actual* dbgeng.dll product version from the restored package so a bump that forgets
+        // to re-pin PinnedBundleUrl + PinnedJsProviderProductVersion is caught here. The package is a
+        // restore-only PackageReference, so its content is in the NuGet global cache on a build/CI
+        // machine; if it can't be located (restored elsewhere), the assertion is inconclusive.
+        var cache = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (string.IsNullOrEmpty(cache))
+        {
+            cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        }
+
+        var dbgeng = Path.Combine(
+            cache, "microsoft.debugging.platform.dbgeng", XamlTriageBinaries.DbgPackageVersion,
+            "content", XamlTriageBinaries.NuGetArch, "dbgeng.dll");
+        if (!File.Exists(dbgeng))
+        {
+            Assert.Inconclusive($"Restored DbgEng package not found in NuGet cache: {dbgeng}");
+        }
+
+        var engineBuild = System.Diagnostics.FileVersionInfo.GetVersionInfo(dbgeng).ProductVersion;
+        Assert.IsTrue(
+            XamlTriageBinaries.VersionsMatch(engineBuild, WinDbgJsProviderAcquirer.PinnedJsProviderProductVersion),
+            $"JsProvider bundle build drifted from the engine: dbgeng.dll (pinned DbgEng {XamlTriageBinaries.DbgPackageVersion}) " +
+            $"reports {engineBuild ?? "<unreadable>"}, but PinnedJsProviderProductVersion is {WinDbgJsProviderAcquirer.PinnedJsProviderProductVersion}. " +
+            "Update PinnedBundleUrl to a WinDbg bundle whose JsProvider matches the engine, and update PinnedJsProviderProductVersion.");
     }
 
     [TestMethod]
