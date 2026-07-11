@@ -11,14 +11,18 @@ namespace WinApp.Cli.Tests;
 internal class FakeCrashDumpService : ICrashDumpService
 {
     public List<(uint ProcessId, uint ThreadId)> WriteCalls { get; } = [];
+    public List<(int Code, nuint Address, nuint[]? Parameters)> CrashRecords { get; } = [];
     public string? FakeDumpPath { get; set; }
     public List<string> AnalyzeCalls { get; } = [];
 
     public string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
-        int savedExceptionCode, nuint savedExceptionAddress)
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode = 0, nuint crashExceptionAddress = 0,
+        nuint[]? crashExceptionParameters = null)
     {
         WriteCalls.Add((processId, savedThreadId));
+        CrashRecords.Add((crashExceptionCode, crashExceptionAddress, crashExceptionParameters));
         return FakeDumpPath;
     }
 

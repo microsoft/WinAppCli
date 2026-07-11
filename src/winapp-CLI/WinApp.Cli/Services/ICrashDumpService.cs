@@ -19,10 +19,24 @@ internal interface ICrashDumpService
     /// <param name="savedThreadId">Thread ID from the first-chance exception.</param>
     /// <param name="savedExceptionCode">Exception code from the first-chance exception.</param>
     /// <param name="savedExceptionAddress">Exception address from the first-chance exception.</param>
+    /// <param name="crashExceptionCode">
+    /// Exception code of the terminating (second-chance) exception, or 0. When this is a stowed
+    /// exception (<c>0xC000027B</c>) and <paramref name="crashExceptionParameters"/> are supplied,
+    /// the dump's exception record carries those parameters so WinUI stowed-exception triage
+    /// (<c>!xamlstowed</c>) can locate the stowed-exception array, while the first-chance context is
+    /// still used for the thread so ClrMD recovers the original managed user frames.
+    /// </param>
+    /// <param name="crashExceptionAddress">Address of the terminating (second-chance) exception, or 0.</param>
+    /// <param name="crashExceptionParameters">
+    /// The terminating exception's parameters (<c>EXCEPTION_RECORD.ExceptionInformation</c>); for a
+    /// stowed exception, element 0 is the stowed-exception array pointer and element 1 is the count.
+    /// </param>
     /// <returns>The full path to the dump file, or <c>null</c> if the dump failed.</returns>
     string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
-        int savedExceptionCode, nuint savedExceptionAddress);
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode = 0, nuint crashExceptionAddress = 0,
+        nuint[]? crashExceptionParameters = null);
 
     /// <summary>
     /// Analyzes a minidump and prints a crash summary to the console.
