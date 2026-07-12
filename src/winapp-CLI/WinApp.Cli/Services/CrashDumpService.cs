@@ -25,14 +25,16 @@ namespace WinApp.Cli.Services;
 /// Writes minidumps for crashed processes and analyzes them using ClrMD
 /// to produce human-readable crash reports with managed exception details and stack traces.
 /// </summary>
-internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpService> logger) : ICrashDumpService
+internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpService> logger, IXamlTriageService xamlTriageService) : ICrashDumpService
 {
     private static readonly string DumpDirectory = Path.Combine(Path.GetTempPath(), "winapp-dumps");
 
     /// <inheritdoc/>
     public unsafe string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
-        int savedExceptionCode, nuint savedExceptionAddress)
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode = 0, nuint crashExceptionAddress = 0,
+        nuint[]? crashExceptionParameters = null)
     {
         try
         {
@@ -62,15 +64,21 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
             if (savedContext != null)
             {
-                logger.LogDebug("Writing dump with saved first-chance context ({Bytes} bytes, thread {ThreadId}, code 0x{Code:X8}).",
-                    savedContext.Length, savedThreadId, savedExceptionCode);
+                // Prefer the terminating stowed exception (0xC000027B) for the dump's exception
+                // record: its parameters point at the stowed-exception array that WinUI triage
+                // (!xamlstowed) reads via $exr_param0/$exr_param1. The thread CONTEXT, however,
+                // stays the first-chance one — it points to the user code that originally threw,
+                // before XAML's error handling replaced the stack with FailFastWithStowedExceptions,
+                // so ClrMD still recovers the managed user frames.
+                var (recordCode, recordAddress, useStowedRecord) = SelectExceptionRecord(
+                    savedExceptionCode, savedExceptionAddress,
+                    crashExceptionCode, crashExceptionAddress, crashExceptionParameters);
 
-                // Use the first-chance context — it points to the user code that
-                // originally caused the exception, before XAML's error handling
-                // replaced the stack with FailFastWithStowedExceptions.
-                // CONTEXT must be 16-byte aligned on x64/ARM64. The saved byte[]
-                // from a managed array doesn't guarantee this, so copy into an
-                // aligned native buffer.
+                logger.LogDebug("Writing dump (thread {ThreadId}); exception record code 0x{Code:X8}{Stowed}.",
+                    savedThreadId, recordCode, useStowedRecord ? " (stowed, with parameters)" : string.Empty);
+
+                // CONTEXT must be 16-byte aligned on x64/ARM64. The saved byte[] from a managed
+                // array doesn't guarantee this, so copy into an aligned native buffer.
                 var pContext = (CONTEXT*)NativeMemory.AlignedAlloc((nuint)savedContext.Length, 16);
                 try
                 {
@@ -81,10 +89,23 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
                     var exRecord = new EXCEPTION_RECORD
                     {
-                        ExceptionCode = new NTSTATUS(savedExceptionCode),
-                        ExceptionAddress = (void*)savedExceptionAddress,
+                        ExceptionCode = new NTSTATUS(recordCode),
+                        ExceptionAddress = (void*)recordAddress,
                         ExceptionRecord = null,
                     };
+
+                    if (useStowedRecord)
+                    {
+                        // Copy the stowed exception parameters (array pointer + count) so the dump's
+                        // exception record mirrors the live RaiseException for 0xC000027B.
+                        var n = Math.Min(crashExceptionParameters!.Length, exRecord.ExceptionInformation.Length);
+                        var slot = exRecord.ExceptionInformation.AsSpan();
+                        for (var i = 0; i < n; i++)
+                        {
+                            slot[i] = crashExceptionParameters[i];
+                        }
+                        exRecord.NumberParameters = (uint)n;
+                    }
 
                     var exPtrs = new EXCEPTION_POINTERS
                     {
@@ -142,6 +163,24 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
     }
 
+    /// <summary>
+    /// Chooses which exception the dump's exception record should describe. A terminating stowed
+    /// exception (<c>0xC000027B</c>) carrying parameters is preferred so WinUI triage can locate the
+    /// stowed-exception array; otherwise the first-chance exception is used. The thread CONTEXT is
+    /// always the first-chance one (handled by the caller) so ClrMD still recovers user frames.
+    /// Exposed internally for testing the selection logic without writing a real dump.
+    /// </summary>
+    internal static (int Code, nuint Address, bool UseStowed) SelectExceptionRecord(
+        int savedExceptionCode, nuint savedExceptionAddress,
+        int crashExceptionCode, nuint crashExceptionAddress, nuint[]? crashExceptionParameters)
+    {
+        const int statusStowedException = unchecked((int)0xC000027B);
+        var useStowed = crashExceptionCode == statusStowedException && crashExceptionParameters is { Length: > 0 };
+        return useStowed
+            ? (crashExceptionCode, crashExceptionAddress, true)
+            : (savedExceptionCode, savedExceptionAddress, false);
+    }
+
     /// <inheritdoc/>
     public async Task AnalyzeDumpAsync(string dumpPath, string logPath, bool useSymbols = false, IReadOnlyList<string>? symbolSearchPaths = null)
     {
@@ -149,15 +188,41 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
         try
         {
-            var (summary, details) = await Task.Run(() => AnalyzeWithClrMD(dumpPath, symbolSearchPaths));
+            var (summary, details, isWinUi) = await Task.Run(() => AnalyzeWithClrMD(dumpPath, symbolSearchPaths));
+
+            // WinUI triage pass — auto-enabled when Microsoft.UI.Xaml.dll is in the dump's
+            // module list. Recovers the stowed exception (0xC000027B) and the XAML dispatch
+            // chain that the ClrMD/DbgEng passes alone cannot surface.
+            string? xamlTriage = null;
+            XamlTriageResult? xamlTriageResult = null;
+            if (isWinUi)
+            {
+                console.MarkupLine(useSymbols
+                    ? "[dim]Running WinUI stowed-exception triage (first run may download debugger components and symbols; this can take a few minutes)...[/]"
+                    : "[dim]Running WinUI stowed-exception triage (first run may download debugger components)...[/]");
+                xamlTriageResult = await RunXamlTriageGuardedAsync(dumpPath, useSymbols);
+                xamlTriage = xamlTriageResult.LogText;
+            }
 
             // ClrMD found managed exception — no need for native fallback
             if (!string.IsNullOrWhiteSpace(summary))
             {
+                var managedLog = new StringBuilder();
                 if (!string.IsNullOrWhiteSpace(details))
                 {
+                    managedLog.AppendLine(details);
+                }
+
+                if (!string.IsNullOrWhiteSpace(xamlTriage))
+                {
+                    managedLog.AppendLine();
+                    managedLog.AppendLine(xamlTriage);
+                }
+
+                if (managedLog.Length > 0)
+                {
                     await File.AppendAllTextAsync(logPath,
-                        $"\n\n=== Crash Analysis ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===\n{details}\n");
+                        $"\n\n=== Crash Analysis ({DateTime.Now:yyyy-MM-dd HH:mm:ss}) ===\n{managedLog}\n");
                 }
 
                 console.WriteLine();
@@ -166,6 +231,8 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 console.MarkupLine("[red][[CRASH ANALYSIS]][/]");
                 console.WriteLine(summary);
                 console.MarkupLine("[red]=====================================[/]");
+                WriteXamlTriageConsole(xamlTriageResult);
+
                 console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
                 console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
                 return;
@@ -190,6 +257,12 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 allDetails.AppendLine(nativeDetails);
             }
 
+            if (!string.IsNullOrWhiteSpace(xamlTriage))
+            {
+                allDetails.AppendLine();
+                allDetails.AppendLine(xamlTriage);
+            }
+
             if (allDetails.Length > 0)
             {
                 await File.AppendAllTextAsync(logPath,
@@ -207,6 +280,8 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 console.MarkupLine("[red]=====================================[/]");
             }
 
+            WriteXamlTriageConsole(xamlTriageResult);
+
             console.MarkupLine($"[dim]Crash dump:[/] {dumpPath.EscapeMarkup()}");
             console.MarkupLine($"[dim]Full debug log:[/] {logPath.EscapeMarkup()}");
             if (!useSymbols && !string.IsNullOrWhiteSpace(nativeSummary))
@@ -223,9 +298,67 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
     }
 
-    private (string Summary, string Details) AnalyzeWithClrMD(string dumpPath, IReadOnlyList<string>? symbolSearchPaths)
+    /// <summary>
+    /// Invokes the WinUI triage service, guaranteeing the crash-analysis flow is never derailed by a
+    /// triage failure. <see cref="IXamlTriageService.TryAnalyzeAsync"/> is contracted to fail open, but
+    /// this local guard is defense-in-depth: any escaping exception (e.g. an internal <c>HttpClient</c>
+    /// timeout surfacing as <see cref="OperationCanceledException"/> on a slow first-run download) is
+    /// logged and swallowed so the already-computed managed/native crash stack is still emitted rather
+    /// than discarded by the outer handler as "Analysis failed."
+    /// </summary>
+    internal async Task<XamlTriageResult> RunXamlTriageGuardedAsync(string dumpPath, bool useSymbols)
+    {
+        try
+        {
+            return await xamlTriageService.TryAnalyzeAsync(dumpPath, useSymbols);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "WinUI triage pass failed; continuing with the standard crash analysis.");
+            return XamlTriageResult.None;
+        }
+    }
+
+    /// <summary>
+    /// Surfaces an accurate WinUI-triage line in the console based on the outcome: the headline verdict
+    /// (or a "written to the debug log" pointer) on success, a distinct "skipped" note when tooling was
+    /// unavailable, and nothing when triage was not applicable. Avoids the previous behavior of always
+    /// claiming triage was written to the log even when it was skipped.
+    /// </summary>
+    private void WriteXamlTriageConsole(XamlTriageResult? result)
+    {
+        if (result == null)
+        {
+            return;
+        }
+
+        switch (result.Outcome)
+        {
+            case XamlTriageOutcome.Succeeded:
+                if (!string.IsNullOrWhiteSpace(result.Verdict))
+                {
+                    console.MarkupLine($"[yellow]WinUI stowed exception:[/] {result.Verdict.EscapeMarkup()}");
+                }
+
+                console.MarkupLine("[dim]WinUI stowed-exception triage written to the debug log.[/]");
+                break;
+            case XamlTriageOutcome.Skipped:
+                console.MarkupLine("[dim]WinUI stowed-exception triage was skipped (see the debug log for details).[/]");
+                break;
+            case XamlTriageOutcome.None:
+            default:
+                break;
+        }
+    }
+
+    private (string Summary, string Details, bool IsWinUi) AnalyzeWithClrMD(string dumpPath, IReadOnlyList<string>? symbolSearchPaths)
     {
         using var dt = DataTarget.LoadDump(dumpPath);
+
+        // Detect WinUI so the triage pass can be auto-enabled. Only meaningful when the dump
+        // matches the host architecture (the triage engine/extension are host-arch native).
+        var archMatches = dt.DataReader.Architecture == RuntimeInformation.ProcessArchitecture;
+        var isWinUi = archMatches && DumpHasWinUiModule(dt);
 
         // Cross-architecture analysis is not supported (e.g., ARM64 winapp analyzing x64 dump).
         // ClrMD requires a matching-architecture DAC DLL that cannot be loaded cross-arch.
@@ -235,12 +368,13 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 $"Cross-architecture crash dump (target: {dt.DataReader.Architecture}, host: {RuntimeInformation.ProcessArchitecture}).\n" +
                 "Automatic analysis is not supported for cross-architecture dumps.\n" +
                 "Open the dump in WinDbg for full analysis.",
-                $"Skipped analysis: dump architecture ({dt.DataReader.Architecture}) does not match host ({RuntimeInformation.ProcessArchitecture}).");
+                $"Skipped analysis: dump architecture ({dt.DataReader.Architecture}) does not match host ({RuntimeInformation.ProcessArchitecture}).",
+                isWinUi);
         }
 
         if (dt.ClrVersions.Length == 0)
         {
-            return (string.Empty, "No CLR runtime found in dump (native-only crash).");
+            return (string.Empty, "No CLR runtime found in dump (native-only crash).", isWinUi);
         }
 
         ClrRuntime runtime;
@@ -257,7 +391,8 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 $"the host architecture ({RuntimeInformation.ProcessArchitecture}).\n" +
                 "This typically happens when debugging an x64 app under ARM64 emulation.\n" +
                 "Open the dump in WinDbg for full analysis.",
-                $"ClrMD DAC load failed: {ex.Message}");
+                $"ClrMD DAC load failed: {ex.Message}",
+                isWinUi);
         }
 
         using var _ = runtime;
@@ -411,7 +546,32 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             }
         }
 
-        return (summary.ToString().Trim(), details.ToString().Trim());
+        return (summary.ToString().Trim(), details.ToString().Trim(), isWinUi);
+    }
+
+    /// <summary>
+    /// Returns true when the dump's loaded module list contains Microsoft.UI.Xaml.dll,
+    /// indicating a WinUI (Windows App SDK) app whose crashes benefit from the triage pass.
+    /// </summary>
+    private static bool DumpHasWinUiModule(DataTarget dt)
+    {
+        try
+        {
+            foreach (var module in dt.EnumerateModules())
+            {
+                var fileName = Path.GetFileName(module.FileName);
+                if (string.Equals(fileName, "Microsoft.UI.Xaml.dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Module enumeration is best-effort; absence simply disables the triage pass.
+        }
+
+        return false;
     }
 
     private static void FormatException(ClrException ex, StringBuilder summary, StringBuilder details, PdbSourceResolver pdbResolver)
