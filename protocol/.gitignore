@@ -1,0 +1,6 @@
+# Build output
+**/bin/
+**/obj/
+
+# Generated facades — reproducible from wdxp.v0.json via `dotnet run --project gen`
+gen/out/

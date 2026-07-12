@@ -1,0 +1,41 @@
+{
+  "scenario": "02-read-floor",
+  "summary": "The guaranteed read floor on the attached SmokeFixture: search by x:Name, enumerate, read a property with value-source precedence, resolve source (confidence-graded). Values mirror the census: authored elements resolve to ms-appx URIs with exact line info; a runtime-only element degrades honestly to kind=runtime-only with the anchor as the never-wrong fallback.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "10", "method": "VisualTree.search", "params": { "name": "Title" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "10",
+      "result": { "matches": [ { "handle": 42, "generation": 1 } ] } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "11", "method": "VisualTree.enumerate",
+      "params": { "node": { "handle": 42, "generation": 1 }, "depth": 1 } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "11",
+      "result": {
+        "root": [ { "node": { "handle": 42, "generation": 1 }, "type": "TextBlock", "name": "Title", "childCount": 0 } ],
+        "nodes": [] } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "12", "method": "Property.get",
+      "params": { "node": { "handle": 42, "generation": 1 }, "names": ["Opacity", "Text"] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "12",
+      "result": { "properties": [
+        { "name": "Opacity", "value": "1", "valueType": "Double", "source": "default", "isDefault": true },
+        { "name": "Text", "value": "Smoke", "valueType": "String", "source": "local", "isDefault": false }
+      ] } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "13", "method": "Source.resolve",
+      "params": { "node": { "handle": 42, "generation": 1 } } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "13",
+      "result": { "resolution": {
+        "kind": "source-backed", "confidence": "exact",
+        "span": { "uri": "ms-appx:///SmokePage.xaml", "line": 13, "column": 10, "lineInfo": true },
+        "anchor": { "name": "Title", "treePath": "Page/Grid/StackPanel[0]/TextBlock[0]", "propertySignature": "Text" }
+      } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "14", "method": "Source.resolve",
+      "params": { "node": { "handle": 77, "generation": 1 } } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "14",
+      "result": { "resolution": {
+        "kind": "runtime-only", "confidence": "none",
+        "anchor": { "treePath": "Page/Grid/Border[2]" }
+      } } } }
+  ]
+}

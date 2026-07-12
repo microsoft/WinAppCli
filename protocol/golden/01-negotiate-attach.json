@@ -1,0 +1,39 @@
+{
+  "scenario": "01-negotiate-attach",
+  "summary": "Session bring-up: negotiate capabilities, list targets, attach to one (session = connection), receive the attached event. Exercises the WDXP + Target domains and the loud-fail-before-unsafe-attach contract.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "1", "method": "WDXP.negotiate",
+      "params": { "client": "winapp-vsc/1.2.0",
+        "capabilities": [
+          { "name": "target", "version": "0.1.0", "stability": "stable" },
+          { "name": "visualtree", "version": "0.1.0", "stability": "stable" },
+          { "name": "property", "version": "0.1.0", "stability": "stable" },
+          { "name": "source", "version": "0.1.0", "stability": "stable" }
+        ] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "1",
+      "result": { "protocolVersion": "0.1.0",
+        "agreed": [
+          { "name": "target", "version": "0.1.0", "stability": "stable" },
+          { "name": "visualtree", "version": "0.1.0", "stability": "stable" },
+          { "name": "property", "version": "0.1.0", "stability": "stable" },
+          { "name": "source", "version": "0.1.0", "stability": "stable" }
+        ] } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "2", "method": "Target.list", "params": {} } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "2",
+      "result": { "targets": [
+        { "targetId": "t-8123", "pid": 8123, "title": "SmokeFixture", "rootCount": 1, "protocolVersion": "0.1.0",
+          "package": { "packaged": false, "path": "C:\\...\\SmokeFixture.exe" } }
+      ] } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "3", "method": "Target.attach",
+      "params": { "targetId": "t-8123", "requiredCapabilities": ["visualtree", "property"] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "3",
+      "result": { "sessionId": "s-1", "granted": ["target", "visualtree", "property", "source"],
+        "affinity": { "threadId": 4460 } } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "Target.attached",
+      "params": { "target": { "targetId": "t-8123", "pid": 8123, "title": "SmokeFixture", "rootCount": 1,
+        "protocolVersion": "0.1.0", "package": { "packaged": false } } } } }
+  ]
+}

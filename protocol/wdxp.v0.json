@@ -1,0 +1,463 @@
+{
+  "$schema": "./wdxp.schema.json",
+  "protocol": "wdxp",
+  "title": "WinUI Runtime DevTools Protocol",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "summary": "Canonical, CDP-shaped source of truth for the WinUI design-time engine. Hand-authored (DAP-style); the CLI command-graph and docs facades are generated from this file. Grounded in the proven substrate: the proven transport (newline JSON-RPC 2.0 + server notifications) is the envelope; the proof-of-concept's live ops (findname/children/getchild/setprop/census) are the first VisualTree/Property/Source methods.",
+  "framing": {
+    "transport": "named-pipe",
+    "pipeNameTemplate": "wdxp-<targetPid>",
+    "security": "CurrentUserOnly",
+    "rpc": "json-rpc-2.0",
+    "delimiter": "newline",
+    "sessionModel": "session-equals-connection",
+    "negotiationMethod": "WDXP.negotiate",
+    "cancellationMethod": "WDXP.cancel",
+    "reference": "See envelope.md for the normative framing spec."
+  },
+  "errorCodes": [
+    { "code": -32700, "name": "ParseError", "category": "jsonrpc", "recoverable": false, "summary": "Invalid JSON was received." },
+    { "code": -32600, "name": "InvalidRequest", "category": "jsonrpc", "recoverable": false, "summary": "The JSON sent is not a valid Request object." },
+    { "code": -32601, "name": "MethodNotFound", "category": "jsonrpc", "recoverable": false, "summary": "The method does not exist / is not available." },
+    { "code": -32602, "name": "InvalidParams", "category": "jsonrpc", "recoverable": false, "summary": "Invalid method parameters." },
+    { "code": -32603, "name": "InternalError", "category": "jsonrpc", "recoverable": false, "summary": "Internal JSON-RPC error." },
+    { "code": -32000, "name": "TargetLost", "category": "target", "recoverable": false, "summary": "The attached app exited or its dispatcher is gone. Re-attach." },
+    { "code": -32001, "name": "StaleHandle", "category": "visualtree", "recoverable": true, "summary": "Node handle generation mismatch. Re-enumerate to refresh handles." },
+    { "code": -32002, "name": "NotOnDispatcher", "category": "engine", "recoverable": true, "summary": "A mutation was routed off the UI DispatcherQueue (RPC_E_WRONG_THREAD analog). The engine must marshal; clients should never see this." },
+    { "code": -32003, "name": "CapabilityUnsupported", "category": "core", "recoverable": true, "summary": "The requested capability/version was not negotiated. Negotiation returns this cleanly; never crash." },
+    { "code": -32004, "name": "Unauthorized", "category": "security", "recoverable": true, "summary": "The session lacks a grant for this command family or the token expired." },
+    { "code": -32005, "name": "RefusedUnsafe", "category": "hotreload", "recoverable": true, "summary": "The engine classified the edit as unsafe to apply in place and refused rather than risk corruption." },
+    { "code": -32006, "name": "UnreachableGate", "category": "hotreload", "recoverable": true, "summary": "A required apply gate (e.g. render verification) could not be reached." },
+    { "code": -32007, "name": "SourceUnavailable", "category": "source", "recoverable": true, "summary": "No source provenance for this element (runtime-only, or spans stripped). Not an error condition to fear \u2014 use the anchor." },
+    { "code": -32008, "name": "Cancelled", "category": "core", "recoverable": true, "summary": "The request was cancelled via WDXP.cancel." }
+  ],
+  "types": [
+    { "id": "Confidence", "kind": "enum", "values": ["exact", "high", "low", "none"], "summary": "Grades any best-effort resolution (source spans, identity, diagnostics). Ordered strongest\u2192weakest." },
+    { "id": "Outcome", "kind": "enum", "values": ["applied", "applied-inert", "reloaded", "needs-restart"], "summary": "The four-outcome classifier every mutating result reports. Honesty invariant: never report a stronger outcome than actually achieved." },
+    { "id": "RiskTier", "kind": "enum", "values": ["read", "mutate-ephemeral", "structural", "persist", "privileged"], "summary": "Command risk tier. Drives consent, audit, and grant policy (Security domain). Every command declares one." }
+  ],
+  "riskTiers": [
+    { "tier": "read", "level": 0, "consent": "session-grant", "summary": "No app-visible mutation: enumerations, reads, subscriptions, resolution." },
+    { "tier": "mutate-ephemeral", "level": 1, "consent": "session-grant", "summary": "Live runtime override that is NOT persisted (a set-property preview)." },
+    { "tier": "structural", "level": 2, "consent": "session-grant", "summary": "Adds/removes/moves live elements or commits a runtime transaction." },
+    { "tier": "persist", "level": 3, "consent": "explicit", "summary": "Writes back to source on disk." },
+    { "tier": "privileged", "level": 4, "consent": "explicit", "summary": "Auth, grants, or target-allowlist changes." }
+  ],
+  "domains": [
+    {
+      "domain": "WDXP",
+      "capability": "core",
+      "stability": "stable",
+      "summary": "Protocol built-ins present on every session before any capability is negotiated.",
+      "types": [
+        { "id": "Capability", "kind": "object", "summary": "A negotiable capability and the version the peer offers.", "properties": [
+          { "name": "name", "type": "string", "summary": "Capability id, e.g. 'visualtree'." },
+          { "name": "version", "type": "string", "summary": "SemVer of the capability contract." },
+          { "name": "stability", "type": "string", "summary": "stable | experimental." }
+        ]}
+      ],
+      "commands": [
+        { "name": "negotiate", "risk": "read", "stability": "stable", "summary": "Exchange supported capabilities/versions. Session = connection; call this first. Unknown capabilities return CapabilityUnsupported, never a crash.",
+          "parameters": [
+            { "name": "client", "type": "string", "summary": "Client identity string (host id), e.g. 'winapp-vsc/1.2.0'." },
+            { "name": "capabilities", "$ref": "Capability", "array": true, "summary": "Capabilities the client wants, with the max version it understands." }
+          ],
+          "returns": [
+            { "name": "agreed", "$ref": "Capability", "array": true, "summary": "The intersection the engine will honor for this session." },
+            { "name": "protocolVersion", "type": "string", "summary": "Engine protocol version (this file's version)." }
+          ]
+        },
+        { "name": "cancel", "risk": "read", "stability": "stable", "summary": "Request cancellation of an in-flight request by its JSON-RPC id. Best-effort; long reads and applies honor it at safe points.",
+          "parameters": [ { "name": "id", "type": "string", "summary": "The JSON-RPC id of the request to cancel." } ],
+          "returns": [ { "name": "cancelled", "type": "boolean", "summary": "True if a matching in-flight request was found and signaled." } ]
+        }
+      ],
+      "events": [
+        { "name": "sessionClosing", "summary": "The engine is tearing the session down (target lost or shutdown). Clients should stop issuing commands.",
+          "parameters": [ { "name": "reason", "type": "string", "summary": "target-lost | shutdown | unauthorized." } ] }
+      ]
+    },
+    {
+      "domain": "Target",
+      "capability": "target",
+      "stability": "stable",
+      "summary": "Discover, attach to, and track the lifecycle of a running WinUI app (target). Session = connection; attach binds this connection to one target.",
+      "types": [
+        { "id": "TargetId", "kind": "primitive", "type": "string", "summary": "Opaque, stable-for-process target id." },
+        { "id": "PackageIdentity", "kind": "object", "summary": "Packaged vs unpackaged identity of a target.", "properties": [
+          { "name": "packaged", "type": "boolean", "summary": "True if MSIX-packaged." },
+          { "name": "aumid", "type": "string", "optional": true, "summary": "Application User Model ID (packaged only)." },
+          { "name": "familyName", "type": "string", "optional": true, "summary": "Package family name (packaged only)." },
+          { "name": "path", "type": "string", "optional": true, "summary": "Executable path (unpackaged) or install path." }
+        ]},
+        { "id": "DispatcherAffinity", "kind": "object", "summary": "The UI thread / DispatcherQueue all mutations MUST marshal to (threading contract). Reads may run off-thread; mutations may not.", "properties": [
+          { "name": "threadId", "type": "integer", "summary": "OS thread id of the UI thread." },
+          { "name": "queueId", "type": "string", "optional": true, "summary": "Opaque DispatcherQueue id when multiple roots exist." }
+        ]},
+        { "id": "Target", "kind": "object", "summary": "A discovered or attached target.", "properties": [
+          { "name": "targetId", "$ref": "TargetId" },
+          { "name": "pid", "type": "integer", "summary": "OS process id." },
+          { "name": "title", "type": "string", "summary": "Best-effort window/app title." },
+          { "name": "package", "$ref": "PackageIdentity" },
+          { "name": "rootCount", "type": "integer", "summary": "Number of XamlRoots/windows." },
+          { "name": "protocolVersion", "type": "string", "summary": "wdxp version the in-app engine speaks." }
+        ]},
+        { "id": "LostReason", "kind": "enum", "values": ["closed", "crashed", "detached", "timeout"], "summary": "Why a target went away." }
+      ],
+      "commands": [
+        { "name": "list", "risk": "read", "stability": "stable", "summary": "Enumerate attachable WinUI targets on this machine for the current user.",
+          "parameters": [],
+          "returns": [ { "name": "targets", "$ref": "Target", "array": true } ]
+        },
+        { "name": "attach", "risk": "read", "stability": "stable", "summary": "Bind this connection to a target and negotiate capabilities against it. Loud-fail before an unsafe attach: version mismatch or a missing required runtime component returns an error, never a partial attach.",
+          "parameters": [
+            { "name": "targetId", "$ref": "TargetId" },
+            { "name": "requiredCapabilities", "type": "string", "array": true, "optional": true, "summary": "Capabilities the client cannot proceed without; attach fails loudly if unavailable." }
+          ],
+          "returns": [
+            { "name": "sessionId", "type": "string", "summary": "Session handle (also = this connection)." },
+            { "name": "granted", "type": "string", "array": true, "summary": "Capability families granted for this session." },
+            { "name": "affinity", "$ref": "DispatcherAffinity" }
+          ]
+        },
+        { "name": "detach", "risk": "read", "stability": "stable", "summary": "Release the target without closing the app.", "parameters": [], "returns": [] },
+        { "name": "reconnect", "risk": "read", "stability": "stable", "summary": "Re-bind after a transport blip; preserves session identity if the target still lives.",
+          "parameters": [ { "name": "sessionId", "type": "string" } ],
+          "returns": [ { "name": "target", "$ref": "Target" } ]
+        }
+      ],
+      "events": [
+        { "name": "attached", "summary": "Emitted when an attach succeeds.", "parameters": [ { "name": "target", "$ref": "Target" } ] },
+        { "name": "targetLost", "summary": "The attached target went away; the session is dead.", "parameters": [
+          { "name": "targetId", "$ref": "TargetId" },
+          { "name": "reason", "$ref": "LostReason" }
+        ]}
+      ]
+    },
+    {
+      "domain": "VisualTree",
+      "capability": "visualtree",
+      "stability": "stable",
+      "summary": "The guaranteed read floor: enumerate/search/subscribe the live XAML visual tree. Config-independent and proven (maps to TAP findname/children/getchild). This is 'XAML sight day one.'",
+      "types": [
+        { "id": "NodeHandle", "kind": "object", "summary": "A live element reference. The generation guards against stale handles across tree mutations.", "properties": [
+          { "name": "handle", "type": "integer", "summary": "Opaque element handle (uint64 rendered as JSON number/string per envelope)." },
+          { "name": "generation", "type": "integer", "summary": "Increments when the handle is invalidated; a mismatch yields StaleHandle." }
+        ]},
+        { "id": "IncompletenessReason", "kind": "enum", "values": ["popup-detached", "flyout-detached", "virtualized-unrealized", "template-subtree", "collection-handle-quirk"], "summary": "Honest incompleteness (REQ-A1): why an enumeration cannot fully see a subtree. Reported, never silently dropped." },
+        { "id": "Node", "kind": "object", "summary": "One node in the visual tree.", "properties": [
+          { "name": "node", "$ref": "NodeHandle" },
+          { "name": "type", "type": "string", "summary": "The XAML runtime type name." },
+          { "name": "name", "type": "string", "optional": true, "summary": "x:Name, when present." },
+          { "name": "childCount", "type": "integer" },
+          { "name": "incompleteness", "$ref": "IncompletenessReason", "array": true, "optional": true, "summary": "Present when this node's children are known to be partial." }
+        ]}
+      ],
+      "commands": [
+        { "name": "enumerate", "risk": "read", "stability": "stable", "summary": "Enumerate the tree from a node (or the roots) to a depth. Honest incompleteness is reported per node.",
+          "parameters": [
+            { "name": "node", "$ref": "NodeHandle", "optional": true, "summary": "Start node; omit for all roots." },
+            { "name": "depth", "type": "integer", "optional": true, "summary": "Max depth; omit for full subtree." }
+          ],
+          "returns": [
+            { "name": "root", "$ref": "Node", "array": true, "summary": "The requested start node(s)." },
+            { "name": "nodes", "$ref": "Node", "array": true, "summary": "Flattened descendants in document order." }
+          ]
+        },
+        { "name": "search", "risk": "read", "stability": "stable", "summary": "Find live elements by x:Name across all roots (maps to TAP findname/findalltype).",
+          "parameters": [ { "name": "name", "type": "string", "summary": "The x:Name to match." } ],
+          "returns": [ { "name": "matches", "$ref": "NodeHandle", "array": true } ]
+        },
+        { "name": "describe", "risk": "read", "stability": "stable", "summary": "Describe a single node.",
+          "parameters": [ { "name": "node", "$ref": "NodeHandle" } ],
+          "returns": [ { "name": "node", "$ref": "Node" } ]
+        },
+        { "name": "subscribe", "risk": "read", "stability": "stable", "summary": "Subscribe to structural changes under a node (or all roots).",
+          "parameters": [ { "name": "node", "$ref": "NodeHandle", "optional": true } ],
+          "returns": [ { "name": "subscriptionId", "type": "string" } ]
+        },
+        { "name": "unsubscribe", "risk": "read", "stability": "stable", "summary": "Cancel a subscription.",
+          "parameters": [ { "name": "subscriptionId", "type": "string" } ], "returns": [] }
+      ],
+      "events": [
+        { "name": "childrenChanged", "summary": "Children of a subscribed node were added/removed. Handles carry the new generation.", "parameters": [
+          { "name": "node", "$ref": "NodeHandle" },
+          { "name": "added", "$ref": "NodeHandle", "array": true },
+          { "name": "removed", "$ref": "NodeHandle", "array": true }
+        ]}
+      ]
+    },
+    {
+      "domain": "Property",
+      "capability": "property",
+      "stability": "stable",
+      "summary": "Read and (ephemerally) override dependency properties. value-source precedence is first-class: a set without knowing the current source is an agent foot-gun.",
+      "types": [
+        { "id": "ValueSource", "kind": "enum", "values": ["local", "animation", "template", "style", "resource", "inherited", "default"], "summary": "DP value-source precedence, highest\u2192lowest. Reports where the current value actually comes from." },
+        { "id": "DpDescriptor", "kind": "object", "summary": "Static shape of a dependency property.", "properties": [
+          { "name": "name", "type": "string" },
+          { "name": "ownerType", "type": "string" },
+          { "name": "valueType", "type": "string" },
+          { "name": "writeable", "type": "boolean" },
+          { "name": "attached", "type": "boolean", "summary": "True for attached DPs (e.g. Grid.Row)." }
+        ]},
+        { "id": "PropertyValue", "kind": "object", "summary": "A property's live value plus provenance.", "properties": [
+          { "name": "name", "type": "string" },
+          { "name": "value", "type": "string", "summary": "Serialized value." },
+          { "name": "valueType", "type": "string" },
+          { "name": "source", "$ref": "ValueSource" },
+          { "name": "isDefault", "type": "boolean" }
+        ]}
+      ],
+      "commands": [
+        { "name": "get", "risk": "read", "stability": "stable", "summary": "Get properties of a node, each tagged with its value-source (maps to TAP getprop/inspect).",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "names", "type": "string", "array": true, "optional": true, "summary": "Specific properties; omit for the common set." }
+          ],
+          "returns": [ { "name": "properties", "$ref": "PropertyValue", "array": true } ]
+        },
+        { "name": "describe", "risk": "read", "stability": "stable", "summary": "Describe a property (owner/type/writeability) before setting it.",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "name", "type": "string" }
+          ],
+          "returns": [ { "name": "descriptor", "$ref": "DpDescriptor" } ]
+        },
+        { "name": "set", "risk": "mutate-ephemeral", "stability": "stable", "summary": "Set a property live as an ephemeral runtime override (maps to TAP setprop/seth). Runs on the UI dispatcher.",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "name", "type": "string" },
+            { "name": "valueType", "type": "string" },
+            { "name": "value", "type": "string" }
+          ],
+          "returns": [ { "name": "applied", "$ref": "PropertyValue" } ]
+        },
+        { "name": "setPreview", "risk": "mutate-ephemeral", "stability": "experimental", "summary": "Set a transient preview value that auto-reverts (for scrubbing). Never persisted.",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "name", "type": "string" },
+            { "name": "valueType", "type": "string" },
+            { "name": "value", "type": "string" }
+          ],
+          "returns": [ { "name": "applied", "$ref": "PropertyValue" } ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "domain": "Resource",
+      "capability": "resource",
+      "stability": "stable",
+      "summary": "Resolve and read XAML resources with provenance (StaticResource vs ThemeResource vs system).",
+      "types": [
+        { "id": "ResourceKind", "kind": "enum", "values": ["static", "theme", "system"], "summary": "StaticResource (snapshot) vs ThemeResource (theme-tracking) vs system-provided." },
+        { "id": "ResourceValue", "kind": "object", "summary": "A resolved resource.", "properties": [
+          { "name": "key", "type": "string" },
+          { "name": "value", "type": "string" },
+          { "name": "valueType", "type": "string" },
+          { "name": "kind", "$ref": "ResourceKind" },
+          { "name": "origin", "type": "string", "optional": true, "summary": "Dictionary/origin provenance, when known." }
+        ]}
+      ],
+      "commands": [
+        { "name": "resolve", "risk": "read", "stability": "stable", "summary": "Resolve a resource key in the context of a node (respects merged dictionaries and theme).",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "key", "type": "string" }
+          ],
+          "returns": [ { "name": "resource", "$ref": "ResourceValue" } ]
+        },
+        { "name": "read", "risk": "read", "stability": "stable", "summary": "Read a resource from the app/system scope without a node context.",
+          "parameters": [
+            { "name": "key", "type": "string" },
+            { "name": "kind", "$ref": "ResourceKind", "optional": true }
+          ],
+          "returns": [ { "name": "resource", "$ref": "ResourceValue" } ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "domain": "Source",
+      "capability": "source",
+      "stability": "stable",
+      "summary": "Confidence-graded provenance over the read floor (RT1). NEVER the load-bearing wedge: a guaranteed tree+name+file floor with a never-wrong best-effort line layer. The census proved file-level provenance is durable across Debug/Release/DisableXbfLineInfo; line precision is gated on that one switch.",
+      "types": [
+        { "id": "SourceKind", "kind": "enum", "values": ["source-backed", "template-generated", "style-generated", "binding-generated", "runtime-only", "resource-origin", "ambiguous", "unreachable"], "summary": "Provenance class. source-backed REQUIRES confidence exact|high with a span (false-confident prohibition)." },
+        { "id": "SourceSpan", "kind": "object", "summary": "A location in authored markup. uri is an ms-appx:/// or ms-resource:/// URI, not a filesystem path.", "properties": [
+          { "name": "uri", "type": "string", "summary": "ms-appx:///Page.xaml etc. Durable across configs (census)." },
+          { "name": "line", "type": "integer", "optional": true, "summary": "1-based line; absent/0 when line info is stripped." },
+          { "name": "column", "type": "integer", "optional": true },
+          { "name": "lineInfo", "type": "boolean", "summary": "False when DisableXbfLineInfo stripped spans; the uri still survives." }
+        ]},
+        { "id": "Anchor", "kind": "object", "summary": "Stable non-source anchor used when spans are stripped or absent.", "properties": [
+          { "name": "name", "type": "string", "optional": true, "summary": "x:Name." },
+          { "name": "treePath", "type": "string", "summary": "Structural path from a root (e.g. type+child-index chain)." },
+          { "name": "propertySignature", "type": "string", "optional": true, "summary": "Distinguishing property signature." }
+        ]},
+        { "id": "SourceResolution", "kind": "object", "summary": "The confidence-graded answer for one element.", "properties": [
+          { "name": "kind", "$ref": "SourceKind" },
+          { "name": "confidence", "$ref": "Confidence" },
+          { "name": "span", "$ref": "SourceSpan", "optional": true, "summary": "The declaration span when confidently known." },
+          { "name": "candidateSpans", "$ref": "SourceSpan", "array": true, "optional": true, "summary": "Ambiguous alternatives (kind=ambiguous)." },
+          { "name": "realizedIndex", "type": "integer", "optional": true, "summary": "Index of a realized virtualized item." },
+          { "name": "itemKey", "type": "string", "optional": true, "summary": "Data item key for a realized template instance." },
+          { "name": "anchor", "$ref": "Anchor", "summary": "Always present: the never-wrong fallback." }
+        ]}
+      ],
+      "commands": [
+        { "name": "resolve", "risk": "read", "stability": "stable", "summary": "Resolve an element to source. Obeys the false-confident prohibition: it will down-grade kind/confidence rather than guess a span.",
+          "parameters": [ { "name": "node", "$ref": "VisualTree.NodeHandle" } ],
+          "returns": [ { "name": "resolution", "$ref": "SourceResolution" } ]
+        },
+        { "name": "anchor", "risk": "read", "stability": "stable", "summary": "Return only the stable anchor (cheap; always available even with no source).",
+          "parameters": [ { "name": "node", "$ref": "VisualTree.NodeHandle" } ],
+          "returns": [ { "name": "anchor", "$ref": "Anchor" } ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "domain": "Diagnostics",
+      "capability": "diagnostics",
+      "stability": "stable",
+      "summary": "Structured runtime diagnostics as API, not log text: parser errors, binding failures, apply results, and source-gaps as first-class diagnostics.",
+      "types": [
+        { "id": "ReasonCode", "kind": "enum", "values": ["parse-error", "binding-failure", "apply-failed", "source-info-missing", "template-generated", "unreachable-popup", "release-no-line-info", "unsafe-refused"], "summary": "Machine reason codes. Diagnostics are branched on by agents, so they are typed, not strings." },
+        { "id": "Diagnostic", "kind": "object", "summary": "One diagnostic event payload.", "properties": [
+          { "name": "code", "$ref": "ReasonCode" },
+          { "name": "message", "type": "string", "summary": "Human-readable detail (secondary to code)." },
+          { "name": "node", "$ref": "VisualTree.NodeHandle", "optional": true },
+          { "name": "span", "$ref": "Source.SourceSpan", "optional": true },
+          { "name": "confidence", "$ref": "Confidence", "optional": true }
+        ]}
+      ],
+      "commands": [
+        { "name": "subscribe", "risk": "read", "stability": "stable", "summary": "Subscribe to the diagnostic stream, optionally filtered by reason code.",
+          "parameters": [ { "name": "kinds", "$ref": "ReasonCode", "array": true, "optional": true } ],
+          "returns": [ { "name": "subscriptionId", "type": "string" } ]
+        },
+        { "name": "unsubscribe", "risk": "read", "stability": "stable", "summary": "Cancel a diagnostics subscription.",
+          "parameters": [ { "name": "subscriptionId", "type": "string" } ], "returns": [] }
+      ],
+      "events": [
+        { "name": "diagnostic", "summary": "A parser/binding/apply failure or a source-gap.", "parameters": [ { "name": "diagnostic", "$ref": "Diagnostic" } ] }
+      ]
+    },
+    {
+      "domain": "HotReload",
+      "capability": "hotreload",
+      "stability": "experimental",
+      "summary": "Classified edit application with an explicit transaction taxonomy (impl is W5, demand+EDR-gated). plan is a pure read (classify without applying); commit/rollback/apply mutate. The honesty invariant is retained end-to-end.",
+      "types": [
+        { "id": "EditKind", "kind": "enum", "values": ["xaml", "cs"], "summary": "Which pipeline an edit routes to (XAML in-place vs C# EnC)." },
+        { "id": "TransactionState", "kind": "enum", "values": ["planned", "previewed", "committed-runtime", "rendered-verified", "source-persisted", "rolled-back", "stale-handle", "target-lost", "refused-unsafe", "unreachable-gate"], "summary": "The lifecycle states an agent branches on. Terminal-failure states (stale-handle/target-lost/refused-unsafe/unreachable-gate) are honest, not exceptions." },
+        { "id": "Edit", "kind": "object", "summary": "A single classified edit.", "properties": [
+          { "name": "kind", "$ref": "EditKind" },
+          { "name": "uri", "type": "string", "summary": "Source uri the edit targets." },
+          { "name": "detail", "type": "string", "summary": "Opaque edit payload (diff/span/value) \u2014 shape owned by W5." }
+        ]},
+        { "id": "Plan", "kind": "object", "summary": "The result of classifying a set of edits without applying them.", "properties": [
+          { "name": "transactionId", "type": "string" },
+          { "name": "edits", "$ref": "Edit", "array": true },
+          { "name": "classification", "$ref": "Outcome" },
+          { "name": "predictedState", "$ref": "TransactionState" }
+        ]}
+      ],
+      "commands": [
+        { "name": "plan", "risk": "read", "stability": "experimental", "summary": "Classify edits and return a plan + predicted outcome. Pure read; nothing is applied.",
+          "parameters": [ { "name": "edits", "$ref": "Edit", "array": true } ],
+          "returns": [ { "name": "plan", "$ref": "Plan" } ]
+        },
+        { "name": "preview", "risk": "mutate-ephemeral", "stability": "experimental", "summary": "Apply a plan as a reversible runtime-only preview.",
+          "parameters": [ { "name": "transactionId", "type": "string" } ],
+          "returns": [ { "name": "state", "$ref": "TransactionState" } ]
+        },
+        { "name": "commit", "risk": "structural", "stability": "experimental", "summary": "Commit a previewed transaction to the running app.",
+          "parameters": [ { "name": "transactionId", "type": "string" } ],
+          "returns": [ { "name": "state", "$ref": "TransactionState" }, { "name": "outcome", "$ref": "Outcome" } ]
+        },
+        { "name": "rollback", "risk": "structural", "stability": "experimental", "summary": "Roll back a previewed or committed-runtime transaction.",
+          "parameters": [ { "name": "transactionId", "type": "string" } ],
+          "returns": [ { "name": "state", "$ref": "TransactionState" } ]
+        },
+        { "name": "apply", "risk": "persist", "stability": "experimental", "summary": "One-shot plan+commit(+persist) of a single edit. Returns the honest terminal state and outcome.",
+          "parameters": [ { "name": "kind", "$ref": "EditKind" }, { "name": "edit", "$ref": "Edit" } ],
+          "returns": [ { "name": "state", "$ref": "TransactionState" }, { "name": "outcome", "$ref": "Outcome" } ]
+        }
+      ],
+      "events": [
+        { "name": "transactionStateChanged", "summary": "A transaction advanced (or failed into) a state.", "parameters": [
+          { "name": "transactionId", "type": "string" },
+          { "name": "state", "$ref": "TransactionState" }
+        ]}
+      ]
+    },
+    {
+      "domain": "Selection",
+      "capability": "selection",
+      "stability": "experimental",
+      "summary": "Element highlight and pick (impl is W6). ALWAYS an out-of-proc transparent click-through overlay window over UIA/visual bounds \u2014 NEVER an injected Adorner. Documented fallback to inert bounding-box screenshots when live tracking lags.",
+      "types": [
+        { "id": "HighlightStyle", "kind": "enum", "values": ["outline", "fill", "margins"], "summary": "How the overlay renders the element bounds." }
+      ],
+      "commands": [
+        { "name": "highlight", "risk": "read", "stability": "experimental", "summary": "Highlight an element via the out-of-proc overlay.",
+          "parameters": [
+            { "name": "node", "$ref": "VisualTree.NodeHandle" },
+            { "name": "style", "$ref": "HighlightStyle", "optional": true }
+          ],
+          "returns": []
+        },
+        { "name": "pick", "risk": "read", "stability": "experimental", "summary": "Let the user pick an element on screen; returns the chosen node (reverse of highlight).",
+          "parameters": [],
+          "returns": [ { "name": "node", "$ref": "VisualTree.NodeHandle" } ]
+        },
+        { "name": "clear", "risk": "read", "stability": "experimental", "summary": "Clear all overlays.", "parameters": [], "returns": [] }
+      ],
+      "events": [
+        { "name": "picked", "summary": "The user completed a pick.", "parameters": [ { "name": "node", "$ref": "VisualTree.NodeHandle" } ] }
+      ]
+    },
+    {
+      "domain": "Security",
+      "capability": "security",
+      "stability": "experimental",
+      "summary": "CORE, not periphery (RT5). Pipe ACL + same-user process auth + per-session nonce/token + replay prevention + capability grants by command family + explicit consent + tamper-resistant local audit + target allowlist + token expiry + command risk tiers. Impl is W8; the contract is normative now.",
+      "types": [
+        { "id": "Grant", "kind": "object", "summary": "A capability-family grant for the session.", "properties": [
+          { "name": "capability", "type": "string" },
+          { "name": "riskTier", "$ref": "RiskTier" },
+          { "name": "granted", "type": "boolean" },
+          { "name": "expiresAt", "type": "string", "optional": true, "summary": "ISO-8601 expiry; absent = session lifetime." }
+        ]},
+        { "id": "AuditEntry", "kind": "object", "summary": "One tamper-resistant local audit record.", "properties": [
+          { "name": "timestamp", "type": "string" },
+          { "name": "method", "type": "string" },
+          { "name": "risk", "$ref": "RiskTier" },
+          { "name": "host", "type": "string", "summary": "Client identity." },
+          { "name": "result", "type": "string", "summary": "ok | unauthorized | refused." }
+        ]}
+      ],
+      "commands": [
+        { "name": "authenticate", "risk": "privileged", "stability": "experimental", "summary": "Establish session auth over the same-user pipe: per-session nonce/token, host identity, replay prevention.",
+          "parameters": [ { "name": "token", "type": "string", "optional": true, "summary": "Prior session token for reconnect; omit for a fresh handshake." } ],
+          "returns": [ { "name": "sessionId", "type": "string" }, { "name": "host", "type": "string" } ]
+        },
+        { "name": "grant", "risk": "privileged", "stability": "experimental", "summary": "Grant capability families to the session with explicit consent; higher risk tiers require explicit (not session-default) consent.",
+          "parameters": [ { "name": "capabilities", "type": "string", "array": true } ],
+          "returns": [ { "name": "grants", "$ref": "Grant", "array": true } ]
+        },
+        { "name": "audit", "risk": "read", "stability": "experimental", "summary": "Read the local audit log (tamper-evident).",
+          "parameters": [ { "name": "since", "type": "string", "optional": true, "summary": "ISO-8601 lower bound." } ],
+          "returns": [ { "name": "entries", "$ref": "AuditEntry", "array": true } ]
+        }
+      ],
+      "events": [
+        { "name": "grantChanged", "summary": "A grant was added, revoked, or expired.", "parameters": [ { "name": "grant", "$ref": "Grant" } ] }
+      ]
+    }
+  ]
+}

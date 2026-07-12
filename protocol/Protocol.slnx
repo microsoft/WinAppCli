@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/conformance/">
+    <Project Path="conformance/Wdxp.Conformance.csproj" />
+  </Folder>
+  <Folder Name="/gen/">
+    <Project Path="gen/Wdxp.Gen.csproj" />
+  </Folder>
+</Solution>

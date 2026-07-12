@@ -1,0 +1,38 @@
+name: Protocol Conformance
+
+# Fast gate for the WDXP protocol contract (protocol/). Pure net10.0, zero-dependency, so it runs
+# on hosted Linux CI. Runs on every PR to the target branches (no path filters) so it can be marked
+# a required status check in branch protection.
+on:
+  push:
+    branches: [ "winui-devex" ]
+  pull_request:
+    branches: [ "winui-devex", "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # Gate 3 (facade totality) + schema-valid + 3 golden traces. Exit 0 == PASS (5/5).
+      - name: Run conformance suite
+        run: dotnet run --project protocol/conformance/Wdxp.Conformance.csproj -c Release
+
+      - name: Check license headers
+        shell: pwsh
+        run: ./protocol/scripts/check-license-headers.ps1
+
+      - name: Check public-appropriateness
+        shell: pwsh
+        run: ./protocol/scripts/check-public-appropriateness.ps1

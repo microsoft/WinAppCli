@@ -260,16 +260,23 @@ Current: **PASS (5/5).** Any new family **must** add a golden trace and keep the
 
 ## 11. Rough implementation phases (port + harden)
 
-1. **Port.** Bring the proof-of-concept protocol assets (the canonical schema, its JSON-Schema guard,
-   the envelope spec, the generator, the golden traces, and the conformance suite) into the winapp repo
-   under a dedicated schema folder. Keep the generator + conformance projects pure `net10.0` (no
-   `-windows`) so the conformance gate runs on hosted CI.
-2. **Wire the fast gate.** Add the conformance suite to CI as a required check, alongside the
-   schema-validation and license-header checks.
-3. **Bind W1.** Align `WDXP.negotiate`/`cancel` + `Target.*` with the daemon's session/attach model as
-   W1 lands; keep the proof-of-concept transport green as the oracle.
-4. **Grow by family.** As W3/W5/W6/W4 implement, tighten each family's types + add golden traces;
-   every field-add stays single-surface (Gate 3) and every family keeps its proof-of-concept smoke
+**Status:** Phases 1–2 have **landed** under [`protocol/`](../protocol/) (base branch `winui-devex`). The
+generator + conformance projects are pure `net10.0` and the fast gate runs on hosted Linux CI via
+[`.github/workflows/protocol-conformance.yml`](../.github/workflows/protocol-conformance.yml)
+(conformance **PASS 5/5** + license-header + public-appropriateness checks). Phases 3–4 are follow-ups.
+
+1. **Port. ✅ Landed.** The proof-of-concept protocol assets (the canonical schema `protocol/wdxp.v0.json`,
+   its JSON-Schema guard, the envelope spec, the generator, the golden traces, and the conformance suite)
+   are in the winapp repo under `protocol/`. The generator + conformance projects are pure `net10.0` (no
+   `-windows`) so the conformance gate runs on hosted CI. (The internal agent-tool-manifest facade was
+   dropped on port — only the CLI-JSON + docs facades ship.)
+2. **Wire the fast gate. ✅ Landed.** The conformance suite runs in CI as a check (intended to be marked a
+   required status check in branch protection), alongside the license-header and public-appropriateness
+   checks.
+3. **Bind W1.** *(Follow-up — waits on `run --inspect`.)* Align `WDXP.negotiate`/`cancel` + `Target.*` with
+   the daemon's session/attach model as W1 lands; keep the proof-of-concept transport green as the oracle.
+4. **Grow by family.** *(Follow-up.)* As W3/W5/W6/W4 implement, tighten each family's types + add golden
+   traces; every field-add stays single-surface (Gate 3) and every family keeps its proof-of-concept smoke
    check green.
 
 ---

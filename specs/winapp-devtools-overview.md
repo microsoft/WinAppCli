@@ -213,7 +213,7 @@ pre-build reality probe.
 | WS | Spec file | Scope (one line) | Surfaces as | Gate |
 |----|-----------|------------------|-------------|------|
 | **W1** | `winapp-run-inspect.md` | Attach + resident daemon / session broker. | `run --inspect` / `--watch` host | latency + identity persistence |
-| **W2** | `winapp-devtools-protocol.md` | Protocol schema + normative contracts (**proto built**). | the contract | additive: change ≤1 surface |
+| **W2** | `winapp-devtools-protocol.md` | Protocol schema + normative contracts (**ported to `protocol/`; conformance gate green**). | the contract | additive: change ≤1 surface |
 | **W3** | `winapp-devtools-read.md` | Visual-tree + property + resource **read floor**. | inspect | config-independent (Debug=Release) |
 | **W4** | `winapp-devtools-provenance.md` | Confidence-graded source/identity + **census**. | select-to-source | resolution rate; false-confident → KILL |
 | **W5** | `winapp-devtools-hot-reload.md` | Mutation/apply + transaction taxonomy. | **`run --watch`** + client edits | differentiated packaged-reload slice |

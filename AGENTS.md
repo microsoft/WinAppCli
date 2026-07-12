@@ -101,6 +101,7 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | Agent skill templates | `docs/fragments/skills/winapp-cli/` |
 | Copilot plugin | `.github/plugin/` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
+| Devtools protocol (W2) | `protocol/` — WDXP schema + generator + conformance fast gate (net10.0) |
 
 ## CLI command semantics
 
