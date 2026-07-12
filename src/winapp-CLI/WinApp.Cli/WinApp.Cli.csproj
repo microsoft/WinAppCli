@@ -66,6 +66,13 @@
     <PackageReference Include="System.Drawing.Common" />
     <PackageReference Include="Microsoft.Diagnostics.Runtime" />
     <PackageReference Include="Microsoft.Diagnostics.Runtime.Utilities" />
+    <!-- Native debugging engine bits (dbgeng/dbghelp/dbgcore/dbgmodel/msdia140 + symsrv) used by the
+         WinUI triage pass. Restore-only: nothing is bundled into the AOT/single-file output (the
+         packages ship native DLLs under content/<arch>/ which PackageReference does not auto-consume,
+         and ExcludeAssets="all" makes that explicit). Restoring populates the NuGet global cache so
+         dev/CI builds can resolve the bits locally; end users download them on first use. -->
+    <PackageReference Include="Microsoft.Debugging.Platform.DbgEng" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Debugging.Platform.SymSrv" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup>

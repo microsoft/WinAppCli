@@ -86,7 +86,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         DebugOutputOption = new Option<bool>("--debug-output")
         {
-            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json."
         };
 
         UnregisterOnExitOption = new Option<bool>("--unregister-on-exit")
@@ -106,7 +106,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         SymbolsOption = new Option<bool>("--symbols")
         {
-            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
+            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
         };
 
         ExecutableOption = new Option<string?>("--executable")
