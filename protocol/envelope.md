@@ -141,8 +141,10 @@ Full policy is the Security domain (W8); the envelope pins the parts that live a
 - The whole file carries a SemVer `version`; each capability carries its own SemVer.
 - `experimental` domains/commands may change shape between minor versions; `stable` ones may only add.
 - **Additive rule (Gate 3):** adding a field/command/event to `wdxp.v0.json` MUST flow to every
-  generated surface (CLI command-graph, docs) with **zero** hand edits. If a change
-  needs a manual edit in more than one generated surface, the codegen — not the schema — is wrong.
+  generated surface (CLI command-graph, docs) with **zero** hand edits. The conformance suite enforces
+  this: every command and event must appear in every facade, and every declared field must appear in the
+  CLI command-graph — so a field-add can never be silently dropped from the surface clients bind to. If a
+  change needs a manual edit in more than one generated surface, the codegen — not the schema — is wrong.
 
 ---
 

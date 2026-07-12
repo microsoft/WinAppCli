@@ -33,10 +33,13 @@ language-neutral JSON contract that every implementation reads, with a small gen
 per-surface facades. We deliberately did **not** invent a DSL (CDP's PDL) or add a TypeSpec/Node
 toolchain — the generator is zero-dependency .NET on the repo's pinned toolchain.
 
-**Why this matters — Gate 3.** Adding a command or a field to the protocol must touch **≤ 1
-hand-written surface** (the schema) and flow automatically into the CLI facade *and* the docs. The
-conformance suite asserts this as `gate3-facade-totality`. If you find yourself editing the generator
-to add a normal command, something is wrong — the generator walks the model generically.
+**Why this matters — Gate 3.** Adding a command, event, or field to the protocol must touch **≤ 1
+hand-written surface** (the schema) and flow automatically into the generated facades. The conformance
+suite asserts this as `gate3-facade-totality`: every command and event is present in **both** the CLI
+command-graph and the docs, **and** every declared field is present in the CLI command-graph (the
+structured contract clients bind to) — so a schema field-add can never be silently dropped. If you find
+yourself editing the generator to add a normal command, something is wrong — the generator walks the
+model generically.
 
 ---
 
@@ -79,9 +82,9 @@ Grouped by the debate's guaranteed **floor** vs. the mutation/best-effort surfac
 
 | Domain | Capability | Cmds/Evts | Stability | What it does |
 |---|---|---|---|---|
-| `WDXP` | `core` | 2 / 1 | stable | `negotiate` (capability handshake), `cancel`; `sessionEnded`. |
+| `WDXP` | `core` | 2 / 1 | stable | `negotiate` (capability handshake), `cancel`; `sessionClosing`. |
 | `Target` | `target` | 4 / 2 | stable | Enumerate/attach/detach live app targets; attach/detach events. |
-| `VisualTree` | `visualtree` | 5 / 1 | stable | **Floor.** Enumerate the tree, get children, resolve handles; `treeChanged`. |
+| `VisualTree` | `visualtree` | 5 / 1 | stable | **Floor.** Enumerate the tree, get children, resolve handles; `childrenChanged`. |
 | `Property` | `property` | 4 / 0 | stable | **Floor.** Read/write properties with a 7-value precedence `ValueSource`. |
 | `Resource` | `resource` | 2 / 0 | stable | Resolve `{ThemeResource}` / `{StaticResource}` values. |
 | `Source` | `source` | 2 / 0 | stable | **Confidence-graded** element→source mapping. Best-effort by design (see below). |
@@ -104,14 +107,14 @@ info is unavailable) and `Diagnostics.ReasonCode`.
 
 These carry the hard-won policy. Do not weaken them without re-opening the debate:
 
-- **`Property.ValueSource`** — 7-value precedence (`local` → `animation` → `templateBinding` →
-  `style` → `builtInStyle` → `inherited` → `default`). Clients must surface *where* a value came from.
+- **`Property.ValueSource`** — 7-value precedence (`local` → `animation` → `template` →
+  `style` → `resource` → `inherited` → `default`). Clients must surface *where* a value came from.
 - **`Source.SourceKind`** — 8 values including the honest `runtime-only` (no source backing).
 - **`HotReload.TransactionState`** — 10 states including `refused-unsafe` (the engine may decline an
   unsafe apply) and the four applied/inert outcomes.
 - **`Diagnostics.ReasonCode`** — structured, machine-actionable failure reasons.
-- **Protocol-level `Outcome`** — the four-outcome classifier (`Applied` / `AppliedInert` /
-  `ReloadRequired` / `NeedsRestart`) — the **honesty invariant**: the engine never claims success it
+- **Protocol-level `Outcome`** — the four-outcome classifier (`applied` / `applied-inert` /
+  `reloaded` / `needs-restart`) — the **honesty invariant**: the engine never claims success it
   can't guarantee.
 - **Protocol-level `RiskTier`** — `read` / `mutate-ephemeral` / `structural` / `persist` /
   `privileged` — drives the `Security` consent gates.

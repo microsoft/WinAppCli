@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/nmetulev/winui-devex/main/protocol/wdxp.schema.json",
+  "$id": "https://raw.githubusercontent.com/microsoft/winappCli/main/protocol/wdxp.schema.json",
   "title": "WDXP protocol definition guard",
   "description": "Validates the hand-authored wdxp.v0.json (DAP-style single source of truth). Also serves as the IDE authoring aid via the $schema reference in the protocol file.",
   "type": "object",

@@ -83,8 +83,49 @@ static (string, bool, string) Gate3(Protocol p)
     if (cliMethods.Count != schemaCommands.Count) errs.Add($"CLI facade command count {cliMethods.Count} != schema {schemaCommands.Count}");
     if (cliNotifs.Count != schemaEvents.Count) errs.Add($"CLI facade notification count {cliNotifs.Count} != schema {schemaEvents.Count}");
 
+    // Field-level totality against the CLI facade (the structured contract every client binds to):
+    // every declared param/return field must be emitted for its command/event, and the facade may not
+    // invent an undeclared field. This gives Gate 3 real teeth beyond method presence — a schema
+    // field-add can never be silently dropped from (nor a stray field smuggled into) the surface.
+    var cliByMethod = cli.RootElement.GetProperty("commands").EnumerateArray()
+        .ToDictionary(e => e.GetProperty("method").GetString()!, e => e, StringComparer.Ordinal);
+    var cliByNotif = cli.RootElement.GetProperty("notifications").EnumerateArray()
+        .ToDictionary(e => e.GetProperty("method").GetString()!, e => e, StringComparer.Ordinal);
+    int fieldCount = 0;
+    foreach (var d in p.Domains)
+    {
+        foreach (var c in d.Commands)
+        {
+            var method = $"{d.Name}.{c.Name}";
+            if (!cliByMethod.TryGetValue(method, out var node)) continue; // presence already reported above
+            fieldCount += CheckCliFields(node, "args", c.Parameters, $"command '{method}' params", errs);
+            fieldCount += CheckCliFields(node, "returns", c.Returns, $"command '{method}' returns", errs);
+        }
+        foreach (var ev in d.Events)
+        {
+            var method = $"{d.Name}.{ev.Name}";
+            if (!cliByNotif.TryGetValue(method, out var node)) continue;
+            fieldCount += CheckCliFields(node, "args", ev.Parameters, $"event '{method}' params", errs);
+        }
+    }
+
     return ("gate3-facade-totality", errs.Count == 0,
-        errs.Count == 0 ? $"{schemaCommands.Count} commands + {schemaEvents.Count} events present in every facade" : string.Join("; ", errs));
+        errs.Count == 0
+            ? $"{schemaCommands.Count} commands + {schemaEvents.Count} events in every facade; {fieldCount} fields total in CLI facade"
+            : string.Join("; ", errs));
+}
+
+// Assert the CLI facade emits exactly the declared field set (by name) for one command/event arg list.
+// Returns the number of declared fields checked (for the totality tally).
+static int CheckCliFields(JsonElement node, string prop, IReadOnlyList<Field> declared, string where, List<string> errs)
+{
+    var emitted = node.GetProperty(prop).EnumerateArray()
+        .Select(a => a.GetProperty("name").GetString()!).ToHashSet(StringComparer.Ordinal);
+    foreach (var f in declared)
+        if (!emitted.Contains(f.Name)) errs.Add($"field '{f.Name}' of {where} missing from CLI facade");
+    foreach (var name in emitted)
+        if (declared.All(f => f.Name != name)) errs.Add($"CLI facade emits undeclared field '{name}' in {where}");
+    return declared.Count;
 }
 
 static (string, bool, string) ConformTrace(string file, IReadOnlyDictionary<string, Command> commands,
@@ -153,6 +194,8 @@ static (string, bool, string) ConformTrace(string file, IReadOnlyDictionary<stri
         }
         else errs.Add($"{where}: unclassifiable message");
     }
+
+    if (n == 0) errs.Add($"{scenario}: golden trace has no messages (empty or missing 'messages' array) — nothing to conform");
 
     return ($"golden:{Path.GetFileName(file)}", errs.Count == 0, errs.Count == 0 ? $"{n} messages conform" : string.Join("; ", errs));
 }
