@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Blog banner: dynamic Windows API bindings for Node.js</title>
+  <title>Blog banner: dynamic Windows API projections for Node.js</title>
   <style>
     :root {
       color-scheme: dark;
@@ -79,8 +79,8 @@
 
     h1 {
       margin: 0;
-      padding-bottom: 8px;
-      font-size: 46px;
+      padding-bottom: 4px;
+      font-size: 42px;
       line-height: 1.15;
       font-weight: 700;
       letter-spacing: -0.02em;
@@ -90,8 +90,17 @@
       color: transparent;
     }
 
+    .lead {
+      font-size: 26px;
+      line-height: 1.3;
+      color: #7cc2ff;
+      font-weight: 600;
+      margin: 0;
+      max-width: 560px;
+    }
+
     .subtitle {
-      font-size: 22px;
+      font-size: 20px;
       line-height: 1.4;
       color: #b8c4d9;
       margin: 0;
@@ -117,7 +126,6 @@
     /* Right side: code card */
     .right {
       width: 420px;
-      transform: rotate(-2deg);
     }
 
     .card {
@@ -172,7 +180,7 @@
     /* Bottom-right corner label */
     .corner {
       position: absolute;
-      right: 88px;
+      left: 692px;
       bottom: 44px;
       display: flex;
       align-items: center;
@@ -196,7 +204,8 @@
     <div class="content">
       <div class="left">
         <span class="eyebrow"><span class="dot"></span>Public preview</span>
-        <h1>Call Windows APIs directly from Electron and Node.js</h1>
+        <h1>A new way to bring native Windows APIs to JavaScript</h1>
+        <p class="lead">Introducing dynamic API projections for Node.js</p>
         <p class="subtitle">Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No native addon, no <code>node-gyp</code>.</p>
         <div class="badges">
           <span class="badge">Electron</span>
@@ -227,11 +236,6 @@
   .<span class="m">summarizeParagraphAsync</span>(input);</pre>
         </div>
       </div>
-    </div>
-
-    <div class="corner">
-      <span class="logo"></span>
-      <span>microsoft/winappCli &middot; microsoft/dynwinrt</span>
     </div>
   </div>
 </body>

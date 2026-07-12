@@ -1,14 +1,14 @@
-# Call Windows APIs directly from Electron and Node.js
+# A new way to bring native Windows APIs to JavaScript — introducing dynamic API projections for Node.js
 
-![Public preview banner. Title: "Call Windows APIs directly from Electron and Node.js." Tagline: "Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No native addon, no node-gyp." A code snippet on the right shows LanguageModel and TextSummarizer being used from the generated bindings.](./assets/blog-banner.png)
+![Public preview banner. Title: "A new way to bring native Windows APIs to JavaScript — introducing dynamic API projections for Node.js." Tagline: "Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No native addon, no node-gyp." A code snippet on the right shows LanguageModel and TextSummarizer being used from the generated bindings.](./assets/blog-banner.png)
 
 You're building an Electron app for Windows and want to add on-device AI features like text summarization, image description, and OCR, right from Copilot+ PCs. But when you look for how to call these Windows APIs from JavaScript, you hit a wall. The usual answer is to write a C++ or C# native addon just to reach a handful of APIs, and you repeat that work every time you need another one.
 
-We're excited to introduce a public preview of **dynamic Windows API bindings for Node.js**. It lets your Electron app, or a plain Node.js process, call the modern Windows API surface directly from JavaScript or TypeScript. Install one npm package, get typed bindings for the Windows features you want. No native addon, no `node-gyp`, no C++ wrapper to maintain. 🚀
+We're excited to introduce a public preview of **a dynamic Windows Runtime API (WinRT) projection for Node.js**. It lets your Electron app, or a plain Node.js process, call the modern Windows API surface directly from JavaScript or TypeScript. Install one npm package, get typed bindings for the Windows features you want. No native addon, no `node-gyp`, no C++ wrapper to maintain. 🚀
 
 ## What makes this different
 
-Instead of a hand-authored native addon per API, this uses a codegen + shared runtime split:
+The Windows Runtime already has static language projections for [C++/WinRT](https://github.com/microsoft/cppwinrt), [C#/WinRT](https://github.com/microsoft/cswinrt), [`windows-rs`](https://github.com/microsoft/windows-rs), and [PyWinRT](https://github.com/pywinrt/pywinrt). This new projection adds JavaScript to that list, targeting the **Node.js runtime**, with a different implementation approach: instead of a hand-authored native addon per API, it uses a codegen + shared runtime split. That means no per-API C++ to write or maintain, no `node-gyp` toolchain in your project, no Electron-version-specific rebuilds, and new Windows APIs light up as soon as their metadata ships.
 
 - **JavaScript bindings, not a per-class native addon.** Codegen produces `.js` + `.d.ts` for supported Windows API patterns.
 - **One shared prebuilt runtime.** `@microsoft/dynwinrt`, installed from npm, dispatches all the calls at execution time.
@@ -29,7 +29,9 @@ In this post we'll walk through two common Windows API scenarios from JavaScript
 - **Native notifications** with `AppNotificationBuilder` / `AppNotificationManager`
 - **Phi Silica on-device AI** with `LanguageModel` / `TextSummarizer` (Copilot+ PCs)
 
-Both are written entirely in JavaScript.
+These are just entry points. The same bindings reach a much broader surface of Windows Runtime APIs from JavaScript, including the full on-device AI stack shipped on Copilot+ PCs (text generation, summarization, rewriting, text-to-table, image description, text recognition, image scaling, object extraction, and object removal), file pickers and storage (`FileOpenPicker`, `StorageFile`), image decoding (`BitmapDecoder`), rich clipboard (`Clipboard`, `HtmlFormatHelper`), and custom model inference via `WinML`. If it's a non-UI WinRT type described in `.winmd` metadata, you can reach it. That includes your own WinRT components. Just extend the `winapp.jsBindings` config to generate bindings for any additional namespaces or `.winmd` files.
+
+Both walkthroughs are written entirely in JavaScript.
 
 ## What's in the box
 
@@ -52,11 +54,15 @@ npm install --save-dev @microsoft/winappcli
 npx winapp init . --use-defaults --add-js-bindings
 ```
 
-The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and writes typed bindings to `.winapp/bindings/`. Then run this once before starting Electron:
+The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and writes typed bindings to `.winapp/bindings/`. It also writes a `winapp.jsBindings` config block to your `package.json` where you can extend the generated surface with additional namespaces or `.winmd` files. See the [file picker guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) for a detailed configuration example.
+
+Both walkthroughs below (`AppNotificationManager` and Phi Silica) use APIs that require package identity. To unblock those APIs during development, grant your Electron dev build a temporary identity:
 
 ```bash
 npx winapp node add-electron-debug-identity
 ```
+
+Rerun `npx winapp node add-electron-debug-identity` whenever the manifest, exe path, or identity fields change. For APIs that don't require package identity, you can start Electron normally with `npm start` and skip this step. See the [debug identity guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/setup.md#step-5-understanding-debug-identity) for the full model, including which API categories require identity.
 
 ### Show a rich Windows notification
 
@@ -85,7 +91,7 @@ AppNotificationManager.default_.show(
     .buildNotification()
 );
 ```
-Run it, and Windows fires the same native toast you'd get from a C#/C++ app, including the progress bar:
+Run the app, and Windows fires the same native toast you'd get from a C#/C++ app, including the progress bar:
 
 ![Windows toast notification from an Electron app titled "test-electron-app", reading "Windows AI task running" and showing a 65% progress bar labeled "Processing with Windows AI."](./assets/electron-toast-hello-from-electron.png)
 

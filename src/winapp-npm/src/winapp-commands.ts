@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.3.3
+ * Source schema version: 0.4.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -85,7 +85,7 @@ export interface CertGenerateOptions extends CommonOptions {
   output?: string;
   /** Password for the generated PFX file */
   password?: string;
-  /** Publisher name for the generated certificate. If not specified, will be inferred from manifest. */
+  /** Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. */
   publisher?: string;
   /** Number of days the certificate is valid */
   validDays?: number;
@@ -311,7 +311,7 @@ export interface ManifestGenerateOptions extends CommonOptions {
   logoPath?: string;
   /** Package name (default: folder name) */
   packageName?: string;
-  /** Publisher CN (default: CN=<current user>) */
+  /** Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. */
   publisherName?: string;
   /** Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) */
   template?: ManifestTemplates;
@@ -383,7 +383,7 @@ export interface PackageOptions extends CommonOptions {
   name?: string;
   /** Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. */
   output?: string;
-  /** Publisher name for certificate generation */
+  /** Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. */
   publisher?: string;
   /** Bundle Windows App SDK runtime for self-contained deployment */
   selfContained?: boolean;
@@ -592,6 +592,45 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 }
 
 // ---------------------------------------------------------------------------
+// ui drag
+// ---------------------------------------------------------------------------
+
+export interface UiDragOptions extends CommonOptions {
+  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
+  from?: string;
+  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
+  to?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. */
+  dwellMs?: number;
+  /** Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. */
+  holdMs?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Drag with the right mouse button instead of the left button */
+  right?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+ */
+export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'drag'];
+  if (options.from) args.push(options.from);
+  if (options.to) args.push(options.to);
+  if (options.app) args.push('--app', options.app);
+  if (options.dwellMs !== undefined) args.push('--dwell-ms', options.dwellMs.toString());
+  if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
+  if (options.json) args.push('--json');
+  if (options.right) args.push('--right');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui focus
 // ---------------------------------------------------------------------------
 
@@ -694,6 +733,36 @@ export async function uiGetValue(options: UiGetValueOptions = {}): Promise<Winap
   const args: string[] = ['ui', 'get-value'];
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui hover
+// ---------------------------------------------------------------------------
+
+export interface UiHoverOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Time in milliseconds to wait after hovering for hover effects to appear (default: 800) */
+  dwellTime?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
+ */
+export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'hover'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.dwellTime !== undefined) args.push('--dwell-time', options.dwellTime.toString());
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
@@ -843,12 +912,14 @@ export interface UiScrollOptions extends CommonOptions {
   json?: boolean;
   /** Scroll to position: top, bottom */
   to?: string;
+  /** Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. */
+  wheel?: number;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+ * Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.
  */
 export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll'];
@@ -857,6 +928,7 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
   if (options.direction) args.push('--direction', options.direction);
   if (options.json) args.push('--json');
   if (options.to) args.push('--to', options.to);
+  if (options.wheel !== undefined) args.push('--wheel', options.wheel.toString());
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
@@ -914,6 +986,42 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui send-keys
+// ---------------------------------------------------------------------------
+
+export interface UiSendKeysOptions extends CommonOptions {
+  /** Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". */
+  keys?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Optional selector (slug or text) to focus before sending keys. */
+  target?: string;
+  /** Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. */
+  verbatim?: boolean;
+  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. */
+  via?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --verbatim to type the whole argument literally, or --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.
+ */
+export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'send-keys'];
+  if (options.keys) args.push(options.keys);
+  if (options.app) args.push('--app', options.app);
+  if (options.json) args.push('--json');
+  if (options.target) args.push('--target', options.target);
+  if (options.verbatim) args.push('--verbatim');
+  if (options.via) args.push('--via', options.via);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }
