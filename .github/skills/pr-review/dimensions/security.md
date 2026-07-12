@@ -21,7 +21,7 @@ This is a CLI tool that:
   (`Add-AppxPackage -ExternalLocation`).
 - Drives Windows UI Automation against arbitrary running apps (HWND access).
 - Has an npm wrapper that shells out to the native CLI.
-- Has a VS Code extension and a NuGet MSBuild targets package.
+- Has a NuGet MSBuild targets package.
 
 ## High-priority patterns
 

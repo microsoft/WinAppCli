@@ -128,9 +128,6 @@ dist-test
 # TernJS port file
 .tern-port
 
-# Stores VSCode versions used for testing VSCode extensions
-.vscode-test
-
 # Playwright test artifacts
 test-results/
 playwright-report/
@@ -162,8 +159,6 @@ obj/
 *.sln.docstates
 # VS Code
 .vscode/
-# Allow .vscode config for the VS Code extension project
-!src/winapp-VSC/.vscode/
 # Visual Studio
 .vs/
 # NuGet packages
@@ -215,7 +210,6 @@ CMakeCache.txt
 # Development certificate
 devcert.pfx
 *.msix
-*.vsix
 
 # GUI app package outputs
 /src/winapp-GUI/winapp-GUI/AppPackages
