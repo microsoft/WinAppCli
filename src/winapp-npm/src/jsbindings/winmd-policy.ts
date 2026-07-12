@@ -21,11 +21,9 @@ export type WinmdPackageCategory = 'emit' | 'refOnly' | 'skip';
 //     instantiations produce thousands of files; Tier 2 XAML samples only
 //     reference a small set of controls.
 const DEFAULT_REF_ONLY_PACKAGES = new Set<string>(
-  [
-    'Microsoft.Windows.SDK.CPP',
-    'Microsoft.WindowsAppSDK.InteractiveExperiences',
-    'Microsoft.WindowsAppSDK.WinUI',
-  ].map((p) => p.toLowerCase())
+  ['Microsoft.Windows.SDK.CPP', 'Microsoft.WindowsAppSDK.InteractiveExperiences', 'Microsoft.WindowsAppSDK.WinUI'].map(
+    (p) => p.toLowerCase()
+  )
 );
 
 // Packages we intentionally skip entirely (neither emit nor ref).

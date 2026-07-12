@@ -134,13 +134,22 @@ export interface EnsureJsBindingsImportsResult {
 /** Add `#winapp/bindings` + `#winapp/bindings/*` to `package.json` `imports`. Existing
  *  aliases with a different target are preserved and reported via `diverged`. */
 export function ensureJsBindingsImports(workspaceDir: string): EnsureJsBindingsImportsResult {
-  let result: EnsureJsBindingsImportsResult = { outcome: 'unchanged', diverged: [] };
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
+    throw new Error(
+      `package.json not found in ${workspaceDir}. ` + 'Run `npm init -y` (or equivalent) before mutating package.json.'
+    );
+  }
+  const applied = withJsBindingsImports(doc.parsed.imports);
+  if (!applied.changed) {
+    // Nothing to add — skip the write so we don't renormalize formatting or
+    // trigger file watchers just to report divergence.
+    return { outcome: 'unchanged', diverged: applied.diverged };
+  }
   mutatePackageJsonDoc(workspaceDir, (parsed) => {
-    const applied = withJsBindingsImports(parsed.imports);
-    parsed.imports = applied.imports;
-    result = { outcome: applied.changed ? 'added' : 'unchanged', diverged: applied.diverged };
+    parsed.imports = withJsBindingsImports(parsed.imports).imports;
   });
-  return result;
+  return { outcome: 'added', diverged: applied.diverged };
 }
 
 /** Render the JSON-serializable config shape embedded in package.json. */

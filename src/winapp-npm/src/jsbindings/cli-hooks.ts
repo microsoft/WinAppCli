@@ -84,6 +84,14 @@ export function formatJsBindingsImportsHints(result: EnsureJsBindingsImportsResu
   return hints;
 }
 
+/** Route each `formatJsBindingsImportsHints` line through `log`. Extracted so the
+ *  --verbose path (log = taskLog, no buffer) has direct regression coverage. */
+export function emitJsBindingsImportsHints(result: EnsureJsBindingsImportsResult, log: (line: string) => void): void {
+  for (const hint of formatJsBindingsImportsHints(result)) {
+    log(hint);
+  }
+}
+
 /** Run `work` under a child spinner (grouped if `ui.group` is set, standalone otherwise). */
 async function runStep<T>(
   ui: {
@@ -393,9 +401,9 @@ export async function handleInit(args: string[]): Promise<void> {
       // testable/reusable without the other.
       if (supportsPackageImports(codegenVersion)) {
         const result = ensureJsBindingsImports(workspaceDir);
-        for (const hint of formatJsBindingsImportsHints(result)) {
-          hintBuffer.push(hint);
-        }
+        // Route through bufferingLog so `--verbose` (no group) logs immediately
+        // and grouped mode flushes after the spinner settles.
+        emitJsBindingsImportsHints(result, bufferingLog);
       }
 
       // --config-only wrote no lockfile; codegen would fail. Defer to a later restore.

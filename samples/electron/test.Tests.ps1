@@ -187,6 +187,18 @@ Describe "Electron Sample" {
                 -Because "generate-bindings must re-emit the bindings index"
         }
 
+        It "Should resolve '#winapp/bindings' via Node's package imports" -Skip:$script:skip {
+            # End-to-end smoke test: verifies the "imports" map in package.json,
+            # the codegen output paths, and Node's resolver all agree. Catches
+            # regressions where the map points at a file that doesn't exist.
+            # Sample is CommonJS, so we only verify the require condition.
+            Push-Location $script:appDir
+            try {
+                & node -e "require('#winapp/bindings')" 2>&1 | ForEach-Object { Write-Host $_ }
+                $LASTEXITCODE | Should -Be 0 -Because "Node must resolve #winapp/bindings via package.json imports"
+            } finally { Pop-Location }
+        }
+
         It "Should detect winapp.yaml drift and refuse generate-bindings (cross-language hash parity)" -Skip:$script:skip {
             # End-to-end check that the TS yaml-packages-hash matches the C#
             # YamlPackagesHasher used by `winapp restore`. If they drift, this

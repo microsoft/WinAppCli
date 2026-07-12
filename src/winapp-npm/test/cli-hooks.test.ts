@@ -13,6 +13,7 @@ import {
   printInitWrapperOnlyHelp,
   handleGenerateBindings,
   formatJsBindingsImportsHints,
+  emitJsBindingsImportsHints,
 } from '../src/jsbindings/cli-hooks';
 
 // Shorthand: build a default `false` set, override with `overrides`.
@@ -131,6 +132,22 @@ test('formatJsBindingsImportsHints combines added + divergent warnings', () => {
   assert.equal(hints.length, 2);
   assert.match(hints[0], /Added "#winapp\/bindings" package imports/);
   assert.match(hints[1], /differs from the winapp default/);
+});
+
+test('emitJsBindingsImportsHints routes every hint through the provided log (verbose path)', () => {
+  // Regression: in --verbose, `handleInit`'s `bufferingLog` is the direct
+  // taskLog (no group buffer). If hints bypass the log sink, users see nothing.
+  const captured: string[] = [];
+  emitJsBindingsImportsHints({ outcome: 'added', diverged: ['#winapp/bindings/*'] }, (line) => captured.push(line));
+  assert.equal(captured.length, 2);
+  assert.match(captured[0], /Added "#winapp\/bindings" package imports/);
+  assert.match(captured[1], /differs from the winapp default/);
+});
+
+test('emitJsBindingsImportsHints emits nothing when there is nothing to say', () => {
+  const captured: string[] = [];
+  emitJsBindingsImportsHints({ outcome: 'unchanged', diverged: [] }, (line) => captured.push(line));
+  assert.deepEqual(captured, []);
 });
 
 test('handleGenerateBindings --help prints command help (no fs probe, no exit)', async () => {
