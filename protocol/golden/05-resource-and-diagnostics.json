@@ -1,0 +1,31 @@
+{
+  "scenario": "05-resource-and-diagnostics",
+  "summary": "Two provenance-carrying reads plus the structured diagnostic stream on the attached session: resolve a resource key in a node's context (theme-tracking), read an app/system resource without a node, then subscribe to typed diagnostics and receive a binding-failure as a first-class Diagnostic (machine reason code + confidence), not log text.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "50", "method": "Resource.resolve",
+      "params": { "node": { "handle": "42", "generation": 1 }, "key": "SystemAccentColor" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "50",
+      "result": { "resource": { "key": "SystemAccentColor", "value": "#FF0078D4", "valueType": "Color", "kind": "theme" } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "51", "method": "Resource.read",
+      "params": { "key": "TextFillColorPrimaryBrush", "kind": "theme" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "51",
+      "result": { "resource": { "key": "TextFillColorPrimaryBrush", "value": "#E4000000", "valueType": "SolidColorBrush", "kind": "theme", "origin": "Fluent/Themes/Dark" } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "52", "method": "Diagnostics.subscribe",
+      "params": { "kinds": ["binding-failure", "parse-error"] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "52", "result": { "subscriptionId": "diag-1" } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "Diagnostics.diagnostic",
+      "params": { "diagnostic": {
+        "code": "binding-failure",
+        "message": "BindingExpression path error: 'Subtitle' property not found on 'ViewModel'.",
+        "node": { "handle": "42", "generation": 1 },
+        "confidence": "high"
+      } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "53", "method": "Diagnostics.unsubscribe",
+      "params": { "subscriptionId": "diag-1" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "53", "result": {} } }
+  ]
+}

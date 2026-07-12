@@ -1,0 +1,48 @@
+{
+  "scenario": "07-describe-set-cancel-lifecycle",
+  "summary": "Node/property describe before mutate, the two ephemeral Property mutations (set + auto-reverting setPreview, each returning the resulting PropertyValue rather than an Outcome), the cheap always-available Source anchor, a best-effort WDXP.cancel, a transport reconnect, then teardown: detach followed by the honest targetLost + sessionClosing notifications.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "70", "method": "VisualTree.describe",
+      "params": { "node": { "handle": "42", "generation": 1 } } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "70",
+      "result": { "node": { "node": { "handle": "42", "generation": 1 }, "type": "TextBlock", "name": "Title", "childCount": 0 } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "71", "method": "Property.describe",
+      "params": { "node": { "handle": "42", "generation": 1 }, "name": "Opacity" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "71",
+      "result": { "descriptor": { "name": "Opacity", "ownerType": "UIElement", "valueType": "Double", "writeable": true, "attached": false } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "72", "method": "Property.set",
+      "params": { "node": { "handle": "42", "generation": 1 }, "name": "Opacity", "valueType": "Double", "value": "0.5" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "72",
+      "result": { "applied": { "name": "Opacity", "value": "0.5", "valueType": "Double", "source": "local", "isDefault": false } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "73", "method": "Property.setPreview",
+      "params": { "node": { "handle": "42", "generation": 1 }, "name": "Opacity", "valueType": "Double", "value": "0.8" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "73",
+      "result": { "applied": { "name": "Opacity", "value": "0.8", "valueType": "Double", "source": "local", "isDefault": false } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "74", "method": "Source.anchor",
+      "params": { "node": { "handle": "42", "generation": 1 } } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "74",
+      "result": { "anchor": { "name": "Title", "treePath": "Page/Grid/StackPanel[0]/TextBlock[0]", "propertySignature": "Text" } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "75", "method": "WDXP.cancel",
+      "params": { "id": "31" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "75", "result": { "cancelled": true } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "76", "method": "Target.reconnect",
+      "params": { "sessionId": "s-1" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "76",
+      "result": { "target": { "targetId": "t-8123", "pid": 8123, "title": "SmokeFixture", "package": { "packaged": false, "path": "C:\\fixtures\\SmokeFixture.exe" }, "rootCount": 1, "protocolVersion": "0.1.0" } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "77", "method": "Target.detach", "params": {} } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "77", "result": {} } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "Target.targetLost",
+      "params": { "targetId": "t-8123", "reason": "detached" } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "WDXP.sessionClosing",
+      "params": { "reason": "target-lost" } } }
+  ]
+}

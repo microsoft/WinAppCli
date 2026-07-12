@@ -4,17 +4,17 @@
   "messages": [
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "10", "method": "VisualTree.search", "params": { "name": "Title" } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "10",
-      "result": { "matches": [ { "handle": 42, "generation": 1 } ] } } },
+      "result": { "matches": [ { "handle": "42", "generation": 1 } ] } } },
 
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "11", "method": "VisualTree.enumerate",
-      "params": { "node": { "handle": 42, "generation": 1 }, "depth": 1 } } },
+      "params": { "node": { "handle": "42", "generation": 1 }, "depth": 1 } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "11",
       "result": {
-        "root": [ { "node": { "handle": 42, "generation": 1 }, "type": "TextBlock", "name": "Title", "childCount": 0 } ],
+        "root": [ { "node": { "handle": "42", "generation": 1 }, "type": "TextBlock", "name": "Title", "childCount": 0 } ],
         "nodes": [] } } },
 
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "12", "method": "Property.get",
-      "params": { "node": { "handle": 42, "generation": 1 }, "names": ["Opacity", "Text"] } } },
+      "params": { "node": { "handle": "42", "generation": 1 }, "names": ["Opacity", "Text"] } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "12",
       "result": { "properties": [
         { "name": "Opacity", "value": "1", "valueType": "Double", "source": "default", "isDefault": true },
@@ -22,7 +22,7 @@
       ] } } },
 
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "13", "method": "Source.resolve",
-      "params": { "node": { "handle": 42, "generation": 1 } } } },
+      "params": { "node": { "handle": "42", "generation": 1 } } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "13",
       "result": { "resolution": {
         "kind": "source-backed", "confidence": "exact",
@@ -31,7 +31,7 @@
       } } } },
 
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "14", "method": "Source.resolve",
-      "params": { "node": { "handle": 77, "generation": 1 } } } },
+      "params": { "node": { "handle": "77", "generation": 1 } } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "14",
       "result": { "resolution": {
         "kind": "runtime-only", "confidence": "none",

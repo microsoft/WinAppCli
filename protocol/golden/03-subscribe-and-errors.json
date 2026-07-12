@@ -3,15 +3,15 @@
   "summary": "Structural subscription with a server notification, plus the two most common recoverable errors: a stale handle after the tree mutated (re-enumerate), and a capability that was never negotiated (clean typed refusal, never a crash). Exercises the notification model and the error taxonomy.",
   "messages": [
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "20", "method": "VisualTree.subscribe",
-      "params": { "node": { "handle": 5, "generation": 1 } } } },
+      "params": { "node": { "handle": "5", "generation": 1 } } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "20", "result": { "subscriptionId": "sub-1" } } },
 
     { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "VisualTree.childrenChanged",
-      "params": { "node": { "handle": 5, "generation": 2 },
-        "added": [ { "handle": 91, "generation": 1 } ], "removed": [] } } },
+      "params": { "node": { "handle": "5", "generation": 2 },
+        "added": [ { "handle": "91", "generation": 1 } ], "removed": [] } } },
 
     { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "21", "method": "Property.get",
-      "params": { "node": { "handle": 5, "generation": 1 } } } },
+      "params": { "node": { "handle": "5", "generation": 1 } } } },
     { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "21",
       "error": { "code": -32001, "name": "StaleHandle",
         "message": "Handle 5 generation 1 is stale (current 2). Re-enumerate to refresh handles." } } },

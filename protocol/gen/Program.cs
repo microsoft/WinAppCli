@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Wdxp.Gen;
 
-var schemaPath = ArgValue(args, "--schema") ?? FindSchema();
+var schemaPath = ArgValue(args, "--schema") ?? SchemaPaths.FindUp("wdxp.v0.json");
 if (schemaPath is null) { Console.Error.WriteLine("error: could not locate wdxp.v0.json (pass --schema <path>)"); return 2; }
 schemaPath = Path.GetFullPath(schemaPath);
 var outDir = Path.GetFullPath(ArgValue(args, "--out") ?? Path.Combine(Path.GetDirectoryName(schemaPath)!, "gen", "out"));
@@ -45,21 +45,6 @@ static string? ArgValue(string[] a, string name)
     return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
 }
 
-static string? FindSchema()
-{
-    foreach (var start in new[] { Environment.CurrentDirectory, AppContext.BaseDirectory })
-    {
-        var dir = new DirectoryInfo(start);
-        while (dir is not null)
-        {
-            foreach (var candidate in new[] { Path.Combine(dir.FullName, "protocol", "wdxp.v0.json"), Path.Combine(dir.FullName, "wdxp.v0.json") })
-                if (File.Exists(candidate)) return candidate;
-            dir = dir.Parent;
-        }
-    }
-    return null;
-}
-
 namespace Wdxp.Gen
 {
     /// <summary>Structural gate enforced in CI. The JSON Schema (wdxp.schema.json) is the authoring aid;
@@ -77,7 +62,7 @@ namespace Wdxp.Gen
             {
                 if (!caps.Add(d.Capability)) errors.Add($"duplicate capability '{d.Capability}' on domain {d.Name}");
 
-                foreach (var t in d.Types) CheckType(t, d, errors);
+                foreach (var t in d.Types) CheckType(t, d, errors, r);
 
                 foreach (var c in d.Commands)
                 {
@@ -102,7 +87,7 @@ namespace Wdxp.Gen
             return errors;
         }
 
-        private static void CheckType(TypeDef t, Domain d, List<string> errors)
+        private static void CheckType(TypeDef t, Domain d, List<string> errors, RefResolver r)
         {
             switch (t.Kind)
             {
@@ -110,6 +95,9 @@ namespace Wdxp.Gen
                 case "primitive" when t.Primitive is null: errors.Add($"{d.Name}.{t.Id}: primitive has no base type"); break;
                 case "object" when t.Properties.Count == 0: errors.Add($"{d.Name}.{t.Id}: object has no properties"); break;
             }
+            // An object type's properties are fields too: their $refs must resolve, or a dangling ref
+            // ships unflagged into every facade. (No-op for enum/primitive types, which have no properties.)
+            foreach (var f in t.Properties) CheckField(f, d, $"{d.Name}.{t.Id} property '{f.Name}'", errors, r);
         }
 
         private static void CheckField(Field f, Domain d, string where, List<string> errors, RefResolver r)

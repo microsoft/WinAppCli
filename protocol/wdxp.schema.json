@@ -5,8 +5,9 @@
   "description": "Validates the hand-authored wdxp.v0.json (DAP-style single source of truth). Also serves as the IDE authoring aid via the $schema reference in the protocol file.",
   "type": "object",
   "required": ["protocol", "version", "stability", "framing", "errorCodes", "riskTiers", "types", "domains"],
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
+    "$schema": { "type": "string" },
     "protocol": { "const": "wdxp" },
     "title": { "type": "string" },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },

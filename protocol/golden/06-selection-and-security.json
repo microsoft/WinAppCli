@@ -1,0 +1,41 @@
+{
+  "scenario": "06-selection-and-security",
+  "summary": "The privileged Security floor and the out-of-proc Selection overlay: authenticate (issuing a per-session token bound to host identity), grant capability families by risk tier, receive a grantChanged notification, then highlight/pick/clear via the transparent overlay window (never an injected adorner) with a picked notification, and finally read the tamper-evident local audit log.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "60", "method": "Security.authenticate", "params": {} } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "60",
+      "result": { "sessionId": "s-1", "host": "winapp-vsc/1.2.0", "token": "tok-9f3a2b", "expiresAt": "2026-07-12T10:00:00Z" } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "61", "method": "Security.grant",
+      "params": { "capabilities": ["hotreload", "selection"] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "61",
+      "result": { "grants": [
+        { "capability": "hotreload", "riskTier": "structural", "granted": true, "expiresAt": "2026-07-12T11:00:00Z" },
+        { "capability": "selection", "riskTier": "read", "granted": true }
+      ] } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "Security.grantChanged",
+      "params": { "grant": { "capability": "hotreload", "riskTier": "structural", "granted": true, "expiresAt": "2026-07-12T11:00:00Z" } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "62", "method": "Selection.highlight",
+      "params": { "node": { "handle": "42", "generation": 1 }, "style": "outline" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "62", "result": {} } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "63", "method": "Selection.pick", "params": {} } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "63",
+      "result": { "node": { "handle": "77", "generation": 1 } } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "Selection.picked",
+      "params": { "node": { "handle": "77", "generation": 1 } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "64", "method": "Selection.clear", "params": {} } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "64", "result": {} } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "65", "method": "Security.audit",
+      "params": { "since": "2026-07-12T09:00:00Z" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "65",
+      "result": { "entries": [
+        { "timestamp": "2026-07-12T09:30:00Z", "method": "HotReload.commit", "risk": "structural", "host": "winapp-vsc/1.2.0", "result": "ok" }
+      ] } } }
+  ]
+}

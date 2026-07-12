@@ -34,7 +34,7 @@
   ],
   "types": [
     { "id": "Confidence", "kind": "enum", "values": ["exact", "high", "low", "none"], "summary": "Grades any best-effort resolution (source spans, identity, diagnostics). Ordered strongest\u2192weakest." },
-    { "id": "Outcome", "kind": "enum", "values": ["applied", "applied-inert", "reloaded", "needs-restart"], "summary": "The four-outcome classifier every mutating result reports. Honesty invariant: never report a stronger outcome than actually achieved." },
+    { "id": "Outcome", "kind": "enum", "values": ["applied", "applied-inert", "reloaded", "needs-restart"], "summary": "The four-outcome classifier a transactional apply/commit reports (HotReload.commit/apply; predicted in a plan's classification). Honesty invariant: never report a stronger outcome than actually achieved. An ephemeral Property.set returns the resulting PropertyValue, not an Outcome." },
     { "id": "RiskTier", "kind": "enum", "values": ["read", "mutate-ephemeral", "structural", "persist", "privileged"], "summary": "Command risk tier. Drives consent, audit, and grant policy (Security domain). Every command declares one." }
   ],
   "riskTiers": [
@@ -69,7 +69,7 @@
           ]
         },
         { "name": "cancel", "risk": "read", "stability": "stable", "summary": "Request cancellation of an in-flight request by its JSON-RPC id. Best-effort; long reads and applies honor it at safe points.",
-          "parameters": [ { "name": "id", "type": "string", "summary": "The JSON-RPC id of the request to cancel." } ],
+          "parameters": [ { "name": "id", "type": "string", "summary": "The JSON-RPC id (a string — WDXP pins string ids protocol-wide, envelope §2) of the request to cancel." } ],
           "returns": [ { "name": "cancelled", "type": "boolean", "summary": "True if a matching in-flight request was found and signaled." } ]
         }
       ],
@@ -142,7 +142,7 @@
       "summary": "The guaranteed read floor: enumerate/search/subscribe the live XAML visual tree. Config-independent and proven (maps to TAP findname/children/getchild). This is 'XAML sight day one.'",
       "types": [
         { "id": "NodeHandle", "kind": "object", "summary": "A live element reference. The generation guards against stale handles across tree mutations.", "properties": [
-          { "name": "handle", "type": "integer", "summary": "Opaque element handle (uint64 rendered as JSON number/string per envelope)." },
+          { "name": "handle", "type": "string", "summary": "Opaque element handle: a uint64 encoded as a decimal string so precision is never lost as a JSON number (envelope §2). Treat as opaque — never do arithmetic on it." },
           { "name": "generation", "type": "integer", "summary": "Increments when the handle is invalidated; a mismatch yields StaleHandle." }
         ]},
         { "id": "IncompletenessReason", "kind": "enum", "values": ["popup-detached", "flyout-detached", "virtualized-unrealized", "template-subtree", "collection-handle-quirk"], "summary": "Honest incompleteness (REQ-A1): why an enumeration cannot fully see a subtree. Reported, never silently dropped." },
@@ -442,9 +442,9 @@
         ]}
       ],
       "commands": [
-        { "name": "authenticate", "risk": "privileged", "stability": "experimental", "summary": "Establish session auth over the same-user pipe: per-session nonce/token, host identity, replay prevention.",
-          "parameters": [ { "name": "token", "type": "string", "optional": true, "summary": "Prior session token for reconnect; omit for a fresh handshake." } ],
-          "returns": [ { "name": "sessionId", "type": "string" }, { "name": "host", "type": "string" } ]
+        { "name": "authenticate", "risk": "privileged", "stability": "experimental", "summary": "Establish session auth over the same-user pipe and issue a per-session token bound to the resolved host identity. Nonce issuance and replay-prevention policy are host-defined and finalized in W8 (Security).",
+          "parameters": [ { "name": "token", "type": "string", "optional": true, "summary": "Prior session token (from a previous authenticate) for reconnect; omit for a fresh handshake." } ],
+          "returns": [ { "name": "sessionId", "type": "string" }, { "name": "host", "type": "string", "summary": "Resolved client identity." }, { "name": "token", "type": "string", "summary": "Opaque per-session token to present on a later reconnect. Issuance/nonce/replay policy is host-defined, finalized in W8." }, { "name": "expiresAt", "type": "string", "optional": true, "summary": "ISO-8601 token expiry; absent = session lifetime." } ]
         },
         { "name": "grant", "risk": "privileged", "stability": "experimental", "summary": "Grant capability families to the session with explicit consent; higher risk tiers require explicit (not session-default) consent.",
           "parameters": [ { "name": "capabilities", "type": "string", "array": true } ],

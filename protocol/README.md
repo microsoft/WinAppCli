@@ -48,12 +48,13 @@ model generically.
 | File | Role |
 |---|---|
 | **`wdxp.v0.json`** | **The canonical schema.** 10 domains · 32 commands · 8 events · 14 error codes · 5 risk tiers. Edit this; regenerate everything else. |
-| `wdxp.schema.json` | JSON Schema (draft 2020-12) guard — authoring/IDE aid + structural validation of the canonical file. |
+| `wdxp.schema.json` | JSON Schema (draft 2020-12) guard — authoring/IDE aid **and** a CI validation step (`scripts/validate-schema.py`) that structurally validates the canonical file. Its root is closed (`additionalProperties:false`) so a stray top-level key is caught. |
 | `envelope.md` | **Normative framing spec** — transport, message shapes, session, negotiation, cancellation, error taxonomy, security, versioning. Read this to implement a client or the daemon. |
 | `gen/` | The generator (`dotnet run` → emits the facades to `gen/out/`). `Model.cs` = loader + `$ref` resolver; `Program.cs` = validator + emitters. |
-| `golden/*.json` | Golden message traces — the conformance oracle. Realistic request/response/event/error sequences a conformant peer must accept. |
-| `conformance/` | The **W2 gate**. `dotnet run` → validates the schema, proves Gate-3 facade totality, and checks the golden traces. Exit 0 = green. |
+| `golden/*.json` | Golden message traces — the conformance oracle. Realistic request/response/event/error sequences a conformant peer must accept. Every command and event is exercised by at least one trace. |
+| `conformance/` | The **W2 gate**. `dotnet run` → validates the schema, proves Gate-3 facade **+ field** totality, **recursively** conforms the golden traces (framing, `$ref`/enum/array types), and checks golden coverage. Exit 0 = green. |
 | `gen/out/` | Generated facades (git-ignored — reproducible from the schema). |
+| `scripts/` | Gate helpers, all run in CI: `validate-schema.py` (draft 2020-12 guard), `check-license-headers.ps1`, `check-public-appropriateness.ps1`. |
 
 ---
 
@@ -66,9 +67,9 @@ model generically.
 cd protocol/gen ; dotnet run -c Debug
 #   -> gen/out/cli-commands.json, protocol-reference.md
 
-# 3. Prove it (schema valid + Gate-3 totality + golden traces conform):
+# 3. Prove it (schema valid + Gate-3 totality + golden traces conform + coverage):
 cd protocol/conformance ; dotnet run -c Debug
-#   -> RESULT: PASS (5/5 checks)   [exit 0]
+#   -> RESULT: PASS (all checks green)   [exit 0]
 ```
 
 Both projects are pure `net10.0` (no `-windows` TFM, no WinAppSDK) so they build and the gate runs on
@@ -114,8 +115,10 @@ These carry the hard-won policy. Do not weaken them without re-opening the debat
   unsafe apply) and the four applied/inert outcomes.
 - **`Diagnostics.ReasonCode`** — structured, machine-actionable failure reasons.
 - **Protocol-level `Outcome`** — the four-outcome classifier (`applied` / `applied-inert` /
-  `reloaded` / `needs-restart`) — the **honesty invariant**: the engine never claims success it
-  can't guarantee.
+  `reloaded` / `needs-restart`) reported by a **transactional** apply/commit (`HotReload.commit`/`apply`,
+  and predicted in a `plan`) — the **honesty invariant**: the engine never claims success it can't
+  guarantee. Ephemeral `Property.set`/`setPreview` have no transaction to classify and instead return the
+  resulting `PropertyValue`, not an `Outcome`.
 - **Protocol-level `RiskTier`** — `read` / `mutate-ephemeral` / `structural` / `persist` /
   `privileged` — drives the `Security` consent gates.
 
@@ -154,7 +157,7 @@ it. A **session is a connection**; capabilities are negotiated per-connection vi
   - **W3 (read surface):** implement the `VisualTree` + `Property` + `Resource` floor against the
     golden traces `02-read-floor.json`.
   - **W5 (hot-reload):** implement `HotReload` honoring `TransactionState` + the `Outcome` invariant;
-    never report `Applied` for an inert change.
+    never report `applied` for an inert change (that is `applied-inert`).
   - **W7 (CLI):** **generate** your surface from `gen/` — do not hand-write a command list.
     CLI path = `<capability> <kebab(command)>`.
   - **W8 (security):** the `Security` domain + `RiskTier` are your gate points.

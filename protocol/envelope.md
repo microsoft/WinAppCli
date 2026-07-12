@@ -23,6 +23,10 @@ request/response pair **and** a server-initiated notification over a `CurrentUse
   contain a raw newline (JSON string escaping handles embedded newlines). No `Content-Length` framing —
   the delimiter is the newline (this is the proof-of-concept-proven framing, and it keeps the CLI trivially
   scriptable with line-oriented tools).
+- **Discovery is out of band (for now).** The pipe name embeds the target pid, so opening the pipe already
+  selects one engine. Enumerating *which* pids are attachable — a machine-wide broker/discovery endpoint —
+  is **deferred to W1 (phase 3)**; until it lands a launcher supplies the pid (e.g. from `run --inspect`).
+  Consequently `Target.list` on a `wdxp-<pid>` pipe returns **only that one target** (see §3).
 
 ## 2. Message shapes (JSON-RPC 2.0)
 
@@ -32,18 +36,22 @@ Three message kinds, all with `"jsonrpc": "2.0"`:
 ```json
 { "jsonrpc": "2.0", "id": "42", "method": "VisualTree.search", "params": { "name": "Title" } }
 ```
-- `id` is a string or number, unique per connection while in flight. A request always gets exactly one
-  response with the same `id`.
+- `id` is a **string**, unique per connection while in flight. WDXP pins **string ids protocol-wide** so
+  every id is uniformly correlatable and cancellable — a numeric id can exceed 2^53 and lose precision as a
+  JSON number. A request always gets exactly one response with the same `id`; `WDXP.cancel` takes that same string.
 - `method` is `"<Domain>.<command>"` (dot-qualified, matching `wdxp.v0.json`).
 - `params` is an **object** keyed by the parameter `name`s in the schema (named params, not positional).
   Omit `params` for zero-parameter commands.
 
 **Response** (success):
 ```json
-{ "jsonrpc": "2.0", "id": "42", "result": { "matches": [ { "handle": 12, "generation": 1 } ] } }
+{ "jsonrpc": "2.0", "id": "42", "result": { "matches": [ { "handle": "12", "generation": 1 } ] } }
 ```
 - `result` is an **object** keyed by the command's `returns` field `name`s. A command with an empty
   `returns` still returns `"result": {}` on success.
+- **Opaque handles are strings.** A `NodeHandle.handle` is a uint64 encoded as a decimal string (e.g.
+  `"handle": "42"`), never a JSON number, so values above 2^53 keep full precision. Treat it as opaque —
+  correlate and compare it, never do arithmetic on it.
 
 **Response** (error) — see §6:
 ```json
@@ -53,7 +61,7 @@ Three message kinds, all with `"jsonrpc": "2.0"`:
 **Notification** (engine → client, no `id`, no response):
 ```json
 { "jsonrpc": "2.0", "method": "VisualTree.childrenChanged",
-  "params": { "node": { "handle": 3, "generation": 2 }, "added": [], "removed": [] } }
+  "params": { "node": { "handle": "3", "generation": 2 }, "added": [], "removed": [] } }
 ```
 - `method` is `"<Domain>.<event>"`. Events are one-way; a client subscribes via the domain's
   `subscribe` command and receives these until it `unsubscribe`s or the session closes.
@@ -65,7 +73,14 @@ connection to exactly one target, so "which app" is the connection, never a per-
 why no command takes a target/window selector the way `winapp ui` does with `-a`/`-w`.
 
 - A connection begins **unattached**. Only `WDXP.*` and `Target.list`/`Target.attach` (and
-  `Security.authenticate`) are valid before attach.
+  `Security.authenticate`) are valid before attach. Because the pipe is already per-target (§1),
+  `Target.list` here returns just the engine you connected to; machine-wide discovery across pipes is a
+  broker concern **deferred to W1 (phase 3)**.
+- **Pre-auth trust boundary.** Binding a target before `Security.authenticate` is gated solely by the
+  `CurrentUserOnly` pipe ACL (§1): only the same OS user can open the pipe, so a connected-but-unauthenticated
+  client is already proven same-user. On that basis `attach` grants **read/attach** reach; privileged families
+  (persist/privileged tiers) still require `Security.authenticate` + `Security.grant`. The exact pre-auth
+  capability set is finalized in W8.
 - `Target.attach` performs **loud-fail-before-unsafe-attach**: on version mismatch, missing capability,
   or a missing required runtime component, it returns an error and leaves the connection unattached — it never
   half-attaches.
@@ -118,20 +133,25 @@ WDXP application errors and how a client should react:
 | -32007 | `SourceUnavailable` | yes | No provenance for this element; use the `Anchor`. Expected for runtime-only/stripped elements — not a failure to fear. |
 | -32008 | `Cancelled` | yes | The request was cancelled via `WDXP.cancel`. |
 
-**Honesty invariant.** The engine MUST NOT report a stronger outcome than it achieved. A mutating
-command reports one of the four `Outcome`s (`applied` / `applied-inert` / `reloaded` / `needs-restart`)
-and, for transactions, a real `TransactionState` including the honest terminal-failure states
-(`refused-unsafe`, `stale-handle`, `target-lost`, `unreachable-gate`). These are **results, not
-exceptions** — they arrive as a normal `result`, not an `error`, because they are expected outcomes an
-agent branches on.
+**Honesty invariant.** The engine MUST NOT report a stronger outcome than it achieved. A **transactional**
+apply or commit (`HotReload.commit` / `HotReload.apply`, and the prediction in a `HotReload.plan`) reports
+one of the four `Outcome`s (`applied` / `applied-inert` / `reloaded` / `needs-restart`) plus a real
+`TransactionState` including the honest terminal-failure states (`refused-unsafe`, `stale-handle`,
+`target-lost`, `unreachable-gate`). An **ephemeral** mutation (`Property.set` / `Property.setPreview`) has no
+transaction to classify, so it instead returns the resulting `PropertyValue` with its live value-source. Either
+way these are **results, not exceptions** — they arrive as a normal `result`, not an `error`, because they are
+expected outcomes an agent branches on.
 
 ## 7. Security posture (framing-level)
 
 Full policy is the Security domain (W8); the envelope pins the parts that live at the wire:
 
-- `CurrentUserOnly` pipe ACL + same-user process auth (§1).
-- `Security.authenticate` establishes a **per-session nonce/token** with **replay prevention**; every
-  command carries the session's authorization implicitly (it is the connection).
+- `CurrentUserOnly` pipe ACL + same-user process auth (§1) — this is the pre-auth trust boundary (§3).
+- `Security.authenticate` issues a **per-session `token`** (returned to the client, with an optional
+  `expiresAt`) bound to the resolved host identity; a client presents it on `Target.reconnect` or to
+  re-authenticate. Token issuance, any nonce, and replay-prevention policy are **host-defined and finalized
+  in W8** — the envelope pins only that a same-user-scoped token exists (the pipe ACL is what proves
+  same-user). Every command then carries the session's authorization implicitly (it is the connection).
 - Every command declares a **risk tier** (`read` / `mutate-ephemeral` / `structural` / `persist` /
   `privileged`). Tiers ≥ `persist` require **explicit** consent, not the session default.
 - All non-`read` commands are written to a **tamper-evident local audit** (`Security.audit`).

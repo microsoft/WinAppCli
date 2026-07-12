@@ -1,0 +1,39 @@
+{
+  "scenario": "04-hotreload-lifecycle",
+  "summary": "The HotReload transaction taxonomy end-to-end on the attached session: classify (plan, a pure read), preview the runtime-only change, watch it advance via transactionStateChanged, commit it, then roll back; finally a one-shot apply that persists to source. Every mutating result reports an honest TransactionState + Outcome — never a stronger outcome than achieved.",
+  "messages": [
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "40", "method": "HotReload.plan",
+      "params": { "edits": [ { "kind": "xaml", "uri": "ms-appx:///SmokePage.xaml", "detail": "set TextBlock[Title].Text = \"Reloaded\"" } ] } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "40",
+      "result": { "plan": {
+        "transactionId": "tx-1",
+        "edits": [ { "kind": "xaml", "uri": "ms-appx:///SmokePage.xaml", "detail": "set TextBlock[Title].Text = \"Reloaded\"" } ],
+        "classification": "applied",
+        "predictedState": "planned"
+      } } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "41", "method": "HotReload.preview",
+      "params": { "transactionId": "tx-1" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "41", "result": { "state": "previewed" } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "HotReload.transactionStateChanged",
+      "params": { "transactionId": "tx-1", "state": "previewed" } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "42", "method": "HotReload.commit",
+      "params": { "transactionId": "tx-1" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "42",
+      "result": { "state": "committed-runtime", "outcome": "applied" } } },
+
+    { "dir": "s2c-event", "msg": { "jsonrpc": "2.0", "method": "HotReload.transactionStateChanged",
+      "params": { "transactionId": "tx-1", "state": "committed-runtime" } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "43", "method": "HotReload.rollback",
+      "params": { "transactionId": "tx-1" } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "43", "result": { "state": "rolled-back" } } },
+
+    { "dir": "c2s", "msg": { "jsonrpc": "2.0", "id": "44", "method": "HotReload.apply",
+      "params": { "kind": "xaml", "edit": { "kind": "xaml", "uri": "ms-appx:///SmokePage.xaml", "detail": "set Grid.Background = \"#FF202020\"" } } } },
+    { "dir": "s2c", "msg": { "jsonrpc": "2.0", "id": "44",
+      "result": { "state": "source-persisted", "outcome": "reloaded" } } }
+  ]
+}
