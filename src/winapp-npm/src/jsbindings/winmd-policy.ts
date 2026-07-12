@@ -6,16 +6,33 @@
 export type WinmdPackageCategory = 'emit' | 'refOnly' | 'skip';
 
 // Built-in package policy. Ref-only winmds are loaded for type resolution
-// without generating their own bindings.
+// without generating their own bindings — the projections stay small and
+// callers cherry-pick just the types they actually use via
+// `jsBindings.additionalWinmds` (`{ namespace, classes }`).
+//
+// Why these packages are refOnly rather than emit:
+//   - Microsoft.Windows.SDK.CPP: the full Windows metadata surface is huge
+//     (~10x the surface most apps need); emitting it wholesale bloats bindings
+//     and slows codegen for no benefit.
+//   - Microsoft.WindowsAppSDK.InteractiveExperiences: AppWindow / input /
+//     dispatching APIs are broad; most apps only need a handful (e.g.
+//     AppWindow, InputKeyboardSource).
+//   - Microsoft.WindowsAppSDK.WinUI: XAML controls, peers, events, and generic
+//     instantiations produce thousands of files; Tier 2 XAML samples only
+//     reference a small set of controls.
 const DEFAULT_REF_ONLY_PACKAGES = new Set<string>(
-  ['Microsoft.Windows.SDK.CPP', 'Microsoft.WindowsAppSDK.InteractiveExperiences'].map((p) => p.toLowerCase())
+  [
+    'Microsoft.Windows.SDK.CPP',
+    'Microsoft.WindowsAppSDK.InteractiveExperiences',
+    'Microsoft.WindowsAppSDK.WinUI',
+  ].map((p) => p.toLowerCase())
 );
 
-// Dropped transitive winmds expose UI/HWND/Composition surfaces that headless Node can't drive.
-// Users can force-emit a dropped winmd via `winapp.jsBindings.additionalWinmds` (explicit opt-in).
-const DEFAULT_SKIPPED_PACKAGES = new Set<string>(
-  ['Microsoft.WindowsAppSDK.WinUI', 'Microsoft.Web.WebView2'].map((p) => p.toLowerCase())
-);
+// Packages we intentionally skip entirely (neither emit nor ref).
+// WebView2's WinRT surface is not meant to be driven from a plain Node
+// process — Chromium hosting is Electron/CoreWebView2 territory, not
+// JS-projection territory — so pulling it in only adds noise.
+const DEFAULT_SKIPPED_PACKAGES = new Set<string>(['Microsoft.Web.WebView2'].map((p) => p.toLowerCase()));
 
 // Categorize a single package ID. Precedence:
 //   skip > refOnly > emit (default)

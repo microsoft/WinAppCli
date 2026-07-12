@@ -9,6 +9,7 @@ import * as path from 'path';
 
 import {
   ensureJsBindingsBlock,
+  ensureJsBindingsImports,
   writeJsBindingsConfig,
   readJsBindingsConfig,
   defaultJsBindingsConfig,
@@ -26,7 +27,7 @@ function readRawPackageJson(dir: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
 }
 
-test('ensureJsBindingsBlock adds the block when absent', () => {
+test('ensureJsBindingsBlock adds the block when absent (does not touch imports)', () => {
   const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
   const outcome = ensureJsBindingsBlock(dir, { quiet: true });
   assert.equal(outcome, 'added');
@@ -34,13 +35,16 @@ test('ensureJsBindingsBlock adds the block when absent', () => {
   const read = readJsBindingsConfig(dir);
   assert.equal(read.packageJsonExists, true);
   assert.deepEqual(read.jsBindings, defaultJsBindingsConfig());
+  assert.equal(readRawPackageJson(dir).imports, undefined);
 });
 
 test('ensureJsBindingsBlock leaves an existing block unchanged without reset', () => {
   const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
   ensureJsBindingsBlock(dir, { quiet: true });
-  // Customize the block, then re-run without reset.
-  writeJsBindingsConfig(dir, { additionalWinmds: [], additionalRefs: ['Custom.winmd'] });
+  writeJsBindingsConfig(dir, {
+    additionalWinmds: [],
+    additionalRefs: ['Custom.winmd'],
+  });
 
   const outcome = ensureJsBindingsBlock(dir, { quiet: true });
   assert.equal(outcome, 'unchanged');
@@ -49,7 +53,10 @@ test('ensureJsBindingsBlock leaves an existing block unchanged without reset', (
 
 test('ensureJsBindingsBlock with reset restores defaults over a customized block', () => {
   const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
-  writeJsBindingsConfig(dir, { additionalWinmds: [], additionalRefs: ['Custom.winmd'] });
+  writeJsBindingsConfig(dir, {
+    additionalWinmds: [],
+    additionalRefs: ['Custom.winmd'],
+  });
 
   const outcome = ensureJsBindingsBlock(dir, { quiet: true, reset: true });
   assert.equal(outcome, 'reset');
@@ -68,6 +75,88 @@ test('ensureJsBindingsBlock preserves unrelated winapp namespace keys', () => {
   const winapp = raw.winapp as Record<string, unknown>;
   assert.deepEqual(winapp.someOtherFeature, { enabled: true });
   assert.ok(winapp.jsBindings, 'jsBindings block should be added alongside existing keys');
+});
+
+test('ensureJsBindingsImports adds both aliases to a workspace without imports', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
+  const result = ensureJsBindingsImports(dir);
+  assert.equal(result.outcome, 'added');
+  assert.deepEqual(result.diverged, []);
+  assert.deepEqual(readRawPackageJson(dir).imports, {
+    '#winapp/bindings': {
+      types: './.winapp/bindings/index.d.ts',
+      import: './.winapp/bindings/index.mjs',
+      require: './.winapp/bindings/index.js',
+      default: './.winapp/bindings/index.js',
+    },
+    '#winapp/bindings/*': {
+      types: './.winapp/bindings/*.d.ts',
+      default: './.winapp/bindings/*.js',
+    },
+  });
+});
+
+test('ensureJsBindingsImports is a no-op when both aliases already match', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
+  ensureJsBindingsImports(dir);
+  const result = ensureJsBindingsImports(dir);
+  assert.equal(result.outcome, 'unchanged');
+  assert.deepEqual(result.diverged, []);
+});
+
+test('ensureJsBindingsImports preserves unrelated aliases and reports divergent ones', () => {
+  const customRoot = { default: './custom-bindings.js' };
+  const dir = makeWorkspace({
+    name: 'app',
+    version: '1.0.0',
+    imports: {
+      '#existing': './src/existing.js',
+      '#winapp/bindings': customRoot,
+    },
+  });
+
+  const result = ensureJsBindingsImports(dir);
+  // The subpath alias was added, so the overall outcome is 'added'.
+  assert.equal(result.outcome, 'added');
+  assert.deepEqual(result.diverged, ['#winapp/bindings']);
+
+  const imports = readRawPackageJson(dir).imports as Record<string, unknown>;
+  assert.equal(imports['#existing'], './src/existing.js');
+  // Divergent alias is preserved as-is, not overwritten.
+  assert.deepEqual(imports['#winapp/bindings'], customRoot);
+  assert.deepEqual(imports['#winapp/bindings/*'], {
+    types: './.winapp/bindings/*.d.ts',
+    default: './.winapp/bindings/*.js',
+  });
+});
+
+test('ensureJsBindingsImports reports divergence without changing package.json when both diverge', () => {
+  const customRoot = { default: './custom-bindings.js' };
+  const customSub = { default: './custom-bindings/*.js' };
+  const dir = makeWorkspace({
+    name: 'app',
+    version: '1.0.0',
+    imports: {
+      '#winapp/bindings': customRoot,
+      '#winapp/bindings/*': customSub,
+    },
+  });
+
+  const result = ensureJsBindingsImports(dir);
+  assert.equal(result.outcome, 'unchanged');
+  assert.deepEqual(result.diverged, ['#winapp/bindings', '#winapp/bindings/*']);
+
+  const imports = readRawPackageJson(dir).imports as Record<string, unknown>;
+  assert.deepEqual(imports['#winapp/bindings'], customRoot);
+  assert.deepEqual(imports['#winapp/bindings/*'], customSub);
+});
+
+test('ensureJsBindingsImports rejects a non-object imports field with an actionable hint', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0', imports: 'invalid' });
+  assert.throws(
+    () => ensureJsBindingsImports(dir),
+    /package\.json "imports" must be an object.*Edit package\.json.*winapp init --add-js-bindings/s
+  );
 });
 
 test('writeJsBindingsConfig throws when package.json is missing', () => {

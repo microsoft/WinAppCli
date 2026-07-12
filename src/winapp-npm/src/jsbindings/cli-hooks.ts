@@ -8,9 +8,19 @@ import * as path from 'path';
 
 import { CLI_NAME, parseArgs, logErrorAndExit } from '../cli-shared';
 import { callWinappCli } from '../winapp-cli-utils';
-import { getCodegenRuntimeDependency, resolveCodegenInvocation } from './codegen-runner';
+import {
+  getCodegenPackageVersion,
+  getCodegenRuntimeDependency,
+  resolveCodegenInvocation,
+  supportsPackageImports,
+} from './codegen-runner';
 import { askBindingsKind } from './init-prompt';
-import { hasJsBindings, ensureJsBindingsBlock } from './package-json-config';
+import {
+  ensureJsBindingsBlock,
+  ensureJsBindingsImports,
+  EnsureJsBindingsImportsResult,
+  hasJsBindings,
+} from './package-json-config';
 import { packageJsonExists } from './package-json-doc';
 import { RUNTIME_PACKAGE_NAME, runJsBindingsPipeline } from './orchestrator';
 import { lockfileExists } from './lockfile-reader';
@@ -56,6 +66,22 @@ export function makeIndentedLog(indent: string): (line: string) => void {
         .join('\n')
     );
   };
+}
+
+/** Build the user-visible hint lines for an `ensureJsBindingsImports` result.
+ *  Pure so `handleInit`'s hint UX is testable without spinning up a workspace. */
+export function formatJsBindingsImportsHints(result: EnsureJsBindingsImportsResult): string[] {
+  const hints: string[] = [];
+  if (result.outcome === 'added') {
+    hints.push('💡 Added "#winapp/bindings" package imports to package.json.');
+  }
+  for (const alias of result.diverged) {
+    hints.push(
+      `⚠ Existing "${alias}" alias in package.json differs from the winapp default; leaving as-is. ` +
+        'Delete it and rerun `npx winapp init --add-js-bindings` to overwrite.'
+    );
+  }
+  return hints;
 }
 
 /** Run `work` under a child spinner (grouped if `ui.group` is set, standalone otherwise). */
@@ -350,9 +376,30 @@ export async function handleInit(args: string[]): Promise<void> {
         );
       }
 
+      // Package aliases require the dual CJS/ESM output introduced in preview.8.
+      // Resolve codegen first so older projects keep their existing relative imports.
+      await ensureCodegenInstalledForInit(workspaceDir, ui);
+      let codegenVersion: string | null = null;
+      try {
+        codegenVersion = getCodegenPackageVersion(workspaceDir);
+      } catch {
+        // Installation is best-effort. Do not point package.json at output files
+        // when the installed codegen version cannot be confirmed.
+      }
+      // Two writes on purpose: ensureJsBindingsBlock owns `winapp.jsBindings`
+      // and ensureJsBindingsImports owns the `imports` map. Keeping them split
+      // means the imports mutation only happens when codegen actually supports
+      // the package-shaped output (checked below), and each helper stays
+      // testable/reusable without the other.
+      if (supportsPackageImports(codegenVersion)) {
+        const result = ensureJsBindingsImports(workspaceDir);
+        for (const hint of formatJsBindingsImportsHints(result)) {
+          hintBuffer.push(hint);
+        }
+      }
+
       // --config-only wrote no lockfile; codegen would fail. Defer to a later restore.
       if (configOnly) {
-        await ensureCodegenInstalledForInit(workspaceDir, ui);
         await ensureRuntimeDependencyForInit(workspaceDir, args, ui);
         // Settle before logging hints so they don't get clobbered by the next group redraw.
         settleGroup('success', 'JS bindings configured (codegen deferred)');
@@ -377,9 +424,6 @@ export async function handleInit(args: string[]): Promise<void> {
         }
         return;
       }
-
-      // Codegen must be in node_modules before the orchestrator queries it for the runtime version.
-      await ensureCodegenInstalledForInit(workspaceDir, ui);
 
       // Resolve yaml against workspaceDir (native remaps --config-dir) to avoid false stale-lockfile.
       await runJsBindingsOrchestrator(
