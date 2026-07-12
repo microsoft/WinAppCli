@@ -1,0 +1,95 @@
+{
+  "generatedUtc": "2026-07-12T05:54:56.9085810+00:00",
+  "pages": [
+    "Items",
+    "Repeater",
+    "SmokePage",
+    "UcHost",
+    "XBindFn"
+  ],
+  "gate1": {
+    "verdict": "Go",
+    "evaluatedConfig": "release",
+    "sourceBackedResolvedPct": 100,
+    "templatedToTemplatePct": 58.3,
+    "falseConfidentTotal": 0,
+    "thresholds": {
+      "sourceBackedFloorPct": 70,
+      "templatedFloorPct": 40
+    },
+    "reasons": [
+      "GO: source-backed resolved 100% ≥ 70% and templated-to-template 58.3% ≥ 40% in 'release', 0 false-confident."
+    ]
+  },
+  "configs": {
+    "debug": {
+      "total": 580,
+      "stripsLineInfo": false,
+      "releaseFamily": false,
+      "sourceKind": {
+        "source-backed": 160,
+        "template-generated": 29,
+        "style-generated": 216,
+        "binding-generated": 0,
+        "runtime-only": 175,
+        "resource-origin": 0,
+        "ambiguous": 0,
+        "unreachable": 0
+      },
+      "sourceBackedTotal": 160,
+      "sourceBackedResolved": 160,
+      "sourceBackedResolvedPct": 100,
+      "templatedResolved": 245,
+      "generatedTotal": 420,
+      "templatedToTemplatePct": 58.3,
+      "falseConfident": 0,
+      "falseConfidentPct": 0
+    },
+    "release": {
+      "total": 580,
+      "stripsLineInfo": false,
+      "releaseFamily": true,
+      "sourceKind": {
+        "source-backed": 160,
+        "template-generated": 29,
+        "style-generated": 216,
+        "binding-generated": 0,
+        "runtime-only": 175,
+        "resource-origin": 0,
+        "ambiguous": 0,
+        "unreachable": 0
+      },
+      "sourceBackedTotal": 160,
+      "sourceBackedResolved": 160,
+      "sourceBackedResolvedPct": 100,
+      "templatedResolved": 245,
+      "generatedTotal": 420,
+      "templatedToTemplatePct": 58.3,
+      "falseConfident": 0,
+      "falseConfidentPct": 0
+    },
+    "release-nolineinfo": {
+      "total": 580,
+      "stripsLineInfo": true,
+      "releaseFamily": true,
+      "sourceKind": {
+        "source-backed": 160,
+        "template-generated": 29,
+        "style-generated": 216,
+        "binding-generated": 0,
+        "runtime-only": 175,
+        "resource-origin": 0,
+        "ambiguous": 0,
+        "unreachable": 0
+      },
+      "sourceBackedTotal": 160,
+      "sourceBackedResolved": 0,
+      "sourceBackedResolvedPct": 0,
+      "templatedResolved": 245,
+      "generatedTotal": 420,
+      "templatedToTemplatePct": 58.3,
+      "falseConfident": 0,
+      "falseConfidentPct": 0
+    }
+  }
+}

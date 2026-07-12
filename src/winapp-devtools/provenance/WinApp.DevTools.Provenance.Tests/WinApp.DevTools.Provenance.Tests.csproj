@@ -1,0 +1,18 @@
+<Project Sdk="MSTest.Sdk/4.1.0">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- CA1707/IDE1006: test method names use underscores for readability. -->
+    <NoWarn>CA1707;IDE1006</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinApp.DevTools.Provenance\WinApp.DevTools.Provenance.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\**\*.tsv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

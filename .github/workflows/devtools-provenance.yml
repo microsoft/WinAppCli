@@ -1,0 +1,71 @@
+name: DevTools Provenance (Gate 1)
+
+# Source-mapping (provenance / W4) analysis layer: pure net10.0, no desktop required, so it runs on a
+# hosted runner. Builds the library + analyzer, runs the grader/aggregator/Gate-1 unit tests and the
+# standing Gate-1 check over the committed reference corpus, re-derives the published census rates, and
+# enforces the public-repo scrub. Fresh live-app collection (packaged/trimmed, real-app corpus) is a
+# separate heavy gate that needs an interactive desktop and is not run here.
+
+on:
+  push:
+    branches: [ "winui-devex" ]
+    paths:
+      - "src/winapp-devtools/**"
+      - ".github/workflows/devtools-provenance.yml"
+  pull_request:
+    branches: [ "winui-devex", "main" ]
+    paths:
+      - "src/winapp-devtools/**"
+      - ".github/workflows/devtools-provenance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # Public-repo hard gate: fail fast on any forbidden internal token before doing anything else.
+      - name: Scrub scan (public-repo forbidden tokens)
+        run: ./src/winapp-devtools/scripts/scrub-scan.ps1
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build src/winapp-devtools/devtools.slnx -c Release
+
+      # Unit tests + the standing Gate-1 check (0% false-confident, Release floors) over the reference corpus.
+      - name: Unit tests + Gate-1 standing check
+        run: >
+          dotnet run --project src/winapp-devtools/provenance/WinApp.DevTools.Provenance.Tests/WinApp.DevTools.Provenance.Tests.csproj
+          -c Release --
+          --report-trx --report-trx-filename provenance.trx
+          --results-directory artifacts/test-results
+
+      # Re-derive the published census rates from the committed corpus and gate on the verdict
+      # (--strict makes CONDITIONAL/INCONCLUSIVE non-zero too; a KILL is always non-zero).
+      - name: Census analyze + Gate-1 verdict
+        run: >
+          dotnet run --project src/winapp-devtools/provenance/WinApp.DevTools.Provenance.Census/WinApp.DevTools.Provenance.Census.csproj
+          -c Release --
+          analyze src/winapp-devtools/provenance/WinApp.DevTools.Provenance.Tests/Fixtures/census
+          --out artifacts/census --strict
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-census
+          path: |
+            artifacts/test-results/**
+            artifacts/census/**

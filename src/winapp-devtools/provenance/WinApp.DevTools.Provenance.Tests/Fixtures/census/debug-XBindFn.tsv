@@ -1,0 +1,34 @@
+handle	type	name	file	line	col
+2301284987168	Microsoft.UI.Xaml.Hosting.DesktopWindowXamlSource			0	0
+2301285116008	Microsoft.UI.Xaml.Controls.Frame	RootFrame	ms-appx:///MainWindow.xaml	32	54
+2301286576456	Microsoft.UI.Xaml.WindowChrome			0	0
+2301287688056	SmokeFixture.XBindFnPage		ms-appx:///XBindFnPage.xaml	9	5
+2301287698984	Microsoft.UI.Xaml.Controls.StackPanel	RootPanel	ms-appx:///XBindFnPage.xaml	24	9
+2301287779000	Microsoft.UI.Xaml.Controls.Border			0	0
+2301402106696	Microsoft.UI.Xaml.Controls.Grid	PART_LayoutRoot	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+2301402108296	Microsoft.UI.Xaml.PopupRoot			0	0
+2301402109496	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///SecondWindow.xaml	12	24
+2301402220160	Microsoft.UI.Xaml.Controls.TitleBar	AppTitleBar	ms-appx:///MainWindow.xaml	21	59
+2301402339864	Microsoft.UI.Xaml.Internal.RootScrollViewer			0	0
+2301402346040	Microsoft.UI.Xaml.Controls.ScrollContentPresenter			0	0
+2301402347192	Microsoft.UI.Xaml.Controls.ScrollContentPresenter			0	0
+2301403112968	Microsoft.UI.Xaml.Controls.ContentControl	MwSlot	ms-appx:///SecondWindow.xaml	36	13
+2301403117368	Microsoft.UI.Xaml.PopupRoot			0	0
+2301403120568	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///MainWindow.xaml	15	6
+2301403628776	Microsoft.UI.Xaml.Controls.TextBlock	GreetOut	ms-appx:///XBindFnPage.xaml	27	13
+2301403630184	Microsoft.UI.Xaml.Controls.TextBlock	Marker	ms-appx:///XBindFnPage.xaml	32	13
+2301403630888	Microsoft.UI.Xaml.Controls.Border			0	0
+2301403635464	Microsoft.UI.Xaml.Controls.Border			0	0
+2301404219368	Microsoft.UI.Xaml.WindowChrome			0	0
+2301408053232	Microsoft.UI.Xaml.Hosting.DesktopWindowXamlSource			0	0
+2301408169400	Microsoft.UI.Xaml.Internal.RootScrollViewer			0	0
+2301408188072	Microsoft.UI.Xaml.Controls.TextBlock	SecondWindowLabel	ms-appx:///SecondWindow.xaml	24	13
+2301408189128	Microsoft.UI.Xaml.Controls.Viewbox	PART_Icon	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+2301408193000	Microsoft.UI.Xaml.Controls.TextBlock	PART_TitleText	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+2301408289480	Microsoft.UI.Xaml.Controls.ContentPresenter	ClientAreaPresenter	ms-resource:///Files/Microsoft.UI.Xaml;component/themes/themeresources.xbf	0	0
+2301408295368	Microsoft.UI.Xaml.Controls.ContentPresenter	ClientAreaPresenter	ms-resource:///Files/Microsoft.UI.Xaml;component/themes/themeresources.xbf	0	0
+2301408295736	Microsoft.UI.Xaml.Controls.Image			0	0
+2301408296472	Microsoft.UI.Xaml.Controls.ContentPresenter		ms-resource:///Files/Microsoft.UI.Xaml;component/themes/generic.xaml	0	0
+2301408469352	Microsoft.UI.Xaml.Controls.Grid			0	0
+2301408478944	Microsoft.UI.Xaml.Controls.ImageIcon			0	0
+2301408628184	Microsoft.UI.Xaml.Controls.ContentPresenter		ms-resource:///Files/Microsoft.UI.Xaml;component/themes/generic.xaml	0	0

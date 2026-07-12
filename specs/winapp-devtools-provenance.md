@@ -1,6 +1,10 @@
 # Spec: provenance — confidence-graded source mapping & the census (W4)
 
 > **Status:** 🟡 Draft v0.1 — best-effort, **honestly graded**, and gated by a pre-build reality census.
+> **Implementation:** the pure-logic **analysis layer landed** — grader, census analysis + Gate-1
+> evaluator, unit tests, and the standing Gate-1 check ship in `src/winapp-devtools/` (see §8). Live
+> collection + the live `Source.resolve`/`census` commands are deferred (heavy gate — need the running-app
+> daemon and the W3 read floor).
 > **Branch:** `winui-devex` · **Owner:** (you) · **Workstream:** W4
 > **Related:** `winapp-devtools-protocol.md` (the `Source` family + `SourceKind` / `Confidence` enums) ·
 > `winapp-devtools-read.md` (the guaranteed floor this annotates) · `winapp-devtools-hot-reload.md`
@@ -146,6 +150,26 @@ prohibited; the census is a pre-build funding gate; persist (W5) is confidence-g
 3. **Run Gate 1.** Execute the census on the real-app corpus; publish the rates; decide go/no-go on
    anything that *depends* on provenance.
 4. **Persist integration.** Expose the confidence W5 needs; enforce the persist threshold.
+
+### Implementation status
+
+The **analysis layer** for phases 1–3 has landed as pure `net10.0` (CI-runnable, no desktop) under
+`src/winapp-devtools/`:
+
+- **Grade (phase 1).** `SourceProvenanceGrader` implements the §4 honesty model; fixture unit tests
+  cover every §4 case including the two **false-confident-prohibition** cases. The grader never emits
+  `exact` unless the origin is authored markup **with** a resolved line.
+- **Census analysis + Gate 1 (phases 2–3, analysis half).** `CensusTsvReader` → `CensusAggregator`
+  (counts by `SourceKind`) → `Gate1Evaluator` (§5 kill-criteria) → `CensusReport` (md + json). A
+  console analyzer (`analyze <tsvDir>`) and a scrubbed orchestration harness (`census/Run-Census.ps1`)
+  drive it. Published rates from the committed **reference corpus** live in `census/results/`; a
+  standing Gate-1 MSTest check + the `devtools-provenance.yml` workflow enforce **0 false-confident**
+  on every run.
+
+**Deferred (heavy gate / needs other workstreams):** live `Source.resolve`/`census` commands wired
+into the running-app daemon; **fresh** collection (injecting the read component; packaged/trimmed
+configs; a real-app corpus per **Q-CENSUS-CORPUS**) — needs an interactive desktop; W5 persist
+integration (phase 4).
 
 ## Appendix — where W4 sits
 

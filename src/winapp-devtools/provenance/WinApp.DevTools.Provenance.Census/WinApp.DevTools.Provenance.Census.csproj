@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WinApp.DevTools.Provenance.Census</RootNamespace>
+    <AssemblyName>winapp-provenance-census</AssemblyName>
+    <Description>Thin CLI over the provenance library: analyzes a directory of source-resolution census TSVs and emits the aggregate report + Gate-1 verdict. Used by the collection harness and to (re)generate published rates.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinApp.DevTools.Provenance\WinApp.DevTools.Provenance.csproj" />
+  </ItemGroup>
+
+</Project>

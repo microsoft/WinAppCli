@@ -1,0 +1,27 @@
+<Project>
+
+  <!--
+    Shared build settings for the winapp DevTools workstreams.
+    These projects are intentionally pure net10.0 (no -windows / no WinUI) so the
+    provenance grading + census-analysis logic and its unit tests run on hosted CI
+    without an interactive desktop. The desktop-only census *collection* harness lives
+    under census/ and is a documented heavy gate.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <Copyright>Copyright (C) Microsoft Corporation and Contributors</Copyright>
+    <Company>Microsoft Corporation</Company>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

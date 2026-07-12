@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>WinApp.DevTools.Provenance</RootNamespace>
+    <AssemblyName>WinApp.DevTools.Provenance</AssemblyName>
+    <Description>Confidence-graded source mapping (provenance) for WinUI design-time DevTools: the honesty model (SourceKind + Confidence + ReasonCode) and the source-resolution census analysis + Gate-1 evaluation.</Description>
+  </PropertyGroup>
+
+</Project>

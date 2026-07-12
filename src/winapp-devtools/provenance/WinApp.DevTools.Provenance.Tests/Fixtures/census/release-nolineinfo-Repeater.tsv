@@ -1,0 +1,130 @@
+handle	type	name	file	line	col
+1983980219984	Microsoft.UI.Xaml.Hosting.DesktopWindowXamlSource			0	0
+1983980454184	Microsoft.UI.Xaml.WindowChrome			0	0
+1983980715248	Microsoft.UI.Xaml.Controls.TitleBar	AppTitleBar	ms-appx:///MainWindow.xaml	0	0
+1983983489336	Microsoft.UI.Xaml.Controls.Border			0	0
+1983983513112	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984096721176	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984097715688	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984098117720	Microsoft.UI.Xaml.Controls.ContentControl	MwSlot	ms-appx:///SecondWindow.xaml	0	0
+1984098118120	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///SecondWindow.xaml	0	0
+1984098120120	Microsoft.UI.Xaml.PopupRoot			0	0
+1984098137528	SmokeFixture.RepeaterPage		ms-appx:///RepeaterPage.xaml	0	0
+1984098230968	Microsoft.UI.Xaml.Internal.RootScrollViewer			0	0
+1984098232456	Microsoft.UI.Xaml.Controls.ScrollContentPresenter			0	0
+1984098399128	Microsoft.UI.Xaml.Controls.Primitives.ScrollBar	VerticalScrollBar	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984098401912	Microsoft.UI.Xaml.Controls.Primitives.ScrollBar	HorizontalScrollBar	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984098950336	Microsoft.UI.Xaml.Hosting.DesktopWindowXamlSource			0	0
+1984099008696	Microsoft.UI.Xaml.Controls.Frame	RootFrame	ms-appx:///MainWindow.xaml	0	0
+1984099132808	Microsoft.UI.Xaml.PopupRoot			0	0
+1984099139608	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///MainWindow.xaml	0	0
+1984099425576	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099426536	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099427016	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099427496	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099428456	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099429416	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099429896	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099430376	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099431336	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099431816	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984099518952	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984099522472	Microsoft.UI.Xaml.Controls.TextBlock	HeaderText	ms-appx:///RepeaterPage.xaml	0	0
+1984099522824	Microsoft.UI.Xaml.Controls.TextBlock	ClickReadout	ms-appx:///RepeaterPage.xaml	0	0
+1984099524648	Microsoft.UI.Xaml.Controls.ItemsRepeater	ItemRepeater	ms-appx:///RepeaterPage.xaml	0	0
+1984100104376	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984100172760	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984102467080	Microsoft.UI.Xaml.Controls.ScrollContentPresenter			0	0
+1984102645768	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984102814952	Microsoft.UI.Xaml.Controls.Border	HorizontalPanningThumb	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984102816360	Microsoft.UI.Xaml.Controls.Border	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984102817064	Microsoft.UI.Xaml.Controls.TextBlock	SecondWindowLabel	ms-appx:///SecondWindow.xaml	0	0
+1984102819176	Microsoft.UI.Xaml.Controls.Border	ScrollBarSeparator	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984102819528	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984102820232	Microsoft.UI.Xaml.Controls.TextBlock	PART_TitleText	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+1984102820936	Microsoft.UI.Xaml.Controls.Border	VerticalPanningThumb	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984102821640	Microsoft.UI.Xaml.Controls.Border			0	0
+1984102822344	Microsoft.UI.Xaml.Controls.Viewbox	PART_Icon	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+1984103854696	Microsoft.UI.Xaml.Controls.Primitives.Thumb	VerticalThumb	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103860968	Microsoft.UI.Xaml.Controls.Primitives.Thumb	HorizontalThumb	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103905624	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	HorizontalSmallDecrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103906136	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	HorizontalLargeIncrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103906648	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	HorizontalSmallIncrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103907672	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	VerticalSmallDecrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103908184	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	VerticalLargeDecrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103910232	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	VerticalLargeIncrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103911256	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	HorizontalLargeDecrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103912792	Microsoft.UI.Xaml.Controls.Primitives.RepeatButton	VerticalSmallIncrease	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984103943912	Microsoft.UI.Xaml.Controls.ScrollViewer	ItemScroller	ms-appx:///RepeaterPage.xaml	0	0
+1984103952784	Microsoft.UI.Xaml.Controls.ImageIcon			0	0
+1984103960984	Microsoft.UI.Xaml.WindowChrome			0	0
+1984104174872	Microsoft.UI.Xaml.Internal.RootScrollViewer			0	0
+1984104239208	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984104239560	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984104241320	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984104243784	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984104244488	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984104244840	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984104245192	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984104245544	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984104245896	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984104246600	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984156093608	Microsoft.UI.Xaml.Controls.ContentPresenter	ClientAreaPresenter	ms-resource:///Files/Microsoft.UI.Xaml;component/themes/themeresources.xbf	0	0
+1984156096184	Microsoft.UI.Xaml.Controls.ContentPresenter		ms-resource:///Files/Microsoft.UI.Xaml;component/themes/generic.xaml	0	0
+1984156099496	Microsoft.UI.Xaml.Controls.Image			0	0
+1984156240008	Microsoft.UI.Xaml.Controls.Grid	PART_LayoutRoot	ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml	0	0
+1984156240408	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156241608	Microsoft.UI.Xaml.Controls.Grid			0	0
+1984156243208	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156338216	Microsoft.UI.Xaml.Controls.ScrollContentPresenter	ScrollContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156598968	Microsoft.UI.Xaml.Shapes.Rectangle	HorizontalTrackRect	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156601176	Microsoft.UI.Xaml.Shapes.Rectangle	VerticalTrackRect	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156636360	Microsoft.UI.Xaml.Controls.Grid	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156638360	Microsoft.UI.Xaml.Controls.Grid	VerticalRoot	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156638760	Microsoft.UI.Xaml.Controls.Grid	HorizontalPanningRoot	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156639160	Microsoft.UI.Xaml.Controls.Grid	VerticalPanningRoot	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156643560	Microsoft.UI.Xaml.Controls.Grid	HorizontalRoot	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156720312	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156722696	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156723432	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156724536	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156725272	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156726008	Microsoft.UI.Xaml.Shapes.Rectangle	ThumbVisual	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156727848	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156729320	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156731160	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156731528	Microsoft.UI.Xaml.Controls.ContentPresenter	ClientAreaPresenter	ms-resource:///Files/Microsoft.UI.Xaml;component/themes/themeresources.xbf	0	0
+1984156731896	Microsoft.UI.Xaml.Controls.ContentPresenter		ms-resource:///Files/Microsoft.UI.Xaml;component/themes/generic.xaml	0	0
+1984156734840	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156766808	Microsoft.UI.Xaml.Controls.Grid	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156769208	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156770408	Microsoft.UI.Xaml.Controls.Grid	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156771208	Microsoft.UI.Xaml.Controls.Grid	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156773208	Microsoft.UI.Xaml.Controls.Grid	Root	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984156895256	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156895688	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156896120	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156897848	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156898280	Microsoft.UI.Xaml.Controls.StackPanel		ms-appx:///RepeaterPage.xaml	0	0
+1984156995704	Microsoft.UI.Xaml.Controls.Grid			0	0
+1984156996104	Microsoft.UI.Xaml.Controls.Grid			0	0
+1984157002904	Microsoft.UI.Xaml.Controls.Grid		ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984157691112	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984157691816	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159598264	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984159600024	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159601432	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984159602136	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159602840	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159603896	Microsoft.UI.Xaml.Controls.Border			0	0
+1984159605304	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984159606008	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159609176	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159609880	Microsoft.UI.Xaml.Controls.TextBlock			0	0
+1984159612344	Microsoft.UI.Xaml.Controls.TextBlock		ms-appx:///RepeaterPage.xaml	0	0
+1984161884328	Microsoft.UI.Xaml.Controls.Button		ms-appx:///RepeaterPage.xaml	0	0
+1984162271768	Microsoft.UI.Xaml.Controls.FontIcon	Arrow	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984162272504	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984162273240	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984162283912	Microsoft.UI.Xaml.Controls.ContentPresenter	ContentPresenter	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0
+1984162285384	Microsoft.UI.Xaml.Controls.FontIcon	Arrow	ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml	0	0

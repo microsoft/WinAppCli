@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/provenance/">
+    <Project Path="provenance/WinApp.DevTools.Provenance.Census/WinApp.DevTools.Provenance.Census.csproj" />
+    <Project Path="provenance/WinApp.DevTools.Provenance.Tests/WinApp.DevTools.Provenance.Tests.csproj" />
+    <Project Path="provenance/WinApp.DevTools.Provenance/WinApp.DevTools.Provenance.csproj" />
+  </Folder>
+</Solution>
