@@ -49,6 +49,18 @@ public class WinAppParserConfigurationTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void PassesLeadingAtValueThroughAsLiteral_ForAppOption()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+        var args = new[] { "ui", "search", "selector", "-a", "@fakeapp" };
+
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+        Assert.AreEqual(0, parseResult.Errors.Count, ErrorSummary(parseResult));
+        Assert.AreEqual("@fakeapp", parseResult.GetValue(SharedUiOptions.AppOption));
+    }
+
+    [TestMethod]
     public void PassesNpmScopeStyleValueThroughAsLiteral()
     {
         var rootCommand = GetRequiredService<WinAppRootCommand>();
