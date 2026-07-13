@@ -6,7 +6,7 @@ This sample demonstrates a WinUI 3 desktop application with UI controls designed
 
 - WinUI 3 desktop app with Mica backdrop and custom TitleBar
 - Interactive controls with `AutomationProperties` for UI automation
-- Button with counter, TextBox, CheckBox, and submit flow
+- Button with counter, TextBox, RichEditBox, CheckBox, and submit flow
 - Used as the target app for `winapp ui` end-to-end tests
 
 ## Controls & AutomationIds
@@ -16,6 +16,7 @@ This sample demonstrates a WinUI 3 desktop application with UI controls designed
 | Button "Click Me" | `CounterButton` | Increments counter on click |
 | TextBlock "Count: N" | `CounterDisplay` | Shows click count |
 | TextBox | `TextInput` | Accepts text input |
+| RichEditBox | `RichEditor` | TextPattern-only edit control (set-value fallback / send-keys target) |
 | CheckBox "Enable feature" | `FeatureToggle` | Toggle on/off |
 | Button "Submit" | `SubmitButton` | Submits form |
 | TextBlock (result) | `ResultDisplay` | Shows submission result |
@@ -52,6 +53,15 @@ winapp ui invoke "Submit Button" -a winui-app
 
 # Verify result
 winapp ui wait-for "Result Display" -a winui-app --property Name --value "Submitted: Hello world (Feature: On)" -t 5000
+
+# Read the RichEditBox (TextPattern read path works)
+winapp ui get-value "Rich Text Editor" -a winui-app
+
+# Note: set-value on the WinUI 3 RichEditBox fails on purpose — it exposes only TextPattern and
+# returns E_NOTIMPL for put_accValue, so winapp reports a clear error pointing at send-keys.
+# (The LegacyIAccessible fallback does set text on rich-edit controls that implement put_accValue,
+# e.g. native Win32 rich-edit and Electron/Chromium compose boxes.)
+winapp ui send-keys "typed via keystrokes" --target "Rich Text Editor" -a winui-app --via send-input
 
 # Take a screenshot
 winapp ui screenshot -a winui-app -o result.png

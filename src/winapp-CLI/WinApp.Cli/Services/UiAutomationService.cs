@@ -805,24 +805,51 @@ return Task.FromResult<UiElement?>(null);
             }
             return Task.CompletedTask;
         }
-        catch
+        catch (Exception ex)
         {
-            // ValuePattern not supported — try RangeValuePattern for sliders/progress bars
-            if (double.TryParse(text, out var numericValue))
-            {
-                try
-                {
-                    var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
-                    rangePattern.SetValue(numericValue);
-                    return Task.CompletedTask;
-                }
-                catch { }
-            }
-
-            throw new InvalidOperationException(
-                $"Element {element.Id} ({element.Type}) does not support ValuePattern or RangeValuePattern. " +
-                "Only editable controls (TextBox, ComboBox, Slider, etc.) support set-value.");
+            _logger.LogDebug("ValuePattern.SetValue failed, trying fallbacks: {Message}", ex.Message);
         }
+
+        // ValuePattern not supported — try RangeValuePattern for numeric controls (sliders/progress bars)
+        if (double.TryParse(text, out var numericValue))
+        {
+            try
+            {
+                var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
+                rangePattern.SetValue(numericValue);
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("RangeValuePattern.SetValue failed: {Message}", ex.Message);
+            }
+        }
+
+        // Neither ValuePattern nor RangeValuePattern worked — fall back to LegacyIAccessible
+        // (IAccessible::put_accValue). This reaches TextPattern-only edit controls such as
+        // RichEditBox / Document editors that expose no ValuePattern, and works programmatically
+        // without requiring the app to be foreground (unlike keystroke injection).
+        try
+        {
+            var legacyPattern = (IUIAutomationLegacyIAccessiblePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId);
+            unsafe
+            {
+                fixed (char* valuePtr = text)
+                {
+                    legacyPattern.SetValue(new Windows.Win32.Foundation.PCWSTR(valuePtr));
+                }
+            }
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("LegacyIAccessible.SetValue failed: {Message}", ex.Message);
+        }
+
+        throw new InvalidOperationException(
+            $"Element {element.Id} ({element.Type}) could not be set via ValuePattern, RangeValuePattern, or " +
+            "LegacyIAccessible (put_accValue). This control may not support setting a value programmatically. " +
+            "As a last resort, use 'winapp ui send-keys' to type into it (requires an interactive desktop with the app in the foreground).");
     }
 
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)

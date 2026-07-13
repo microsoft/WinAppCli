@@ -133,6 +133,31 @@ function Assert-WinappOutputContains {
     return $result
 }
 
+# Asserts the command fails (non-zero exit) AND its combined stdout+stderr contains an expected
+# substring. Used for graceful-failure paths whose message is written to stderr (which Invoke-Winapp
+# discards), e.g. set-value on a control that supports no settable UIA pattern.
+function Assert-WinappFailureContains {
+    param([string]$TestName, [string[]]$WinappArgs, [string]$Expected)
+    $env:WINAPP_CLI_TELEMETRY_OPTOUT = "1"
+    $stderrFile = New-TemporaryFile
+    try {
+        $stdout = & $WinAppPath @WinappArgs 2>$stderrFile
+        $exitCode = $LASTEXITCODE
+        $stderr = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue
+    } finally {
+        Remove-Item $stderrFile -ErrorAction SilentlyContinue
+    }
+    $combined = (@($stdout) -join "`n") + "`n" + [string]$stderr
+    if ($exitCode -ne 0 -and $combined -match [regex]::Escape($Expected)) {
+        Write-TestPass $TestName "exit $exitCode, matched '$Expected'"
+    } elseif ($exitCode -eq 0) {
+        Write-TestFail $TestName "Expected non-zero exit but got 0"
+    } else {
+        Write-TestFail $TestName "Exit $exitCode but '$Expected' not found in: $($combined.Substring(0, [Math]::Min(300, $combined.Length)))"
+    }
+    return @{ ExitCode = $exitCode; Output = $combined }
+}
+
 function Assert-WinappJsonField {
     param([string]$TestName, [string[]]$WinappArgs, [string]$Field, [string]$Expected)
     $result = Invoke-Winapp $WinappArgs
@@ -321,6 +346,13 @@ Assert-WinappSuccess "set-value Text Input" -WinappArgs @("ui", "set-value", "Te
 
 # --- wait-for text value ---
 Assert-WinappSuccess "wait-for: text value set" -WinappArgs @("ui", "wait-for", "Text Input", "-a", "$appPid", "--property", "Value", "--value", "Hello from e2e test!", "-t", "5000")
+
+# --- RichEditBox (TextPattern-only, no ValuePattern): read works, set falls back to
+#     LegacyIAccessible. WinUI 3 RichEditBox returns E_NOTIMPL for put_accValue, so set-value
+#     must fail *gracefully* (non-zero exit) with an actionable message that points at send-keys,
+#     rather than crash or hang. This guards the fallback chain + error path for issue #620. ---
+Assert-WinappSuccess "get-value RichEditBox (TextPattern read path)" -WinappArgs @("ui", "get-value", "Rich Text Editor", "-a", "$appPid")
+Assert-WinappFailureContains "set-value RichEditBox fails gracefully with send-keys hint" -WinappArgs @("ui", "set-value", "Rich Text Editor", "hello richedit", "-a", "$appPid") -Expected "send-keys"
 
 # --- invoke checkbox toggle (exit code) ---
 Assert-WinappSuccess "invoke FeatureToggle" -WinappArgs @("ui", "invoke", "Feature Toggle", "-a", "$appPid")

@@ -173,6 +173,16 @@ winapp ui get-property cmb-modellist-d5e6 -a myapp --property IsSelected
 winapp ui get-focused -a myapp
 ```
 
+### Set values
+`set-value` writes programmatically (no keystrokes, no foreground) via a fallback chain: ValuePattern → RangeValuePattern (numeric) → LegacyIAccessible `put_accValue` for TextPattern-only edit controls.
+```powershell
+winapp ui set-value txt-searchbox-e5f6 "hello" -a myapp        # TextBox/ComboBox via ValuePattern
+winapp ui set-value sld-volume-b2c3 75 -a myapp                # Slider via RangeValuePattern
+winapp ui set-value doc-compose-9f3a "hello" -a myapp          # RichEdit/compose box via LegacyIAccessible
+```
+- The LegacyIAccessible fallback reaches rich-edit/compose controls that expose no ValuePattern, as long as their accessibility implements `put_accValue` (native Win32 rich-edit and Chromium/Electron/WebView2 compose boxes typically do).
+- **WinUI 3 `RichEditBox` and WPF `RichTextBox` return `E_NOTIMPL`** for `put_accValue`. `set-value` fails on them with a clear error — use `send-keys` (needs an unlocked, foregrounded desktop) to type into those instead. Note `get-value` can still *read* them via TextPattern.
+
 ### Scroll containers
 ```powershell
 # Find scrollable containers — look for [scroll:v] (vertical) or [scroll:h] (horizontal)
@@ -476,7 +486,7 @@ Send synthetic keyboard input to a window. Supports named keys (down, enter, tab
 
 ### `winapp ui set-value`
 
-Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
+Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, and falls back to LegacyIAccessible (put_accValue) for TextPattern-only edit controls such as RichEditBox. No app foreground required. Usage: winapp ui set-value <selector> <value> -a <app>
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->

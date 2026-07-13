@@ -701,7 +701,7 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 
 ### `uiSetValue()`
 
-Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
+Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, and falls back to LegacyIAccessible (put_accValue) for TextPattern-only edit controls such as RichEditBox. No app foreground required. Usage: winapp ui set-value <selector> <value> -a <app>
 
 ```typescript
 function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>

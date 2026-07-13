@@ -214,7 +214,7 @@ Want to inspect or interact with a running app's UI?
 - `ui hover <selector> -a <app> [--dwell-time <ms>]` — move mouse to element center to trigger tooltips, flyouts, and hover states. Use with `ui screenshot --capture-screen` to capture the result.
 - `ui drag <from> <to> -a <app> [--right]` — press the mouse button at one point, move to another, and release (reorder, resize, sliders, drag-and-drop). Each of `<from>`/`<to>` is an element selector (drags from/to its center) or app coordinates `x,y` as reported by `ui inspect`.
 - `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input] [--verbatim]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--verbatim` to type the whole argument literally (no key/combo parsing), or `--via send-input` for per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox).
-- `ui set-value <selector> "value" -a <app>` — set text or slider value
+- `ui set-value <selector> "value" -a <app>` — set text or slider value programmatically (ValuePattern → RangeValuePattern → LegacyIAccessible `put_accValue` fallback for TextPattern-only rich-edit/compose boxes). WinUI 3 `RichEditBox` / WPF `RichTextBox` return `E_NOTIMPL` and can't be set this way — use `send-keys` for those.
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)

@@ -336,11 +336,19 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 
 
 ### set-value
-Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
+Set a value on an editable element **programmatically** (no keystrokes, no app foreground). Uses a fallback chain:
+1. **ValuePattern** — TextBox, ComboBox, PasswordBox, and most editable controls.
+2. **RangeValuePattern** — numeric controls (Slider, ProgressBar) when the value parses as a number.
+3. **LegacyIAccessible** (`IAccessible::put_accValue`) — the fallback for **TextPattern-only** edit controls that expose no ValuePattern (e.g. rich-edit / `Document` compose boxes). This closes the read/write gap where `get-value` could read such a control but `set-value` could not.
 ```bash
 winapp ui set-value txt-textbox-a4b1 "Hello world" -a notepad
 winapp ui set-value sld-volume-b2c3 75 -a myapp
+winapp ui set-value doc-compose-9f3a "hello" -a myapp        # RichEdit/compose box via LegacyIAccessible
 ```
+If none of the three patterns can set the value, `set-value` fails with a clear error pointing at `send-keys` as the last resort.
+
+> **Not every rich editor supports programmatic set.** The LegacyIAccessible fallback only works on controls whose accessibility implements `IAccessible::put_accValue` — native Win32 rich-edit controls and Chromium/Electron/WebView2 compose surfaces typically do. **WinUI 3 `RichEditBox` and WPF `RichTextBox` return `E_NOTIMPL`** for `put_accValue`, so they can't be set this way — use `send-keys` (which needs an unlocked, foregrounded desktop) for those.
+
 
 ### get-value
 Read the current value from an element. Uses a smart fallback chain: TextPattern (RichEditBox, Document) → ValuePattern (TextBox, Slider) → SelectionPattern (ComboBox, RadioButton, TabView) → Name (labels).
@@ -424,12 +432,14 @@ winapp ui list-windows --show-hidden                        # include invisible 
 
 | Framework | inspect | search | invoke | set-value | screenshot |
 |---|---|---|---|---|---|
-| **WPF** | ✅ Full tree | ✅ All properties | ✅ All patterns | ✅ | ✅ |
+| **WPF** | ✅ Full tree | ✅ All properties | ✅ All patterns | ✅ ¹ | ✅ |
 | **WinForms** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Win32** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **WinUI 3** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **WinUI 3** | ✅ | ✅ | ✅ | ✅ ¹ | ✅ |
 | **Electron** | ⚠️ Chromium tree | ⚠️ Limited | ⚠️ Varies | ⚠️ Varies | ✅ |
 | **Flutter** | ⚠️ Basic | ⚠️ Basic | ❌ Minimal | ❌ | ✅ |
+
+¹ `set-value` works on any control exposing ValuePattern/RangeValuePattern, plus TextPattern-only edit controls whose accessibility implements `IAccessible::put_accValue` (LegacyIAccessible fallback). **WinUI 3 `RichEditBox` and WPF `RichTextBox` are exceptions** — they expose only TextPattern and return `E_NOTIMPL` for `put_accValue`, so they can't be set programmatically; use `send-keys` (interactive desktop required) to type into them.
 
 ## Troubleshooting
 
