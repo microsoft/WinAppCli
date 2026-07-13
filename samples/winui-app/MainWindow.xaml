@@ -63,7 +63,8 @@
                      exercise the LegacyIAccessible put_accValue fallback in `winapp ui set-value`.
                      WinUI 3 RichEditBox returns E_NOTIMPL for put_accValue, so set-value fails
                      gracefully here and points at `send-keys` — the read path (get-value via
-                     TextPattern) still works. -->
+                     TextPattern) still works. Initial text is seeded in code-behind so the e2e
+                     can assert the read path returns real content, not just a zero exit code. -->
                 <RichEditBox
                     x:Name="RichInputBox"
                     AutomationProperties.AutomationId="RichEditor"

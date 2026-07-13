@@ -356,7 +356,7 @@ Assert-WinappSuccess "wait-for: text value set" -WinappArgs @("ui", "wait-for", 
 #     set-value tries first), so that branch is validated manually against native put_accValue
 #     controls (Win32 rich-edit, Electron/WebView2 compose boxes) and tracked for automated
 #     coverage in a follow-up. ---
-Assert-WinappSuccess "get-value RichEditBox (TextPattern read path)" -WinappArgs @("ui", "get-value", "Rich Text Editor", "-a", "$appPid")
+Assert-WinappOutputContains "get-value RichEditBox (TextPattern read path)" -WinappArgs @("ui", "get-value", "Rich Text Editor", "-a", "$appPid") -Expected "Rich text read path OK"
 Assert-WinappFailureContains "set-value RichEditBox fails gracefully with send-keys hint" -WinappArgs @("ui", "set-value", "Rich Text Editor", "hello richedit", "-a", "$appPid") -Expected "send-keys"
 
 # --- invoke checkbox toggle (exit code) ---
