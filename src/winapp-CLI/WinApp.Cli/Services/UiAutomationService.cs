@@ -788,71 +788,82 @@ return Task.FromResult<UiElement?>(null);
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
         }
 
-        try
+        // The fallback ordering (ValuePattern → RangeValuePattern → LegacyIAccessible/put_accValue,
+        // then a send-keys hint) lives in the pure, unit-tested ValueSetter; ComValueSetStrategy
+        // supplies the live UIA COM mechanics.
+        ValueSetter.Apply(new ComValueSetStrategy(comElement, _logger), element, text);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// <see cref="IValueSetStrategy"/> backed by a live UI Automation COM element. Each method
+    /// acquires the relevant UIA pattern and performs the set, returning <c>false</c> (and logging at
+    /// debug level) when the pattern is unavailable or the COM call throws so the caller falls through
+    /// to the next mechanism.
+    /// </summary>
+    private sealed class ComValueSetStrategy(IUIAutomationElement comElement, ILogger logger) : IValueSetStrategy
+    {
+        public bool TrySetViaValuePattern(string text)
         {
-            var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
-            unsafe
+            try
             {
-                var bstrPtr = Marshal.StringToBSTR(text);
-                try
+                var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
+                unsafe
                 {
-                    pattern.SetValue(new Windows.Win32.Foundation.BSTR((char*)bstrPtr));
+                    var bstrPtr = Marshal.StringToBSTR(text);
+                    try
+                    {
+                        pattern.SetValue(new Windows.Win32.Foundation.BSTR((char*)bstrPtr));
+                    }
+                    finally
+                    {
+                        Marshal.FreeBSTR(bstrPtr);
+                    }
                 }
-                finally
-                {
-                    Marshal.FreeBSTR(bstrPtr);
-                }
+                return true;
             }
-            return Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("ValuePattern.SetValue failed, trying fallbacks: {Message}", ex.Message);
+            catch (Exception ex)
+            {
+                logger.LogDebug("ValuePattern.SetValue failed, trying fallbacks: {Message}", ex.Message);
+                return false;
+            }
         }
 
-        // ValuePattern not supported — try RangeValuePattern for numeric controls (sliders/progress bars)
-        if (double.TryParse(text, out var numericValue))
+        public bool TrySetViaRangeValuePattern(double value)
         {
             try
             {
                 var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
-                rangePattern.SetValue(numericValue);
-                return Task.CompletedTask;
+                rangePattern.SetValue(value);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("RangeValuePattern.SetValue failed: {Message}", ex.Message);
+                logger.LogDebug("RangeValuePattern.SetValue failed: {Message}", ex.Message);
+                return false;
             }
         }
 
-        // Neither ValuePattern nor RangeValuePattern worked — fall back to LegacyIAccessible
-        // (IAccessible::put_accValue). This reaches TextPattern-only edit controls such as
-        // RichEditBox / Document editors that expose no ValuePattern, and works programmatically
-        // without requiring the app to be foreground (unlike keystroke injection).
-        try
+        public bool TrySetViaLegacyIAccessible(string text)
         {
-            var legacyPattern = (IUIAutomationLegacyIAccessiblePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId);
-            unsafe
+            try
             {
-                fixed (char* valuePtr = text)
+                var legacyPattern = (IUIAutomationLegacyIAccessiblePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId);
+                unsafe
                 {
-                    legacyPattern.SetValue(new Windows.Win32.Foundation.PCWSTR(valuePtr));
+                    fixed (char* valuePtr = text)
+                    {
+                        legacyPattern.SetValue(new Windows.Win32.Foundation.PCWSTR(valuePtr));
+                    }
                 }
+                return true;
             }
-            return Task.CompletedTask;
+            catch (Exception ex)
+            {
+                logger.LogDebug("LegacyIAccessible.SetValue failed: {Message}", ex.Message);
+                return false;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("LegacyIAccessible.SetValue failed: {Message}", ex.Message);
-        }
-
-        var sendKeysTarget = element.Selector ?? element.Name ?? element.AutomationId ?? "<selector>";
-        throw new InvalidOperationException(
-            $"Element {element.Id} ({element.Type}) could not be set via ValuePattern, RangeValuePattern, or " +
-            "LegacyIAccessible (put_accValue). This control may not support setting a value programmatically. " +
-            "As a last resort, focus it and type the value with 'winapp ui send-keys' — for example: " +
-            $"winapp ui send-keys --verbatim \"<value>\" --target \"{sendKeysTarget}\" --via send-input -a <app> " +
-            "(requires an interactive desktop with the app in the foreground).");
     }
 
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
