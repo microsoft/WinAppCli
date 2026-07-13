@@ -19,8 +19,9 @@ internal class UiSetValueCommand : Command, IShortDescription
     public UiSetValueCommand()
         : base("set-value", "Set a value on an element programmatically. " +
                "Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, " +
-               "and falls back to LegacyIAccessible (put_accValue) for TextPattern-only edit controls such as RichEditBox. " +
-               "No app foreground required. Usage: winapp ui set-value <selector> <value> -a <app>")
+               "with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. " +
+               "Some controls reject programmatic setting (e.g. WinUI 3 RichEditBox and WPF RichTextBox return E_NOTIMPL); " +
+               "use 'winapp ui send-keys' for those. Usage: winapp ui set-value <selector> <value> -a <app>")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Arguments.Add(SharedUiOptions.ValueArgument);

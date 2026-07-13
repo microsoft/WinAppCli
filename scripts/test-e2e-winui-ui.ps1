@@ -350,7 +350,12 @@ Assert-WinappSuccess "wait-for: text value set" -WinappArgs @("ui", "wait-for", 
 # --- RichEditBox (TextPattern-only, no ValuePattern): read works, set falls back to
 #     LegacyIAccessible. WinUI 3 RichEditBox returns E_NOTIMPL for put_accValue, so set-value
 #     must fail *gracefully* (non-zero exit) with an actionable message that points at send-keys,
-#     rather than crash or hang. This guards the fallback chain + error path for issue #620. ---
+#     rather than crash or hang. This guards the fallback chain + error path for issue #620.
+#     Coverage boundary: the *successful* put_accValue path can't be exercised from this WinUI 3
+#     sample — no WinUI 3 control implements put_accValue without also exposing ValuePattern (which
+#     set-value tries first), so that branch is validated manually against native put_accValue
+#     controls (Win32 rich-edit, Electron/WebView2 compose boxes) and tracked for automated
+#     coverage in a follow-up. ---
 Assert-WinappSuccess "get-value RichEditBox (TextPattern read path)" -WinappArgs @("ui", "get-value", "Rich Text Editor", "-a", "$appPid")
 Assert-WinappFailureContains "set-value RichEditBox fails gracefully with send-keys hint" -WinappArgs @("ui", "set-value", "Rich Text Editor", "hello richedit", "-a", "$appPid") -Expected "send-keys"
 
