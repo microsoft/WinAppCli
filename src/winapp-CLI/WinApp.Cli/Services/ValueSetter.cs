@@ -68,8 +68,9 @@ internal static class ValueSetter
         throw new InvalidOperationException(
             $"Element {element.Id} ({element.Type}) could not be set via ValuePattern, RangeValuePattern, or " +
             "LegacyIAccessible (put_accValue). This control may not support setting a value programmatically. " +
-            "As a last resort, focus it and type the value with 'winapp ui send-keys' — for example: " +
-            $"winapp ui send-keys --verbatim \"<value>\" --target \"{sendKeysTarget}\" --via send-input -a <app> " +
-            "(requires an interactive desktop with the app in the foreground).");
+            "As a last resort, type the value with 'winapp ui send-keys' — for example: " +
+            $"winapp ui send-keys --verbatim \"<value>\" --target \"{sendKeysTarget}\" -a <app>. " +
+            "This defaults to HWND-targeted post-message input (no foreground required); add '--via send-input' " +
+            "for controls that need real per-keystroke input, which does require an unlocked foreground desktop.");
     }
 }
