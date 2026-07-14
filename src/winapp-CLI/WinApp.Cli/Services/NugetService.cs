@@ -154,6 +154,14 @@ internal class NugetService(
     }
 
     /// <summary>
+    /// Normalizes a version string to NuGet's canonical form (e.g. "1.0" -> "1.0.0") so the value stored
+    /// and returned by the installer matches the on-disk global-packages folder layout. Returns the input
+    /// unchanged if it is not a parseable NuGet version.
+    /// </summary>
+    internal static string NormalizeVersion(string version) =>
+        NuGetVersion.TryParse(version, out var parsed) ? parsed.ToNormalizedString() : version;
+
+    /// <summary>
     /// Detects whether the global winapp directory is a test override (not the real user profile .winapp).
     /// </summary>
     private static bool IsTestOverride(DirectoryInfo globalDir)
@@ -183,28 +191,34 @@ internal class NugetService(
             return;
         }
 
-        var packageDir = GetNuGetPackageDir(package, version);
+        // Store the canonical (normalized) version so the value recorded in `installed` matches the
+        // on-disk NuGet folder layout (e.g. "1.0" -> "1.0.0"). Downstream consumers build cache paths by
+        // concatenating this value, so an un-normalized shorthand would point them at a folder that the
+        // global-packages writer never created.
+        var normalizedVersion = NormalizeVersion(version);
+
+        var packageDir = GetNuGetPackageDir(package, normalizedVersion);
 
         // Already installed on disk?
         if (packageDir.Exists)
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {version} already present");
-            installed[package] = version;
+            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
+            installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, taskContext, cacheContext, cancellationToken);
             return;
         }
 
         // Download and extract the package from the user's configured NuGet sources into the
         // global packages folder (using the standard NuGet on-disk layout). Throws with the
         // underlying source error if no configured source can provide the package.
-        await DownloadPackageAsync(package, version, cacheContext, cancellationToken);
+        await DownloadPackageAsync(package, normalizedVersion, cacheContext, cancellationToken);
 
-        installed[package] = version;
-        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {version}");
+        installed[package] = normalizedVersion;
+        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
@@ -484,6 +498,7 @@ internal class NugetService(
 
         var versions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Exception? lastError = null;
+        string? lastErrorSource = null;
         using var cacheContext = new SourceCacheContext();
 
         foreach (var repo in GetRepositoriesForPackage(packageName))
@@ -519,14 +534,21 @@ internal class NugetService(
             catch (Exception ex)
             {
                 // A single unreachable/unauthorized source should not prevent other sources from
-                // resolving the package. Remember the error in case no source yields a version.
+                // resolving the package. Remember the error (and which source) in case no source
+                // yields a version.
                 lastError = ex;
+                lastErrorSource = repo.PackageSource.Name;
             }
         }
 
         if (versions.Count == 0 && lastError != null)
         {
-            throw new InvalidOperationException($"No versions found for {packageName}", lastError);
+            // Inline the underlying source error in the message rather than only wrapping it: top-level
+            // command handlers print ex.Message, so 401/403/network detail carried by the inner exception
+            // would otherwise be invisible to the user.
+            throw new InvalidOperationException(
+                $"No versions found for {packageName}. Last error from source '{lastErrorSource}': {lastError.Message}",
+                lastError);
         }
 
         return [.. versions];
@@ -564,6 +586,8 @@ internal class NugetService(
     {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var nugetVersion = NuGetVersion.Parse(version);
+        Exception? lastError = null;
+        string? lastErrorSource = null;
 
         foreach (var repo in GetRepositoriesForPackage(packageName))
         {
@@ -582,15 +606,17 @@ internal class NugetService(
 
                 dependencyInfo = await byIdResource.GetDependencyInfoAsync(packageName, nugetVersion, cacheContext, Logger, cancellationToken);
             }
-            catch (FatalProtocolException)
+            catch (FatalProtocolException ex)
             {
-                // Source unreachable/unauthorized; try the next one.
+                // Source unreachable/unauthorized; remember why and try the next one.
+                lastError = ex;
+                lastErrorSource = repo.PackageSource.Name;
                 continue;
             }
 
             if (dependencyInfo is null)
             {
-                // This source does not have the requested version; try the next one.
+                // This source responded that it does not have the requested version; try the next one.
                 continue;
             }
 
@@ -614,6 +640,17 @@ internal class NugetService(
 
             // Dependencies resolved from the first source that has the package.
             return dependencies;
+        }
+
+        // No source produced dependency metadata. If at least one source failed with a protocol error
+        // (unreachable/401/403/network), surface it rather than returning an empty graph: a caller would
+        // otherwise treat "no dependencies" as success and silently skip installing missing transitive
+        // packages. An empty result is only returned when every source cleanly reported the package absent.
+        if (lastError != null)
+        {
+            throw new InvalidOperationException(
+                $"Failed to resolve dependencies for {packageName} {version} from the configured NuGet sources. Last error from source '{lastErrorSource}': {lastError.Message}",
+                lastError);
         }
 
         return dependencies;

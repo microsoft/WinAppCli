@@ -110,6 +110,12 @@ internal sealed class PackageInstallationService(
                 version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
             }
 
+            // Normalize the resolved version to NuGet's canonical on-disk form (e.g. a "1.0" pin becomes
+            // "1.0.0"). allInstalledVersions is returned to callers that build global-cache paths by
+            // concatenating this value, so a shorthand pin would otherwise point them at a folder the
+            // NuGet writer never created.
+            version = NugetService.NormalizeVersion(version);
+
             // Check if already installed in NuGet global cache
             var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
             if (packageDir.Exists)

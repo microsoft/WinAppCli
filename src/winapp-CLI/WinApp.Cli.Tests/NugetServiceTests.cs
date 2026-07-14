@@ -719,6 +719,24 @@ public class NugetServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    // Shorthand numeric versions expand to NuGet's canonical 3-part form so the stored/returned value
+    // matches the on-disk global-packages folder layout that downstream cache-path builders concatenate.
+    [DataRow("1.0", "1.0.0")]
+    [DataRow("2", "2.0.0")]
+    [DataRow("1.2.3", "1.2.3")]
+    // Trailing-zero revision is dropped by normalization (1.2.3.0 -> 1.2.3), matching NuGet on disk.
+    [DataRow("1.2.3.0", "1.2.3")]
+    // Prerelease and metadata are preserved (build metadata is stripped by NuGet normalization).
+    [DataRow("1.0.0-preview.1", "1.0.0-preview.1")]
+    [DataRow("1.0.0+build5", "1.0.0")]
+    // Non-parseable input is returned unchanged rather than throwing.
+    [DataRow("not-a-version", "not-a-version")]
+    public void NormalizeVersion_ReturnsCanonicalOnDiskForm(string input, string expected)
+    {
+        Assert.AreEqual(expected, NugetService.NormalizeVersion(input), $"NormalizeVersion(\"{input}\")");
+    }
+
+    [TestMethod]
     public async Task GetLatestVersionAsync_WhenCancelled_ThrowsOperationCanceledException()
     {
         var root = CreateFeedTestDirectory();
