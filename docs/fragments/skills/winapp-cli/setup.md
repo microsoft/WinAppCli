@@ -76,7 +76,7 @@ Use `restore` when you clone a repo that already has `winapp.yaml` but no `.wina
 
 ### Private or custom NuGet feeds
 
-`init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard `nuget.config` hierarchy (project, user, and machine level). To restore the SDK packages from an internal feed or mirror, add it under `<packageSources>`; winapp queries every enabled source (and picks the highest listed version for `init`/`update`). To use *only* your feed, `<clear />` the inherited sources first:
+`init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard `nuget.config` hierarchy (project, user, and machine level). To restore the SDK packages from an internal feed or mirror, add it under `<packageSources>`; winapp queries every enabled source (and picks the highest listed version for `init`/`update`). If your `nuget.config` defines a `<packageSourceMapping>`, only the sources mapped to a given package are queried for it, so an enabled feed excluded by the mapping is skipped (and an unmapped package fails to resolve rather than falling back to another feed). To use *only* your feed, `<clear />` the inherited sources first:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>

@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using NuGet.Frameworks;
+using NuGet.Packaging;
+using NuGet.Packaging.Core;
+using NuGet.Versioning;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -765,6 +769,129 @@ public class NugetServiceTests : BaseCommandTests
             // Cancellation must surface as OperationCanceledException, not be masked as a "no versions" error.
             await Assert.ThrowsExactlyAsync<OperationCanceledException>(
                 async () => await service.GetLatestVersionAsync("Any.Package", SdkInstallMode.Stable, cts.Token));
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    /// <summary>
+    /// Authors a minimal but valid .nupkg (with an optional dependency group) into a flat local feed
+    /// folder, so tests can exercise the real download/extract/nuspec/recursive-dependency paths without
+    /// network access.
+    /// </summary>
+    private static void WriteNupkgToFeed(DirectoryInfo feedDir, string id, string version, params (string Id, string Version)[] dependencies)
+    {
+        var builder = new PackageBuilder
+        {
+            Id = id,
+            Version = NuGetVersion.Parse(version),
+            Description = $"{id} test package",
+        };
+        builder.Authors.Add("winapp-tests");
+
+        if (dependencies.Length > 0)
+        {
+            builder.DependencyGroups.Add(new PackageDependencyGroup(
+                NuGetFramework.Parse("net10.0"),
+                [.. dependencies.Select(d => new PackageDependency(d.Id, VersionRange.Parse(d.Version)))]));
+        }
+
+        // A .nupkg must contain at least one file; add a trivial lib file from a temp source.
+        var contentFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.txt");
+        File.WriteAllText(contentFile, "test");
+        try
+        {
+            builder.Files.Add(new PhysicalPackageFile { SourcePath = contentFile, TargetPath = $"lib/net10.0/{id}.txt" });
+
+            var nupkgPath = Path.Combine(feedDir.FullName, $"{id}.{version}.nupkg");
+            using var stream = File.Create(nupkgPath);
+            builder.Save(stream);
+        }
+        finally
+        {
+            File.Delete(contentFile);
+        }
+    }
+
+    private static void WriteLocalFeedConfig(DirectoryInfo root, DirectoryInfo feed, DirectoryInfo packages) =>
+        WriteNuGetConfig(root, $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <config>
+                <add key="globalPackagesFolder" value="{packages.FullName}" />
+              </config>
+              <packageSources>
+                <clear />
+                <add key="local" value="{feed.FullName}" />
+              </packageSources>
+              <packageSourceMapping>
+                <clear />
+                <packageSource key="local">
+                  <package pattern="*" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+            """);
+
+    [TestMethod]
+    public async Task InstallPackageAsync_LocalFeed_InstallsPackageAndNormalizedTransitiveDependency()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Package A depends on Package B; both live only in the local feed (no network).
+            WriteNupkgToFeed(feed, "Winapp.TestA", "1.0.0", ("Winapp.TestB", "1.0.0"));
+            WriteNupkgToFeed(feed, "Winapp.TestB", "1.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            // Request with a "1.0" shorthand to also exercise version normalization end-to-end.
+            var installed = await service.InstallPackageAsync("Winapp.TestA", "1.0", TestTaskContext, TestContext.CancellationToken);
+
+            // The package and its transitive dependency are both recorded with canonical (normalized) versions.
+            Assert.IsTrue(installed.ContainsKey("Winapp.TestA"), "Main package should be recorded as installed.");
+            Assert.AreEqual("1.0.0", installed["Winapp.TestA"], "Main package version should be normalized.");
+            Assert.IsTrue(installed.ContainsKey("Winapp.TestB"), "Transitive dependency should be resolved and installed.");
+            Assert.AreEqual("1.0.0", installed["Winapp.TestB"], "Dependency version should be normalized.");
+
+            // Both are extracted into the configured global packages folder using the normalized layout.
+            Assert.IsTrue(service.GetNuGetPackageDir("Winapp.TestA", "1.0.0").Exists, "Main package should be extracted on disk.");
+            Assert.IsTrue(service.GetNuGetPackageDir("Winapp.TestB", "1.0.0").Exists, "Dependency should be extracted on disk.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task InstallPackageAsync_PackageMissingFromFeed_ThrowsActionableError()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // The feed exists but does not contain the requested package: the content download fails on
+            // every eligible source, which must surface as an actionable error rather than silently succeeding.
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.InstallPackageAsync("Winapp.DoesNotExist", "1.0.0", TestTaskContext, TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "Winapp.DoesNotExist", StringComparison.Ordinal);
         }
         finally
         {

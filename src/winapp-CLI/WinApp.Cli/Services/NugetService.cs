@@ -246,6 +246,12 @@ internal class NugetService(
             try
             {
                 bool copied;
+
+                // Capture warning/error diagnostics for this source. CopyNupkgToStreamAsync reports content
+                // failures (e.g. a 401/403 on the .nupkg endpoint) through the logger and can then return
+                // false instead of throwing; with NullLogger that detail would be lost and the failure
+                // misreported as "not found".
+                var downloadLogger = new CollectingLogger();
                 await using (var fileStream = File.Create(tempFile))
                 {
                     try
@@ -258,7 +264,7 @@ internal class NugetService(
                             continue;
                         }
 
-                        copied = await byIdResource.CopyNupkgToStreamAsync(identity.Id, identity.Version, fileStream, cacheContext, Logger, cancellationToken);
+                        copied = await byIdResource.CopyNupkgToStreamAsync(identity.Id, identity.Version, fileStream, cacheContext, downloadLogger, cancellationToken);
                     }
                     catch (FatalProtocolException ex)
                     {
@@ -272,6 +278,15 @@ internal class NugetService(
 
                 if (!copied)
                 {
+                    // A false return covers both "this source doesn't have the package" (normal failover)
+                    // and a content-endpoint failure (e.g. 401/403) that was retried and logged rather than
+                    // thrown. Preserve any captured error so an auth/network failure isn't later reported as
+                    // a plain "package/version was not found".
+                    if (downloadLogger.LastErrorMessage is not null)
+                    {
+                        lastError = new InvalidOperationException(downloadLogger.LastErrorMessage);
+                        lastErrorSource = repo.PackageSource.Name;
+                    }
                     continue;
                 }
 
@@ -586,10 +601,11 @@ internal class NugetService(
     {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var nugetVersion = NuGetVersion.Parse(version);
+        var repos = GetRepositoriesForPackage(packageName);
         Exception? lastError = null;
         string? lastErrorSource = null;
 
-        foreach (var repo in GetRepositoriesForPackage(packageName))
+        foreach (var repo in repos)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -653,6 +669,15 @@ internal class NugetService(
                 lastError);
         }
 
+        // No source was even eligible: <packageSourceMapping> excludes this package from every configured
+        // source. Fail closed (matching the download path) instead of reporting a dependency-free graph,
+        // which a caller would treat as success while required transitive packages remain uninstalled.
+        if (repos.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot resolve dependencies for {packageName} {version}: no configured NuGet source is mapped to this package (check <packageSourceMapping> in nuget.config).");
+        }
+
         return dependencies;
     }
 
@@ -679,5 +704,30 @@ internal class NugetService(
             }
         }
         return 0;
+    }
+
+    /// <summary>
+    /// An <see cref="ILogger"/> that captures the most recent warning/error message emitted by a NuGet
+    /// operation. Used to recover the underlying reason (e.g. a 401/403 on a package-content endpoint)
+    /// when an API such as <c>CopyNupkgToStreamAsync</c> reports failure by returning <c>false</c> and
+    /// logging rather than throwing, so the failure is not later misreported as a plain "not found".
+    /// </summary>
+    private sealed class CollectingLogger : LoggerBase
+    {
+        public string? LastErrorMessage { get; private set; }
+
+        public override void Log(ILogMessage message)
+        {
+            if (message.Level >= LogLevel.Warning)
+            {
+                LastErrorMessage = message.Message;
+            }
+        }
+
+        public override Task LogAsync(ILogMessage message)
+        {
+            Log(message);
+            return Task.CompletedTask;
+        }
     }
 }
