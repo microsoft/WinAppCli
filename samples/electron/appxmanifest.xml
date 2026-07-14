@@ -20,6 +20,9 @@
     <DisplayName>Electron winapp Sample</DisplayName>
     <PublisherDisplayName>Sample Author</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on"/>
+    </uap10:PackageIntegrity>
   </Properties>
 
   <Dependencies>
@@ -35,7 +38,7 @@
     <Application Id="electronWinappSample"
       Executable="$targetnametoken$.exe"
       EntryPoint="Windows.FullTrustApplication"
-      uap10:TrustLevel="mediumIL" 
+      uap10:TrustLevel="mediumIL"
       uap10:RuntimeBehavior="packagedClassicApp">
       <uap:VisualElements
         DisplayName="Electron winapp Sample"

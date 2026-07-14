@@ -135,7 +135,8 @@ Want to inspect or interact with a running app's UI?
 - `--args <string>` — command-line arguments to pass to the app
 - `--no-launch` — register the package without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
-- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching)
+- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
+- `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for loose layout
 **Requires:** Built app output directory + `appxmanifest.xml`
 

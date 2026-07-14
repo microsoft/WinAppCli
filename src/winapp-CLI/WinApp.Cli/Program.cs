@@ -17,6 +17,14 @@ internal static class Program
 {
     internal static async Task<int> Main(string[] args)
     {
+        // Hidden internal verb: the WinUI DbgEng triage pass runs in this isolated child process so
+        // its modern dbgeng.dll is not poisoned by the system32 dbghelp.dll the parent already loaded.
+        // Intercept before any host/service setup to keep the loader state clean and output noise-free.
+        if (args.Length > 0 && args[0] == Services.XamlTriageRunner.InternalVerb)
+        {
+            return Services.XamlTriageRunner.Run(args);
+        }
+
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
         try
         {
