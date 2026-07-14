@@ -240,7 +240,56 @@ The default capture path uses **Windows.Graphics.Capture (WGC)**, reading the ac
 
 Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays that aren't owned by the target window. `--capture-screen` reads from the screen DC and brings the window to the foreground first. Use `--focus` if you just want to foreground the window without switching capture modes (e.g., to ensure the screenshot matches what the user is currently looking at).
 
-### invoke
+### record
+Record the target window (or an element's region) to an H.264 MP4 video. Frames are captured via Windows Graphics Capture (with PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so recordings never buffer the full video in memory.
+
+**Default behavior** (`--duration-sec 0`): records until stopped. Use Ctrl+C interactively, or (for programmatic / agent callers) write a newline to stdin or close stdin to stop and finalize the MP4 gracefully. A valid, playable MP4 is **always** finalized on any graceful stop — no corruption.
+
+```bash
+# Timed: record for 10 s at 15 fps
+winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
+
+# Unbounded (default): record until Ctrl+C, downscaled to max 1280px longest edge
+winapp ui record -a myapp --max-edge 1280 --output capture.mp4
+
+# Programmatic stop (agent/script): pipe a newline; the recorder stops and writes a valid MP4
+"" | winapp ui record -a myapp --json --output capture.mp4
+
+# Record a single element's region (fails with element_not_found if selector is missing)
+winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
+
+# Include screen overlays / popups (captures from screen DC; brings window to foreground)
+winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
+```
+
+**Options:**
+- `--duration-sec N` — Record for N seconds. Default **0** = record until stopped.
+- `--fps N` — Target frames per second (default 15).
+- `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
+- `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
+- `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>.mp4` in the current directory.
+
+**Stop mechanisms:**
+- Interactive: **Ctrl+C** (any platform).
+- Programmatic / agent: write a **newline** (`""`) or close stdin (EOF). A grace window ignores an instant EOF that arrives because no stdin pipe is attached — the recording continues. EOF after the grace window always stops.
+
+**Capture modes** (reported in the JSON `mode` field):
+- `wgc` — Windows Graphics Capture (default; works while the window is occluded).
+- `printwindow` — GDI PrintWindow (fallback when WGC is unavailable).
+- `screen` — Screen DC via `--capture-screen` (includes overlays/popups).
+- `screen-fallback` — WGC init failed; automatically fell back to screen DC.
+
+**JSON output (`--json`):**
+- **stdout** (final result): `{ "path", "frames", "width", "height", "fileSize", "codec": "h264", "mode", "fps", "durationSec" }`
+- **stderr** (liveness event, emitted when capture begins): `{ "event": "recording-started", "path", "fps", "durationSec" }`
+
+The liveness event on stderr lets programmatic callers know the capture loop is live without waiting for the final result. The final result JSON on stdout is a single clean object.
+
+**Error codes:**
+- `element_not_found` — Selector given but no matching element found; fails immediately (no partial file written).
+- `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
+
+
 Programmatically activate an element (click button, toggle checkbox, expand combo box).
 ```bash
 winapp ui invoke btn-submit-7a90 -a myapp             # by slug from inspect
@@ -444,6 +493,8 @@ winapp ui list-windows --show-hidden                        # include invisible 
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
 | Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
+| `element_not_found` during record | Selector given but no matching element | Re-run `inspect` or `search` to get a fresh selector |
+| Record `mode: "screen-fallback"` | WGC capture init failed; fell back to screen DC | Check GPU/driver; use `--capture-screen` explicitly to use screen DC on purpose |
 
 ## Common Patterns
 

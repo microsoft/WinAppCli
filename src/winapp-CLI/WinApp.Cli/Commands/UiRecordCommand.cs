@@ -18,7 +18,9 @@ internal class UiRecordCommand : Command, IShortDescription
     public UiRecordCommand()
         : base("record", "Record the target window (or an element's region) to an H.264 MP4 video. " +
                "Captures frames via Windows Graphics Capture and encodes with Media Foundation. " +
-               "Use --duration-sec 0 to record until Ctrl+C. Use --capture-screen to include overlays/popups.")
+               "By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). " +
+               "Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. " +
+               "Use --capture-screen to include overlays/popups.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
         Options.Add(SharedUiOptions.AppOption);
@@ -62,6 +64,12 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogError("{Symbol} --duration-sec must be 0 or greater.", UiSymbols.Error);
                 return 1;
             }
+            if (durationSec > 86400)
+            {
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must not exceed 86400 (24 hours).");
+                logger.LogError("{Symbol} --duration-sec must not exceed 86400 (24 hours).", UiSymbols.Error);
+                return 1;
+            }
             if (fps < 1)
             {
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--fps must be at least 1.");
@@ -75,22 +83,58 @@ internal class UiRecordCommand : Command, IShortDescription
                 return 1;
             }
 
-            var filePath = output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4";
-            filePath = Path.GetFullPath(filePath);
-            var dir = Path.GetDirectoryName(filePath);
-            if (dir is not null)
-            {
-                Directory.CreateDirectory(dir);
-            }
+            // Linked token so either Ctrl+C OR the stdin monitor can cancel and finalize the MP4.
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
             try
             {
+                // Resolve output path inside error handling so path errors produce structured output.
+                string filePath;
+                try
+                {
+                    filePath = Path.GetFullPath(output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
+                    var dir = Path.GetDirectoryName(filePath);
+                    if (dir is not null)
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                }
+                catch (Exception pathEx)
+                {
+                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, $"Invalid output path: {pathEx.Message}");
+                    logger.LogError("{Symbol} Invalid output path: {Message}", UiSymbols.Error, pathEx.Message);
+                    return 1;
+                }
+
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
                 if (!json)
                 {
-                    var until = durationSec > 0 ? $"{durationSec}s" : "Ctrl+C";
+                    var until = durationSec > 0
+                        ? $"{durationSec}s"
+                        : "Ctrl+C (or newline/EOF on stdin)";
                     ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(session.WindowTitle ?? "")}\" (PID {session.ProcessId}) to {Markup.Escape(filePath)} — until {until}, {fps} fps…[/]");
+                }
+                else
+                {
+                    // Emit a structured liveness event to stderr so programmatic callers know
+                    // the capture loop is live before the final result JSON arrives on stdout.
+                    var startedEvent = new UiRecordStartedEvent
+                    {
+                        Path = filePath,
+                        Fps = fps,
+                        DurationSec = durationSec,
+                    };
+                    Console.Error.WriteLine(
+                        JsonSerializer.Serialize(startedEvent, UiJsonContext.Default.UiRecordStartedEvent));
+                }
+
+                // For unbounded recordings from a programmatic caller (piped stdin), monitor stdin
+                // so a newline or EOF gracefully stops the recorder and finalizes the MP4.
+                // Do NOT start the monitor for interactive consoles — humans use Ctrl+C.
+                if (durationSec == 0 && Console.IsInputRedirected)
+                {
+                    StdinStopMonitor.Start(Console.In, () => linkedCts.Cancel());
                 }
 
                 var options = new RecordOptions
@@ -102,7 +146,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     CaptureScreen = captureScreen,
                 };
 
-                var result = await uiAutomation.RecordAsync(session, selector, options, cancellationToken);
+                var result = await uiAutomation.RecordAsync(session, selector, options, linkedCts.Token);
 
                 if (json)
                 {
@@ -127,6 +171,11 @@ internal class UiRecordCommand : Command, IShortDescription
                     "Recorded {Frames} frames ({Width}x{Height}, h264) to {Path} ({Size}KB)",
                     result.Frames, result.Width, result.Height, filePath, result.FileSize / 1024);
                 return 0;
+            }
+            catch (UiElementNotFoundException notFoundEx)
+            {
+                UiErrors.ElementNotFound(logger, notFoundEx.Selector, json);
+                return 1;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

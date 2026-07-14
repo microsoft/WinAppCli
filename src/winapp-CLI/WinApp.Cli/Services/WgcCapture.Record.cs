@@ -18,7 +18,7 @@ internal static partial class WgcCapture
     /// the most recently arrived frame available on demand. Used by the recorder to
     /// sample frames at a fixed cadence without re-initializing D3D per frame.
     /// </summary>
-    public static FrameGrabber StartGrabber(HWND hwnd, ILogger logger)
+    public static FrameGrabber StartGrabber(HWND hwnd, ILogger logger, int fps = 0)
     {
         if (!GraphicsCaptureSession.IsSupported())
         {
@@ -48,7 +48,7 @@ internal static partial class WgcCapture
             var session = pool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
 
-            return new FrameGrabber(device, context, pool, session, item, logger);
+            return new FrameGrabber(device, context, pool, session, item, logger, fps);
         }
         catch
         {
@@ -77,13 +77,22 @@ internal static partial class WgcCapture
         private int _latestHeight;
         private bool _disposed;
 
+        // Throttle: track when we last did the expensive GPU→CPU copy so arrivals faster than
+        // the target FPS are discarded without copying. A residual TOCTOU race means at most
+        // ~2 copies can occur in the same sampling interval (two threads both pass the check
+        // before either updates _lastSampleMs), but this is harmless — the second copy simply
+        // overwrites the cached frame with an identical (or slightly newer) one.
+        private long _lastSampleMs;
+        private readonly int _minIntervalMs; // 0 = no throttle
+
         internal FrameGrabber(
             D3D.ID3D11Device device,
             D3D.ID3D11DeviceContext context,
             Direct3D11CaptureFramePool pool,
             GraphicsCaptureSession session,
             GraphicsCaptureItem item,
-            ILogger logger)
+            ILogger logger,
+            int fps = 0)
         {
             _device = device;
             _context = context;
@@ -91,6 +100,9 @@ internal static partial class WgcCapture
             _session = session;
             _item = item;
             _logger = logger;
+            // fps == 0 disables throttling (used when fps is unknown or caller handles timing).
+            _minIntervalMs = fps > 0 ? 1000 / fps : 0;
+            _lastSampleMs = 0; // treat as "very old" so the first frame is always captured
             _pool.FrameArrived += OnFrameArrived;
             _session.StartCapture();
         }
@@ -104,6 +116,19 @@ internal static partial class WgcCapture
                 if (frame is null)
                 {
                     return;
+                }
+
+                // Throttle BEFORE the expensive GPU→CPU readback: skip arrivals that are faster
+                // than the target sampling interval. At 4K this can prevent gigabytes/sec of
+                // unnecessary memory allocation and copy when the display refresh rate exceeds fps.
+                if (_minIntervalMs > 0)
+                {
+                    var nowMs = Environment.TickCount64;
+                    if (nowMs - Interlocked.Read(ref _lastSampleMs) < _minIntervalMs)
+                    {
+                        return; // too soon — discard without copying
+                    }
+                    Interlocked.Exchange(ref _lastSampleMs, nowMs);
                 }
 
                 var (pixels, width, height) = CopyFrame(_device, _context, frame);

@@ -25,6 +25,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiScreenshotResult))]
 [JsonSerializable(typeof(UiScreenshotResult[]))]
 [JsonSerializable(typeof(UiRecordResult))]
+[JsonSerializable(typeof(UiRecordStartedEvent))]
 [JsonSerializable(typeof(UiGetValueResult))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(UiScrollResult))]
@@ -152,6 +153,18 @@ internal sealed class UiRecordResult
     public long FileSize { get; set; }
     public string Codec { get; set; } = "h264";
     public string Mode { get; set; } = "";
+}
+
+/// <summary>
+/// Structured liveness event emitted to stderr (JSON path only) when recording begins.
+/// Lets programmatic callers know the capture loop is live before the final result arrives.
+/// </summary>
+internal sealed class UiRecordStartedEvent
+{
+    public string Event { get; set; } = "recording-started";
+    public string Path { get; set; } = "";
+    public int Fps { get; set; }
+    public int DurationSec { get; set; }
 }
 
 internal sealed class UiWaitForResult

@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "1.0.0",
+  "version": "0.4.1",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -2766,7 +2766,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. Use --duration-sec 0 to record until Ctrl+C. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -2811,11 +2811,11 @@
               "recursive": false
             },
             "--duration-sec": {
-              "description": "Recording duration in seconds (default 30). Use 0 to record until Ctrl+C.",
+              "description": "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
-              "defaultValue": 30,
+              "defaultValue": 0,
               "arity": {
                 "minimum": 1,
                 "maximum": 1

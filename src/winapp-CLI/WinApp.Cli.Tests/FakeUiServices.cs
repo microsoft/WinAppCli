@@ -91,8 +91,15 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
     public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
 
+    /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
+    public Exception? RecordException { get; set; }
+
     public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct)
     {
+        if (RecordException is not null)
+        {
+            throw RecordException;
+        }
         await File.WriteAllBytesAsync(options.OutputPath, new byte[16], ct);
         var size = new FileInfo(options.OutputPath).Length;
         return new RecordCaptureResult

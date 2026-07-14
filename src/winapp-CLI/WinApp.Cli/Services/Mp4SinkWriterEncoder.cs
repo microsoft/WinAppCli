@@ -20,6 +20,12 @@ namespace WinApp.Cli.Services;
 /// Input frames are treated as top-down RGB32 (BGRA byte order, matching the
 /// pixel layout produced by <see cref="WgcCapture"/> and GDI captures). The
 /// sink writer inserts the color-conversion + H.264 encoder MFTs automatically.
+/// <para>
+/// <b>Atomicity:</b> frames are written to a temp sibling file and moved to the
+/// final path only on <see cref="Complete"/>. This means a pre-existing file at
+/// the output path is never touched unless recording completes successfully, and
+/// a constructor or capture failure never leaves a corrupt file at the final path.
+/// </para>
 /// </remarks>
 internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 {
@@ -32,6 +38,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     private readonly uint _streamIndex;
     private readonly uint _frameBytes;
     private readonly string _path;
+    private readonly string _tempPath;
     private bool _mfStarted;
     private bool _finalized;
     private bool _disposed;
@@ -47,6 +54,13 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         _path = path;
         _frameBytes = checked((uint)(width * height * 4));
 
+        // Write to a temp sibling so that a pre-existing file at _path is never corrupted
+        // if construction or encoding fails. Complete() atomically moves temp → final.
+        var dir = Path.GetDirectoryName(path);
+        _tempPath = Path.Combine(
+            string.IsNullOrEmpty(dir) ? "." : dir,
+            Guid.NewGuid().ToString("N") + ".mp4");
+
         PInvoke.MFStartup(MF_VERSION, MFSTARTUP_FULL).ThrowOnFailure();
         _mfStarted = true;
 
@@ -54,7 +68,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         IMFMediaType? inType = null;
         try
         {
-            PInvoke.MFCreateSinkWriterFromURL(path, null, null, out _writer).ThrowOnFailure();
+            PInvoke.MFCreateSinkWriterFromURL(_tempPath, null, null, out _writer).ThrowOnFailure();
 
             // Output (encoded) media type: H.264.
             PInvoke.MFCreateMediaType(out outType).ThrowOnFailure();
@@ -151,7 +165,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         }
     }
 
-    /// <summary>Finalizes the MP4 container. Safe to call once; a no-op afterwards.</summary>
+    /// <summary>Finalizes the MP4 container and atomically moves the temp file to the final path. Safe to call once; a no-op afterwards.</summary>
     public void Complete()
     {
         if (_finalized)
@@ -160,6 +174,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         }
         _writer.Finalize();
         _finalized = true;
+
+        // Atomically replace the final path (overwrite any pre-existing file) now that
+        // we have a fully valid MP4. The temp file is now owned by _path.
+        File.Move(_tempPath, _path, overwrite: true);
     }
 
     private static ulong PackU64(uint high, uint low) => ((ulong)high << 32) | low;
@@ -181,23 +199,22 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         }
         _disposed = true;
 
-        // If the encoder is being torn down without a successful Complete() (e.g. an exception
-        // during capture), the on-disk .mp4 is truncated/unfinalized. Release the writer and remove
-        // the partial file so a corrupt recording is never left behind as if it succeeded.
-        var leftPartial = !_finalized;
         ReleaseCom(_writer);
-        if (leftPartial)
+
+        if (!_finalized)
         {
+            // Encoding did not complete — delete only the temp file, never the final path.
+            // A pre-existing file at _path must not be touched on failure.
             try
             {
-                if (File.Exists(_path))
+                if (File.Exists(_tempPath))
                 {
-                    File.Delete(_path);
+                    File.Delete(_tempPath);
                 }
             }
             catch
             {
-                // Best-effort cleanup of the partial file.
+                // Best-effort cleanup of the partial temp file.
             }
         }
 

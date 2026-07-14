@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 1.0.0
+ * Source schema version: 0.4.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -872,7 +872,7 @@ export interface UiRecordOptions extends CommonOptions {
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
-  /** Recording duration in seconds (default 30). Use 0 to record until Ctrl+C. */
+  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
@@ -887,7 +887,7 @@ export interface UiRecordOptions extends CommonOptions {
 }
 
 /**
- * Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. Use --duration-sec 0 to record until Ctrl+C. Use --capture-screen to include overlays/popups.
+ * Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.
  */
 export async function uiRecord(options: UiRecordOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'record'];

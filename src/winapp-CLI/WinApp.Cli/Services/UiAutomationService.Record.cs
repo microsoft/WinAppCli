@@ -80,7 +80,7 @@ internal sealed partial class UiAutomationService
             {
                 try
                 {
-                    grabber = WgcCapture.StartGrabber(hwnd, _logger);
+                    grabber = WgcCapture.StartGrabber(hwnd, _logger, options.Fps);
                     if (!await grabber.WaitForFirstFrameAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false))
                     {
                         throw new InvalidOperationException("Timed out waiting for the first captured frame.");
@@ -131,7 +131,9 @@ internal sealed partial class UiAutomationService
                 }
                 else
                 {
-                    _logger.LogWarning("Element '{Selector}' not found; recording the whole window instead.", elementId);
+                    // A selector was given but the element was not found — fail loudly rather than
+                    // silently recording the whole window, which would produce a confusing result.
+                    throw new UiElementNotFoundException(elementId);
                 }
             }
 
@@ -141,13 +143,21 @@ internal sealed partial class UiAutomationService
             using var encoder = new Mp4SinkWriterEncoder(options.OutputPath, targetW, targetH, options.Fps, bitrate);
 
             var frameDurationHns = 10_000_000L / options.Fps;
-            var totalFrames = options.DurationSec > 0 ? options.DurationSec * options.Fps : (int?)null;
+            // Use long arithmetic to avoid int overflow for high fps × long duration combinations.
+            var totalFrames = options.DurationSec > 0 ? (long)options.DurationSec * options.Fps : (long?)null;
             var stopwatch = Stopwatch.StartNew();
             var frameIndex = 0;
 
             while (!ct.IsCancellationRequested)
             {
                 if (totalFrames.HasValue && frameIndex >= totalFrames.Value)
+                {
+                    break;
+                }
+
+                // Wall-clock deadline: also break when the requested wall time has elapsed, so slow
+                // encoding (encoding takes longer than the sampling cadence) doesn't overshoot.
+                if (totalFrames.HasValue && stopwatch.Elapsed.TotalSeconds >= options.DurationSec)
                 {
                     break;
                 }
