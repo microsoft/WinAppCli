@@ -379,6 +379,7 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
+  'ui record': '_uiRecordGenerated', // the public uiRecord is the guarded wrapper in ui-record-guard.ts
 };
 
 function getFunctionName(cmdPath) {

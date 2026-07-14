@@ -94,13 +94,16 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
     public Exception? RecordException { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct)
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
     {
         if (RecordException is not null)
         {
             throw RecordException;
         }
         await File.WriteAllBytesAsync(options.OutputPath, new byte[16], ct);
+        // Signal readiness before returning — mirrors the real service behavior (encoder is
+        // initialized and the first frame has been captured at this point).
+        onRecordingStarted?.Invoke();
         var size = new FileInfo(options.OutputPath).Length;
         return new RecordCaptureResult
         {

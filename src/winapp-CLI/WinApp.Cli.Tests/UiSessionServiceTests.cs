@@ -73,7 +73,7 @@ public class UiSessionServiceTests
         public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct) => Task.FromResult<UiElement?>(null);
         public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct) => Task.FromResult(new Dictionary<string, object?>());
         public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => Task.FromResult((Array.Empty<byte>(), 0, 0));
-        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct)
+        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
             => Task.FromResult(new RecordCaptureResult());
         public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => Task.FromResult("");
         public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct) => Task.CompletedTask;

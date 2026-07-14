@@ -40,7 +40,8 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     private readonly string _path;
     private readonly string _tempPath;
     private bool _mfStarted;
-    private bool _finalized;
+    private bool _finalized;   // writer.Finalize() completed
+    private bool _fileMoved;   // temp → final move succeeded
     private bool _disposed;
 
     public int Width { get; }
@@ -177,7 +178,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 
         // Atomically replace the final path (overwrite any pre-existing file) now that
         // we have a fully valid MP4. The temp file is now owned by _path.
+        // _fileMoved is set ONLY after the move succeeds so that Dispose() can still
+        // clean up the temp if the move throws (e.g., destination path locked).
         File.Move(_tempPath, _path, overwrite: true);
+        _fileMoved = true;
     }
 
     private static ulong PackU64(uint high, uint low) => ((ulong)high << 32) | low;
@@ -201,9 +205,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 
         ReleaseCom(_writer);
 
-        if (!_finalized)
+        if (!_fileMoved)
         {
-            // Encoding did not complete — delete only the temp file, never the final path.
+            // Encoding did not complete successfully (writer was never finalized, or the
+            // temp→final move failed). Delete the temp file so nothing is orphaned.
             // A pre-existing file at _path must not be touched on failure.
             try
             {
