@@ -247,18 +247,30 @@ public class PointerInputFrameTests
     [TestMethod]
     public void InjectPenStroke_WithDurationMs_NoTrailingDwellAfterEndpoint()
     {
-        // The sleep schedule must end at or before the endpoint UPDATE frame; the UP frame must
-        // follow immediately with no extra sleep (no trailing dwell beyond the scheduled duration).
+        // Ordered-event log: record every sleep and every frame in call order so the test can verify
+        // the exact sequence tail. A regression that reintroduces a sleep between the endpoint UPDATE
+        // and the UP (e.g. sleep-after-send instead of sleep-before-send) will appear as
+        //   [..., "frame:UPDATE@(100,0)", "sleep:X", "frame:UP"]
+        // and the assertion will correctly FAIL.
         long fakeNow = 0;
-        bool lastEventWasSleep = false;
-        void fakeSleep(int ms) { fakeNow += ms; lastEventWasSleep = true; }
-        long fakeNowMs() => fakeNow;
+        var events = new List<string>();
+        void fakeSleep(int ms) { if (ms > 0) { fakeNow += ms; events.Add($"sleep:{ms}"); } }
+        long fakeNowFn() => fakeNow;
 
-        var frames = new List<POINTER_FLAGS>();
         PointerInput.PenFrameSender recorder = (x, y, p, flags) =>
         {
-            frames.Add(flags);
-            lastEventWasSleep = false;
+            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP))
+            {
+                events.Add("frame:UP");
+            }
+            else if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN))
+            {
+                events.Add($"frame:DOWN@({x},{y})");
+            }
+            else
+            {
+                events.Add($"frame:UPDATE@({x},{y})");
+            }
         };
 
         var path = new List<PointerPoint>
@@ -267,12 +279,25 @@ public class PointerInputFrameTests
             new PointerPoint(100, 0),
         };
 
-        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder, fakeSleep, fakeNowMs);
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder, fakeSleep, fakeNowFn);
 
-        // The UP frame is the last event; no sleep should occur between the endpoint UPDATE and the UP.
-        Assert.IsFalse(lastEventWasSleep,
-            "No sleep should occur after the endpoint UPDATE frame; the UP frame must follow immediately");
-        Assert.IsTrue(frames[^1].HasFlag(POINTER_FLAGS.POINTER_FLAG_UP), "Last frame must be UP");
+        // The last UPDATE frame must be the endpoint (X=100), and UP must follow immediately after it.
+        int lastUpdateIdx = events.FindLastIndex(e => e.StartsWith("frame:UPDATE", StringComparison.Ordinal));
+        Assert.IsTrue(lastUpdateIdx >= 0, "Must have at least one UPDATE frame");
+        Assert.AreEqual("frame:UPDATE@(100,0)", events[lastUpdateIdx],
+            "The last UPDATE frame must be at the endpoint (100,0)");
+
+        // Assert no sleep between endpoint UPDATE and UP — if one exists the test fails.
+        bool sleepBetween = events.Skip(lastUpdateIdx + 1).Any(e => e.StartsWith("sleep:", StringComparison.Ordinal));
+        Assert.IsFalse(sleepBetween,
+            $"No sleep may occur between the endpoint UPDATE and UP; ordered tail: " +
+            $"[{string.Join(", ", events.Skip(lastUpdateIdx))}]");
+
+        // UP must be the very next event after the endpoint UPDATE.
+        Assert.AreEqual("frame:UP", events[lastUpdateIdx + 1],
+            "UP must immediately follow the endpoint UPDATE frame with no intervening events");
+        Assert.AreEqual(events.Count - 1, lastUpdateIdx + 1,
+            "UP must be the final event in the ordered log (no events after it)");
     }
 
     [TestMethod]
@@ -327,6 +352,183 @@ public class PointerInputFrameTests
             $"durationMs=0 should produce DOWN + 1 UPDATE per waypoint + UP; got {frames.Count}");
         Assert.IsTrue(frames[1].X == 50, "First UPDATE should be at waypoint[1] X=50");
         Assert.IsTrue(frames[2].X == 100, "Second UPDATE should be at waypoint[2] X=100");
+    }
+
+    // -------------------------------------------------------------------------
+    // MEDIUM 1 — Touch --duration-ms uses the same cumulative scheduler as pen
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void InjectTouchStroke_WithDurationMs_TotalSleepApproximatesDurationMs()
+    {
+        // Injected clock: fakeNow advances only via fakeSleep so total recorded sleep == scheduled ms.
+        // 1-segment path × GlideSteps=20 frames and durationMs=200 → total sleep must equal 200ms.
+        long fakeNow = 0;
+        var sleeps = new List<int>();
+        void fakeSleep(int ms) { sleeps.Add(ms); fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
+        var frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        PointerInput.TouchSender recorder = contacts =>
+        {
+            foreach (var c in contacts)
+            {
+                frames.Add((c.pointerInfo.pointerFlags, c.pointerInfo.ptPixelLocation.X, c.pointerInfo.ptPixelLocation.Y));
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0), new PointerPoint(100, 0) }
+        };
+
+        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 200, recorder, fakeSleep, fakeNowMs);
+
+        // Total scheduled sleep must equal durationMs exactly (cumulative target timestamp approach).
+        int totalSleep = sleeps.Sum();
+        Assert.AreEqual(200, totalSleep,
+            $"Total sleep must equal durationMs=200ms; got {totalSleep}ms across {sleeps.Count} intervals");
+    }
+
+    [TestMethod]
+    public void InjectTouchStroke_SmallDurationMs_NotInflatedToStepCount()
+    {
+        // With durationMs=1 and GlideSteps=20, the old Math.Max(1,…) code would sleep 1ms×20 = 20ms.
+        // The cumulative-timestamp approach must yield total sleep ≈ 1ms regardless of step count.
+        long fakeNow = 0;
+        var sleeps = new List<int>();
+        void fakeSleep(int ms) { sleeps.Add(ms); fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
+        var frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        PointerInput.TouchSender recorder = contacts =>
+        {
+            foreach (var c in contacts)
+            {
+                frames.Add((c.pointerInfo.pointerFlags, c.pointerInfo.ptPixelLocation.X, c.pointerInfo.ptPixelLocation.Y));
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0), new PointerPoint(100, 0) }
+        };
+
+        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 1, recorder, fakeSleep, fakeNowMs);
+
+        int totalSleep = sleeps.Sum();
+        Assert.AreEqual(1, totalSleep,
+            $"durationMs=1 must not be inflated by step count; expected total=1ms, got {totalSleep}ms. " +
+            $"Old Math.Max(1,…) code would return ~{sleeps.Count}ms.");
+    }
+
+    [TestMethod]
+    public void InjectTouchStroke_WithDurationMs_NoTrailingDwellAfterEndpoint()
+    {
+        // Ordered-event log (mirrors the pen no-dwell test): a sleep between endpoint UPDATE and UP
+        // shows up in the ordered log and the assertion correctly FAILS.
+        long fakeNow = 0;
+        var events = new List<string>();
+        void fakeSleep(int ms) { if (ms > 0) { fakeNow += ms; events.Add($"sleep:{ms}"); } }
+        long fakeNowFn() => fakeNow;
+
+        PointerInput.TouchSender recorder = contacts =>
+        {
+            foreach (var c in contacts)
+            {
+                var flags = c.pointerInfo.pointerFlags;
+                int x = c.pointerInfo.ptPixelLocation.X;
+                int y = c.pointerInfo.ptPixelLocation.Y;
+                if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP))
+                {
+                    events.Add("frame:UP");
+                }
+                else if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN))
+                {
+                    events.Add($"frame:DOWN@({x},{y})");
+                }
+                else
+                {
+                    events.Add($"frame:UPDATE@({x},{y})");
+                }
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0), new PointerPoint(100, 0) }
+        };
+
+        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 200, recorder, fakeSleep, fakeNowFn);
+
+        int lastUpdateIdx = events.FindLastIndex(e => e.StartsWith("frame:UPDATE", StringComparison.Ordinal));
+        Assert.IsTrue(lastUpdateIdx >= 0, "Must have at least one UPDATE frame");
+
+        bool sleepBetween = events.Skip(lastUpdateIdx + 1).Any(e => e.StartsWith("sleep:", StringComparison.Ordinal));
+        Assert.IsFalse(sleepBetween,
+            $"No sleep may occur between touch endpoint UPDATE and UP; ordered tail: " +
+            $"[{string.Join(", ", events.Skip(lastUpdateIdx))}]");
+
+        Assert.AreEqual("frame:UP", events[lastUpdateIdx + 1],
+            "UP must immediately follow the endpoint UPDATE frame");
+    }
+
+    [TestMethod]
+    public void InjectTouchStroke_WithDurationMs_MonotonicToEndpointMultiContact()
+    {
+        // Two-finger glide with durationMs: both contacts must progress monotonically to the endpoint,
+        // and the last UPDATE frame must reach the destination coordinates.
+        long fakeNow = 0;
+        void fakeSleep(int ms) { fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
+        // Track (flags, x, y) per contact per frame-group so we can verify monotonicity.
+        var contact0Frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        var contact1Frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        PointerInput.TouchSender recorder = contacts =>
+        {
+            if (contacts.Length > 0)
+            {
+                contact0Frames.Add((contacts[0].pointerInfo.pointerFlags,
+                    contacts[0].pointerInfo.ptPixelLocation.X, contacts[0].pointerInfo.ptPixelLocation.Y));
+            }
+            if (contacts.Length > 1)
+            {
+                contact1Frames.Add((contacts[1].pointerInfo.pointerFlags,
+                    contacts[1].pointerInfo.ptPixelLocation.X, contacts[1].pointerInfo.ptPixelLocation.Y));
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0),   new PointerPoint(100, 0) },  // finger 1
+            new List<PointerPoint> { new PointerPoint(0, 50),  new PointerPoint(100, 50) }, // finger 2
+        };
+
+        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 200, recorder, fakeSleep, fakeNowMs);
+
+        // Both contacts received the same number of frames (DOWN + GlideSteps UPDATE + UP).
+        Assert.AreEqual(contact0Frames.Count, contact1Frames.Count,
+            "Both contacts must receive the same number of frames");
+
+        // X must be monotonically non-decreasing across UPDATE frames for both contacts.
+        var updates0 = contact0Frames.Where(f => f.Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)).ToList();
+        var updates1 = contact1Frames.Where(f => f.Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)).ToList();
+        Assert.IsTrue(updates0.Count > 0, "Contact 0 must have UPDATE frames");
+        Assert.IsTrue(updates1.Count > 0, "Contact 1 must have UPDATE frames");
+
+        for (int i = 1; i < updates0.Count; i++)
+        {
+            Assert.IsTrue(updates0[i].X >= updates0[i - 1].X, "Contact 0 X must not decrease between frames");
+        }
+        for (int i = 1; i < updates1.Count; i++)
+        {
+            Assert.IsTrue(updates1[i].X >= updates1[i - 1].X, "Contact 1 X must not decrease between frames");
+        }
+
+        // Last UPDATE frame must reach the endpoint for both contacts.
+        Assert.AreEqual(100, updates0[^1].X, "Contact 0 last UPDATE must reach endpoint X=100");
+        Assert.AreEqual(100, updates1[^1].X, "Contact 1 last UPDATE must reach endpoint X=100");
     }
 
     // -------------------------------------------------------------------------

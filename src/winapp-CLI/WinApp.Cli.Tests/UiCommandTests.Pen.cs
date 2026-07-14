@@ -102,17 +102,33 @@ public partial class UiCommandTests
             ["-a", "TestApp", "--at", "100,100", "--pressure", "NaN", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for NaN pressure");
+
+        // The structured JSON error written to stderr must carry code == "invalid_arguments".
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for NaN pressure");
     }
 
     [TestMethod]
     public async Task Pen_PressureInfinity_Rejected_NoInjection()
     {
-        // PositiveInfinity also bypasses the old range check; the IsFinite guard must reject it.
+        // PositiveInfinity bypasses the old range check; however "Infinity" is rejected at System.CommandLine
+        // parse time (float.TryParse("Infinity") returns false in the SCL parser), so the handler never runs
+        // and UiJsonError.Emit is never called. The rejection still correctly prevents any injection.
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--pressure", "Infinity", "--json"]);
-        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(1, exitCode, "Non-parseable --pressure Infinity must fail with exit code 1");
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for Infinity pressure");
+        // The parse error is emitted by System.CommandLine (not UiJsonError), so stderr contains the SCL
+        // error message rather than a JSON error object. Verify the right error surface is populated.
+        var stderr = ConsoleStdErr.ToString();
+        Assert.IsTrue(stderr.Length > 0, "stderr must contain an error message for Infinity pressure");
     }
 
     [TestMethod]

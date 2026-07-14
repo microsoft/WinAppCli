@@ -156,7 +156,9 @@ internal static class PointerInput
         IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths,
         int holdMs,
         int durationMs,
-        TouchSender send)
+        TouchSender send,
+        Action<int>? sleep = null,
+        Func<long>? nowMs = null)
     {
         int count = contactPaths.Count;
         var contacts = new POINTER_TOUCH_INFO[count];
@@ -207,21 +209,49 @@ internal static class PointerInput
 
             if (maxWaypoints > 1)
             {
-                int perStep = Math.Max(1, durationMs / GlideSteps);
-                for (int step = 1; step <= GlideSteps; step++)
+                if (durationMs > 0)
                 {
-                    double t = step / (double)GlideSteps;
-                    for (int i = 0; i < count; i++)
+                    // Cumulative-timestamp scheduling (mirrors InjectPenStroke): for frame index k (1..N),
+                    // the target offset is targetMs_k = durationMs * k / N. Before frame k sleep only
+                    // max(0, targetMs_k − elapsed) so total wall time ≈ durationMs regardless of step count.
+                    // No Math.Max(1,…) floor → --duration-ms 1 stays ≈ 1 ms total. The final frame (k == N)
+                    // has targetMs == durationMs and is followed by no trailing sleep.
+                    var sleepFn = sleep ?? Thread.Sleep;
+                    var sw = Stopwatch.StartNew();
+                    var nowFn = nowMs ?? (() => sw.ElapsedMilliseconds);
+
+                    ScheduleGlide(durationMs, GlideSteps, frameIndex =>
                     {
-                        var path = contactPaths[i];
-                        var (x, y) = Interpolate(path, t);
-                        contacts[i] = MakeContact(
-                            (uint)i, x, y,
-                            POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT,
-                            primary: i == 0);
+                        double t = frameIndex / (double)GlideSteps;
+                        for (int i = 0; i < count; i++)
+                        {
+                            var path = contactPaths[i];
+                            var (x, y) = Interpolate(path, t);
+                            contacts[i] = MakeContact(
+                                (uint)i, x, y,
+                                POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT,
+                                primary: i == 0);
+                        }
+                        send(contacts);
+                    }, sleepFn, nowFn);
+                }
+                else
+                {
+                    // durationMs <= 0: no timing — send all glide frames immediately.
+                    for (int step = 1; step <= GlideSteps; step++)
+                    {
+                        double t = step / (double)GlideSteps;
+                        for (int i = 0; i < count; i++)
+                        {
+                            var path = contactPaths[i];
+                            var (x, y) = Interpolate(path, t);
+                            contacts[i] = MakeContact(
+                                (uint)i, x, y,
+                                POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT,
+                                primary: i == 0);
+                        }
+                        send(contacts);
                     }
-                    send(contacts);
-                    Thread.Sleep(perStep);
                 }
             }
         }
@@ -382,47 +412,28 @@ internal static class PointerInput
             {
                 if (durationMs > 0)
                 {
-                    // Cumulative-timestamp scheduling: for frame index k (1..N), the ideal offset is
-                    //   targetMs_k = durationMs * k / N  (integer math; targetMs_N == durationMs).
-                    // Before sending frame k, sleep only max(0, targetMs_k - elapsed) so the total
-                    // wall time ≈ durationMs regardless of step count. This avoids the Math.Max(1,…)
-                    // inflation that made `--duration-ms 1` sleep ~20 ms, and eliminates the
-                    // per-step trailing dwell that occurred after the endpoint frame in the old code.
+                    // Cumulative-timestamp scheduling via the shared ScheduleGlide helper.
+                    // For frame index k (1..N), targetMs_k = durationMs * k / N; sleep only the drift-
+                    // corrected delta before each frame. The final frame has targetMs == durationMs and
+                    // is followed by no trailing sleep. See ScheduleGlide for the algorithm details.
                     var sleepFn = sleep ?? Thread.Sleep;
                     var sw = Stopwatch.StartNew();
                     var nowFn = nowMs ?? (() => sw.ElapsedMilliseconds);
 
                     int totalFrames = segments * GlideSteps;
-                    int frameIndex = 0;
 
-                    for (int seg = 0; seg < segments; seg++)
+                    ScheduleGlide(durationMs, totalFrames, frameIndex =>
                     {
-                        var from = path[seg];
-                        var to = path[seg + 1];
-
-                        for (int step = 1; step <= GlideSteps; step++)
-                        {
-                            double t = step / (double)GlideSteps;
-                            int x = from.X + (int)Math.Round((to.X - from.X) * t);
-                            int y = from.Y + (int)Math.Round((to.Y - from.Y) * t);
-
-                            frameIndex++;
-                            long targetMs = (long)durationMs * frameIndex / totalFrames;
-
-                            // Drift-corrected: sleep only the remaining time to reach the target.
-                            // Clamped to ≥ 0 — for sub-ms-per-frame durations the delta is zero
-                            // and no sleep is issued (no Math.Max(1,…) inflation).
-                            long elapsedMs = nowFn();
-                            int deltaMs = (int)Math.Max(0L, targetMs - elapsedMs);
-                            if (deltaMs > 0)
-                            {
-                                sleepFn(deltaMs);
-                            }
-
-                            send(x, y, contactPressure,
-                                POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
-                        }
-                    }
+                        int segIdx = (frameIndex - 1) / GlideSteps;
+                        int step   = (frameIndex - 1) % GlideSteps + 1;
+                        double t = step / (double)GlideSteps;
+                        var from = path[segIdx];
+                        var to   = path[segIdx + 1];
+                        int x = from.X + (int)Math.Round((to.X - from.X) * t);
+                        int y = from.Y + (int)Math.Round((to.Y - from.Y) * t);
+                        send(x, y, contactPressure,
+                            POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
+                    }, sleepFn, nowFn);
                 }
                 else
                 {
@@ -495,5 +506,29 @@ internal static class PointerInput
         int x = a.X + (int)Math.Round((b.X - a.X) * t);
         int y = a.Y + (int)Math.Round((b.Y - a.Y) * t);
         return (x, y);
+    }
+
+    /// <summary>
+    /// Drift-corrected sleep scheduling for a timed glide of <paramref name="totalFrames"/> evenly-spaced
+    /// frames over <paramref name="durationMs"/> milliseconds. For frame index k (1..N) the target offset
+    /// is <c>durationMs * k / N</c>; before frame k we sleep only <c>max(0, targetMs_k − elapsed)</c>
+    /// (no <c>Math.Max(1,…)</c> floor, so sub-ms-per-frame durations yield zero sleep). The final frame
+    /// (k == N) has targetMs == durationMs and is sent with no trailing sleep after it.
+    /// </summary>
+    private static void ScheduleGlide(
+        int durationMs,
+        int totalFrames,
+        Action<int> sendFrame,
+        Action<int> sleepFn,
+        Func<long> nowFn)
+    {
+        for (int k = 1; k <= totalFrames; k++)
+        {
+            long targetMs = (long)durationMs * k / totalFrames;
+            long elapsedMs = nowFn();
+            int deltaMs = (int)Math.Max(0L, targetMs - elapsedMs);
+            if (deltaMs > 0) { sleepFn(deltaMs); }
+            sendFrame(k);
+        }
     }
 }
