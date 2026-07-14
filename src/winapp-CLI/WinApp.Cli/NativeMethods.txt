@@ -60,6 +60,7 @@ IUIAutomationValuePattern
 IUIAutomationScrollItemPattern
 IUIAutomationScrollPattern
 IUIAutomationRangeValuePattern
+IUIAutomationLegacyIAccessiblePattern
 GetForegroundWindow
 GetWindowRect
 PrintWindow
