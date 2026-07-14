@@ -58,19 +58,19 @@ internal class UiRecordCommand : Command, IShortDescription
 
             if (durationSec < 0)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "--duration-sec must be 0 or greater.");
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must be 0 or greater.");
                 logger.LogError("{Symbol} --duration-sec must be 0 or greater.", UiSymbols.Error);
                 return 1;
             }
             if (fps < 1)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "--fps must be at least 1.");
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--fps must be at least 1.");
                 logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
                 return 1;
             }
             if (maxEdge < 0)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "--max-edge must be 0 or greater.");
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 or greater.");
                 logger.LogError("{Symbol} --max-edge must be 0 or greater.", UiSymbols.Error);
                 return 1;
             }

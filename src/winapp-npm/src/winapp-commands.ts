@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.4.1
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -862,6 +862,48 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// ui record
+// ---------------------------------------------------------------------------
+
+export interface UiRecordOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
+  captureScreen?: boolean;
+  /** Recording duration in seconds (default 30). Use 0 to record until Ctrl+C. */
+  durationSec?: number;
+  /** Frames per second to capture */
+  fps?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
+  maxEdge?: number;
+  /** Save output to this file path. */
+  output?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. Use --duration-sec 0 to record until Ctrl+C. Use --capture-screen to include overlays/popups.
+ */
+export async function uiRecord(options: UiRecordOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'record'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.captureScreen) args.push('--capture-screen');
+  if (options.durationSec !== undefined) args.push('--duration-sec', options.durationSec.toString());
+  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
+  if (options.json) args.push('--json');
+  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
+  if (options.output) args.push('--output', options.output);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // ui screenshot
 // ---------------------------------------------------------------------------
 
@@ -870,13 +912,13 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
   /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
   focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Save output to file path (e.g., screenshot) */
+  /** Save output to this file path. */
   output?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;

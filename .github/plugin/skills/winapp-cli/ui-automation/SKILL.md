@@ -1,7 +1,7 @@
 ---
 name: winapp-ui-automation
 description: Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron.
-version: 0.4.1
+version: 1.0.0
 ---
 ## When to use
 - Inspecting a running Windows app's UI from the command line
@@ -388,10 +388,10 @@ Capture the target window or element as a PNG image. When multiple windows exist
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
 | `--focus` | Bring the target window to the foreground before capture. Already implied by --capture-screen. | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--output` | Save output to file path (e.g., screenshot) | (none) |
+| `--output` | Save output to this file path. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui record`
@@ -409,12 +409,12 @@ Record the target window (or an element's region) to an H.264 MP4 video. Capture
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
-| `--duration-sec` | Recording duration in seconds. 0 = record until Ctrl+C. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
+| `--duration-sec` | Recording duration in seconds (default 30). Use 0 to record until Ctrl+C. | `30` |
 | `--fps` | Frames per second to capture | `15` |
 | `--json` | Format output as JSON | (none) |
 | `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
-| `--output` | Save output to file path (e.g., screenshot) | (none) |
+| `--output` | Save output to this file path. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui invoke`

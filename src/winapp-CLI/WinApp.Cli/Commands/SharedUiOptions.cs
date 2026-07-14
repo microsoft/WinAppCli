@@ -60,7 +60,7 @@ internal static class SharedUiOptions
 
         OutputOption = new Option<string?>("--output", "-o")
         {
-            Description = "Save output to file path (e.g., screenshot)"
+            Description = "Save output to this file path."
         };
 
         TimeoutOption = new Option<int>("--timeout", "-t")
@@ -82,7 +82,7 @@ internal static class SharedUiOptions
 
         CaptureScreenOption = new Option<bool>("--capture-screen")
         {
-            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus."
+            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target)."
         };
 
         FocusOption = new Option<bool>("--focus")
@@ -107,8 +107,8 @@ internal static class SharedUiOptions
 
         DurationSecOption = new Option<int>("--duration-sec")
         {
-            Description = "Recording duration in seconds. 0 = record until Ctrl+C.",
-            DefaultValueFactory = _ => 0
+            Description = "Recording duration in seconds (default 30). Use 0 to record until Ctrl+C.",
+            DefaultValueFactory = _ => 30
         };
 
         FpsOption = new Option<int>("--fps")

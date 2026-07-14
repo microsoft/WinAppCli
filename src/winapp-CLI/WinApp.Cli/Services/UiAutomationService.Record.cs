@@ -99,7 +99,7 @@ internal sealed partial class UiAutomationService
                     grabber = null;
                     useScreen = true;
                     useWgc = false;
-                    mode = "screen";
+                    mode = "screen-fallback";
                     srcWidth = rect.right - rect.left;
                     srcHeight = rect.bottom - rect.top;
                     captureOriginLeft = rect.left;

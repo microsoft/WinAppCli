@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "1.0.0",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -2798,7 +2798,7 @@
               "recursive": false
             },
             "--capture-screen": {
-              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus.",
+              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target).",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -2811,11 +2811,11 @@
               "recursive": false
             },
             "--duration-sec": {
-              "description": "Recording duration in seconds. 0 = record until Ctrl+C.",
+              "description": "Recording duration in seconds (default 30). Use 0 to record until Ctrl+C.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
-              "defaultValue": 0,
+              "defaultValue": 30,
               "arity": {
                 "minimum": 1,
                 "maximum": 1
@@ -2863,7 +2863,7 @@
               "recursive": false
             },
             "--output": {
-              "description": "Save output to file path (e.g., screenshot)",
+              "description": "Save output to this file path.",
               "hidden": false,
               "aliases": [
                 "-o"
@@ -2959,7 +2959,7 @@
               "recursive": false
             },
             "--capture-screen": {
-              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus.",
+              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target).",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -2998,7 +2998,7 @@
               "recursive": false
             },
             "--output": {
-              "description": "Save output to file path (e.g., screenshot)",
+              "description": "Save output to this file path.",
               "hidden": false,
               "aliases": [
                 "-o"

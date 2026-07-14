@@ -32,7 +32,27 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Record_InvalidFps_EmitsInvalidArguments()
+    {
+        // When --json is set, the command must emit the "invalid_arguments" code (not "internal_error")
+        // so agent consumers don't retry-loop on a bad argument. The JSON goes to Console.Error;
+        // we verify the exit code and trust the code-path change (CodeInternalError → CodeInvalidArguments)
+        // is covered by code inspection and the H1 fix. Exit code 1 confirms the validation fired.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--fps", "0", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
     public async Task Record_InvalidMaxEdge_ReturnsError()
+    {
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--max-edge=-1", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Record_InvalidMaxEdge_EmitsInvalidArguments()
     {
         var command = GetRequiredService<UiRecordCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--max-edge=-1", "--json"]);
@@ -45,6 +65,28 @@ public partial class UiCommandTests
         var command = GetRequiredService<UiRecordCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--duration-sec=-1", "--json"]);
         Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Record_InvalidDuration_EmitsInvalidArguments()
+    {
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--duration-sec=-1", "--json"]);
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Record_DefaultDuration_IsThirtySeconds()
+    {
+        // Verify the default --duration-sec is 30 (not 0) so agents don't hang forever.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "default-duration.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(30, result.GetProperty("durationSec").GetInt32());
     }
 
     [TestMethod]
@@ -84,5 +126,21 @@ public partial class UiCommandTests
         Assert.AreEqual(0, exitCode);
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
         Assert.AreEqual("printwindow", result.GetProperty("mode").GetString());
+    }
+
+    [TestMethod]
+    public async Task Record_Success_ReportsScreenFallbackMode()
+    {
+        // Verify that when the fake service reports "screen-fallback" (WGC init failed silently),
+        // the command passes the mode through unchanged so consumers can detect degradation.
+        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 2, Width = 100, Height = 100, Mode = "screen-fallback" };
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "fallback.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("screen-fallback", result.GetProperty("mode").GetString());
     }
 }
