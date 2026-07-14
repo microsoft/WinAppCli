@@ -104,14 +104,6 @@ export function planJsBindingsImportsHints(input: JsBindingsImportsHintInput, op
   return formatJsBindingsImportsHints(input.result);
 }
 
-/** Route each `formatJsBindingsImportsHints` line through `log`. Extracted so the
- *  --verbose path (log = taskLog, no buffer) has direct regression coverage. */
-export function emitJsBindingsImportsHints(result: EnsureJsBindingsImportsResult, log: (line: string) => void): void {
-  for (const hint of formatJsBindingsImportsHints(result)) {
-    log(hint);
-  }
-}
-
 /** Run `work` under a child spinner (grouped if `ui.group` is set, standalone otherwise). */
 async function runStep<T>(
   ui: {
