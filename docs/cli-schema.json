@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "1.0.0",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -3249,7 +3249,7 @@
           },
           "options": {
             "--allow-system-keys": {
-              "description": "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v). No effect on --via post-message (already window-scoped). Note: Windows still blocks secure sequences such as ctrl+alt+del (SAS) from injected input regardless of this flag.",
+              "description": "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l stays blocked even with this flag — it locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation. Windows still blocks secure sequences such as ctrl+alt+del (SAS) from injected input regardless of this flag.",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,

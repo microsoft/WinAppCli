@@ -342,4 +342,53 @@ public partial class UiCommandTests
         StringAssert.Contains(UiSendKeysCommand.AllowSystemKeysOption.Description, "system");
     }
 
+    // COR-01 — SEC-01: win+l must be refused even when --allow-system-keys is set
+    [TestMethod]
+    public async Task SendKeys_WinL_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
+    {
+        // win+l triggers LockWorkStation() via the shell hook and is unrecoverable from automation.
+        // It must be blocked EVEN when --allow-system-keys is passed — the never-bypassable guard
+        // must fire before the soft-combo/allow path and prevent injection.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "win+l must never reach the keyboard transport");
+    }
+
+    // COR-01 — SEC-01: a benign win+<key> combo IS allowed with --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_WinR_ViaSendInput_WithAllowSystemKeys_IsAllowed()
+    {
+        // win+r (Run dialog) is a soft-blocked system combo that the caller can opt into with
+        // --allow-system-keys. It must pass the never-bypassable guard (only win+l is hard-blocked)
+        // and reach the keyboard transport.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+r", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
+    // COR-01 — SEC-02: --allow-system-keys with post-message is a no-op (exit 0, warning emitted)
+    [TestMethod]
+    public async Task SendKeys_AllowSystemKeys_WithPostMessage_IsNoOpAndWarns()
+    {
+        // post-message is already window-scoped and never blocks system combos, so --allow-system-keys
+        // has no effect with it. The command must succeed (exit 0) and still deliver the keystrokes;
+        // a warning is logged but the exit code stays 0.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+a", "-a", "TestApp", "--via", "post-message", "--allow-system-keys"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "keys should still be sent via post-message");
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
 }
