@@ -173,13 +173,20 @@ public class ValueSetterTests
     }
 
     [TestMethod]
-    [DataRow("weird\"name\nhere", "weird\"name")]
-    [DataRow("$(whoami)", "whoami")]
-    [DataRow("a`b;c|d&e", "a`b")]
+    [DataRow("a\"b", "a\"b")]                 // double quote
+    [DataRow("line1\nline2", "line1\nline2")] // newline
+    [DataRow("a$b", "a$b")]                   // $ / $() expansion
+    [DataRow("a`b", "a`b")]                   // backtick command substitution
+    [DataRow("a;b", "a;b")]                   // command separator
+    [DataRow("a|b", "a|b")]                   // pipe
+    [DataRow("a&b", "a&b")]                   // background / AND
+    [DataRow("a(b)c", "a(b)c")]               // subshell parentheses
+    [DataRow("a%b", "a%b")]                   // %VAR% expansion
     public void Apply_ThrowMessage_UsesSelectorPlaceholder_WhenTargetHasUnsafeChars(string unsafeName, string mustNotAppear)
     {
-        // App-controlled names containing shell metacharacters (quotes, newlines, $(), backticks,
-        // ;, |, &) must not be echoed into the copy-pasteable example — it falls back to "<selector>".
+        // Each app-controlled name carries exactly one shell metacharacter surrounded by safe text, so a
+        // regression that let that specific character through would echo the raw name and fail this case.
+        // Unsafe targets must fall back to the "<selector>" placeholder in the copy-pasteable example.
         var ex = Assert.ThrowsExactly<InvalidOperationException>(
             () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: unsafeName), "x"));
 
@@ -188,12 +195,14 @@ public class ValueSetterTests
     }
 
     [TestMethod]
-    public void Apply_ThrowMessage_KeepsSafeTargetWithPathAndSpaces()
+    [DataRow("My Field 2")]
+    [DataRow("C:\\My App\\field-1")]
+    public void Apply_ThrowMessage_KeepsSafeTarget(string safeName)
     {
-        // A benign name with spaces and path separators is safe and should be echoed verbatim.
+        // Benign names (spaces, path separators, drive colon, digits, hyphens) are safe and echoed verbatim.
         var ex = Assert.ThrowsExactly<InvalidOperationException>(
-            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: "My Field 2"), "x"));
+            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: safeName), "x"));
 
-        StringAssert.Contains(ex.Message, "--target \"My Field 2\"");
+        StringAssert.Contains(ex.Message, $"--target \"{safeName}\"");
     }
 }
