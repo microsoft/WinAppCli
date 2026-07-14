@@ -489,6 +489,15 @@ extends:
                 Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
                 $ghExe = "$tempDir\gh\bin\gh.exe"
 
+                # Configure git to authenticate as gh (uses GH_TOKEN) so raw `git push`
+                # against the HTTPS remote doesn't prompt for credentials.
+                Write-Host "Configuring git credential helper via gh..."
+                & $ghExe auth setup-git
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to configure git auth via gh. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
                 # Sync the fork with upstream
                 Write-Host "Syncing docs repo fork..."
                 & $ghExe repo sync $docsFork -b main
