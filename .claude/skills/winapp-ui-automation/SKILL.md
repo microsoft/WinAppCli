@@ -486,7 +486,7 @@ Send synthetic keyboard input to a window. Supports named keys (down, enter, tab
 
 ### `winapp ui set-value`
 
-Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. Some rich text controls (e.g. WinUI 3 RichEditBox and WPF RichTextBox) don't support setting their value programmatically — type into them with 'winapp ui send-keys --via send-input' instead. Usage: winapp ui set-value <selector> <value> -a <app>
+Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. Some rich text controls (e.g. WinUI 3 RichEditBox and WPF RichTextBox) don't support setting their value programmatically — use the 'send-keys' command with '--via send-input' to type into them instead. Usage: winapp ui set-value <selector> <value> -a <app>
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->

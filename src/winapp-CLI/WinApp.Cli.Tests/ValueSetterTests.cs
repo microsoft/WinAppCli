@@ -86,6 +86,20 @@ public class ValueSetterTests
     }
 
     [TestMethod]
+    public void Apply_SkipsRangeValue_ForLocaleGroupedNumber()
+    {
+        // "1,2" must not be reinterpreted as 12 via thousands grouping — it is not a valid invariant
+        // number, so RangeValue is skipped and legacy receives the raw text.
+        var strategy = new FakeValueSetStrategy { RangeValuePatternSucceeds = true, LegacySucceeds = true };
+
+        ValueSetter.Apply(strategy, Element(), "1,2");
+
+        Assert.AreEqual("value,legacy", string.Join(",", strategy.Calls));
+        Assert.IsNull(strategy.RangeValueReceived);
+        Assert.AreEqual("1,2", strategy.LegacyTextReceived);
+    }
+
+    [TestMethod]
     public void Apply_FallsBackToLegacyIAccessible_WhenValueAndRangeUnavailable()
     {
         // The put_accValue success path for TextPattern-only edit controls (issue #620).
@@ -159,14 +173,27 @@ public class ValueSetterTests
     }
 
     [TestMethod]
-    public void Apply_ThrowMessage_UsesSelectorPlaceholder_WhenTargetHasUnsafeChars()
+    [DataRow("weird\"name\nhere", "weird\"name")]
+    [DataRow("$(whoami)", "whoami")]
+    [DataRow("a`b;c|d&e", "a`b")]
+    public void Apply_ThrowMessage_UsesSelectorPlaceholder_WhenTargetHasUnsafeChars(string unsafeName, string mustNotAppear)
     {
-        // An app-controlled name containing a quote or newline must not break the single,
-        // copy-pasteable example line — it falls back to the "<selector>" placeholder.
+        // App-controlled names containing shell metacharacters (quotes, newlines, $(), backticks,
+        // ;, |, &) must not be echoed into the copy-pasteable example — it falls back to "<selector>".
         var ex = Assert.ThrowsExactly<InvalidOperationException>(
-            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: "weird\"name\nhere"), "x"));
+            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: unsafeName), "x"));
 
         StringAssert.Contains(ex.Message, "--target \"<selector>\"");
-        Assert.IsFalse(ex.Message.Contains("weird\"name"), "Unsafe target text must not appear in the hint.");
+        Assert.IsFalse(ex.Message.Contains(mustNotAppear), "Unsafe target text must not appear in the hint.");
+    }
+
+    [TestMethod]
+    public void Apply_ThrowMessage_KeepsSafeTargetWithPathAndSpaces()
+    {
+        // A benign name with spaces and path separators is safe and should be echoed verbatim.
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(
+            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: "My Field 2"), "x"));
+
+        StringAssert.Contains(ex.Message, "--target \"My Field 2\"");
     }
 }

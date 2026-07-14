@@ -51,9 +51,10 @@ internal static class ValueSetter
         }
 
         // ValuePattern not supported — try RangeValuePattern for numeric controls (sliders/progress bars).
-        // Parse with the invariant culture so a value like "3.5" is interpreted consistently regardless of
-        // the machine's locale (CLI inputs are culture-independent).
-        if (double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var numericValue) &&
+        // Parse with the invariant culture and no thousands grouping so "3.5" is interpreted consistently
+        // regardless of the machine's locale, and locale-specific inputs such as "1,2" fall through to the
+        // next mechanism rather than being silently reinterpreted (e.g. as "12").
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var numericValue) &&
             strategy.TrySetViaRangeValuePattern(numericValue))
         {
             return;
@@ -68,11 +69,12 @@ internal static class ValueSetter
             return;
         }
 
-        // Use the element's own selector/name/id in the example, but fall back to a placeholder when
-        // that app-controlled text contains characters (quotes/newlines) that would break the single,
-        // copy-pasteable command line. This hint is only displayed, never executed.
+        // Echo the element's own selector/name/id in the copy-pasteable example only when it consists of
+        // safe characters; otherwise use a placeholder. This keeps app-controlled text from injecting shell
+        // metacharacters (quotes, $(), backticks, %VAR%, newlines, ...) into the example if a user pastes
+        // the hint into a shell. The hint is only displayed, never executed by winapp.
         var rawTarget = element.Selector ?? element.Name ?? element.AutomationId;
-        var sendKeysTarget = !string.IsNullOrEmpty(rawTarget) && rawTarget.IndexOfAny(['"', '\r', '\n']) < 0
+        var sendKeysTarget = !string.IsNullOrEmpty(rawTarget) && IsSafeHintTarget(rawTarget)
             ? rawTarget
             : "<selector>";
         throw new InvalidOperationException(
@@ -83,5 +85,21 @@ internal static class ValueSetter
             "WinUI 3 / WPF rich text controls need '--via send-input' (types real keystrokes; requires the app " +
             "foregrounded on an unlocked desktop) — the default post-message transport is silently dropped by the " +
             "XAML input pipeline. The post-message default (no foreground needed) works for classic Win32 edit controls.");
+    }
+
+    // A hint target is safe to echo into the copy-pasteable example only if it contains no shell
+    // metacharacters — letters, digits, spaces, and a few path/separator punctuation marks. Anything
+    // else (quotes, $, `, %, ;, |, &, parentheses, newlines, ...) forces the "<selector>" placeholder.
+    private static bool IsSafeHintTarget(string value)
+    {
+        foreach (var c in value)
+        {
+            if (!(char.IsLetterOrDigit(c) || c is ' ' or '_' or '-' or '.' or ':' or '/' or '\\'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
