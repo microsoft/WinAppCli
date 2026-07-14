@@ -347,7 +347,7 @@ winapp ui set-value doc-compose-9f3a "hello" -a myapp        # RichEdit/compose 
 ```
 If none of the three patterns can set the value, `set-value` fails with a clear error pointing at `send-keys` as the last resort.
 
-> **Not every rich editor supports programmatic set.** The LegacyIAccessible fallback only works on controls whose accessibility implements `IAccessible::put_accValue` — native Win32 rich-edit controls and Chromium/Electron/WebView2 compose surfaces typically do. **WinUI 3 `RichEditBox` and WPF `RichTextBox` return `E_NOTIMPL`** for `put_accValue`, so they can't be set this way — use `send-keys` (which needs an unlocked, foregrounded desktop) for those.
+> **Not every rich editor supports programmatic set.** The LegacyIAccessible fallback only works on controls whose accessibility implements `IAccessible::put_accValue` — native Win32 rich-edit controls and Chromium/Electron/WebView2 compose surfaces typically do. **WinUI 3 `RichEditBox` and WPF `RichTextBox` don't support programmatic value-setting** — by design they expose their contents to UI Automation as read-only (Text pattern, no settable Value pattern), so `set-value` can't write to them. Use `send-keys` (which needs an unlocked, foregrounded desktop) for those.
 
 
 ### get-value
@@ -439,7 +439,7 @@ winapp ui list-windows --show-hidden                        # include invisible 
 | **Electron** | ⚠️ Chromium tree | ⚠️ Limited | ⚠️ Varies | ⚠️ Varies | ✅ |
 | **Flutter** | ⚠️ Basic | ⚠️ Basic | ❌ Minimal | ❌ | ✅ |
 
-¹ `set-value` works on any control exposing ValuePattern/RangeValuePattern, plus TextPattern-only edit controls whose accessibility implements `IAccessible::put_accValue` (LegacyIAccessible fallback). **WinUI 3 `RichEditBox` and WPF `RichTextBox` are exceptions** — they expose only TextPattern and return `E_NOTIMPL` for `put_accValue`, so they can't be set programmatically; use `send-keys` (interactive desktop required) to type into them.
+¹ `set-value` works on any control exposing ValuePattern/RangeValuePattern, plus TextPattern-only edit controls whose accessibility implements `IAccessible::put_accValue` (LegacyIAccessible fallback). **WinUI 3 `RichEditBox` and WPF `RichTextBox` are exceptions** — they expose only the read-only Text pattern (no settable Value pattern), so they can't be set programmatically by design; use `send-keys` (interactive desktop required) to type into them.
 
 ## Troubleshooting
 

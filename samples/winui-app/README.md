@@ -58,7 +58,7 @@ winapp ui wait-for "Result Display" -a winui-app --property Name --value "Submit
 winapp ui get-value "Rich Text Editor" -a winui-app
 
 # Note: set-value on the WinUI 3 RichEditBox fails on purpose — it exposes only TextPattern and
-# returns E_NOTIMPL for put_accValue, so winapp reports a clear error pointing at send-keys.
+# has no settable Value pattern, so winapp reports a clear error pointing at send-keys.
 # (The LegacyIAccessible fallback does set text on rich-edit controls that implement put_accValue,
 # e.g. native Win32 rich-edit and Electron/Chromium compose boxes.)
 winapp ui send-keys "typed via keystrokes" --target "Rich Text Editor" -a winui-app --via send-input

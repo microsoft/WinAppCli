@@ -61,7 +61,7 @@
 
                 <!-- Rich text input (TextPattern-only: no ValuePattern). Used by the e2e test to
                      exercise the LegacyIAccessible put_accValue fallback in `winapp ui set-value`.
-                     WinUI 3 RichEditBox returns E_NOTIMPL for put_accValue, so set-value fails
+                     WinUI 3 RichEditBox has no settable Value pattern (read-only to UIA value APIs), so set-value fails
                      gracefully here and points at `send-keys` — the read path (get-value via
                      TextPattern) still works. Initial text is seeded in code-behind so the e2e
                      can assert the read path returns real content, not just a zero exit code. -->
