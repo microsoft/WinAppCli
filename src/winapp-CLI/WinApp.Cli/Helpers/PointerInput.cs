@@ -29,6 +29,13 @@ internal static class PointerInput
     /// <summary>Steps used to interpolate a moving gesture between two waypoints.</summary>
     private const int GlideSteps = 20;
 
+    /// <summary>
+    /// Interval in milliseconds between stationary UPDATE frames emitted during a touch long-press hold.
+    /// Windows touch injection can cancel or mis-classify a held contact that receives no periodic
+    /// frames; this cadence keeps the contact alive and lets the OS recognise it as press-and-hold.
+    /// </summary>
+    internal const int HoldFrameIntervalMs = 40;
+
     // touchFlags / touchMask / penFlags / penMask are raw DWORD bitmasks in the generated structs.
     private const uint TOUCH_MASK_CONTACTAREA = 0x00000001;
     private const uint PEN_FLAG_NONE = 0x00000000;
@@ -41,7 +48,7 @@ internal static class PointerInput
     private static volatile bool _touchInitialized;
 
     /// <summary>Delegate that submits one frame of touch contacts (synthetic device or legacy API).</summary>
-    private delegate void TouchSender(POINTER_TOUCH_INFO[] contacts);
+    internal delegate void TouchSender(POINTER_TOUCH_INFO[] contacts);
 
     /// <summary>
     /// Registers this process for legacy touch injection the first time it is needed. Idempotent — the
@@ -144,7 +151,7 @@ internal static class PointerInput
         }
     }
 
-    private static void InjectTouchStroke(
+    internal static void InjectTouchStroke(
         IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths,
         int holdMs,
         int durationMs,
@@ -166,9 +173,28 @@ internal static class PointerInput
 
         try
         {
+            // --- Hold phase: emit periodic stationary UPDATE frames so Windows does not drop/cancel
+            //     the contact or mis-classify the hold as a tap. One frame per HoldFrameIntervalMs,
+            //     clamping the final partial interval so the total hold ≈ holdMs. ---
             if (holdMs > 0)
             {
-                Thread.Sleep(holdMs);
+                int elapsed = 0;
+                while (elapsed < holdMs)
+                {
+                    int interval = Math.Min(HoldFrameIntervalMs, holdMs - elapsed);
+                    Thread.Sleep(interval);
+                    elapsed += interval;
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        var start = contactPaths[i][0];
+                        contacts[i] = MakeContact(
+                            (uint)i, start.X, start.Y,
+                            POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT,
+                            primary: i == 0);
+                    }
+                    send(contacts);
+                }
             }
 
             // --- Glide between waypoints (only if any contact has more than one waypoint) ---
@@ -307,34 +333,87 @@ internal static class PointerInput
                 mappedPressure = 1; // in-contact frames need non-zero pressure
             }
 
-            // Down at the first point.
-            var first = path[0];
-            SendPen(device, first.X, first.Y, mappedPressure, tiltX, tiltY, eraser,
-                POINTER_FLAGS.POINTER_FLAG_DOWN | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
-
-            try
-            {
-                // Glide through the remaining ink points, distributing --duration-ms evenly.
-                int segments = path.Count - 1;
-                int perSegmentMs = (durationMs > 0 && segments > 0) ? Math.Max(1, durationMs / segments) : 10;
-                for (int i = 1; i < path.Count; i++)
-                {
-                    var pt = path[i];
-                    SendPen(device, pt.X, pt.Y, mappedPressure, tiltX, tiltY, eraser,
-                        POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
-                    Thread.Sleep(perSegmentMs);
-                }
-            }
-            finally
-            {
-                var last = path[^1];
-                try { SendPen(device, last.X, last.Y, 0, tiltX, tiltY, eraser, POINTER_FLAGS.POINTER_FLAG_UP); }
-                catch (InvalidOperationException) { }
-            }
+            InjectPenStroke(path, mappedPressure, durationMs,
+                (x, y, p, flags) => SendPen(device, x, y, p, tiltX, tiltY, eraser, flags));
         }
         finally
         {
             PInvoke.DestroySyntheticPointerDevice(device);
+        }
+    }
+
+    /// <summary>
+    /// Delegate that submits one pen frame. <paramref name="pressure"/> is the raw 0..1024 pressure
+    /// value (0 for UP frames); <paramref name="flags"/> carries DOWN/UPDATE/UP and contact flags.
+    /// </summary>
+    internal delegate void PenFrameSender(int x, int y, uint pressure, POINTER_FLAGS flags);
+
+    /// <summary>
+    /// Sends the full sequence of DOWN → interpolated UPDATE glide → UP frames for a pen stroke.
+    /// Exposed as <see langword="internal"/> for frame-sequence unit tests (no live device needed).
+    /// </summary>
+    internal static void InjectPenStroke(
+        IReadOnlyList<PointerPoint> path,
+        uint contactPressure,
+        int durationMs,
+        PenFrameSender send)
+    {
+        // DOWN at the first point.
+        var first = path[0];
+        send(first.X, first.Y, contactPressure,
+            POINTER_FLAGS.POINTER_FLAG_DOWN | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
+
+        try
+        {
+            int segments = path.Count - 1;
+            if (segments > 0)
+            {
+                if (durationMs > 0)
+                {
+                    // Interpolate GlideSteps UPDATE frames per segment, distributing --duration-ms
+                    // proportionally across all steps with a running-remainder to avoid accumulating
+                    // rounding error.
+                    int msBudget = durationMs;
+                    int stepsLeft = segments * GlideSteps;
+
+                    for (int seg = 0; seg < segments; seg++)
+                    {
+                        var from = path[seg];
+                        var to = path[seg + 1];
+
+                        for (int step = 1; step <= GlideSteps; step++)
+                        {
+                            double t = step / (double)GlideSteps;
+                            int x = from.X + (int)Math.Round((to.X - from.X) * t);
+                            int y = from.Y + (int)Math.Round((to.Y - from.Y) * t);
+
+                            int sleepMs = Math.Max(1, msBudget / stepsLeft);
+                            send(x, y, contactPressure,
+                                POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
+                            Thread.Sleep(sleepMs);
+                            msBudget -= sleepMs;
+                            stepsLeft--;
+                        }
+                    }
+                }
+                else
+                {
+                    // durationMs <= 0: fall back to a fixed ~10 ms per waypoint (original cadence).
+                    for (int i = 1; i < path.Count; i++)
+                    {
+                        var pt = path[i];
+                        send(pt.X, pt.Y, contactPressure,
+                            POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
+                        Thread.Sleep(10);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            var last = path[^1];
+            try { send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP); }
+            catch (InvalidOperationException) { }
         }
     }
 

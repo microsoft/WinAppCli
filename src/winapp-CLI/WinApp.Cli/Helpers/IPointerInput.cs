@@ -12,9 +12,14 @@ internal readonly record struct PointerPoint(int X, int Y);
 /// </summary>
 internal readonly record struct PointerRect(int Left, int Top, int Right, int Bottom)
 {
-    /// <summary>Whether <paramref name="p"/> lies inside (inclusive) this rectangle.</summary>
+    /// <summary>
+    /// Whether <paramref name="p"/> lies strictly inside this rectangle.
+    /// <c>Right</c> and <c>Bottom</c> are exclusive bounds (the first pixel column/row outside the
+    /// window), matching the semantics of <c>GetWindowRect</c>, so a point exactly on <c>Right</c>
+    /// or <c>Bottom</c> is considered outside.
+    /// </summary>
     public bool Contains(PointerPoint p)
-        => p.X >= Left && p.X <= Right && p.Y >= Top && p.Y <= Bottom;
+        => p.X >= Left && p.X < Right && p.Y >= Top && p.Y < Bottom;
 }
 
 /// <summary>The synthetic touch gestures supported by <c>winapp ui touch</c>.</summary>

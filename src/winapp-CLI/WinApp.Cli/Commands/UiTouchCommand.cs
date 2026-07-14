@@ -323,6 +323,7 @@ internal class UiTouchCommand : Command, IShortDescription
                         Points = points.Select(p => new UiPointResult { X = p.X, Y = p.Y }).ToArray(),
                         Fingers = effectiveFingers,
                         DurationMs = durationMs,
+                        HoldMs = holdMs,
                         Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(

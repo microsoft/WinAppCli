@@ -446,7 +446,7 @@ export interface RunOptions extends CommonOptions {
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
-  /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
+  /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
@@ -460,7 +460,7 @@ export interface RunOptions extends CommonOptions {
   noLaunch?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
   outputAppxDirectory?: string;
-  /** Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
+  /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;

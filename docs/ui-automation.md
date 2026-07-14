@@ -299,9 +299,10 @@ winapp ui touch img-map-9f8e -a myapp --gesture stretch --distance 200  # stretc
 **Options:**
 - `--gesture <g>` — `tap` (default), `double-tap`, `long-press`, `swipe`, `pinch`, `stretch`.
 - `--at <x,y>` — Explicit start point (app coordinates). Defaults to the selector's element center.
-- `--to-point <x,y>` — End point for a `swipe`.
-- `--distance <px>` — Finger spread for `pinch`/`stretch`, or a directionless `swipe` distance.
-- `--hold-ms <ms>` — Hold contacts down before lifting (long-press hold time).
+- `--to-point <x,y>` — End point for a `swipe`. Takes precedence over `--direction`.
+- `--direction <right|left|up|down>` — Swipe direction (default: `right`). Combined with `--distance` to compute the end point when `--to-point` is not given.
+- `--distance <px>` — Finger spread for `pinch`/`stretch`, or swipe distance in pixels.
+- `--hold-ms <ms>` — Hold contacts down before lifting (long-press hold time; defaults to 500 ms for `long-press` when not set).
 - `--duration-ms <ms>` — Glide time for moving gestures (swipe/pinch/stretch; default 300).
 - `--fingers <n>` — Number of contacts (1–10; default 1). `pinch`/`stretch` always use 2.
 
@@ -325,6 +326,7 @@ winapp ui pen -a myapp --at 200,200 --tilt-x 30 --tilt-y -15           # tilted 
 - `--pressure <0.0–1.0>` — Pen pressure (default 0.5).
 - `--tilt-x <deg>` / `--tilt-y <deg>` — Pen tilt angles, −90 to 90 (default 0).
 - `--eraser` — Use the eraser end of the pen instead of the tip.
+- `--duration-ms <ms>` — Total stroke travel time in milliseconds distributed as interpolated UPDATE frames across the path (default: ~10 ms per waypoint). Use this to control how fast the pen visibly moves from start to end.
 
 > **Injection safety.** Like `touch`, `pen` refuses to inject without a **non-zero, foregrounded target window** (`no_target` / `foreground_not_target` / `no_interactive_desktop`) and **bounds-checks every ink point** against the target window rectangle, rejecting out-of-bounds coordinates with **`invalid_arguments`** before any input is injected. Invalid `--pressure` (outside 0.0–1.0) or tilt (outside ±90°) are rejected up front.
 

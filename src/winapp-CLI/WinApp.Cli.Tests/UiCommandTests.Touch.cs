@@ -172,6 +172,55 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Touch_LongPress_JsonOutputIncludesEffectiveHoldMs()
+    {
+        // Verify that the JSON result carries the effective holdMs so agents can observe it.
+        _fakeSession.SessionResult.WindowHandle = 5158;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "long-press", "--at", "100,100", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        // Default long-press holdMs = 500.
+        Assert.IsTrue(result.TryGetProperty("holdMs", out var holdMsProp),
+            "JSON output must contain 'holdMs' property");
+        Assert.AreEqual(500, holdMsProp.GetInt32(), "holdMs must equal the effective long-press default (500)");
+    }
+
+    [TestMethod]
+    public async Task Touch_LongPress_ExplicitHoldMs_JsonOutputIncludesExplicitValue()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5159;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "long-press", "--at", "100,100", "--hold-ms", "1500", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("holdMs", out var holdMsProp));
+        Assert.AreEqual(1500, holdMsProp.GetInt32(), "holdMs must reflect the explicit --hold-ms value");
+    }
+
+    [TestMethod]
+    public async Task Touch_Tap_JsonOutput_HoldMsIsZero()
+    {
+        // For a plain tap, holdMs=0 and must appear in JSON as 0 (not missing).
+        _fakeSession.SessionResult.WindowHandle = 5160;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "tap", "--at", "100,100", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("holdMs", out var holdMsProp));
+        Assert.AreEqual(0, holdMsProp.GetInt32(), "Tap gesture should report holdMs=0");
+    }
+
+    [TestMethod]
     public async Task Touch_InvalidGesture_Rejected_NoInjection()
     {
         var command = GetRequiredService<UiTouchCommand>();
