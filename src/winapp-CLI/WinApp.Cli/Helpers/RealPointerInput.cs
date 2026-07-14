@@ -12,6 +12,6 @@ internal class RealPointerInput : IPointerInput
     public void Touch(TouchGesture gesture, IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths, int holdMs, int durationMs)
         => PointerInput.Touch(gesture, contactPaths, holdMs, durationMs);
 
-    public void Pen(IReadOnlyList<PointerPoint> path, float pressure, int tiltX, int tiltY, bool eraser)
-        => PointerInput.Pen(path, pressure, tiltX, tiltY, eraser);
+    public void Pen(IReadOnlyList<PointerPoint> path, float pressure, int tiltX, int tiltY, bool eraser, int durationMs)
+        => PointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
 }

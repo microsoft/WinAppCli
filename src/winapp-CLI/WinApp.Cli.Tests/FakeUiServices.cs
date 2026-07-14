@@ -195,7 +195,8 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
         float Pressure,
         int TiltX,
         int TiltY,
-        bool Eraser);
+        bool Eraser,
+        int DurationMs);
 
     public List<TouchCall> TouchCalls { get; } = [];
     public List<PenCall> PenCalls { get; } = [];
@@ -212,8 +213,9 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
         float pressure,
         int tiltX,
         int tiltY,
-        bool eraser)
-        => PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser));
+        bool eraser,
+        int durationMs)
+        => PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser, durationMs));
 }
 
 /// <summary>

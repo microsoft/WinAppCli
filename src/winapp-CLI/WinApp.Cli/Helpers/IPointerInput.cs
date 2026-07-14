@@ -55,13 +55,15 @@ internal interface IPointerInput
     /// <summary>
     /// Injects a synthetic pen action along <paramref name="path"/> (a single ink stroke; a one-point
     /// path is a tap). <paramref name="pressure"/> is 0..1 (mapped to the 0..1024 pen range),
-    /// <paramref name="tiltX"/>/<paramref name="tiltY"/> are tilt angles in degrees, and
-    /// <paramref name="eraser"/> selects the eraser end of the pen.
+    /// <paramref name="tiltX"/>/<paramref name="tiltY"/> are tilt angles in degrees,
+    /// <paramref name="eraser"/> selects the eraser end of the pen, and <paramref name="durationMs"/>
+    /// controls total glide time distributed across path segments (0 = ~10 ms per segment).
     /// </summary>
     void Pen(
         IReadOnlyList<PointerPoint> path,
         float pressure,
         int tiltX,
         int tiltY,
-        bool eraser);
+        bool eraser,
+        int durationMs);
 }

@@ -56,6 +56,8 @@ Want to inspect or interact with a running app's UI?
 ├─ Read element properties → winapp ui get-property <selector> -a <appname>
 ├─ Set a value on an element → winapp ui set-value <selector> "value" -a <appname>
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
+├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
+├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 ```
 
@@ -219,6 +221,8 @@ Want to inspect or interact with a running app's UI?
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)
+- `ui touch <selector> -a <app> [--gesture tap|double-tap|long-press|swipe|pinch|stretch] [--at x,y] [--to-point x,y] [--direction right|left|up|down] [--distance px] [--duration-ms ms] [--hold-ms ms] [--fingers N]` — inject synthetic touch gestures (tap, swipe, pinch, stretch, long-press). Swipe direction defaults to right; long-press defaults to 500 ms hold if --hold-ms not set. Requires an unlocked interactive desktop.
+- `ui pen <selector> -a <app> [--at x,y] [--path "x1,y1 x2,y2 ..."] [--pressure 0.5] [--tilt-x N] [--tilt-y N] [--eraser] [--duration-ms ms]` — inject synthetic pen/stylus input: a tap at element center/--at, or an ink stroke along --path. --duration-ms distributes glide time across stroke segments. Requires Windows 10 1809+ and an unlocked interactive desktop.
 - `ui wait-for <selector> -a <app> --timeout <ms> [--gone] [--value Y] [--property X --value Y]` — wait for element value or property match
 - `ui list-windows -a <app> [--show-hidden]` — list windows, popups, and dialogs with HWNDs (untitled zero-size windows hidden by default)
 - `ui get-focused -a <app>` — show the element with keyboard focus

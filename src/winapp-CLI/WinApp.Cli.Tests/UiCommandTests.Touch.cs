@@ -64,6 +64,114 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Touch_Swipe_Direction_Right_ComputesEndPoint()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5151;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "100,200", "--direction", "right", "--distance", "150", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(TouchGesture.Swipe, call.Gesture);
+        Assert.AreEqual(new PointerPoint(100, 200), call.ContactPaths[0][0]);
+        Assert.AreEqual(new PointerPoint(250, 200), call.ContactPaths[0][^1]); // +150 on X
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_Direction_Left_ComputesEndPoint()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5152;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "400,200", "--direction", "left", "--distance", "150", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(new PointerPoint(400, 200), call.ContactPaths[0][0]);
+        Assert.AreEqual(new PointerPoint(250, 200), call.ContactPaths[0][^1]); // -150 on X
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_Direction_Up_ComputesEndPoint()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5153;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "200,300", "--direction", "up", "--distance", "100", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(new PointerPoint(200, 300), call.ContactPaths[0][0]);
+        Assert.AreEqual(new PointerPoint(200, 200), call.ContactPaths[0][^1]); // -100 on Y
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_Direction_Down_ComputesEndPoint()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5154;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "200,100", "--direction", "down", "--distance", "100", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(new PointerPoint(200, 100), call.ContactPaths[0][0]);
+        Assert.AreEqual(new PointerPoint(200, 200), call.ContactPaths[0][^1]); // +100 on Y
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_DistanceOnly_DefaultsToRightDirection()
+    {
+        // Backward-compat: --distance without --direction still moves right (the old behavior).
+        _fakeSession.SessionResult.WindowHandle = 5155;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "50,50", "--distance", "200", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(new PointerPoint(50, 50), call.ContactPaths[0][0]);
+        Assert.AreEqual(new PointerPoint(250, 50), call.ContactPaths[0][^1]); // right = +X
+    }
+
+    [TestMethod]
+    public async Task Touch_LongPress_NoHoldMs_DefaultsTo500ms()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5156;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        // No --hold-ms specified → should default to 500 ms for long-press.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "long-press", "--at", "100,100", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(TouchGesture.LongPress, call.Gesture);
+        Assert.AreEqual(500, call.HoldMs); // long-press default
+    }
+
+    [TestMethod]
+    public async Task Touch_LongPress_ExplicitHoldMs_UsesProvidedValue()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5157;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "long-press", "--at", "100,100", "--hold-ms", "1200", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(1200, call.HoldMs); // explicit value preserved
+    }
+
+    [TestMethod]
     public async Task Touch_InvalidGesture_Rejected_NoInjection()
     {
         var command = GetRequiredService<UiTouchCommand>();

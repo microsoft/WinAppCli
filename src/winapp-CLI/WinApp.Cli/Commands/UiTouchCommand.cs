@@ -41,18 +41,25 @@ internal class UiTouchCommand : Command, IShortDescription
 
     public static Option<string?> ToPointOption { get; } = new("--to-point")
     {
-        Description = "End point x,y for a swipe (app coordinates)."
+        Description = "End point x,y for a swipe (app coordinates). Takes precedence over --direction."
     };
 
     public static Option<int> DistanceOption { get; } = new("--distance")
     {
-        Description = "Distance in pixels for pinch/stretch (finger spread) or a directionless swipe.",
+        Description = "Distance in pixels for pinch/stretch (finger spread) or swipe.",
         DefaultValueFactory = _ => 0
+    };
+
+    public static Option<string?> DirectionOption { get; } = new("--direction")
+    {
+        Description = "Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given.",
+        DefaultValueFactory = _ => "right"
     };
 
     public static Option<int> HoldOption { get; } = new("--hold-ms")
     {
-        Description = "Milliseconds to hold contacts down before lifting (long-press hold time).",
+        Description = "Milliseconds to hold contacts down before lifting (long-press hold time). " +
+                      "Defaults to 500 ms when --gesture long-press is used and this option is not set.",
         DefaultValueFactory = _ => 0
     };
 
@@ -81,6 +88,7 @@ internal class UiTouchCommand : Command, IShortDescription
         Options.Add(AtOption);
         Options.Add(ToPointOption);
         Options.Add(DistanceOption);
+        Options.Add(DirectionOption);
         Options.Add(HoldOption);
         Options.Add(DurationOption);
         Options.Add(FingersOption);
@@ -106,6 +114,7 @@ internal class UiTouchCommand : Command, IShortDescription
             var atStr = parseResult.GetValue(AtOption);
             var toStr = parseResult.GetValue(ToPointOption);
             var distance = parseResult.GetValue(DistanceOption);
+            var direction = parseResult.GetValue(DirectionOption);
             var holdMs = parseResult.GetValue(HoldOption);
             var durationMs = parseResult.GetValue(DurationOption);
             var fingers = parseResult.GetValue(FingersOption);
@@ -131,6 +140,22 @@ internal class UiTouchCommand : Command, IShortDescription
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                     "--hold-ms/--duration-ms/--distance must be zero or positive and --fingers >= 1.");
                 return 1;
+            }
+
+            // Validate --direction value up front.
+            var validDirections = new[] { "right", "left", "up", "down" };
+            if (!string.IsNullOrEmpty(direction) && !validDirections.Contains(direction.ToLowerInvariant()))
+            {
+                logger.LogError("{Symbol} --direction must be one of: right, left, up, down. Got '{Direction}'.", UiSymbols.Error, direction);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    $"--direction must be one of: right, left, up, down. Got '{direction}'.");
+                return 1;
+            }
+
+            // Long-press with no explicit --hold-ms defaults to 500 ms (a real long-press).
+            if (gesture is TouchGesture.LongPress && holdMs <= 0)
+            {
+                holdMs = 500;
             }
 
             if (fingers > PointerGesturePlanner.MaxContacts)
@@ -183,8 +208,8 @@ internal class UiTouchCommand : Command, IShortDescription
 
             if (gesture is TouchGesture.Swipe && to is null && distance <= 0)
             {
-                logger.LogError("{Symbol} swipe requires --to-point x,y or --distance.", UiSymbols.Error);
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "swipe requires --to-point x,y or --distance.");
+                logger.LogError("{Symbol} swipe requires --to-point x,y or --distance (combined with optional --direction).", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "swipe requires --to-point x,y or --distance (combined with optional --direction).");
                 return 1;
             }
 
@@ -263,7 +288,7 @@ internal class UiTouchCommand : Command, IShortDescription
                 }
 
                 var (contactPaths, points, effectiveFingers) =
-                    PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers);
+                    PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers, direction);
 
                 // Every planned point (selector center, explicit --at/--to-point, and generated
                 // waypoints) must fall inside the target window — reject out-of-bounds coordinates

@@ -109,14 +109,16 @@ internal static class PointerGesturePlanner
     /// <summary>
     /// Expands a touch gesture into per-finger waypoint paths plus the flattened point list reported in
     /// JSON. <paramref name="start"/> is the anchor (selector center or <c>--at</c>). For pinch/stretch
-    /// <paramref name="fingers"/> is coerced to at least 2.
+    /// <paramref name="fingers"/> is coerced to at least 2. <paramref name="direction"/> controls the
+    /// swipe axis when no explicit <paramref name="end"/> is given; defaults to <c>"right"</c>.
     /// </summary>
     public static (List<IReadOnlyList<PointerPoint>> ContactPaths, List<PointerPoint> Points, int Fingers) PlanTouch(
         TouchGesture gesture,
         PointerPoint start,
         PointerPoint? end,
         int distance,
-        int fingers)
+        int fingers,
+        string? direction = null)
     {
         var contactPaths = new List<IReadOnlyList<PointerPoint>>();
 
@@ -124,7 +126,7 @@ internal static class PointerGesturePlanner
         {
             case TouchGesture.Swipe:
             {
-                var to = end ?? new PointerPoint(start.X + distance, start.Y);
+                var to = end ?? ComputeSwipeEnd(start, distance, direction);
                 int count = Math.Max(1, fingers);
                 for (int i = 0; i < count; i++)
                 {
@@ -181,5 +183,20 @@ internal static class PointerGesturePlanner
         }
 
         return (contactPaths, points, contactPaths.Count);
+    }
+
+    /// <summary>
+    /// Computes a swipe end point from <paramref name="start"/> by moving <paramref name="distance"/>
+    /// pixels along <paramref name="direction"/> (right/left/up/down; defaults to right).
+    /// </summary>
+    private static PointerPoint ComputeSwipeEnd(PointerPoint start, int distance, string? direction)
+    {
+        return (direction ?? "right").ToLowerInvariant() switch
+        {
+            "left"  => new PointerPoint(start.X - distance, start.Y),
+            "up"    => new PointerPoint(start.X, start.Y - distance),
+            "down"  => new PointerPoint(start.X, start.Y + distance),
+            _       => new PointerPoint(start.X + distance, start.Y), // "right" + default
+        };
     }
 }

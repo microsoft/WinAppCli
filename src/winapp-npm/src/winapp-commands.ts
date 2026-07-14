@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.4.1
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -872,6 +872,8 @@ export interface UiPenOptions extends CommonOptions {
   app?: string;
   /** Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
   at?: string;
+  /** Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). */
+  durationMs?: number;
   /** Use the eraser end of the pen instead of the tip. */
   eraser?: boolean;
   /** Format output as JSON */
@@ -896,6 +898,7 @@ export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
   if (options.eraser) args.push('--eraser');
   if (options.json) args.push('--json');
   if (options.path) args.push('--path', options.path);
@@ -1136,7 +1139,9 @@ export interface UiTouchOptions extends CommonOptions {
   app?: string;
   /** Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
   at?: string;
-  /** Distance in pixels for pinch/stretch (finger spread) or a directionless swipe. */
+  /** Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. */
+  direction?: string;
+  /** Distance in pixels for pinch/stretch (finger spread) or swipe. */
   distance?: number;
   /** Glide time in milliseconds for moving gestures (swipe/pinch/stretch). */
   durationMs?: number;
@@ -1144,11 +1149,11 @@ export interface UiTouchOptions extends CommonOptions {
   fingers?: number;
   /** Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). */
   gesture?: string;
-  /** Milliseconds to hold contacts down before lifting (long-press hold time). */
+  /** Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. */
   holdMs?: number;
   /** Format output as JSON */
   json?: boolean;
-  /** End point x,y for a swipe (app coordinates). */
+  /** End point x,y for a swipe (app coordinates). Takes precedence over --direction. */
   toPoint?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1162,6 +1167,7 @@ export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResul
   if (options.selector) args.push(options.selector);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
+  if (options.direction) args.push('--direction', options.direction);
   if (options.distance !== undefined) args.push('--distance', options.distance.toString());
   if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
   if (options.fingers !== undefined) args.push('--fingers', options.fingers.toString());

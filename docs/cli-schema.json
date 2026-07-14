@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "1.0.0",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -2809,6 +2809,19 @@
               "required": false,
               "recursive": false
             },
+            "--duration-ms": {
+              "description": "Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment).",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--eraser": {
               "description": "Use the eraser end of the pen instead of the tip.",
               "hidden": false,
@@ -3763,8 +3776,21 @@
               "required": false,
               "recursive": false
             },
+            "--direction": {
+              "description": "Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": true,
+              "defaultValue": "right",
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--distance": {
-              "description": "Distance in pixels for pinch/stretch (finger spread) or a directionless swipe.",
+              "description": "Distance in pixels for pinch/stretch (finger spread) or swipe.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
@@ -3819,7 +3845,7 @@
               "recursive": false
             },
             "--hold-ms": {
-              "description": "Milliseconds to hold contacts down before lifting (long-press hold time).",
+              "description": "Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
@@ -3861,7 +3887,7 @@
               "recursive": false
             },
             "--to-point": {
-              "description": "End point x,y for a swipe (app coordinates).",
+              "description": "End point x,y for a swipe (app coordinates). Takes precedence over --direction.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,

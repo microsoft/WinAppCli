@@ -51,6 +51,12 @@ internal class UiPenCommand : Command, IShortDescription
         Description = "Use the eraser end of the pen instead of the tip."
     };
 
+    public static Option<int> DurationOption { get; } = new("--duration-ms")
+    {
+        Description = "Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment).",
+        DefaultValueFactory = _ => 0
+    };
+
     public UiPenCommand()
         : base("pen", "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. " +
                "Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's " +
@@ -66,6 +72,7 @@ internal class UiPenCommand : Command, IShortDescription
         Options.Add(TiltXOption);
         Options.Add(TiltYOption);
         Options.Add(EraserOption);
+        Options.Add(DurationOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -90,6 +97,7 @@ internal class UiPenCommand : Command, IShortDescription
             var tiltX = parseResult.GetValue(TiltXOption);
             var tiltY = parseResult.GetValue(TiltYOption);
             var eraser = parseResult.GetValue(EraserOption);
+            var durationMs = parseResult.GetValue(DurationOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
@@ -101,6 +109,13 @@ internal class UiPenCommand : Command, IShortDescription
             {
                 logger.LogError("{Symbol} --pressure must be between 0.0 and 1.0.", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--pressure must be between 0.0 and 1.0.");
+                return 1;
+            }
+
+            if (durationMs < 0)
+            {
+                logger.LogError("{Symbol} --duration-ms must be zero or positive.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-ms must be zero or positive.");
                 return 1;
             }
 
@@ -241,7 +256,7 @@ internal class UiPenCommand : Command, IShortDescription
                     return 1;
                 }
 
-                pointerInput.Pen(path, pressure, tiltX, tiltY, eraser);
+                pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
 
                 var action = eraser ? "erase" : (path.Count > 1 ? "draw" : "tap");
 
@@ -256,6 +271,7 @@ internal class UiPenCommand : Command, IShortDescription
                         TiltX = tiltX,
                         TiltY = tiltY,
                         Eraser = eraser,
+                        DurationMs = durationMs,
                         Hwnd = targetHwnd
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(

@@ -38,7 +38,7 @@ internal static class PointerInput
     private const uint PEN_MASK_TILT_Y = 0x00000008;
 
     private static readonly object InitLock = new();
-    private static bool _touchInitialized;
+    private static volatile bool _touchInitialized;
 
     /// <summary>Delegate that submits one frame of touch contacts (synthetic device or legacy API).</summary>
     private delegate void TouchSender(POINTER_TOUCH_INFO[] contacts);
@@ -286,7 +286,8 @@ internal static class PointerInput
         float pressure,
         int tiltX,
         int tiltY,
-        bool eraser)
+        bool eraser,
+        int durationMs)
     {
         var device = PInvoke.CreateSyntheticPointerDevice(POINTER_INPUT_TYPE.PT_PEN, 1, POINTER_FEEDBACK_MODE.POINTER_FEEDBACK_NONE);
         if (device.IsNull)
@@ -313,13 +314,15 @@ internal static class PointerInput
 
             try
             {
-                // Glide through the remaining ink points.
+                // Glide through the remaining ink points, distributing --duration-ms evenly.
+                int segments = path.Count - 1;
+                int perSegmentMs = (durationMs > 0 && segments > 0) ? Math.Max(1, durationMs / segments) : 10;
                 for (int i = 1; i < path.Count; i++)
                 {
                     var pt = path[i];
                     SendPen(device, pt.X, pt.Y, mappedPressure, tiltX, tiltY, eraser,
                         POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
-                    Thread.Sleep(10);
+                    Thread.Sleep(perSegmentMs);
                 }
             }
             finally

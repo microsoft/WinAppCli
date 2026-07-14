@@ -1,7 +1,7 @@
 ---
 name: winapp-ui-automation
 description: Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron.
-version: 0.4.1
+version: 1.0.0
 ---
 ## When to use
 - Inspecting a running Windows app's UI from the command line
@@ -478,13 +478,14 @@ Inject synthetic touch input using the Windows touch-injection API. Supports tap
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--at` | Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. | (none) |
-| `--distance` | Distance in pixels for pinch/stretch (finger spread) or a directionless swipe. | (none) |
+| `--direction` | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. | `right` |
+| `--distance` | Distance in pixels for pinch/stretch (finger spread) or swipe. | (none) |
 | `--duration-ms` | Glide time in milliseconds for moving gestures (swipe/pinch/stretch). | `300` |
 | `--fingers` | Number of touch contacts (default: 1). Pinch/stretch always use 2. | `1` |
 | `--gesture` | Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). | `tap` |
-| `--hold-ms` | Milliseconds to hold contacts down before lifting (long-press hold time). | (none) |
+| `--hold-ms` | Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--to-point` | End point x,y for a swipe (app coordinates). | (none) |
+| `--to-point` | End point x,y for a swipe (app coordinates). Takes precedence over --direction. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui pen`
@@ -503,6 +504,7 @@ Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps 
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--at` | Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. | (none) |
+| `--duration-ms` | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). | (none) |
 | `--eraser` | Use the eraser end of the pen instead of the tip. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--path` | Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". | (none) |

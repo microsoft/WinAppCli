@@ -61,6 +61,38 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Pen_DurationMs_PassedThrough()
+    {
+        // Verify --duration-ms is forwarded to the pointer input as-is.
+        _fakeSession.SessionResult.WindowHandle = 3301;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--path", "10,10 100,100", "--duration-ms", "800", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count);
+        Assert.AreEqual(800, _fakePointer.PenCalls[0].DurationMs);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(800, result.GetProperty("durationMs").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task Pen_DurationMs_DefaultIsZero()
+    {
+        // Default --duration-ms (0) means ~10 ms per segment; verify 0 is passed through.
+        _fakeSession.SessionResult.WindowHandle = 3302;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "50,50", "--json"]);
+        Assert.AreEqual(0, exitCode);
+
+        Assert.AreEqual(0, _fakePointer.PenCalls[0].DurationMs);
+    }
+
+    [TestMethod]
     public async Task Pen_InvalidPressure_Rejected_NoInjection()
     {
         var command = GetRequiredService<UiPenCommand>();

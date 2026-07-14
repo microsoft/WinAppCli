@@ -282,5 +282,6 @@ internal sealed class UiPenResult
     public int TiltX { get; set; }
     public int TiltY { get; set; }
     public bool Eraser { get; set; }
+    public int DurationMs { get; set; }
     public long Hwnd { get; set; }
 }
