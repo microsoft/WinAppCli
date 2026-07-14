@@ -10,7 +10,7 @@ const {
   FileOpenPicker,
   PickerLocationId,
   PickerViewMode,
-} = require('../.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 let csAddon = undefined; 
 

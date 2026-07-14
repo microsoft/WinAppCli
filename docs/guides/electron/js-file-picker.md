@@ -59,7 +59,9 @@ npx winapp node generate-bindings
 
 ## Step 3: Call Windows APIs from your Electron code
 
-All generated classes are exported from `.winapp/bindings/index.js`:
+All generated classes are exported through `#winapp/bindings`:
+
+> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`** — see [Get started with Electron](index.md#2-call-windows-apis-from-javascript) for older-project fallbacks.
 
 ```js
 // src/index.js (Electron main, CommonJS)
@@ -73,7 +75,7 @@ const {
   StorageFile,
   FileAccessMode,
   BitmapDecoder,
-} = require('../.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 async function pickAndInspectImage(mainWindow) {
   // FileOpenPicker needs the parent window's HWND wrapped in a WindowId struct.
