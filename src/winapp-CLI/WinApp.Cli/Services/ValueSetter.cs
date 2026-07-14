@@ -69,8 +69,9 @@ internal static class ValueSetter
             $"Element {element.Id} ({element.Type}) could not be set via ValuePattern, RangeValuePattern, or " +
             "LegacyIAccessible (put_accValue). This control may not support setting a value programmatically. " +
             "As a last resort, type the value with 'winapp ui send-keys' — for example: " +
-            $"winapp ui send-keys --verbatim \"<value>\" --target \"{sendKeysTarget}\" -a <app>. " +
-            "This defaults to HWND-targeted post-message input (no foreground required); add '--via send-input' " +
-            "for controls that need real per-keystroke input, which does require an unlocked foreground desktop.");
+            $"winapp ui send-keys --verbatim \"<value>\" --target \"{sendKeysTarget}\" --via send-input -a <app>. " +
+            "WinUI 3 / WPF rich text controls need '--via send-input' (types real keystrokes; requires the app " +
+            "foregrounded on an unlocked desktop) — the default post-message transport is silently dropped by the " +
+            "XAML input pipeline. The post-message default (no foreground needed) works for classic Win32 edit controls.");
     }
 }

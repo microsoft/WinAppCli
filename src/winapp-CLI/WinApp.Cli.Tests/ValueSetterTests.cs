@@ -24,12 +24,14 @@ public class ValueSetterTests
         public bool LegacySucceeds { get; init; }
 
         public List<string> Calls { get; } = [];
+        public string? ValueTextReceived { get; private set; }
         public double? RangeValueReceived { get; private set; }
         public string? LegacyTextReceived { get; private set; }
 
         public bool TrySetViaValuePattern(string text)
         {
             Calls.Add("value");
+            ValueTextReceived = text;
             return ValuePatternSucceeds;
         }
 
@@ -93,6 +95,30 @@ public class ValueSetterTests
 
         Assert.AreEqual("value,legacy", string.Join(",", strategy.Calls));
         Assert.AreEqual("hello richedit", strategy.LegacyTextReceived);
+    }
+
+    [TestMethod]
+    public void Apply_PreservesEmptyString_ViaValuePattern()
+    {
+        // Clearing a field: an empty string must flow through ValuePattern unchanged.
+        var strategy = new FakeValueSetStrategy { ValuePatternSucceeds = true };
+
+        ValueSetter.Apply(strategy, Element(), "");
+
+        Assert.AreEqual("value", string.Join(",", strategy.Calls));
+        Assert.AreEqual("", strategy.ValueTextReceived);
+    }
+
+    [TestMethod]
+    public void Apply_PreservesEmptyString_ViaLegacy_AndSkipsRangeValue()
+    {
+        // An empty string is not numeric, so RangeValuePattern is skipped; legacy receives "" intact.
+        var strategy = new FakeValueSetStrategy { LegacySucceeds = true };
+
+        ValueSetter.Apply(strategy, Element(), "");
+
+        Assert.AreEqual("value,legacy", string.Join(",", strategy.Calls));
+        Assert.AreEqual("", strategy.LegacyTextReceived);
     }
 
     [TestMethod]
