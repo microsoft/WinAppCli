@@ -96,6 +96,17 @@ test('ensureJsBindingsImports adds both aliases to a workspace without imports',
   });
 });
 
+test('ensureJsBindingsImports adds both aliases to an empty imports object', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0', imports: {} });
+  const result = ensureJsBindingsImports(dir);
+  assert.equal(result.outcome, 'added');
+  assert.deepEqual(result.diverged, []);
+
+  const imports = readRawPackageJson(dir).imports as Record<string, unknown>;
+  assert.ok(imports['#winapp/bindings']);
+  assert.ok(imports['#winapp/bindings/*']);
+});
+
 test('ensureJsBindingsImports is a no-op when both aliases already match', () => {
   const dir = makeWorkspace({ name: 'app', version: '1.0.0' });
   ensureJsBindingsImports(dir);
@@ -157,6 +168,16 @@ test('ensureJsBindingsImports rejects a non-object imports field with an actiona
     () => ensureJsBindingsImports(dir),
     /package\.json "imports" must be an object.*Edit package\.json.*winapp init --add-js-bindings/s
   );
+});
+
+test('ensureJsBindingsImports rejects null imports with an actionable hint', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0', imports: null });
+  assert.throws(() => ensureJsBindingsImports(dir), /package\.json "imports" must be an object/);
+});
+
+test('ensureJsBindingsImports rejects array imports with an actionable hint', () => {
+  const dir = makeWorkspace({ name: 'app', version: '1.0.0', imports: [] });
+  assert.throws(() => ensureJsBindingsImports(dir), /package\.json "imports" must be an object/);
 });
 
 test('writeJsBindingsConfig throws when package.json is missing', () => {

@@ -14,6 +14,7 @@ import {
   handleGenerateBindings,
   formatJsBindingsImportsHints,
   emitJsBindingsImportsHints,
+  planJsBindingsImportsHints,
 } from '../src/jsbindings/cli-hooks';
 
 // Shorthand: build a default `false` set, override with `overrides`.
@@ -148,6 +149,43 @@ test('emitJsBindingsImportsHints emits nothing when there is nothing to say', ()
   const captured: string[] = [];
   emitJsBindingsImportsHints({ outcome: 'unchanged', diverged: [] }, (line) => captured.push(line));
   assert.deepEqual(captured, []);
+});
+
+test('planJsBindingsImportsHints suppresses configured hints when quiet', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: [] } },
+    { quiet: true }
+  );
+  assert.deepEqual(hints, []);
+});
+
+test('planJsBindingsImportsHints suppresses unsupported hints when quiet', () => {
+  const hints = planJsBindingsImportsHints({ kind: 'unsupported' }, { quiet: true });
+  assert.deepEqual(hints, []);
+});
+
+test('planJsBindingsImportsHints emits the added hint for configured imports', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: [] } },
+    { quiet: false }
+  );
+  assert.deepEqual(hints, ['💡 Added "#winapp/bindings" package imports to package.json.']);
+});
+
+test('planJsBindingsImportsHints combines configured added hint with divergence warning', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: ['#winapp/bindings'] } },
+    { quiet: false }
+  );
+  assert.equal(hints.length, 2);
+  assert.match(hints[0], /Added "#winapp\/bindings" package imports/);
+  assert.match(hints[1], /differs from the winapp default/);
+});
+
+test('planJsBindingsImportsHints emits an upgrade hint when package imports are unsupported', () => {
+  const hints = planJsBindingsImportsHints({ kind: 'unsupported' }, { quiet: false });
+  assert.equal(hints.length, 1);
+  assert.match(hints[0], /npm i -D @microsoft\/dynwinrt-codegen@latest && npx winapp init --add-js-bindings/);
 });
 
 test('handleGenerateBindings --help prints command help (no fs probe, no exit)', async () => {
