@@ -1,7 +1,8 @@
 # Node.js WinUI 3 Sample
 
-This sample creates a native WinUI 3 window directly from Node.js. The UI uses
-real `Microsoft.UI.Xaml` controls projected into JavaScript by dynwinrt. It does
+This sample creates a `Microsoft.UI.Windowing.AppWindow` from Node.js and hosts
+real WinUI 3 controls in it using `DesktopWindowXamlSource`. The
+`Microsoft.UI.Xaml` controls are projected into JavaScript by dynwinrt. It does
 not use Electron, HTML, a WebView, XAML markup, or a native addon.
 
 The window contains a counter implemented with `StackPanel`, `TextBlock`, and

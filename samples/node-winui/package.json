@@ -2,7 +2,7 @@
   "name": "winapp-node-winui-sample",
   "version": "1.0.0",
   "private": true,
-  "description": "Create a native WinUI 3 window directly from Node.js with dynwinrt.",
+  "description": "Create an AppWindow from Node.js and host real WinUI 3 controls with DesktopWindowXamlSource.",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
