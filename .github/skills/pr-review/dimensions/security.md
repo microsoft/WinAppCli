@@ -21,7 +21,7 @@ This is a CLI tool that:
   (`Add-AppxPackage -ExternalLocation`).
 - Drives Windows UI Automation against arbitrary running apps (HWND access).
 - Has an npm wrapper that shells out to the native CLI.
-- Has a VS Code extension and a NuGet MSBuild targets package.
+- Has a NuGet MSBuild targets package.
 
 ## High-priority patterns
 
@@ -60,6 +60,32 @@ This is a CLI tool that:
 - Manifest edits via regex on new code → medium.
 - New HTTP listener bound to anything other than loopback → high.
 - Missing admin elevation check on a path that requires it → medium.
+
+## Threat-model checklist (required)
+
+For any diff that touches these surfaces, walk the checklist and record what you
+found — even when the answer is "not reachable":
+
+- **Input-injection** — CLI args, manifest/config values, UI-automation
+  selectors, or file contents that flow into a command, path, or query. Can a
+  crafted value inject an extra flag, a path traversal, or a shell metacharacter?
+- **Process-invocation** — for every new `Process.Start` / `ProcessStartInfo`:
+  are arguments passed via `ArgumentList` (safe) or concatenated (unsafe), and
+  where does each argument originate?
+- **Credentials & secrets** — cert passwords, PFX files, tokens, connection
+  strings: created, logged, left on disk, or hardcoded? Anything beyond the
+  documented dev default `password`?
+- **Signing** — does the change alter what gets signed, the trust chain, cert
+  install/trust, or let an untrusted input influence the signing target?
+- **Supply-chain** — new package refs (floating versions, known CVEs), new
+  downloads (non-Microsoft host, missing HTTPS/checksum), or suppressed security
+  analyzers.
+
+For the highest-risk item you find, describe a concrete **red-team attempt** the
+orchestrator can run in the Validate phase (e.g., "pass a manifest whose
+`Source` is `a b\" --flag` and confirm the extra flag reaches makeappx"). Keep
+such findings `Validation: static-only (needs runtime confirmation)` until the
+Validate phase reproduces or refutes them.
 
 ## Reminders
 
