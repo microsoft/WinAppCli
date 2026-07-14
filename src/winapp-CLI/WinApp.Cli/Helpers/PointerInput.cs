@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -352,11 +353,22 @@ internal static class PointerInput
     /// Sends the full sequence of DOWN → interpolated UPDATE glide → UP frames for a pen stroke.
     /// Exposed as <see langword="internal"/> for frame-sequence unit tests (no live device needed).
     /// </summary>
+    /// <param name="sleep">
+    /// Optional sleep function; defaults to <see cref="Thread.Sleep(int)"/>. Inject a fake for tests
+    /// so timing assertions complete instantly without real blocking.
+    /// </param>
+    /// <param name="nowMs">
+    /// Optional monotonic clock returning elapsed milliseconds from the start of the timed glide.
+    /// Defaults to a <see cref="Stopwatch"/> started when the timed loop begins. Inject a fake for
+    /// tests that need to control the apparent clock (should advance by the same amounts as <paramref name="sleep"/>).
+    /// </param>
     internal static void InjectPenStroke(
         IReadOnlyList<PointerPoint> path,
         uint contactPressure,
         int durationMs,
-        PenFrameSender send)
+        PenFrameSender send,
+        Action<int>? sleep = null,
+        Func<long>? nowMs = null)
     {
         // DOWN at the first point.
         var first = path[0];
@@ -370,11 +382,18 @@ internal static class PointerInput
             {
                 if (durationMs > 0)
                 {
-                    // Interpolate GlideSteps UPDATE frames per segment, distributing --duration-ms
-                    // proportionally across all steps with a running-remainder to avoid accumulating
-                    // rounding error.
-                    int msBudget = durationMs;
-                    int stepsLeft = segments * GlideSteps;
+                    // Cumulative-timestamp scheduling: for frame index k (1..N), the ideal offset is
+                    //   targetMs_k = durationMs * k / N  (integer math; targetMs_N == durationMs).
+                    // Before sending frame k, sleep only max(0, targetMs_k - elapsed) so the total
+                    // wall time ≈ durationMs regardless of step count. This avoids the Math.Max(1,…)
+                    // inflation that made `--duration-ms 1` sleep ~20 ms, and eliminates the
+                    // per-step trailing dwell that occurred after the endpoint frame in the old code.
+                    var sleepFn = sleep ?? Thread.Sleep;
+                    var sw = Stopwatch.StartNew();
+                    var nowFn = nowMs ?? (() => sw.ElapsedMilliseconds);
+
+                    int totalFrames = segments * GlideSteps;
+                    int frameIndex = 0;
 
                     for (int seg = 0; seg < segments; seg++)
                     {
@@ -387,12 +406,21 @@ internal static class PointerInput
                             int x = from.X + (int)Math.Round((to.X - from.X) * t);
                             int y = from.Y + (int)Math.Round((to.Y - from.Y) * t);
 
-                            int sleepMs = Math.Max(1, msBudget / stepsLeft);
+                            frameIndex++;
+                            long targetMs = (long)durationMs * frameIndex / totalFrames;
+
+                            // Drift-corrected: sleep only the remaining time to reach the target.
+                            // Clamped to ≥ 0 — for sub-ms-per-frame durations the delta is zero
+                            // and no sleep is issued (no Math.Max(1,…) inflation).
+                            long elapsedMs = nowFn();
+                            int deltaMs = (int)Math.Max(0L, targetMs - elapsedMs);
+                            if (deltaMs > 0)
+                            {
+                                sleepFn(deltaMs);
+                            }
+
                             send(x, y, contactPressure,
                                 POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
-                            Thread.Sleep(sleepMs);
-                            msBudget -= sleepMs;
-                            stepsLeft--;
                         }
                     }
                 }

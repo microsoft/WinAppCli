@@ -184,10 +184,14 @@ public class PointerInputFrameTests
     [TestMethod]
     public void InjectPenStroke_WithDurationMs_TotalSleepApproximatesDurationMs()
     {
-        // Verify the running-remainder budget distributes durationMs correctly across all steps
-        // by checking that each step sleep is calculated as budget/stepsLeft (no systematic drift).
-        // We do this by counting the total frames (DOWN + GlideSteps*segments + UP) — 1 segment with
-        // GlideSteps=20 update frames means 22 total frames.
+        // Injected clock: fakeNow advances only via fakeSleep so total recorded sleep == scheduled ms.
+        // With 1 segment × GlideSteps=20 frames and durationMs=200, each frame targets 10ms apart:
+        // total sleep must be exactly 200ms (no Math.Max(1,…) inflation, no trailing dwell beyond schedule).
+        long fakeNow = 0;
+        var sleeps = new List<int>();
+        void fakeSleep(int ms) { sleeps.Add(ms); fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
         var frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
         PointerInput.PenFrameSender recorder = (x, y, p, flags) => frames.Add((flags, x, y));
 
@@ -197,11 +201,108 @@ public class PointerInputFrameTests
             new PointerPoint(100, 0),
         };
 
-        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 400, recorder);
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder, fakeSleep, fakeNowMs);
 
-        // With 1 segment and GlideSteps=20: expect DOWN + 20 UPDATE frames + UP = 22.
+        // Frame count: DOWN + 20 UPDATE + UP = 22.
         Assert.AreEqual(22, frames.Count,
             $"1-segment stroke with durationMs>0 should produce DOWN + 20 UPDATE + UP = 22 frames; got {frames.Count}");
+
+        // Total scheduled sleep must equal durationMs exactly (cumulative target timestamp approach).
+        int totalSleep = sleeps.Sum();
+        Assert.AreEqual(200, totalSleep,
+            $"Total sleep must equal durationMs=200ms; got {totalSleep}ms across {sleeps.Count} intervals");
+    }
+
+    [TestMethod]
+    public void InjectPenStroke_SmallDurationMs_NotInflatedToStepCount()
+    {
+        // With durationMs=1 and GlideSteps=20, the old Math.Max(1,…) code would sleep 1ms×20 = 20ms.
+        // The cumulative-timestamp approach must yield total sleep ≈ 1ms regardless of step count.
+        long fakeNow = 0;
+        var sleeps = new List<int>();
+        void fakeSleep(int ms) { sleeps.Add(ms); fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
+        var frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        PointerInput.PenFrameSender recorder = (x, y, p, flags) => frames.Add((flags, x, y));
+
+        var path = new List<PointerPoint>
+        {
+            new PointerPoint(0, 0),
+            new PointerPoint(100, 0),
+        };
+
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 1, recorder, fakeSleep, fakeNowMs);
+
+        int totalSleep = sleeps.Sum();
+        Assert.AreEqual(1, totalSleep,
+            $"durationMs=1 must not be inflated by step count; expected total=1ms, got {totalSleep}ms. " +
+            $"Old Math.Max(1,…) code would return ~{sleeps.Count}ms.");
+
+        // Still must produce the correct frame sequence.
+        Assert.AreEqual(22, frames.Count, "Frame count must still be DOWN + 20 UPDATE + UP = 22");
+        Assert.AreEqual(100, frames[^2].X, "Last UPDATE frame must reach destination X=100");
+    }
+
+    [TestMethod]
+    public void InjectPenStroke_WithDurationMs_NoTrailingDwellAfterEndpoint()
+    {
+        // The sleep schedule must end at or before the endpoint UPDATE frame; the UP frame must
+        // follow immediately with no extra sleep (no trailing dwell beyond the scheduled duration).
+        long fakeNow = 0;
+        bool lastEventWasSleep = false;
+        void fakeSleep(int ms) { fakeNow += ms; lastEventWasSleep = true; }
+        long fakeNowMs() => fakeNow;
+
+        var frames = new List<POINTER_FLAGS>();
+        PointerInput.PenFrameSender recorder = (x, y, p, flags) =>
+        {
+            frames.Add(flags);
+            lastEventWasSleep = false;
+        };
+
+        var path = new List<PointerPoint>
+        {
+            new PointerPoint(0, 0),
+            new PointerPoint(100, 0),
+        };
+
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder, fakeSleep, fakeNowMs);
+
+        // The UP frame is the last event; no sleep should occur between the endpoint UPDATE and the UP.
+        Assert.IsFalse(lastEventWasSleep,
+            "No sleep should occur after the endpoint UPDATE frame; the UP frame must follow immediately");
+        Assert.IsTrue(frames[^1].HasFlag(POINTER_FLAGS.POINTER_FLAG_UP), "Last frame must be UP");
+    }
+
+    [TestMethod]
+    public void InjectPenStroke_MultiSegment_WithDurationMs_TotalSleepEqualsDurationMs()
+    {
+        // 3-point path (2 segments) with injected clock: total sleep must still equal durationMs exactly.
+        long fakeNow = 0;
+        var sleeps = new List<int>();
+        void fakeSleep(int ms) { sleeps.Add(ms); fakeNow += ms; }
+        long fakeNowMs() => fakeNow;
+
+        var frames = new List<(POINTER_FLAGS Flags, int X, int Y)>();
+        PointerInput.PenFrameSender recorder = (x, y, p, flags) => frames.Add((flags, x, y));
+
+        var path = new List<PointerPoint>
+        {
+            new PointerPoint(0, 0),
+            new PointerPoint(50, 0),
+            new PointerPoint(100, 0),
+        };
+
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 400, recorder, fakeSleep, fakeNowMs);
+
+        // 2 segments × 20 steps = 40 UPDATE frames; DOWN + 40 + UP = 42.
+        Assert.AreEqual(42, frames.Count,
+            $"2-segment stroke should produce DOWN + 40 UPDATE + UP = 42 frames; got {frames.Count}");
+
+        int totalSleep = sleeps.Sum();
+        Assert.AreEqual(400, totalSleep,
+            $"Total sleep for 2-segment stroke must equal durationMs=400ms; got {totalSleep}ms");
     }
 
     [TestMethod]

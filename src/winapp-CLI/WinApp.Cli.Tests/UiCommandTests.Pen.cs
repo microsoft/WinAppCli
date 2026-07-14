@@ -93,6 +93,42 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Pen_PressureNaN_Rejected_NoInjection()
+    {
+        // NaN passes the old `< 0 || > 1` range check (both comparisons false for NaN) but must
+        // be caught by the new !float.IsFinite guard before any injection is attempted.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--pressure", "NaN", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for NaN pressure");
+    }
+
+    [TestMethod]
+    public async Task Pen_PressureInfinity_Rejected_NoInjection()
+    {
+        // PositiveInfinity also bypasses the old range check; the IsFinite guard must reject it.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--pressure", "Infinity", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for Infinity pressure");
+    }
+
+    [TestMethod]
+    public async Task Pen_TiltXNonInteger_Rejected_NoInjection()
+    {
+        // --tilt-x is Option<int>; a non-integer value (e.g. "NaN") is rejected at parse time
+        // by System.CommandLine — the handler is never called, so no injection occurs.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--tilt-x", "NaN"]);
+        Assert.AreNotEqual(0, exitCode, "Non-integer --tilt-x must fail with a non-zero exit code");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for non-parseable --tilt-x");
+    }
+
+
+    [TestMethod]
     public async Task Pen_InvalidPressure_Rejected_NoInjection()
     {
         var command = GetRequiredService<UiPenCommand>();

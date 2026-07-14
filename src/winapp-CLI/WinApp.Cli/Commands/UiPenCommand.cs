@@ -105,10 +105,10 @@ internal class UiPenCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (pressure < 0f || pressure > 1f)
+            if (!float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
             {
-                logger.LogError("{Symbol} --pressure must be between 0.0 and 1.0.", UiSymbols.Error);
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--pressure must be between 0.0 and 1.0.");
+                logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--pressure must be a finite number between 0.0 and 1.0.");
                 return 1;
             }
 
