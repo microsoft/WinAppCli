@@ -21,8 +21,10 @@ npm install onnxruntime-node@1.24.3
 
 The Windows App SDK transitively depends on `Microsoft.WindowsAppSDK.ML`, so the WinML APIs are already in your generated bindings. Verify:
 
+> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`** — see [Get started with Electron](index.md#2-call-windows-apis-from-javascript) for older-project fallbacks.
+
 ```bash
-node -e "console.log(Object.keys(require('./.winapp/bindings/index.js')).filter(k => k.startsWith('ExecutionProvider')))"
+node -e "console.log(Object.keys(require('#winapp/bindings')).filter(k => k.startsWith('ExecutionProvider')))"
 ```
 
 You should see `[ 'ExecutionProvider', 'ExecutionProviderCatalog', 'ExecutionProviderReadyState' ]`.
@@ -34,7 +36,7 @@ Use `ModelCatalog` from JS bindings to download and cache the model locally. The
 Create `src/winml-model.js`:
 
 ```js
-const { ModelCatalog, ModelCatalogSource, Uri } = require('../.winapp/bindings/index.js');
+const { ModelCatalog, ModelCatalogSource, Uri } = require('#winapp/bindings');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -88,7 +90,7 @@ Use `ExecutionProviderCatalog` to list available providers (CPU, DirectML, QNN/N
 Create `src/winml-ep.js`:
 
 ```js
-const { ExecutionProviderCatalog, ExecutionProviderReadyState, ExecutionProviderReadyResultState } = require('../.winapp/bindings/index.js');
+const { ExecutionProviderCatalog, ExecutionProviderReadyState, ExecutionProviderReadyResultState } = require('#winapp/bindings');
 
 function listProviders() {
   const catalog = ExecutionProviderCatalog.getDefault();
