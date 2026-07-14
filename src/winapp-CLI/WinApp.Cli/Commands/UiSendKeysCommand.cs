@@ -126,12 +126,16 @@ internal class UiSendKeysCommand : Command, IShortDescription
 
             // SEC-02: --allow-system-keys only applies to send-input; with post-message the transport is
             // already window-scoped so system combos are never blocked and the flag has no effect.
+            var warnings = new List<string>();
             if (allowSystemKeys && transport != KeyTransport.SendInput)
             {
                 logger.LogWarning(
                     "{Symbol} --allow-system-keys only applies to --via send-input and has no effect with " +
                     "--via post-message (post-message is already window-scoped and never blocks system combos).",
                     UiSymbols.Warning);
+                warnings.Add(
+                    "--allow-system-keys only applies to --via send-input and has no effect with " +
+                    "--via post-message (post-message is already window-scoped and never blocks system combos).");
             }
 
             IReadOnlyList<KeyAction> actions;
@@ -262,10 +266,14 @@ internal class UiSendKeysCommand : Command, IShortDescription
                         // Caller explicitly opted in with --allow-system-keys (e.g. to fire a global hotkey such as
                         // PowerToys' win+shift+v). Record the bypass so it's auditable in persisted logs, then fall
                         // through and inject. (Windows still blocks secure sequences like ctrl+alt+del regardless.)
+                        var systemCombosStr = string.Join(", ", systemCombos);
                         logger.LogWarning(
                             "{Symbol} Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {Combos}. " +
                             "These act on the OS/shell beyond the target app.",
-                            UiSymbols.Warning, string.Join(", ", systemCombos));
+                            UiSymbols.Warning, systemCombosStr);
+                        warnings.Add(
+                            $"Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {systemCombosStr}. " +
+                            "These act on the OS/shell beyond the target app.");
                     }
                 }
 
@@ -279,7 +287,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
                         Via = transport == KeyTransport.PostMessage ? "post-message" : "send-input",
                         ActionCount = actions.Count,
                         Target = target,
-                        Hwnd = targetHwnd
+                        Hwnd = targetHwnd,
+                        Warnings = warnings
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiSendKeysResult));

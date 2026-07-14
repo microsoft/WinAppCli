@@ -391,4 +391,125 @@ public partial class UiCommandTests
         Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
     }
 
+    // M1: --allow-system-keys + --json + post-message → no-op warning visible in JSON warnings array
+    [TestMethod]
+    public async Task SendKeys_AllowSystemKeys_PostMessage_Json_WarningInResult()
+    {
+        // --json consumers see the no-op warning even though the global logger is suppressed in JSON mode.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+a", "-a", "TestApp", "--via", "post-message", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        var warnings = result.GetProperty("warnings");
+        Assert.AreEqual(1, warnings.GetArrayLength(), "one no-op warning expected in JSON");
+        StringAssert.Contains(warnings[0].GetString(), "--allow-system-keys");
+        StringAssert.Contains(warnings[0].GetString(), "post-message");
+    }
+
+    // M1: --allow-system-keys + --json + send-input + system combo → audit warning visible in JSON
+    [TestMethod]
+    public async Task SendKeys_AllowSystemKeys_SendInput_Json_AuditWarningInResult()
+    {
+        // --json consumers see the injection audit trail even though the global logger is suppressed.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+shift+v", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        var warnings = result.GetProperty("warnings");
+        Assert.AreEqual(1, warnings.GetArrayLength(), "one audit warning expected in JSON");
+        StringAssert.Contains(warnings[0].GetString(), "--allow-system-keys");
+        StringAssert.Contains(warnings[0].GetString(), "win+<key>");
+    }
+
+    // M1: no --allow-system-keys flag → warnings array is empty in JSON
+    [TestMethod]
+    public async Task SendKeys_NoAllowFlag_Json_WarningsIsEmpty()
+    {
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+a", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0, result.GetProperty("warnings").GetArrayLength(), "no warnings when flag is absent");
+    }
+
+    // LOW: cmd alias for win — cmd+l stays hard-blocked even with --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_CmdL_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
+    {
+        // cmd is an alias for win in the key grammar; cmd+l must be blocked unconditionally.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["cmd+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "cmd+l must never reach the keyboard transport");
+    }
+
+    // LOW: win+shift+l (extra modifier alongside never-bypassable) stays hard-blocked
+    [TestMethod]
+    public async Task SendKeys_WinShiftL_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
+    {
+        // Extra modifiers do not defeat the win+l hard block — the guard sees win modifier + VkL.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+shift+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "win+shift+l must never reach the keyboard transport");
+    }
+
+    // LOW: lone right-Win key (vk=0x5c) is soft-blocked without --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_LoneRWin_ViaSendInput_WithoutAllow_IsBlocked()
+    {
+        // The right-Win key (VkRWin = 0x5c) opens Start — refused without --allow-system-keys.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["vk=0x5c", "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "lone right-Win key must be blocked without --allow-system-keys");
+    }
+
+    // LOW: lone right-Win key (vk=0x5c) IS allowed with --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_LoneRWin_ViaSendInput_WithAllow_Sends()
+    {
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["vk=0x5c", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "right-Win key should be sent when opted in");
+        Assert.AreEqual(WinApp.Cli.Helpers.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+    }
+
+    // LOW: system combo refused without flag → error text contains --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_SystemCombo_Refused_ErrorMentionsAllowFlag()
+    {
+        // The logged error message must guide the caller to --allow-system-keys so the fix is actionable.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["win+r", "-a", "TestApp", "--via", "send-input"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--allow-system-keys");
+    }
+
 }
