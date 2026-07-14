@@ -307,28 +307,48 @@ internal class NugetService(
     /// </summary>
     private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
+        Dictionary<string, VersionRange> deps;
         try
         {
-            var deps = ReadDependenciesFromNuspec(packageDir, package);
-            foreach (var (depName, depVersionRange) in deps)
-            {
-                if (installed.ContainsKey(depName))
-                {
-                    continue;
-                }
-
-                var depVersion = depVersionRange.MinVersion?.ToNormalizedString();
-                if (!string.IsNullOrEmpty(depVersion))
-                {
-                    await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cacheContext, cancellationToken);
-                }
-            }
+            deps = ReadDependenciesFromNuspec(packageDir, package);
         }
         catch (Exception ex)
         {
-            // Dependency resolution failures are non-fatal; the main package is installed.
-            // Log so transitive dependency issues are visible in verbose/debug output.
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Dependency resolution for {package} {version}: {ex.Message}");
+            // The .nuspec is best-effort metadata; a malformed/unreadable manifest should not fail the
+            // install of the package that was already downloaded, but surface it so the gap is visible.
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {ex.Message}");
+            return;
+        }
+
+        foreach (var (depName, depVersionRange) in deps)
+        {
+            if (installed.ContainsKey(depName))
+            {
+                continue;
+            }
+
+            var depVersion = depVersionRange.MinVersion?.ToNormalizedString();
+            if (string.IsNullOrEmpty(depVersion))
+            {
+                continue;
+            }
+
+            try
+            {
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cacheContext, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Never mask a genuine cancellation as a successful (but incomplete) install.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // A single transitive dependency that cannot be installed should not abort the whole
+                // install, but the failure must be visible (not hidden behind verbose-only logging) so an
+                // incomplete install is not silently reported as success.
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} {depVersion} (required by {package} {version}): {ex.Message}");
+            }
         }
     }
 
@@ -358,7 +378,11 @@ internal class NugetService(
         {
             foreach (var dependency in group.Packages)
             {
-                if (!string.IsNullOrEmpty(dependency.Id) && dependency.VersionRange != null)
+                // Skip framework/runtime reference packages (same filter as FetchDirectDependenciesAsync)
+                // so we don't attempt to install non-winapp packages that aren't served by the feed.
+                if (!string.IsNullOrEmpty(dependency.Id)
+                    && dependency.VersionRange != null
+                    && !IgnoredDependencyPrefixes.Any(p => dependency.Id.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                 {
                     dependencies.TryAdd(dependency.Id, dependency.VersionRange);
                 }
@@ -404,6 +428,7 @@ internal class NugetService(
         }
 
         var list = await GetListedVersionsAsync(packageName, cancellationToken);
+        var totalFound = list.Count;
 
         // If not winapp SDK, preview and experimental versions are the same
         if (packageName.StartsWith(BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase))
@@ -436,7 +461,13 @@ internal class NugetService(
 
         if (list.Count == 0)
         {
-            throw new InvalidOperationException($"No versions found for {packageName}");
+            // Distinguish "the sources returned versions but none matched the requested channel" from
+            // "no versions came back at all" so the user knows whether to change the channel or to check
+            // the package ID / configured sources / credentials.
+            var reason = totalFound > 0
+                ? $"found {totalFound} version(s) but none matched the '{sdkInstallMode}' channel"
+                : "no versions were returned by the configured NuGet sources — verify the package ID, the configured sources, and any required credentials";
+            throw new InvalidOperationException($"No matching versions found for {packageName} ({reason}).");
         }
 
         list.Sort(CompareVersions);
@@ -590,6 +621,15 @@ internal class NugetService(
 
     public static int CompareVersions(string a, string b)
     {
+        // Prefer correct NuGet SemVer 2.0 ordering whenever both inputs parse as NuGet versions. This
+        // accounts for prerelease tags (e.g. 1.0.0-preview1 < 1.0.0-preview2 < 1.0.0), which the plain
+        // numeric-segment comparison below cannot distinguish (it parses tags as 0, making them equal).
+        if (NuGetVersion.TryParse(a, out var va) && NuGetVersion.TryParse(b, out var vb))
+        {
+            return va.CompareTo(vb);
+        }
+
+        // Fallback for inputs that are not valid NuGet versions: compare numeric segments.
         var ap = a.Split('.', '-', StringSplitOptions.RemoveEmptyEntries);
         var bp = b.Split('.', '-', StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < Math.Max(ap.Length, bp.Length); i++)

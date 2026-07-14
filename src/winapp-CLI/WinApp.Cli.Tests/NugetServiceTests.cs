@@ -423,19 +423,17 @@ public class NugetServiceTests : BaseCommandTests
     [TestMethod]
     public void CompareVersions_WithPrereleaseTags_ComparesCorrectly()
     {
-        // The implementation splits on both '.' and '-' and compares parts numerically
-        // Non-numeric parts (like "preview1") are treated as 0
+        // Uses NuGet SemVer 2.0 ordering: numbered prerelease tags order by their number, and a stable
+        // release outranks its own prerelease. (The previous numeric-only split treated all of these as
+        // equal, which made "latest" selection for preview/experimental channels non-deterministic.)
 
-        // "1.0.0-preview1" splits to ["1", "0", "0", "preview1"] 
-        // "1.0.0-preview2" splits to ["1", "0", "0", "preview2"]
-        // "preview1" and "preview2" both parse to 0, so they compare as equal
-        Assert.AreEqual(0, NugetService.CompareVersions("1.0.0-preview1", "1.0.0-preview2"));
+        // 1.0.0-preview1 < 1.0.0-preview2
+        Assert.IsLessThan(0, NugetService.CompareVersions("1.0.0-preview1", "1.0.0-preview2"));
+        Assert.IsGreaterThan(0, NugetService.CompareVersions("1.0.0-preview2", "1.0.0-preview1"));
 
-        // Non-prerelease version without suffix vs with suffix
-        // "1.0.0" splits to ["1", "0", "0"]
-        // "1.0.0-preview" splits to ["1", "0", "0", "preview"] 
-        // At index 3: 0 vs 0 (both default to 0), so they're equal
-        Assert.AreEqual(0, NugetService.CompareVersions("1.0.0", "1.0.0-preview"));
+        // A stable release is greater than its prerelease of the same version.
+        Assert.IsGreaterThan(0, NugetService.CompareVersions("1.0.0", "1.0.0-preview"));
+        Assert.IsLessThan(0, NugetService.CompareVersions("1.0.0-preview", "1.0.0"));
     }
 
     #endregion
@@ -682,6 +680,73 @@ public class NugetServiceTests : BaseCommandTests
                 expected.TrimEnd(Path.DirectorySeparatorChar),
                 actual.TrimEnd(Path.DirectorySeparatorChar),
                 "globalPackagesFolder from nuget.config should be honored (resolved relative to the config).");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public void GetNuGetPackageDir_NormalizesIdAndVersionToOnDiskLayout()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <config>
+                    <add key="globalPackagesFolder" value="custom-packages" />
+                  </config>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            // "1.0" is a valid NuGet version that NuGet stores under its normalized "1.0.0" folder, and
+            // the package-id folder is lowercased. GetNuGetPackageDir must match that on-disk layout so
+            // callers find the extracted package regardless of how the version string was expressed.
+            var dir = service.GetNuGetPackageDir("Some.Package", "1.0");
+
+            Assert.AreEqual("1.0.0", dir.Name, "Version should be normalized to the on-disk folder name.");
+            Assert.AreEqual("some.package", dir.Parent?.Name, "Package id folder should be lowercased.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // One eligible source so version enumeration actually enters the per-source loop, where the
+            // cancellation token is observed — rather than short-circuiting to "no versions found".
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            using var cts = new CancellationTokenSource();
+            await cts.CancelAsync();
+
+            // Cancellation must surface as OperationCanceledException, not be masked as a "no versions" error.
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+                async () => await service.GetLatestVersionAsync("Any.Package", SdkInstallMode.Stable, cts.Token));
         }
         finally
         {
