@@ -16,6 +16,7 @@ on:
           - dotnet-app
           - electron
           - flutter-app
+          - node-winui
           - packaging-cli
           - rust-app
           - tauri-app
@@ -57,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app]
+        sample: [cpp-app, dotnet-app, electron, flutter-app, node-winui, packaging-cli, rust-app, tauri-app, wpf-app]
     runs-on: windows-latest
     name: ${{ matrix.sample }}
 
@@ -124,7 +125,7 @@ jobs:
     - name: Setup Node.js
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
+        contains(fromJson('["electron", "node-winui", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
         node-version: '22'

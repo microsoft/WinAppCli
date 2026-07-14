@@ -1,0 +1,6 @@
+node_modules/
+.winapp/
+.local-node/
+AppX/
+*.log
+
