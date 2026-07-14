@@ -469,4 +469,225 @@ public class NugetServiceTests : BaseCommandTests
     }
 
     #endregion
+
+    #region Private nuget.config (isolated feed) Tests
+
+    // These tests exercise the NuGet.Client-backed behavior directly against a temporary
+    // nuget.config with local folder sources (no network). They cover the private-feed scenarios the
+    // migration enables: <packageSourceMapping> source selection and globalPackagesFolder resolution.
+    // The temp root lives under %TEMP% (outside the repo) so the repo's own nuget.config is not in
+    // its configuration hierarchy; <clear /> removes any inherited machine/user sources.
+
+    private static readonly string[] AlphaAndBeta = ["alpha", "beta"];
+    private static readonly string[] AlphaOnly = ["alpha"];
+    private static readonly string[] BetaOnly = ["beta"];
+
+    /// <summary>
+    /// <see cref="IWinappDirectoryService"/> whose global directory is the real default
+    /// (<c>%USERPROFILE%\.winapp</c>), so <see cref="NugetService"/> does NOT treat it as a test
+    /// override and instead resolves the global packages folder from the supplied nuget.config
+    /// (exercising <c>SettingsUtility.GetGlobalPackagesFolder</c>).
+    /// </summary>
+    private sealed class DefaultWinappDirectoryService : IWinappDirectoryService
+    {
+        public DirectoryInfo GetGlobalWinappDirectory() =>
+            new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp"));
+
+        public DirectoryInfo GetLocalWinappDirectory(DirectoryInfo? baseDirectory = null) =>
+            new(Path.Combine((baseDirectory ?? new DirectoryInfo(Directory.GetCurrentDirectory())).FullName, ".winapp"));
+
+        public void SetCacheDirectoryForTesting(DirectoryInfo? cacheDirectory)
+        {
+        }
+    }
+
+    private static NugetService CreateServiceRootedAt(DirectoryInfo root) =>
+        new(new DefaultWinappDirectoryService(), new CurrentDirectoryProvider(root.FullName));
+
+    private static DirectoryInfo CreateFeedTestDirectory()
+    {
+        var dir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"NugetServiceFeedTests_{Guid.NewGuid():N}"));
+        dir.Create();
+        return dir;
+    }
+
+    private static void WriteNuGetConfig(DirectoryInfo dir, string contents) =>
+        File.WriteAllText(Path.Combine(dir.FullName, "nuget.config"), contents);
+
+    private static void TryDelete(DirectoryInfo dir)
+    {
+        try
+        {
+            dir.Refresh();
+            if (dir.Exists)
+            {
+                dir.Delete(true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    [TestMethod]
+    public void GetRepositoriesForPackage_NoPackageSourceMapping_ReturnsAllConfiguredSources()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                    <add key="beta" value="beta-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var sources = service.GetRepositoriesForPackage("Any.Package")
+                .Select(r => r.PackageSource.Name)
+                .ToList();
+
+            CollectionAssert.AreEquivalent(
+                AlphaAndBeta,
+                sources,
+                "With no packageSourceMapping in effect, every configured source is eligible.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public void GetRepositoriesForPackage_PackageSourceMapping_SelectsOnlyMappedSource()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                    <add key="beta" value="beta-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="alpha">
+                      <package pattern="Contoso.*" />
+                    </packageSource>
+                    <packageSource key="beta">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            // Contoso.* is mapped exclusively to 'alpha'.
+            var mapped = service.GetRepositoriesForPackage("Contoso.Widget")
+                .Select(r => r.PackageSource.Name)
+                .ToList();
+            CollectionAssert.AreEqual(AlphaOnly, mapped, "Contoso.* must resolve to the mapped source only.");
+
+            // Everything else falls back to the '*' mapping on 'beta'.
+            var fallback = service.GetRepositoriesForPackage("Fabrikam.Thing")
+                .Select(r => r.PackageSource.Name)
+                .ToList();
+            CollectionAssert.AreEqual(BetaOnly, fallback, "Unmatched packages use the '*' mapping.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public void GetRepositoriesForPackage_PackageSourceMapping_UnmappedPackage_ReturnsEmpty()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // Mapping is enabled but only maps Contoso.* -> alpha; there is no '*' fallback, so a
+            // package matching no pattern must resolve to zero sources rather than silently falling
+            // back to an unmapped feed (the dependency-confusion behavior the reviewer flagged).
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                    <add key="beta" value="beta-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="alpha">
+                      <package pattern="Contoso.*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var sources = service.GetRepositoriesForPackage("Unmapped.Package").ToList();
+
+            Assert.IsEmpty(sources, "A package matching no packageSourceMapping pattern must resolve to no sources.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public void GetNuGetGlobalPackagesDir_HonorsGlobalPackagesFolderFromConfig()
+    {
+        // GetGlobalPackagesFolder gives NUGET_PACKAGES precedence over the config value; skip if the
+        // host has it set so the assertion stays meaningful.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <config>
+                    <add key="globalPackagesFolder" value="custom-packages" />
+                  </config>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var expected = new DirectoryInfo(Path.Combine(root.FullName, "custom-packages")).FullName;
+            var actual = service.GetNuGetGlobalPackagesDir().FullName;
+
+            Assert.AreEqual(
+                expected.TrimEnd(Path.DirectorySeparatorChar),
+                actual.TrimEnd(Path.DirectorySeparatorChar),
+                "globalPackagesFolder from nuget.config should be honored (resolved relative to the config).");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    #endregion
 }

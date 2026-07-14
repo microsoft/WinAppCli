@@ -34,15 +34,45 @@ internal class NugetService(
         NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
 
     private SourceRepositoryProvider? _cachedSourceRepositoryProvider;
+    private PackageSourceMapping? _cachedPackageSourceMapping;
 
     private ISettings Settings => _settings.Value;
 
-    private IEnumerable<SourceRepository> GetRepositories()
+    private IReadOnlyList<SourceRepository> GetRepositories()
     {
         _cachedSourceRepositoryProvider ??= new SourceRepositoryProvider(
             new PackageSourceProvider(Settings),
             Repository.Provider.GetCoreV3());
-        return _cachedSourceRepositoryProvider.GetRepositories();
+        return [.. _cachedSourceRepositoryProvider.GetRepositories()];
+    }
+
+    private PackageSourceMapping PackageSourceMapping =>
+        _cachedPackageSourceMapping ??= PackageSourceMapping.GetPackageSourceMapping(Settings);
+
+    /// <summary>
+    /// Returns the configured package sources eligible to serve <paramref name="packageId"/>, honoring
+    /// <c>&lt;packageSourceMapping&gt;</c> when it is enabled. When mapping is enabled but no source is
+    /// mapped to the package, an empty list is returned (matching NuGet restore semantics, which fails
+    /// rather than falling back to an unmapped feed).
+    /// </summary>
+    internal IReadOnlyList<SourceRepository> GetRepositoriesForPackage(string packageId)
+    {
+        var repositories = GetRepositories();
+
+        var mapping = PackageSourceMapping;
+        if (!mapping.IsEnabled)
+        {
+            return repositories;
+        }
+
+        var mappedSources = mapping.GetConfiguredPackageSources(packageId);
+        if (mappedSources is null || mappedSources.Count == 0)
+        {
+            return [];
+        }
+
+        var allowed = new HashSet<string>(mappedSources, StringComparer.OrdinalIgnoreCase);
+        return [.. repositories.Where(r => allowed.Contains(r.PackageSource.Name))];
     }
 
     private static readonly string[] IgnoredDependencyPrefixes =
@@ -112,7 +142,15 @@ internal class NugetService(
     public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
     {
         var cache = GetNuGetGlobalPackagesDir();
-        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
+        // Resolve the on-disk folder the same way the global-packages writer does, so the path matches
+        // regardless of how the version string is expressed (NuGet stores e.g. "1.0" under "1.0.0").
+        if (NuGetVersion.TryParse(version, out var parsed))
+        {
+            var resolver = new VersionFolderPathResolver(cache.FullName);
+            return new DirectoryInfo(resolver.GetInstallPath(packageName, parsed));
+        }
+
+        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version.ToLowerInvariant()));
     }
 
     /// <summary>
@@ -158,12 +196,9 @@ internal class NugetService(
         }
 
         // Download and extract the package from the user's configured NuGet sources into the
-        // global packages folder (using the standard NuGet on-disk layout).
-        var downloaded = await DownloadPackageAsync(package, version, cacheContext, cancellationToken);
-        if (!downloaded)
-        {
-            throw new InvalidOperationException($"Failed to download {package} {version} from the configured NuGet sources");
-        }
+        // global packages folder (using the standard NuGet on-disk layout). Throws with the
+        // underlying source error if no configured source can provide the package.
+        await DownloadPackageAsync(package, version, cacheContext, cancellationToken);
 
         installed[package] = version;
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {version}");
@@ -174,21 +209,23 @@ internal class NugetService(
 
     /// <summary>
     /// Downloads a package from the first configured source that has it and extracts it into the
-    /// global packages folder. Returns false if no source could provide the package.
+    /// global packages folder. Honors <c>&lt;packageSourceMapping&gt;</c> for source selection and
+    /// throws an <see cref="InvalidOperationException"/> (preserving the underlying source error) when
+    /// no configured source can provide the package.
     /// </summary>
-    private async Task<bool> DownloadPackageAsync(string package, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task DownloadPackageAsync(string package, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         var identity = new PackageIdentity(package, NuGetVersion.Parse(version));
         var globalPackagesFolder = GetNuGetGlobalPackagesDir().FullName;
         var clientPolicyContext = ClientPolicyContext.GetClientPolicy(Settings, Logger);
 
-        foreach (var repo in GetRepositories())
+        var repos = GetRepositoriesForPackage(package);
+        Exception? lastError = null;
+        string? lastErrorSource = null;
+
+        foreach (var repo in repos)
         {
-            var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
-            if (byIdResource is null)
-            {
-                continue;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Buffer to a temp file rather than memory: SDK packages (e.g. Windows App SDK) are large.
             var tempFile = Path.GetTempFileName();
@@ -199,11 +236,22 @@ internal class NugetService(
                 {
                     try
                     {
+                        // Acquiring the resource loads the source's service index, which can throw for an
+                        // unreachable/unauthorized source; keep it inside the try so we fail over instead.
+                        var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+                        if (byIdResource is null)
+                        {
+                            continue;
+                        }
+
                         copied = await byIdResource.CopyNupkgToStreamAsync(identity.Id, identity.Version, fileStream, cacheContext, Logger, cancellationToken);
                     }
-                    catch (FatalProtocolException)
+                    catch (FatalProtocolException ex)
                     {
-                        // Source unreachable or does not have this package; try the next source.
+                        // Source unreachable/unauthorized or does not have this package; remember why
+                        // (e.g. 401/403/network) and try the next source.
+                        lastError = ex;
+                        lastErrorSource = repo.PackageSource.Name;
                         continue;
                     }
                 }
@@ -214,7 +262,7 @@ internal class NugetService(
                 }
 
                 await using var readStream = File.OpenRead(tempFile);
-                await GlobalPackagesFolderUtility.AddPackageAsync(
+                using var addResult = await GlobalPackagesFolderUtility.AddPackageAsync(
                     source: repo.PackageSource.Source,
                     packageIdentity: identity,
                     packageStream: readStream,
@@ -224,7 +272,7 @@ internal class NugetService(
                     logger: Logger,
                     token: cancellationToken);
 
-                return true;
+                return;
             }
             finally
             {
@@ -239,7 +287,19 @@ internal class NugetService(
             }
         }
 
-        return false;
+        // No configured source could provide the package. Surface the underlying reason when we have it
+        // so authentication/network failures are distinguishable from a genuinely missing package.
+        var sources = string.Join(", ", repos.Select(r => r.PackageSource.Name));
+        var baseMessage = string.IsNullOrEmpty(sources)
+            ? $"Failed to download {package} {version}: no configured NuGet source is mapped to this package (check <packageSourceMapping> in nuget.config)."
+            : $"Failed to download {package} {version} from the configured NuGet sources ({sources}).";
+
+        if (lastError is not null)
+        {
+            throw new InvalidOperationException($"{baseMessage} Last error from source '{lastErrorSource}': {lastError.Message}", lastError);
+        }
+
+        throw new InvalidOperationException($"{baseMessage} The package/version was not found on any configured source.");
     }
 
     /// <summary>
@@ -395,16 +455,18 @@ internal class NugetService(
         Exception? lastError = null;
         using var cacheContext = new SourceCacheContext();
 
-        foreach (var repo in GetRepositories())
+        foreach (var repo in GetRepositoriesForPackage(packageName))
         {
-            var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
-            if (metadataResource is null)
-            {
-                continue;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
+                var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+                if (metadataResource is null)
+                {
+                    continue;
+                }
+
                 var metadata = await metadataResource.GetMetadataAsync(
                     packageName,
                     includePrerelease: true,
@@ -417,6 +479,11 @@ internal class NugetService(
                 {
                     versions.Add(package.Identity.Version.ToNormalizedString());
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Propagate genuine cancellation instead of masking it as "no versions found".
+                throw;
             }
             catch (Exception ex)
             {
@@ -467,22 +534,26 @@ internal class NugetService(
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var nugetVersion = NuGetVersion.Parse(version);
 
-        foreach (var repo in GetRepositories())
+        foreach (var repo in GetRepositoriesForPackage(packageName))
         {
-            var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
-            if (byIdResource is null)
-            {
-                continue;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             FindPackageByIdDependencyInfo? dependencyInfo;
             try
             {
+                // Acquiring the resource loads the source's service index, which can throw for an
+                // unreachable/unauthorized source; keep it inside the try so we fail over instead.
+                var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+                if (byIdResource is null)
+                {
+                    continue;
+                }
+
                 dependencyInfo = await byIdResource.GetDependencyInfoAsync(packageName, nugetVersion, cacheContext, Logger, cancellationToken);
             }
             catch (FatalProtocolException)
             {
-                // Source unreachable; try the next one.
+                // Source unreachable/unauthorized; try the next one.
                 continue;
             }
 
