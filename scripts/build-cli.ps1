@@ -13,8 +13,6 @@
     Exit with error code if tests fail (default: true, stops build on test failures)
 .PARAMETER SkipNpm
     Skip npm package creation
-.PARAMETER SkipVsc
-    Skip VS Code extension packaging
 .PARAMETER SkipNuGet
     Skip NuGet package creation (BuildTools.WinApp)
 .PARAMETER SkipMsix
@@ -35,8 +33,6 @@
     .\scripts\build-cli.ps1 -SkipTests
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipNpm
-.EXAMPLE
-    .\scripts\build-cli.ps1 -SkipVsc
 .EXAMPLE
     .\scripts\build-cli.ps1 -SkipNuGet
 .EXAMPLE
@@ -60,7 +56,6 @@ param(
     [switch]$SkipTests = $false,
     [switch]$FailOnTestFailure = $true,
     [switch]$SkipNpm = $false,
-    [switch]$SkipVsc = $false,
     [switch]$SkipNuGet = $false,
     [switch]$SkipMsix = $false,
     [switch]$SkipDocs = $false,
@@ -359,26 +354,7 @@ try
         Write-Host "[NPM] Skipping npm package creation (use -SkipNpm:`$false to enable)" -ForegroundColor Gray
     }
 
-    # Step 8: Create VS Code extension package (optional)
-    if (-not $SkipVsc) {
-        Write-Host ""
-        Write-Host "[VSC] Creating VS Code extension package..." -ForegroundColor Blue
-    
-        $PackageVscScript = Join-Path $PSScriptRoot "package-vsc.ps1"
-
-        & $PackageVscScript -Stable:$Stable
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "VS Code extension packaging failed, but continuing..."
-        } else {
-            Write-Host "[VSC] VS Code extension packaged successfully!" -ForegroundColor Green
-        }
-    } else {
-        Write-Host ""
-        Write-Host "[VSC] Skipping VS Code extension packaging (use -SkipVsc:`$false to enable)" -ForegroundColor Gray
-    }
-
-    # Step 9: Create NuGet packages (optional)
+    # Step 8: Create NuGet packages (optional)
     if (-not $SkipNuGet) {
         Write-Host ""
         Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
@@ -403,13 +379,15 @@ try
                         $pesterConfig = New-PesterConfiguration
                         $pesterConfig.Run.Path = $NuGetTestsPath
                         $pesterConfig.Run.Exit = $false
+                        $pesterConfig.Run.PassThru = $true
                         $pesterConfig.Output.Verbosity = 'Normal'
                         $pesterResult = Invoke-Pester -Configuration $pesterConfig
-                        if ($pesterResult.FailedCount -gt 0) {
+                        if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
                             if ($FailOnTestFailure) {
-                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed"
+                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
+                                exit 1
                             } else {
-                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failure(s) — continuing"
+                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
                             }
                         } else {
                             Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green

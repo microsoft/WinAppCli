@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<Package 
+<Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2"
@@ -21,6 +21,9 @@
     <DisplayName>cpp-app-winui</DisplayName>
     <PublisherDisplayName>nikolame</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on"/>
+    </uap10:PackageIntegrity>
   </Properties>
 
   <Dependencies>
@@ -35,7 +38,7 @@
     <Application Id="cppApp"
       Executable="$targetnametoken$.exe"
       EntryPoint="Windows.FullTrustApplication"
-      uap10:TrustLevel="mediumIL" 
+      uap10:TrustLevel="mediumIL"
       uap10:RuntimeBehavior="packagedClassicApp">
       <uap:VisualElements
         DisplayName="cpp-app-winui"
