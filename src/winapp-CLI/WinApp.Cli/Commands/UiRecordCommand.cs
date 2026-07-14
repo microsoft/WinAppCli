@@ -116,13 +116,26 @@ internal class UiRecordCommand : Command, IShortDescription
                     ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(session.WindowTitle ?? "")}\" (PID {session.ProcessId}) to {Markup.Escape(filePath)} — until {until}, {fps} fps…[/]");
                 }
 
+                // Readiness gate: completed by OnRecordingStarted after the first frame is encoded.
+                // The stdin monitor waits on this task before applying a stop so the encoder always
+                // exists when Cancel() is called (prevents the round-2 internal_error race).
+                var readyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                // Start the stdin monitor BEFORE recording so a pre-buffered stop signal (e.g. an
+                // empty pipe that immediately delivers EOF) is caught immediately and then latched
+                // until the encoder is ready. Do NOT start for interactive consoles — humans use Ctrl+C.
+                if (durationSec == 0 && Console.IsInputRedirected)
+                {
+                    StdinStopMonitor.Start(Console.In, readyTcs.Task, () => linkedCts.Cancel());
+                }
+
                 // Readiness callback: invoked by RecordAsync after the encoder is initialized and the
-                // first frame has been captured — i.e., recording is genuinely live. Only then is it
-                // safe to arm the stdin-stop monitor and emit the liveness event, so that a newline
-                // pre-buffered in stdin triggers a graceful stop (encoder.Complete()) rather than
-                // canceling before any encoder exists (which produced internal_error / no MP4 file).
+                // first frame has been captured — i.e., recording is genuinely live.
                 void OnRecordingStarted()
                 {
+                    // Signal readiness so the stdin monitor can now apply any latched stop.
+                    readyTcs.TrySetResult();
+
                     if (json)
                     {
                         // Emit a structured liveness event to stderr so programmatic callers know
@@ -137,14 +150,6 @@ internal class UiRecordCommand : Command, IShortDescription
                         };
                         parseResult.InvocationConfiguration.Error.WriteLine(
                             JsonSerializer.Serialize(startedEvent, UiJsonContext.Default.UiRecordStartedEvent));
-                    }
-
-                    // For unbounded recordings from a programmatic caller (piped stdin), monitor stdin
-                    // so a newline or EOF gracefully stops the recorder and finalizes the MP4.
-                    // Do NOT start the monitor for interactive consoles — humans use Ctrl+C.
-                    if (durationSec == 0 && Console.IsInputRedirected)
-                    {
-                        StdinStopMonitor.Start(Console.In, () => linkedCts.Cancel());
                     }
                 }
 

@@ -1115,7 +1115,7 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 ```
 
 **Record options:**
-- `--duration-sec <n>` - Recording length in seconds. `0` records until Ctrl+C (default `30`).
+- `--duration-sec <n>` - Recording length in seconds. `0` records until Ctrl+C (default `0`).
 - `--fps <n>` - Frames per second to capture (default `15`).
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).

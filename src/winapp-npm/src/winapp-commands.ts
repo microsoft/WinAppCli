@@ -886,22 +886,8 @@ export interface UiRecordOptions extends CommonOptions {
   window?: number;
 }
 
-/**
- * Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.
- */
-export async function _uiRecordGenerated(options: UiRecordOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['ui', 'record'];
-  if (options.selector) args.push(options.selector);
-  if (options.app) args.push('--app', options.app);
-  if (options.captureScreen) args.push('--capture-screen');
-  if (options.durationSec !== undefined) args.push('--duration-sec', options.durationSec.toString());
-  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
-  if (options.json) args.push('--json');
-  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
-  if (options.output) args.push('--output', options.output);
-  if (options.window !== undefined) args.push('--window', options.window.toString());
-  return execCommand(args, options);
-}
+// _uiRecordGenerated: options interface exported above; function body omitted — use the
+//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.
 
 // ---------------------------------------------------------------------------
 // ui screenshot

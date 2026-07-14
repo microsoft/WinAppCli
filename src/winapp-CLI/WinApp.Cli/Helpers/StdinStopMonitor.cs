@@ -1,34 +1,34 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
-
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
 /// Watches stdin on a background thread and fires a stop callback when a newline is
-/// received or EOF arrives after an initial grace window. Designed so that programmatic
-/// callers (piped stdin) can gracefully finalize a recording by writing a newline or
-/// closing their end of the pipe, while interactive users simply use Ctrl+C.
+/// received or EOF arrives. The stop is gated on a caller-supplied readiness task so
+/// that a stop signal detected before the encoder is initialized is latched and applied
+/// only once the encoder is live — preventing the "cancel before encoder exists" race.
+/// Designed so that programmatic callers (piped stdin) can gracefully finalize a
+/// recording by writing a newline or closing their end of the pipe, while interactive
+/// users simply use Ctrl+C (the monitor is only started when stdin is redirected).
 /// </summary>
 internal static class StdinStopMonitor
 {
-    private static readonly TimeSpan DefaultGrace = TimeSpan.FromMilliseconds(1000);
-
     /// <summary>
-    /// Starts the monitor on a background thread. The thread is a daemon (IsBackground=true)
+    /// Starts the monitor on a background thread. Reads stdin eagerly; when a newline or
+    /// EOF arrives, waits for <paramref name="readyTask"/> and then invokes
+    /// <paramref name="stop"/> exactly once. The thread is a daemon (IsBackground=true)
     /// so it never prevents process exit.
     /// </summary>
+    /// <param name="readyTask">
+    /// Completes when the encoder is initialized and the first frame has been captured.
+    /// Any stop signal that arrives before this point is latched and applied as soon as
+    /// the task completes, so the encoder always exists when <paramref name="stop"/> runs.
+    /// </param>
     /// <param name="stop">Called at most once when a stop condition is met.</param>
-    public static void Start(TextReader stdin, Action stop)
-        => Start(stdin, DefaultGrace, stop);
-
-    /// <param name="grace">Ignore an immediate EOF that arrives within this window with no
-    /// data — protects against the "no stdin attached → instant EOF → 0-frame file" footgun.</param>
-    public static void Start(TextReader stdin, TimeSpan grace, Action stop)
+    public static void Start(TextReader stdin, Task readyTask, Action stop)
     {
-        var sw = Stopwatch.StartNew();
-        var t = new Thread(() => MonitorCore(stdin, grace, () => sw.Elapsed, stop))
+        var t = new Thread(() => MonitorCore(stdin, readyTask, stop))
         {
             IsBackground = true,
             Name = "StdinStopMonitor",
@@ -37,10 +37,10 @@ internal static class StdinStopMonitor
     }
 
     /// <summary>
-    /// Core logic, separated for unit-testing with a controllable <paramref name="getElapsed"/>
-    /// clock instead of a real <see cref="Stopwatch"/>.
+    /// Core logic, separated for unit-testing with a controllable <paramref name="readyTask"/>
+    /// instead of a real background thread.
     /// </summary>
-    internal static void MonitorCore(TextReader stdin, TimeSpan grace, Func<TimeSpan> getElapsed, Action stop)
+    internal static void MonitorCore(TextReader stdin, Task readyTask, Action stop)
     {
         string? line;
         try
@@ -53,20 +53,11 @@ internal static class StdinStopMonitor
             line = null;
         }
 
-        if (line is not null)
-        {
-            // A newline (even an empty one) always triggers a stop.
-            stop();
-            return;
-        }
-
-        // EOF: only stop if we are past the grace window.
-        // An immediate EOF with no data read likely means stdin is not attached
-        // (e.g. the process was launched without a pipe) — ignore it so the caller
-        // can still use Ctrl+C or --duration-sec to stop.
-        if (getElapsed() >= grace)
-        {
-            stop();
-        }
+        // A newline (even empty) or EOF both signal a stop. Gate on readiness first so the
+        // encoder is initialized before we request finalization — avoids the race where
+        // Cancel() fires before the encoder object exists, which caused internal_error in
+        // round 2. The stop is detected eagerly; only the application is deferred.
+        readyTask.GetAwaiter().GetResult();
+        stop();
     }
 }

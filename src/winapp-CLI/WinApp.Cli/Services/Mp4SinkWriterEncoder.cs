@@ -62,13 +62,24 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
             string.IsNullOrEmpty(dir) ? "." : dir,
             Guid.NewGuid().ToString("N") + ".mp4");
 
-        PInvoke.MFStartup(MF_VERSION, MFSTARTUP_FULL).ThrowOnFailure();
-        _mfStarted = true;
-
         IMFMediaType? outType = null;
         IMFMediaType? inType = null;
         try
         {
+            // Test-only fault injection seam: when set, bypasses MF so tests can verify
+            // that the constructor catch block deletes the temp file without needing MF hardware.
+            // The delegate creates a placeholder file at _tempPath and then throws.
+            // Always null in production code. Tests must clear this field in cleanup.
+            if (s_testFaultAfterTempCreate is { } testFault)
+            {
+                s_testFaultAfterTempCreate = null;
+                File.WriteAllBytes(_tempPath, []); // simulate the file MFCreateSinkWriterFromURL creates
+                testFault();                        // must throw — exercises the catch below
+            }
+
+            PInvoke.MFStartup(MF_VERSION, MFSTARTUP_FULL).ThrowOnFailure();
+            _mfStarted = true;
+
             PInvoke.MFCreateSinkWriterFromURL(_tempPath, null, null, out _writer).ThrowOnFailure();
 
             // Output (encoded) media type: H.264.
@@ -97,18 +108,33 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         }
         catch
         {
-            // Constructor failed after MFStartup — release any partial writer and undo the
-            // MFStartup so we don't leak a global Media Foundation reference, then rethrow.
+            // Constructor failed — release any partial writer and undo MFStartup.
             ReleaseCom(_writer);
+            // Delete the temp file so it is never orphaned on construction failure.
+            // Dispose() won't run because the constructor is throwing, so we must do it here.
             try
             {
-                PInvoke.MFShutdown();
+                if (File.Exists(_tempPath))
+                {
+                    File.Delete(_tempPath);
+                }
             }
             catch
             {
-                // Best-effort shutdown.
+                // Best-effort cleanup of the temp file.
             }
-            _mfStarted = false;
+            if (_mfStarted)
+            {
+                try
+                {
+                    PInvoke.MFShutdown();
+                }
+                catch
+                {
+                    // Best-effort shutdown.
+                }
+                _mfStarted = false;
+            }
             throw;
         }
         finally
@@ -119,6 +145,12 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
             ReleaseCom(inType);
         }
     }
+
+    // Test-only fault injection seam. Null in production. When set, the constructor invokes
+    // this delegate inside the try block (after creating _tempPath but before any MF calls)
+    // to simulate a late-constructor failure and verify the catch block cleans up the temp file.
+    // Tests must clear this field in cleanup if the constructor does not consume it.
+    internal static volatile Action? s_testFaultAfterTempCreate;
 
     /// <summary>
     /// Writes a single top-down BGRA frame. <paramref name="bgra"/> must contain

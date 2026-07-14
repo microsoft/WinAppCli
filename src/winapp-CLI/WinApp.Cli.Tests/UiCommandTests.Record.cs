@@ -274,8 +274,7 @@ public partial class UiCommandTests
         var stopped = false;
         StdinStopMonitor.MonitorCore(
             new StringReader("\n"),
-            TimeSpan.FromSeconds(1),
-            () => TimeSpan.Zero,
+            Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "a newline should trigger stop");
     }
@@ -287,37 +286,22 @@ public partial class UiCommandTests
         var stopped = false;
         StdinStopMonitor.MonitorCore(
             new StringReader("\n"),  // "\n" → ReadLine returns "" (empty string, not null = not EOF)
-            TimeSpan.FromSeconds(1),
-            () => TimeSpan.Zero,
+            Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "an empty line (immediate enter) should trigger stop");
     }
 
     [TestMethod]
-    public void StdinStopMonitor_ImmediateEof_WithinGrace_DoesNotStop()
+    public void StdinStopMonitor_ImmediateEof_Stops()
     {
-        // Immediate EOF with no data and elapsed < grace → ignore (protects against the
-        // "no stdin attached → instant EOF → 0-frame file" footgun).
+        // With the readiness gate (Task.CompletedTask = already ready), an immediate EOF
+        // must trigger a stop — the old wall-clock grace that swallowed immediate EOFs is gone.
         var stopped = false;
         StdinStopMonitor.MonitorCore(
             new EofReader(),
-            TimeSpan.FromSeconds(1),
-            () => TimeSpan.FromMilliseconds(10), // 10ms << 1000ms grace
+            Task.CompletedTask,
             () => stopped = true);
-        Assert.IsFalse(stopped, "immediate EOF within grace window should not stop");
-    }
-
-    [TestMethod]
-    public void StdinStopMonitor_EofAfterGrace_Stops()
-    {
-        // EOF after the grace window has elapsed → stop (programmatic caller closed the pipe).
-        var stopped = false;
-        StdinStopMonitor.MonitorCore(
-            new EofReader(),
-            TimeSpan.FromSeconds(1),
-            () => TimeSpan.FromSeconds(2), // 2s >> 1s grace
-            () => stopped = true);
-        Assert.IsTrue(stopped, "EOF after grace window should trigger stop");
+        Assert.IsTrue(stopped, "immediate EOF with a completed ready task must trigger stop");
     }
 
     [TestMethod]
@@ -326,10 +310,65 @@ public partial class UiCommandTests
         var stopped = false;
         StdinStopMonitor.MonitorCore(
             new StringReader("stop"),
-            TimeSpan.FromSeconds(1),
-            () => TimeSpan.Zero,
+            Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "any line of text should trigger stop");
+    }
+
+    [TestMethod]
+    public async Task StdinStopMonitor_EofBeforeReady_WaitsForReadyThenStops()
+    {
+        // An immediate EOF that arrives BEFORE the encoder is ready must be LATCHED and applied
+        // only after the ready task completes — not discarded, not an internal_error.
+        var stopped = false;
+        var readyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReturned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Run MonitorCore on a background thread (it blocks on readyTask).
+        var t = new Thread(() =>
+        {
+            StdinStopMonitor.MonitorCore(
+                new SignalingEofReader(() => readReturned.TrySetResult()),
+                readyTcs.Task,
+                () => stopped = true);
+        });
+        t.IsBackground = true;
+        t.Start();
+
+        // Wait deterministically for the stdin read to complete (EOF returned, now blocked on ready).
+        await readReturned.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(stopped, "stop must not fire before the ready task completes");
+
+        // Signal readiness — monitor must now apply the latched stop.
+        readyTcs.SetResult();
+        t.Join(TimeSpan.FromSeconds(5));
+        Assert.IsTrue(stopped, "stop must fire after the ready task completes");
+    }
+
+    [TestMethod]
+    public async Task StdinStopMonitor_NewlineBeforeReady_WaitsForReadyThenStops()
+    {
+        // A newline that arrives before the encoder is ready must also be latched — no internal_error.
+        var stopped = false;
+        var readyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReturned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var t = new Thread(() =>
+        {
+            StdinStopMonitor.MonitorCore(
+                new SignalingStringReader("stop\n", () => readReturned.TrySetResult()),
+                readyTcs.Task,
+                () => stopped = true);
+        });
+        t.IsBackground = true;
+        t.Start();
+
+        await readReturned.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(stopped, "stop must not fire before the ready task completes");
+
+        readyTcs.SetResult();
+        t.Join(TimeSpan.FromSeconds(5));
+        Assert.IsTrue(stopped, "stop must fire after the ready task completes");
     }
 
     // -----------------------------------------------------------------------
@@ -399,6 +438,37 @@ public partial class UiCommandTests
         Assert.AreEqual(0, dispH % 2, "display height must always be even");
     }
 
+    [TestMethod]
+    public void ComputeTargetSize_ThinAspect_DownscaleRoundsNotFloors()
+    {
+        // 300×10 with maxEdge=100: scale=0.333, ideal displayH=3.33.
+        // Floor would give 2 (50:1 aspect — huge distortion from 30:1).
+        // Nearest-even round gives 4 (25:1 aspect — much closer to 30:1).
+        var (encW, encH, dispW, dispH) = UiAutomationService.ComputeTargetSize(300, 10, 100);
+        Assert.AreEqual(0, dispW % 2, "display width must be even");
+        Assert.AreEqual(0, dispH % 2, "display height must be even");
+        Assert.IsTrue(dispH >= 4, $"nearest-even round of 3.33 must be 4, not floored to 2; got {dispH}");
+
+        var inputRatio = 300.0 / 10.0;
+        var displayRatio = (double)dispW / dispH;
+        var aspectError = Math.Abs(displayRatio - inputRatio) / inputRatio;
+        Assert.IsTrue(aspectError < 0.20,
+            $"aspect error ({aspectError:P1}) must be < 20% with nearest-even rounding; got {dispW}×{dispH}");
+    }
+
+    [TestMethod]
+    public void ComputeTargetSize_ThinAspect_DownscaleDimsAreEvenAndAboveMinimum()
+    {
+        // Verify encoder dims are at or above the H.264 minimum and all dims are even.
+        var (encW, encH, dispW, dispH) = UiAutomationService.ComputeTargetSize(300, 10, 100);
+        Assert.IsTrue(encW >= 64, $"encoder width ({encW}) must be ≥ 64 (MF H.264 minimum)");
+        Assert.IsTrue(encH >= 64, $"encoder height ({encH}) must be ≥ 64 (MF H.264 minimum)");
+        Assert.AreEqual(0, encW % 2, "encoder width must be even");
+        Assert.AreEqual(0, encH % 2, "encoder height must be even");
+        Assert.AreEqual(0, dispW % 2, "display width must be even");
+        Assert.AreEqual(0, dispH % 2, "display height must be even");
+    }
+
     // -----------------------------------------------------------------------
     // H3 — Canonical selector resolution (ambiguous selector returns error)
     // -----------------------------------------------------------------------
@@ -435,8 +505,45 @@ public partial class UiCommandTests
     }
 
     // -----------------------------------------------------------------------
-    // M1 — Failed temp→final move must clean up temp (no orphan)
+    // M1 — Constructor failure must delete temp file (no orphan)
     // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public void Mp4SinkWriterEncoder_ConstructorFailure_TempFileIsDeleted()
+    {
+        // Set the injectable seam: inside the constructor try-block, the seam creates the
+        // temp file (simulating what MFCreateSinkWriterFromURL does) and then throws a
+        // COMException (simulating a bad-FPS codec rejection). The constructor catch must
+        // delete the temp file — this test verifies that code path directly.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "ctor-fail.mp4");
+        bool threw = false;
+        try
+        {
+            Mp4SinkWriterEncoder.s_testFaultAfterTempCreate =
+                () => throw new System.Runtime.InteropServices.COMException(
+                    "Simulated codec rejection (bad fps)", unchecked((int)0xC00D36B4));
+
+            _ = new Mp4SinkWriterEncoder(outputPath, 640, 480, 30, 2_000_000);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            threw = true;
+        }
+        finally
+        {
+            Mp4SinkWriterEncoder.s_testFaultAfterTempCreate = null; // always clean up seam
+        }
+
+        Assert.IsTrue(threw, "constructor must have thrown COMException via the fault seam");
+
+        // The output (final) path must not have been created.
+        Assert.IsFalse(File.Exists(outputPath), "output path must not exist after constructor failure");
+
+        // No orphaned temp .mp4 files may remain in the directory.
+        var orphans = Directory.GetFiles(_tempDirectory.FullName, "*.mp4");
+        Assert.AreEqual(0, orphans.Length,
+            $"constructor catch must delete the temp file; orphan(s) found: {string.Join(", ", orphans)}");
+    }
 
     [TestMethod]
     public void Mp4SinkWriterEncoder_MoveFails_TempFileCleanedUp()
@@ -498,5 +605,17 @@ public partial class UiCommandTests
     private sealed class EofReader : TextReader
     {
         public override string? ReadLine() => null;
+    }
+
+    /// <summary>A TextReader that signals a TCS when ReadLine is invoked, then returns null (EOF).</summary>
+    private sealed class SignalingEofReader(Action onRead) : TextReader
+    {
+        public override string? ReadLine() { onRead(); return null; }
+    }
+
+    /// <summary>A TextReader that signals a TCS when ReadLine is invoked, then returns the line.</summary>
+    private sealed class SignalingStringReader(string text, Action onRead) : StringReader(text)
+    {
+        public override string? ReadLine() { onRead(); return base.ReadLine(); }
     }
 }

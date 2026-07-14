@@ -264,16 +264,21 @@ internal sealed partial class UiAutomationService
             scale = (double)maxEdge / longest;
         }
 
-        var displayW = EvenClamp((int)Math.Round(width * scale));
-        var displayH = EvenClamp((int)Math.Round(height * scale));
+        // Round to the NEAREST even integer (not floor) to minimise aspect-ratio distortion.
+        // Flooring odd-scaled dimensions (e.g. 300×10 → 100×2) can introduce large aspect-ratio
+        // error; rounding to nearest-even keeps the error ≤ one half-pixel per side.
+        var displayW = EvenRound(width * scale);
+        var displayH = EvenRound(height * scale);
 
         // Pad up to the encoder minimum while preserving even dimensions.
-        var encoderW = EvenClamp(Math.Max(displayW, MfH264MinWidth));
-        var encoderH = EvenClamp(Math.Max(displayH, MfH264MinHeight));
+        var encoderW = Math.Max(displayW, MfH264MinWidth);
+        var encoderH = Math.Max(displayH, MfH264MinHeight);
 
         return (encoderW, encoderH, displayW, displayH);
 
-        static int EvenClamp(int v) => Math.Max(2, v & ~1);
+        // Round a scaled double to the nearest even integer ≥ 2.
+        static int EvenRound(double v)
+            => Math.Max(2, (int)(Math.Round(v / 2.0, MidpointRounding.AwayFromZero) * 2));
     }
 
     /// <summary>

@@ -24,9 +24,9 @@ export {
 export { GenerateCppAddonOptions, GenerateCppAddonResult } from './cpp-addon-utils';
 export { GenerateCsAddonOptions, GenerateCsAddonResult } from './cs-addon-utils';
 
-// Re-export all command types and functions automatically from the generated module.
-// NOTE: winapp-commands.ts exports _uiRecordGenerated (not uiRecord) so there is no conflict
-// with the guarded uiRecord exported below.
+// Re-export all command types and public functions automatically from the generated module.
+// The generated _uiRecordGenerated function is module-internal (not exported) so it does
+// not appear in the package surface — only the guarded uiRecord is public.
 export * from './winapp-commands';
 
 // Export the public, guarded uiRecord wrapper (overrides the internal _uiRecordGenerated).
@@ -57,5 +57,5 @@ export default {
   getGlobalWinappPath,
   getLocalWinappPath,
   ...winappCommands,
-  uiRecord, // guarded wrapper overrides the _uiRecordGenerated from the spread above
+  uiRecord, // guarded wrapper — overrides any uiRecord from the spread (none expected)
 };

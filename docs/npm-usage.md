@@ -634,32 +634,6 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 
 ---
 
-### `_uiRecordGenerated()`
-
-Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.
-
-```typescript
-function _uiRecordGenerated(options?: UiRecordOptions): Promise<WinappResult>
-```
-
-**Options:**
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
-| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
-| `durationSec` | `number \| undefined` | No | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. |
-| `fps` | `number \| undefined` | No | Frames per second to capture |
-| `json` | `boolean \| undefined` | No | Format output as JSON |
-| `maxEdge` | `number \| undefined` | No | Downscale so the longest edge is at most this many pixels (0 = no downscale) |
-| `output` | `string \| undefined` | No | Save output to this file path. |
-| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
-
----
-
 ### `uiScreenshot()`
 
 Capture the target window or element as a PNG image. When multiple windows exist (e.g., dialogs), captures each to a separate file. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.

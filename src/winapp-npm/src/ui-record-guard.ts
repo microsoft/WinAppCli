@@ -4,16 +4,21 @@
 /**
  * Hand-written guard wrapper for uiRecord.
  *
- * winapp-commands.ts is AUTO-GENERATED and re-generates `_uiRecordGenerated` (not `uiRecord`).
- * This module is the public face: it validates that `durationSec` is provided and positive
- * before delegating to the generated function, because unbounded recording (durationSec == 0)
- * is only supportable via the CLI with Ctrl+C or piped stdin — the npm wrapper has no mechanism
- * to stop an unbounded spawn (no AbortSignal, no stdin pass-through).
+ * winapp-commands.ts is AUTO-GENERATED. The raw generated delegate for `ui record`
+ * is intentionally NOT exported (underscore-prefixed, module-internal) so it cannot
+ * bypass this guard. This module is the only public entry point for recording.
+ *
+ * The guard validates that `durationSec` is provided and positive before calling the
+ * CLI, because unbounded recording (durationSec == 0) is only supportable via the CLI
+ * with Ctrl+C or piped stdin — the npm wrapper has no mechanism to stop an unbounded
+ * spawn (no AbortSignal, no stdin pass-through).
  *
  * This file must NOT be edited by the code generator; it is hand-maintained.
  */
 
-import { _uiRecordGenerated, UiRecordOptions, WinappResult } from './winapp-commands';
+import { callWinappCliCapture } from './winapp-cli-utils';
+import type { CallWinappCliCaptureOptions } from './winapp-cli-utils';
+import type { UiRecordOptions, WinappResult } from './winapp-commands';
 
 export type { UiRecordOptions };
 
@@ -34,5 +39,23 @@ export async function uiRecord(options: UiRecordOptions = {}): Promise<WinappRes
         'Pass options.durationSec > 0.'
     );
   }
-  return _uiRecordGenerated(options);
+
+  // Build args mirroring the generated _uiRecordGenerated (kept in sync with the CLI schema).
+  const args: string[] = ['ui', 'record'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.captureScreen) args.push('--capture-screen');
+  // durationSec is always set and > 0 (guarded above)
+  args.push('--duration-sec', options.durationSec.toString());
+  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
+  if (options.json) args.push('--json');
+  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
+  if (options.output) args.push('--output', options.output);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (options.quiet) args.push('--quiet');
+  if (options.verbose) args.push('--verbose');
+
+  const captureOpts: CallWinappCliCaptureOptions = options.cwd ? { cwd: options.cwd } : {};
+  const result = await callWinappCliCapture(args, captureOpts);
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
