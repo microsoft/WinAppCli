@@ -157,4 +157,16 @@ public class ValueSetterTests
             () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(automationId: "field-1"), "x"));
         StringAssert.Contains(byAutomationId.Message, "--target \"field-1\"");
     }
+
+    [TestMethod]
+    public void Apply_ThrowMessage_UsesSelectorPlaceholder_WhenTargetHasUnsafeChars()
+    {
+        // An app-controlled name containing a quote or newline must not break the single,
+        // copy-pasteable example line — it falls back to the "<selector>" placeholder.
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(
+            () => ValueSetter.Apply(new FakeValueSetStrategy(), Element(name: "weird\"name\nhere"), "x"));
+
+        StringAssert.Contains(ex.Message, "--target \"<selector>\"");
+        Assert.IsFalse(ex.Message.Contains("weird\"name"), "Unsafe target text must not appear in the hint.");
+    }
 }

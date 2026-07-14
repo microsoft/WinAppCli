@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -50,7 +51,10 @@ internal static class ValueSetter
         }
 
         // ValuePattern not supported — try RangeValuePattern for numeric controls (sliders/progress bars).
-        if (double.TryParse(text, out var numericValue) && strategy.TrySetViaRangeValuePattern(numericValue))
+        // Parse with the invariant culture so a value like "3.5" is interpreted consistently regardless of
+        // the machine's locale (CLI inputs are culture-independent).
+        if (double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var numericValue) &&
+            strategy.TrySetViaRangeValuePattern(numericValue))
         {
             return;
         }
@@ -64,7 +68,13 @@ internal static class ValueSetter
             return;
         }
 
-        var sendKeysTarget = element.Selector ?? element.Name ?? element.AutomationId ?? "<selector>";
+        // Use the element's own selector/name/id in the example, but fall back to a placeholder when
+        // that app-controlled text contains characters (quotes/newlines) that would break the single,
+        // copy-pasteable command line. This hint is only displayed, never executed.
+        var rawTarget = element.Selector ?? element.Name ?? element.AutomationId;
+        var sendKeysTarget = !string.IsNullOrEmpty(rawTarget) && rawTarget.IndexOfAny(['"', '\r', '\n']) < 0
+            ? rawTarget
+            : "<selector>";
         throw new InvalidOperationException(
             $"Element {element.Id} ({element.Type}) could not be set via ValuePattern, RangeValuePattern, or " +
             "LegacyIAccessible (put_accValue). This control may not support setting a value programmatically. " +
