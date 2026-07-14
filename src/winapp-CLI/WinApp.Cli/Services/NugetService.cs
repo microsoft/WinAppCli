@@ -28,7 +28,20 @@ internal class NugetService(
 {
     private static readonly ILogger Logger = NullLogger.Instance;
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
-    private static int _credentialServiceInitialized;
+
+    // Lazy (ExecutionAndPublication) guarantees the credential-service setup runs exactly once AND that
+    // every caller blocks until it has fully completed. Publishing an "initialized" flag before setup
+    // finished (e.g. via Interlocked.Exchange) would let a concurrent NuGet operation build its HTTP
+    // resources against a not-yet-configured credential service and hit a private feed anonymously.
+    private static readonly Lazy<bool> CredentialServiceInitializer = new(() =>
+    {
+        var nonInteractive = Console.IsInputRedirected
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"))
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD"));
+
+        DefaultCredentialServiceUtility.SetupDefaultCredentialService(Logger, nonInteractive);
+        return true;
+    });
 
     private readonly Lazy<ISettings> _settings = new(() =>
         NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
@@ -75,6 +88,25 @@ internal class NugetService(
         return [.. repositories.Where(r => allowed.Contains(r.PackageSource.Name))];
     }
 
+    /// <summary>
+    /// Explains why no source was eligible to serve <paramref name="packageId"/>, distinguishing
+    /// "no sources are configured/enabled at all" from "<c>&lt;packageSourceMapping&gt;</c> excludes this
+    /// package", so the error points the user at the right nuget.config section.
+    /// </summary>
+    private string DescribeNoEligibleSources(string packageId)
+    {
+        // If there are no enabled sources at all, mapping is irrelevant — an empty eligible set can only
+        // mean the feed list itself is empty, regardless of whether packageSourceMapping is enabled.
+        if (GetRepositories().Count == 0)
+        {
+            return "no enabled NuGet sources are configured (add or enable a source in the <packageSources> section of your nuget.config)";
+        }
+
+        // Sources exist, so the only way to reach an empty eligible set is that packageSourceMapping is
+        // enabled and maps this package to none of them.
+        return $"no configured NuGet source is mapped to '{packageId}' (check <packageSourceMapping> in nuget.config)";
+    }
+
     private static readonly string[] IgnoredDependencyPrefixes =
     [
         "NETStandard.",
@@ -97,21 +129,11 @@ internal class NugetService(
     /// <summary>
     /// Configures NuGet's default credential service so authenticated (private) feeds work using
     /// credentials stored in nuget.config, environment-based credentials, or credential-provider
-    /// plugins. Interactive prompting is only enabled for real interactive terminals.
+    /// plugins. Interactive prompting is only enabled for real interactive terminals. Setup runs
+    /// exactly once and every caller blocks until it has completed, so concurrent NuGet operations
+    /// never observe a half-initialized credential service.
     /// </summary>
-    private static void EnsureCredentialService()
-    {
-        if (Interlocked.Exchange(ref _credentialServiceInitialized, 1) != 0)
-        {
-            return;
-        }
-
-        var nonInteractive = Console.IsInputRedirected
-            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"))
-            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD"));
-
-        DefaultCredentialServiceUtility.SetupDefaultCredentialService(Logger, nonInteractive);
-    }
+    private static void EnsureCredentialService() => _ = CredentialServiceInitializer.Value;
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
@@ -320,7 +342,7 @@ internal class NugetService(
         // so authentication/network failures are distinguishable from a genuinely missing package.
         var sources = string.Join(", ", repos.Select(r => r.PackageSource.Name));
         var baseMessage = string.IsNullOrEmpty(sources)
-            ? $"Failed to download {package} {version}: no configured NuGet source is mapped to this package (check <packageSourceMapping> in nuget.config)."
+            ? $"Failed to download {package} {version}: {DescribeNoEligibleSources(package)}."
             : $"Failed to download {package} {version} from the configured NuGet sources ({sources}).";
 
         if (lastError is not null)
@@ -669,13 +691,13 @@ internal class NugetService(
                 lastError);
         }
 
-        // No source was even eligible: <packageSourceMapping> excludes this package from every configured
-        // source. Fail closed (matching the download path) instead of reporting a dependency-free graph,
-        // which a caller would treat as success while required transitive packages remain uninstalled.
+        // No source was even eligible. Fail closed (matching the download path) instead of reporting a
+        // dependency-free graph, which a caller would treat as success while required transitive packages
+        // remain uninstalled. The reason is either an empty feed list or a packageSourceMapping exclusion.
         if (repos.Count == 0)
         {
             throw new InvalidOperationException(
-                $"Cannot resolve dependencies for {packageName} {version}: no configured NuGet source is mapped to this package (check <packageSourceMapping> in nuget.config).");
+                $"Cannot resolve dependencies for {packageName} {version}: {DescribeNoEligibleSources(packageName)}.");
         }
 
         return dependencies;
