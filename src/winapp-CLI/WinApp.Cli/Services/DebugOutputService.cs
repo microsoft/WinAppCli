@@ -278,10 +278,16 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
 
             if (_crashDumpPath == null)
             {
+                // Forward the terminating exception's parameters. For a stowed exception
+                // (0xC000027B) these point at the stowed-exception array that WinUI triage reads;
+                // the dump otherwise keeps the first-chance context for ClrMD's managed frames.
+                var crashParameters = ReadExceptionParameters(exInfo.ExceptionRecord);
+
                 _crashDumpPath = crashDumpService.WriteMiniDump(
                     debugEvent.dwProcessId,
                     _savedFirstChanceContext, _savedFirstChanceThreadId,
-                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress);
+                    _savedFirstChanceExceptionCode, _savedFirstChanceExceptionAddress,
+                    unchecked((int)code), address, crashParameters);
             }
         }
 
@@ -297,6 +303,28 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         {
             PInvoke.CloseHandle(handle);
         }
+    }
+
+    /// <summary>
+    /// Reads the parameters (<c>ExceptionInformation</c>) from a debug-event exception record. For a
+    /// stowed exception (<c>0xC000027B</c>) element 0 is the stowed-exception array pointer and element
+    /// 1 is the count; these are copied verbatim into the dump so WinUI triage can locate them.
+    /// </summary>
+    private static unsafe nuint[]? ReadExceptionParameters(in EXCEPTION_RECORD record)
+    {
+        var count = (int)Math.Min(record.NumberParameters, (uint)record.ExceptionInformation.Length);
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        var parameters = new nuint[count];
+        var source = record.ExceptionInformation.AsReadOnlySpan();
+        for (var i = 0; i < count; i++)
+        {
+            parameters[i] = source[i];
+        }
+        return parameters;
     }
 
     /// <summary>

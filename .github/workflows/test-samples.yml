@@ -40,7 +40,7 @@ jobs:
         node-version: '22'
     - name: Build npm package
       shell: pwsh
-      run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix -SkipVsc
+      run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix
     - uses: actions/upload-artifact@v4
       with:
         name: npm-package
