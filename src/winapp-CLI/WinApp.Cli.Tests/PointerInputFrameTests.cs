@@ -575,4 +575,142 @@ public class PointerInputFrameTests
         Assert.IsTrue(rect.Contains(new PointerPoint(300, 100)), "Top edge must be INSIDE (inclusive)");
         Assert.IsFalse(rect.Contains(new PointerPoint(300, 99)), "One pixel above Top must be outside");
     }
+
+    // -------------------------------------------------------------------------
+    // HIGH 1 — UP-frame failures surface on normal path; swallowed only on unwind
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void InjectTouchStroke_UpFrameFailsOnNormalPath_ExceptionSurfaced()
+    {
+        // Sender succeeds for DOWN (and any UPDATE glide) but throws on the UP frame.
+        // On the normal (non-faulted) path the UP failure must propagate to the caller,
+        // not be swallowed — mirroring the MouseInput.Drag released-flag pattern.
+        var upEx = new InvalidOperationException("UP injection failed — pointer stuck");
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP)))
+            {
+                throw upEx;
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(100, 200) }
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, sender);
+            Assert.Fail("Expected InvalidOperationException was not thrown");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(upEx, caught,
+            "The exact UP-frame exception must surface; it must not be swallowed on the normal path");
+    }
+
+    [TestMethod]
+    public void InjectTouchStroke_GlideFrameThrows_OriginalExceptionPreserved_UpFailureSwallowed()
+    {
+        // Sender throws on the first glide (UPDATE) frame. The UP-frame exception thrown inside
+        // the finally's best-effort lift must be swallowed so the original glide exception
+        // propagates unmasked — matching the MouseInput.Drag unwind behaviour.
+        var glideEx = new InvalidOperationException("glide frame failed");
+        var upEx   = new InvalidOperationException("UP injection also failed — must be swallowed");
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)))
+            {
+                throw glideEx;
+            }
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP)))
+            {
+                throw upEx;
+            }
+        };
+
+        // Two-point path forces a glide step.
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0), new PointerPoint(100, 0) }
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, sender);
+            Assert.Fail("Expected InvalidOperationException was not thrown");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(glideEx, caught,
+            "The original glide exception must propagate; the UP exception in the finally must be swallowed");
+    }
+
+    [TestMethod]
+    public void InjectPenStroke_UpFrameFailsOnNormalPath_ExceptionSurfaced()
+    {
+        // Sender succeeds for DOWN (and any UPDATE glide) but throws on the UP frame.
+        // On the normal path the UP failure must propagate, not be swallowed.
+        var upEx = new InvalidOperationException("pen UP injection failed — pen stuck");
+
+        PointerInput.PenFrameSender sender = (x, y, pressure, flags) =>
+        {
+            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP))
+            {
+                throw upEx;
+            }
+        };
+
+        var path = new List<PointerPoint> { new PointerPoint(100, 200) };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 0, sender);
+            Assert.Fail("Expected InvalidOperationException was not thrown");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(upEx, caught,
+            "The UP-frame exception must surface on the normal path; it must not be swallowed");
+    }
+
+    [TestMethod]
+    public void InjectPenStroke_GlideFrameThrows_OriginalExceptionPreserved_UpFailureSwallowed()
+    {
+        // Sender throws on the first UPDATE (glide) frame. The UP exception thrown in the
+        // finally best-effort lift must be swallowed to preserve the original glide exception.
+        var glideEx = new InvalidOperationException("pen glide frame failed");
+        var upEx   = new InvalidOperationException("pen UP also failed — must be swallowed");
+
+        PointerInput.PenFrameSender sender = (x, y, pressure, flags) =>
+        {
+            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)) { throw glideEx; }
+            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP))    { throw upEx; }
+        };
+
+        // Two-point path forces a glide step.
+        var path = new List<PointerPoint>
+        {
+            new PointerPoint(0, 0),
+            new PointerPoint(100, 0),
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 0, sender);
+            Assert.Fail("Expected InvalidOperationException was not thrown");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(glideEx, caught,
+            "The glide exception must propagate; the UP exception in the finally must be swallowed");
+    }
 }

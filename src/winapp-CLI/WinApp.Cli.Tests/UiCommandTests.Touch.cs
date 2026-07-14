@@ -293,4 +293,39 @@ public partial class UiCommandTests
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
         Assert.AreEqual(0, _fakeForeground.Calls.Count);
     }
+
+    [TestMethod]
+    public async Task Touch_LongPress_ExplicitHoldMsZero_RejectedWithInvalidArguments()
+    {
+        // Explicit --hold-ms 0 with long-press is a degenerate combination that must be
+        // rejected with a structured invalid_arguments error, NOT silently rewritten to 500.
+        _fakeSession.SessionResult.WindowHandle = 5161;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "long-press", "--at", "100,100", "--hold-ms", "0", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count,
+            "No injection should occur when --hold-ms 0 is explicitly given with long-press");
+    }
+
+    [TestMethod]
+    public async Task Touch_InjectThrowsInvalidOperation_ReturnsNonZeroWithStructuredError()
+    {
+        // If the pointer-injection path throws InvalidOperationException (e.g. UP-frame failure
+        // now surfacing on the normal path), the command must catch it and return non-zero rather
+        // than letting it crash unhandled. The exception is mapped to injection_unsupported via
+        // the existing catch block in UiTouchCommand.Handler.InvokeAsync.
+        _fakeSession.SessionResult.WindowHandle = 5162;
+        _fakePointer.ThrowException = new InvalidOperationException("UP frame injection failed — pointer stuck");
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(1, exitCode,
+            "Command must return non-zero when the inject call throws InvalidOperationException");
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count,
+            "No successful injection was recorded (the fake threw before recording)");
+    }
 }

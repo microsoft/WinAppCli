@@ -174,6 +174,7 @@ internal static class PointerInput
         }
         send(contacts);
 
+        bool released = false;
         try
         {
             // --- Hold phase: emit periodic stationary UPDATE frames so Windows does not drop/cancel
@@ -254,17 +255,34 @@ internal static class PointerInput
                     }
                 }
             }
-        }
-        finally
-        {
-            // --- Lift (always, even if a glide frame threw, so contacts don't stay stuck down) ---
+
+            // --- Lift on the normal path: let failure propagate so the caller knows the pointer
+            //     may be stuck and the command exits non-zero with a structured error. ---
             for (int i = 0; i < count; i++)
             {
                 var last = contactPaths[i][^1];
                 contacts[i] = MakeContact((uint)i, last.X, last.Y, POINTER_FLAGS.POINTER_FLAG_UP, primary: i == 0);
             }
-            try { send(contacts); }
-            catch (InvalidOperationException) { }
+            send(contacts);
+            released = true;
+        }
+        finally
+        {
+            // Best-effort lift when unwinding from an earlier exception (hold/glide frame failed).
+            // Swallowing here avoids masking the original, more-informative exception.
+            if (!released)
+            {
+                try
+                {
+                    for (int i = 0; i < count; i++)
+                    {
+                        var last = contactPaths[i][^1];
+                        contacts[i] = MakeContact((uint)i, last.X, last.Y, POINTER_FLAGS.POINTER_FLAG_UP, primary: i == 0);
+                    }
+                    send(contacts);
+                }
+                catch (InvalidOperationException) { }
+            }
         }
     }
 
@@ -405,6 +423,7 @@ internal static class PointerInput
         send(first.X, first.Y, contactPressure,
             POINTER_FLAGS.POINTER_FLAG_DOWN | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
 
+        bool released = false;
         try
         {
             int segments = path.Count - 1;
@@ -447,12 +466,22 @@ internal static class PointerInput
                     }
                 }
             }
+            // --- Lift on the normal path: let failure propagate so the caller knows the pen
+            //     may be stuck and the command exits non-zero with a structured error. ---
+            var last = path[^1];
+            send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP);
+            released = true;
         }
         finally
         {
-            var last = path[^1];
-            try { send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP); }
-            catch (InvalidOperationException) { }
+            // Best-effort lift when unwinding from an earlier exception (glide frame failed).
+            // Swallowing here avoids masking the original, more-informative exception.
+            if (!released)
+            {
+                var last = path[^1];
+                try { send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP); }
+                catch (InvalidOperationException) { }
+            }
         }
     }
 

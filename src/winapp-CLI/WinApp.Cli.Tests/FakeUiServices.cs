@@ -201,12 +201,19 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
     public List<TouchCall> TouchCalls { get; } = [];
     public List<PenCall> PenCalls { get; } = [];
 
+    /// <summary>When non-null, both Touch() and Pen() throw this exception instead of recording the call.
+    /// Use to test command-level exception handling without a live injection path.</summary>
+    public Exception? ThrowException { get; set; }
+
     public void Touch(
         WinApp.Cli.Helpers.TouchGesture gesture,
         IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> contactPaths,
         int holdMs,
         int durationMs)
-        => TouchCalls.Add(new(gesture, contactPaths, holdMs, durationMs));
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        TouchCalls.Add(new(gesture, contactPaths, holdMs, durationMs));
+    }
 
     public void Pen(
         IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> path,
@@ -215,7 +222,10 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
         int tiltY,
         bool eraser,
         int durationMs)
-        => PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser, durationMs));
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser, durationMs));
+    }
 }
 
 /// <summary>

@@ -153,9 +153,23 @@ internal class UiTouchCommand : Command, IShortDescription
             }
 
             // Long-press with no explicit --hold-ms defaults to 500 ms (a real long-press).
-            if (gesture is TouchGesture.LongPress && holdMs <= 0)
+            // An explicit --hold-ms 0 is a degenerate long-press (indistinguishable from a tap)
+            // and is rejected clearly rather than silently rewritten to 500.
+            if (gesture is TouchGesture.LongPress)
             {
-                holdMs = 500;
+                bool holdWasSupplied = (parseResult.GetResult(HoldOption)?.Tokens.Count ?? 0) > 0;
+                if (!holdWasSupplied)
+                {
+                    holdMs = 500;
+                }
+                else if (holdMs == 0)
+                {
+                    logger.LogError("{Symbol} --hold-ms 0 is invalid with --gesture long-press (degenerate hold). " +
+                        "Omit --hold-ms to get the 500 ms default or supply a positive value.", UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                        "--hold-ms 0 is invalid with --gesture long-press. Omit --hold-ms to use the 500 ms default or supply a positive value.");
+                    return 1;
+                }
             }
 
             if (fingers > PointerGesturePlanner.MaxContacts)
