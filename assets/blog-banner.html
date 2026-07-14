@@ -10,7 +10,7 @@
     html, body {
       margin: 0;
       padding: 0;
-      background: #0a0f1c;
+      background: transparent;
       font-family: 'Segoe UI', 'SF Pro Display', system-ui, -apple-system, sans-serif;
       -webkit-font-smoothing: antialiased;
     }
@@ -21,6 +21,7 @@
       height: 630px;
       position: relative;
       overflow: hidden;
+      border-radius: 10px;
       background:
         radial-gradient(1200px 700px at 85% 15%, rgba(0, 120, 212, 0.35), transparent 60%),
         radial-gradient(900px 500px at 10% 90%, rgba(126, 87, 194, 0.28), transparent 55%),
@@ -206,7 +207,7 @@
         <span class="eyebrow"><span class="dot"></span>Public preview</span>
         <h1>A new way to bring native Windows APIs to JavaScript</h1>
         <p class="lead">Introducing dynamic API projections for Node.js</p>
-        <p class="subtitle">Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No native addon, no <code>node-gyp</code>.</p>
+        <p class="subtitle">Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No app-specific native addon or <code>node-gyp</code> setup.</p>
         <div class="badges">
           <span class="badge">Electron</span>
           <span class="badge">Node.js</span>

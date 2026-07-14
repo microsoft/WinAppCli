@@ -1,49 +1,51 @@
 # A new way to bring native Windows APIs to JavaScript — introducing dynamic API projections for Node.js
 
-![Public preview banner. Title: "A new way to bring native Windows APIs to JavaScript — introducing dynamic API projections for Node.js." Tagline: "Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No native addon, no node-gyp." A code snippet on the right shows LanguageModel and TextSummarizer being used from the generated bindings.](./assets/blog-banner.png)
+![Public preview banner. Title: "A new way to bring native Windows APIs to JavaScript — introducing dynamic API projections for Node.js." Tagline: "Notifications, Phi Silica, clipboard, and more, straight from JavaScript. No app-specific native addon or node-gyp setup." A code snippet on the right shows LanguageModel and TextSummarizer being used from the generated JavaScript wrappers.](./assets/blog-banner.png)
 
-You're building an Electron app for Windows and want to add on-device AI features like text summarization, image description, and OCR, right from Copilot+ PCs. But when you look for how to call these Windows APIs from JavaScript, you hit a wall. The usual answer is to write a C++ or C# native addon just to reach a handful of APIs, and you repeat that work every time you need another one.
+JavaScript developers commonly use Electron and Node.js to build desktop apps that run on Windows, but using Windows Runtime APIs for features such as on-device AI has traditionally required an app-specific interop layer. Developers had to build a C++ or C# bridge, translate WinRT types and asynchronous behavior into JavaScript, and maintain wrapper code for every API they exposed. This introduced another language and toolchain, along with architecture and Electron compatibility work. Each new API meant more native code to build, test, and maintain.
 
-We're excited to introduce a public preview of **a dynamic Windows Runtime API (WinRT) projection for Node.js**. It lets your Electron app, or a plain Node.js process, call the modern Windows API surface directly from JavaScript or TypeScript. Install one npm package, get typed bindings for the Windows features you want. No native addon, no `node-gyp`, no C++ wrapper to maintain. 🚀
+Today, we're excited to introduce **a dynamic Windows Runtime API (WinRT) projection for Node.js**, now available in public preview. It lets your Electron app, or a plain Node.js process, call supported Windows Runtime APIs directly from JavaScript or TypeScript. Install one npm package to get JavaScript wrappers and TypeScript types for the Windows features you want. You do not need to build an app-specific native addon, configure `node-gyp`, or maintain a C++ wrapper. 🚀
 
-## What makes this different
+## What makes this projection different
 
-The Windows Runtime already has static language projections for [C++/WinRT](https://github.com/microsoft/cppwinrt), [C#/WinRT](https://github.com/microsoft/cswinrt), [`windows-rs`](https://github.com/microsoft/windows-rs), and [PyWinRT](https://github.com/pywinrt/pywinrt). This new projection adds JavaScript to that list, targeting the **Node.js runtime**, with a different implementation approach: instead of a hand-authored native addon per API, it uses a codegen + shared runtime split. That means no per-API C++ to write or maintain, no `node-gyp` toolchain in your project, no Electron-version-specific rebuilds, and new Windows APIs light up as soon as their metadata ships.
+The Windows Runtime already has static language projections for [C++/WinRT](https://github.com/microsoft/cppwinrt), [C#/WinRT](https://github.com/microsoft/cswinrt), [`windows-rs`](https://github.com/microsoft/windows-rs), and [PyWinRT](https://github.com/pywinrt/pywinrt). This new projection adds JavaScript to that list and targets the **Node.js runtime**. Instead of using a hand-authored native addon for each API, it combines code generation with a shared runtime. This removes the need to write per-API C++, configure a `node-gyp` toolchain, or rebuild for each Electron version. Compatible APIs can be projected by rerunning code generation when their metadata becomes available.
 
-- **JavaScript bindings, not a per-class native addon.** Codegen produces `.js` + `.d.ts` for supported Windows API patterns.
+- **Generated JavaScript wrappers, not per-class native addons.** Codegen produces `.js` wrappers and `.d.ts` declarations for supported Windows Runtime API patterns.
 - **One shared prebuilt runtime.** `@microsoft/dynwinrt`, installed from npm, dispatches all the calls at execution time.
-- **Regenerate, don't rebuild.** New Windows API metadata ships → rerun codegen → updated bindings. No hand-authored bindings to wait for.
+- **Regenerate, don't rebuild.** Rerun codegen when compatible Windows API metadata changes. There are no hand-authored per-API wrappers to wait for.
 
-## See it in action
+## What you can build with the projection
 
-We've already used these bindings to power [**Electron on Windows Gallery**](https://github.com/microsoft/electron-on-windows-gallery), an open-source Electron app that showcases the range of native Windows functionality reachable from Electron. It ships interactive samples covering the current Windows on-device AI APIs (text generation, summarization, rewriting, text-to-table, image description, OCR, image scaling, object extraction, and object removal) alongside JavaScript sample code, API documentation, and getting-started guides for building your own Electron-on-Windows features.
+By reading Windows metadata (`.winmd`), the projection is not limited to a fixed catalog of APIs. It enables Node.js apps to use a broad range of non-UI WinRT APIs. Here are just a few examples:
+
+- **[On-device AI](https://github.com/microsoft/electron-on-windows-gallery):** text generation, summarization, rewriting, text-to-table, image description, text recognition, image scaling, object extraction and removal, plus [Windows ML model and execution provider catalogs](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-winml.md)
+- **App and content APIs:** [notifications](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-notification.md), [file and folder pickers, storage, and image decoding](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md), plus rich clipboard content
+- **System and device APIs:** networking, sensors, globalization, and cryptography
+
+This list is not exhaustive. Developers can use the same metadata-driven workflow to project many other compatible Windows Runtime APIs, as well as their own WinRT components.
+
+You can explore the AI scenarios today in [**Electron on Windows Gallery**](https://github.com/microsoft/electron-on-windows-gallery), an open-source Electron app built with these JavaScript projections. Each interactive sample includes the JavaScript source, API documentation, and getting-started guidance.
 
 <p align="center">
-  <img src="./assets/electron-gallery-samples.gif" width="720" alt="Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description, each driven by a handful of JavaScript against the generated bindings." />
+  <img src="./assets/electron-gallery-samples.gif" width="720" alt="Electron on Windows Gallery running several on-device AI samples end-to-end: text summarization, OCR, object remover, and image description, each driven by a handful of JavaScript against the generated wrappers." />
 </p>
 
-## What you can build
+## How the pieces fit together
 
-In this post we'll walk through two common Windows API scenarios from JavaScript:
+The projection is delivered through three npm packages. You install only `@microsoft/winappcli`; it coordinates the other two and keeps their versions aligned:
+
+- **[`@microsoft/winappcli`](https://www.npmjs.com/package/@microsoft/winappcli)** sets up the manifest and SDK metadata, runs projection generation, and handles debug package identity.
+- **[`@microsoft/dynwinrt-codegen`](https://www.npmjs.com/package/@microsoft/dynwinrt-codegen)** reads that `.winmd` metadata and emits JavaScript wrappers with matching TypeScript declarations (`.js` + `.d.ts`).
+- **[`@microsoft/dynwinrt`](https://www.npmjs.com/package/@microsoft/dynwinrt)** is the shared, prebuilt x64 and arm64 runtime that dispatches those Windows API calls when your app runs.
+
+Together, they turn Windows metadata into JavaScript APIs your app can import and call. Now let's put that flow to work.
+
+## Build two Windows experiences in Electron
+
+We'll build both examples entirely in JavaScript:
 
 - **Native notifications** with `AppNotificationBuilder` / `AppNotificationManager`
 - **Phi Silica on-device AI** with `LanguageModel` / `TextSummarizer` (Copilot+ PCs)
-
-These are just entry points. The same bindings reach a much broader surface of Windows Runtime APIs from JavaScript, including the full on-device AI stack shipped on Copilot+ PCs (text generation, summarization, rewriting, text-to-table, image description, text recognition, image scaling, object extraction, and object removal), file pickers and storage (`FileOpenPicker`, `StorageFile`), image decoding (`BitmapDecoder`), rich clipboard (`Clipboard`, `HtmlFormatHelper`), and custom model inference via `WinML`. If it's a non-UI WinRT type described in `.winmd` metadata, you can reach it. That includes your own WinRT components. Just extend the `winapp.jsBindings` config to generate bindings for any additional namespaces or `.winmd` files.
-
-Both walkthroughs are written entirely in JavaScript.
-
-## What's in the box
-
-Three npm packages, designed to be used together:
-
-- **[`@microsoft/dynwinrt`](https://www.npmjs.com/package/@microsoft/dynwinrt)**: the shared native runtime that dispatches Windows API calls at execution time. Prebuilt for x64 and arm64 Windows.
-- **[`@microsoft/dynwinrt-codegen`](https://www.npmjs.com/package/@microsoft/dynwinrt-codegen)**: the code generator that reads `.winmd` metadata and emits JavaScript bindings with TypeScript types (`.js` + `.d.ts`).
-- **[`@microsoft/winappcli`](https://www.npmjs.com/package/@microsoft/winappcli)**: the Windows App Development CLI. It manages the NuGet packages that ship Windows API metadata, runs codegen, pins the matching `@microsoft/dynwinrt` runtime, and handles debug package identity.
-
-You only install `@microsoft/winappcli`; it brings in the other two for you.
-
-## Adding it to your Electron app
 
 ### Project setup
 
@@ -54,7 +56,7 @@ npm install --save-dev @microsoft/winappcli
 npx winapp init . --use-defaults --add-js-bindings
 ```
 
-The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and writes typed bindings to `.winapp/bindings/`. It also writes a `winapp.jsBindings` config block to your `package.json` where you can extend the generated surface with additional namespaces or `.winmd` files. See the [file picker guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) for a detailed configuration example.
+The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and generates JavaScript wrappers and TypeScript types for the supported Windows App SDK APIs in `.winapp/bindings/`. It also writes a `winapp.jsBindings` config block to your `package.json` where you can extend the generated surface with additional namespaces or `.winmd` files, including metadata from your own WinRT components. See the [file picker guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) for a detailed configuration example.
 
 Both walkthroughs below (`AppNotificationManager` and Phi Silica) use APIs that require package identity. To unblock those APIs during development, grant your Electron dev build a temporary identity:
 
@@ -95,7 +97,7 @@ Run the app, and Windows fires the same native toast you'd get from a C#/C++ app
 
 ![Windows toast notification from an Electron app titled "test-electron-app", reading "Windows AI task running" and showing a 65% progress bar labeled "Processing with Windows AI."](./assets/electron-toast-hello-from-electron.png)
 
-Full walk-through in the [Show a notification from JavaScript](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-notification.md) guide.
+See the [Show a notification from JavaScript](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-notification.md) guide for a full walkthrough.
 
 ### Run Phi Silica on-device AI
 
@@ -128,12 +130,10 @@ try {
 }
 ```
 
-Before running, add the `systemAIModels` restricted capability to `Package.appxmanifest`:
+Before running, add this restricted capability inside the existing `<Capabilities>` element in `Package.appxmanifest`:
 
 ```xml
-<Capabilities>
-  <rescap:Capability Name="systemAIModels" />
-</Capabilities>
+<rescap:Capability Name="systemAIModels" />
 ```
 
 Then refresh debug identity:
@@ -142,11 +142,11 @@ Then refresh debug identity:
 npx winapp node add-electron-debug-identity
 ```
 
-Full walk-through in the [Call Phi Silica from JavaScript](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-phi-silica.md) guide.
-
 Running the snippet above in an Electron main process, the summary streams into the terminal chunk by chunk, followed by the final `Done:` line:
 
 ![Terminal running electron-forge start: the Phi Silica summary streams in one partial chunk at a time via op.progress(), followed by a final "Done:" line with the complete summary.](./assets/phi-silica-console.gif)
+
+See the [Call Phi Silica from JavaScript](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-phi-silica.md) guide for a full walkthrough.
 
 ## Extending to Windows SDK and beyond
 
@@ -203,11 +203,29 @@ Clipboard.flush();
   <img src="./assets/clipboard-html-demo.gif" width="720" alt="Running the snippet from the Electron main process and pasting into Word: the copied content renders as a formatted heading, bold text, and a clickable link, exactly the way the source HTML was written." />
 </p>
 
-For third-party WinRT components, or to include a package the WinApp CLI doesn't ship by default, point the entry directly at a `.winmd` file: `{ "winmdPath": "path/to/Foo.winmd", "namespace": "Foo.Bar", "classes": ["Baz"] }`. This generates the typed bindings; running the component at runtime still requires shipping its DLL and registering activation in your app's `Package.appxmanifest`.
+For third-party WinRT components, or to include a package the WinApp CLI doesn't ship by default, add an entry with a `winmdPath` to `winapp.jsBindings.additionalWinmds`:
 
-## Plain Node.js: a dev-mode quick-start
+```json
+{
+  "winapp": {
+    "jsBindings": {
+      "additionalWinmds": [
+        {
+          "winmdPath": "path/to/Foo.winmd",
+          "namespace": "Foo.Bar",
+          "classes": ["Baz"]
+        }
+      ]
+    }
+  }
+}
+```
 
-Not using Electron? These bindings work from plain Node.js too. If you just want to try a Windows API on your own machine without packaging an MSIX, set up a project and point it at your existing `node.exe`:
+This generates JavaScript wrappers and TypeScript types. At runtime, you must also deploy the component binaries and configure any activation the component requires, often in your app's `Package.appxmanifest`.
+
+## Use the projection with plain Node.js
+
+Not using Electron? The JavaScript projections also work from a plain Node.js process. If you just want to try a Windows API on your own machine without packaging an MSIX, set up a project and point it at your existing `node.exe`:
 
 ```powershell
 mkdir my-winrt-experiment; cd my-winrt-experiment
@@ -264,29 +282,29 @@ The rewritten text prints straight to your terminal. Under the hood, `winapp run
 
 For an iteration-friendly variant using a persistent execution alias (`mynode.exe app.js` from any terminal) and packaging notes, see the full [Plain Node.js dev-mode guide](https://github.com/microsoft/dynwinrt/blob/main/docs/guides/node/dev-mode.md).
 
-## How it works, briefly
+## How the projection works
 
-`dynwinrt-codegen` runs during `winapp init` / `restore` / `generate-bindings` and turns `.winmd` metadata into JavaScript wrappers with TypeScript types. No native code is generated per class. At execution time, `@microsoft/dynwinrt` invokes the underlying COM vtables directly, handling the WinRT plumbing (HSTRINGs, HRESULTs to JavaScript exceptions, async operations to Promises, collections, structs, enums, delegates) transparently.
+`dynwinrt-codegen` runs during `winapp init` / `restore` / `generate-bindings` and turns `.winmd` metadata into JavaScript wrappers with TypeScript types. No native code is generated per class. At execution time, `@microsoft/dynwinrt` invokes the underlying COM vtables directly and adapts WinRT conventions to JavaScript. For example, it converts strings and errors, makes asynchronous operations awaitable with cancellation support and progress when the API provides it, and projects generic collections, structs, enums, and event delegates.
 
-These bindings target non-UI Windows Runtime APIs such as AI, storage, notifications, networking, and similar system capabilities, not UI hosting like XAML / WinUI or WebView2.
+The projection targets non-UI Windows Runtime APIs such as AI, storage, notifications, networking, and similar system capabilities, not UI hosting like XAML / WinUI or WebView2.
 
 For the full design, see [`dynwinrt/design.md`](https://github.com/microsoft/dynwinrt/blob/main/design.md).
 
 ## Final thoughts and feedback
 
-This is public preview, and there's a lot we still want to sharpen. If a Windows API doesn't shape well in JS, a TypeScript type feels off, or a scenario you care about isn't covered yet, please file feedback. We're actively deciding what to invest in next.
+This is a public preview, and there's a lot we still want to sharpen. If a Windows API doesn't shape well in JS, a TypeScript type feels off, or a scenario you care about isn't covered yet, please file feedback. We're actively deciding what to invest in next.
 
 The WinApp CLI and the underlying projection live in **two different repos**. File feedback in whichever fits your issue:
 
-- **CLI ergonomics, bindings generation, docs, samples** → [`microsoft/winappCli`](https://github.com/microsoft/winappCli/issues)
-- **Runtime, code generator, type support, TypeScript declarations** → [`microsoft/dynwinrt`](https://github.com/microsoft/dynwinrt/issues)
+- **CLI setup, configuration, identity, docs, and samples:** [`microsoft/winappCli`](https://github.com/microsoft/winappCli/issues)
+- **Runtime, code generator, type mapping, and generated TypeScript declarations:** [`microsoft/dynwinrt`](https://github.com/microsoft/dynwinrt/issues)
 
 ### WinApp CLI
 
 - Repo and full command reference: [`microsoft/winappCli`](https://github.com/microsoft/winappCli)
 - Install: [`@microsoft/winappcli`](https://www.npmjs.com/package/@microsoft/winappcli) on npm
 - Electron getting-started guides: [setup](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/setup.md) · [file picker](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) · [notification](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-notification.md) · [Phi Silica](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-phi-silica.md) · [WinML](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-winml.md)
-- Debug identity for Electron: [Setup guide → Understanding Debug Identity](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/setup.md#step-5-understanding-debug-identity)
+- Debug identity for Electron: [Understanding Debug Identity in the setup guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/setup.md#step-5-understanding-debug-identity)
 
 ### dynwinrt (the projection itself)
 
