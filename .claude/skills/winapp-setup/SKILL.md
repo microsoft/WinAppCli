@@ -79,6 +79,22 @@ winapp restore ./my-project
 
 Use `restore` when you clone a repo that already has `winapp.yaml` but no `.winapp/` folder.
 
+### Private or custom NuGet feeds
+
+`init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard `nuget.config` hierarchy (project, user, and machine level). To restore the SDK packages from an internal feed or mirror, add it under `<packageSources>`; winapp queries every enabled source (and picks the highest listed version for `init`/`update`). To use *only* your feed, `<clear />` the inherited sources first:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="contoso" value="https://pkgs.dev.azure.com/contoso/_packaging/winsdk-mirror/nuget/v3/index.json" />
+  </packageSources>
+</configuration>
+```
+
+Authentication uses credentials from `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins automatically — interactive prompts only appear on interactive terminals, so CI relies on pre-configured/environment credentials. The package cache location follows `NUGET_PACKAGES` / `globalPackagesFolder`, falling back to `~/.nuget/packages`.
+
 ### Update SDK versions
 
 ```powershell
@@ -159,6 +175,8 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 | "winapp.yaml not found" | Running `restore`/`update` without config | Run `winapp init` first, or ensure you're in the right directory |
 | "Directory not found" | Target directory doesn't exist | Create the directory first or check the path |
 | SDK download fails | Network issue or firewall | Ensure internet access; check proxy settings |
+| SDK download fails with 401/403 | Private feed requires authentication | Store credentials in `nuget.config` (`<packageSourceCredentials>`) or configure a credential provider / feed environment credentials before running in CI |
+| SDK package not found on private feed | Feed doesn't mirror the SDK packages, or the wrong source is configured | Ensure the feed serves `Microsoft.WindowsAppSDK`, `Microsoft.Windows.SDK.CPP`, `Microsoft.Windows.CppWinRT`, etc.; keep `nuget.org` enabled if the feed only supplements it |
 | `init` prompts unexpectedly in CI | Missing `--use-defaults` flag | Add `--use-defaults` to skip all prompts (note: non-interactive shells are now auto-detected) |
 
 

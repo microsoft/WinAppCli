@@ -2,21 +2,86 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
-using System.IO.Compression;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Xml;
+using NuGet.Common;
+using NuGet.Configuration;
+using NuGet.Credentials;
+using NuGet.Packaging;
+using NuGet.Packaging.Core;
+using NuGet.Packaging.Signing;
+using NuGet.Protocol;
+using NuGet.Protocol.Core.Types;
+using NuGet.Versioning;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
-internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
+/// <summary>
+/// Wraps the official NuGet client libraries (NuGet.Protocol / NuGet.Packaging /
+/// NuGet.Configuration). Package sources, credentials and the global packages folder are resolved
+/// from the user's <c>nuget.config</c> hierarchy (rooted at the current working directory), so
+/// private/custom feeds and mirrors are honored when restoring SDK packages.
+/// </summary>
+internal class NugetService(
+    IWinappDirectoryService winappDirectoryService,
+    ICurrentDirectoryProvider currentDirectoryProvider) : INugetService
 {
-    private static readonly HttpClient Http = new();
-    private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
-    private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
+    private static readonly ILogger Logger = NullLogger.Instance;
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
+    private static int _credentialServiceInitialized;
+
+    private readonly Lazy<ISettings> _settings = new(() =>
+        NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
+
+    private SourceRepositoryProvider? _cachedSourceRepositoryProvider;
+
+    private ISettings Settings => _settings.Value;
+
+    private IEnumerable<SourceRepository> GetRepositories()
+    {
+        _cachedSourceRepositoryProvider ??= new SourceRepositoryProvider(
+            new PackageSourceProvider(Settings),
+            Repository.Provider.GetCoreV3());
+        return _cachedSourceRepositoryProvider.GetRepositories();
+    }
+
+    private static readonly string[] IgnoredDependencyPrefixes =
+    [
+        "NETStandard.",
+        "runtime.",
+        "System.",
+        "Microsoft.Bcl.",
+        "Microsoft.NETCore.",
+    ];
+
+    public static readonly string[] SDK_PACKAGES =
+    [
+        "Microsoft.Windows.CppWinRT",
+        BuildToolsService.WINAPP_SDK_PACKAGE,
+        "Microsoft.Windows.ImplementationLibrary",
+        BuildToolsService.CPP_SDK_PACKAGE,
+        $"{BuildToolsService.CPP_SDK_PACKAGE}.x64",
+        $"{BuildToolsService.CPP_SDK_PACKAGE}.arm64"
+    ];
+
+    /// <summary>
+    /// Configures NuGet's default credential service so authenticated (private) feeds work using
+    /// credentials stored in nuget.config, environment-based credentials, or credential-provider
+    /// plugins. Interactive prompting is only enabled for real interactive terminals.
+    /// </summary>
+    private static void EnsureCredentialService()
+    {
+        if (Interlocked.Exchange(ref _credentialServiceInitialized, 1) != 0)
+        {
+            return;
+        }
+
+        var nonInteractive = Console.IsInputRedirected
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"))
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD"));
+
+        DefaultCredentialServiceUtility.SetupDefaultCredentialService(Logger, nonInteractive);
+    }
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
@@ -32,21 +97,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             return overrideDir;
         }
 
-        // NUGET_PACKAGES env var takes priority
-        var envPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
-        if (!string.IsNullOrEmpty(envPath))
-        {
-            var envDir = new DirectoryInfo(envPath);
-            if (!envDir.Exists)
-            {
-                envDir.Create();
-            }
-            return envDir;
-        }
-
-        // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
+        // Resolve the global packages folder from the user's NuGet configuration. This honors the
+        // NUGET_PACKAGES environment variable and the `globalPackagesFolder` setting in nuget.config,
+        // falling back to %USERPROFILE%/.nuget/packages.
+        var globalPackagesFolder = SettingsUtility.GetGlobalPackagesFolder(Settings);
+        var nugetDir = new DirectoryInfo(globalPackagesFolder);
         if (!nugetDir.Exists)
         {
             nugetDir.Create();
@@ -70,36 +125,19 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
     }
 
-    private static readonly string[] IgnoredDependencyPrefixes =
-    [
-        "NETStandard.",
-        "runtime.",
-        "System.",
-        "Microsoft.Bcl.",
-        "Microsoft.NETCore.",
-    ];
-
-    public static readonly string[] SDK_PACKAGES =
-    [
-        "Microsoft.Windows.CppWinRT",
-        BuildToolsService.WINAPP_SDK_PACKAGE,
-        "Microsoft.Windows.ImplementationLibrary",
-        BuildToolsService.CPP_SDK_PACKAGE,
-        $"{BuildToolsService.CPP_SDK_PACKAGE}.x64",
-        $"{BuildToolsService.CPP_SDK_PACKAGE}.arm64"
-    ];
-
     public async Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
+        EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        await InstallPackageRecursiveAsync(package, version, packages, taskContext, cancellationToken);
+        using var cacheContext = new SourceCacheContext();
+        await InstallPackageRecursiveAsync(package, version, packages, taskContext, cacheContext, cancellationToken);
         return packages;
     }
 
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -115,38 +153,99 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {version} already present");
             installed[package] = version;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cacheContext, cancellationToken);
             return;
         }
 
-        // Download .nupkg from the NuGet flat container API
-        var lowerId = package.ToLowerInvariant();
-        var lowerVersion = version.ToLowerInvariant();
-        var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
-
-        using var resp = await Http.GetAsync(url, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
+        // Download and extract the package from the user's configured NuGet sources into the
+        // global packages folder (using the standard NuGet on-disk layout).
+        var downloaded = await DownloadPackageAsync(package, version, cacheContext, cancellationToken);
+        if (!downloaded)
         {
-            throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
+            throw new InvalidOperationException($"Failed to download {package} {version} from the configured NuGet sources");
         }
-
-        // Extract to the NuGet global cache location
-        Directory.CreateDirectory(packageDir.FullName);
-
-        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        ZipFile.ExtractToDirectory(stream, packageDir.FullName, overwriteFiles: true);
 
         installed[package] = version;
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {version}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cacheContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// Downloads a package from the first configured source that has it and extracts it into the
+    /// global packages folder. Returns false if no source could provide the package.
+    /// </summary>
+    private async Task<bool> DownloadPackageAsync(string package, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    {
+        var identity = new PackageIdentity(package, NuGetVersion.Parse(version));
+        var globalPackagesFolder = GetNuGetGlobalPackagesDir().FullName;
+        var clientPolicyContext = ClientPolicyContext.GetClientPolicy(Settings, Logger);
+
+        foreach (var repo in GetRepositories())
+        {
+            var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+            if (byIdResource is null)
+            {
+                continue;
+            }
+
+            // Buffer to a temp file rather than memory: SDK packages (e.g. Windows App SDK) are large.
+            var tempFile = Path.GetTempFileName();
+            try
+            {
+                bool copied;
+                await using (var fileStream = File.Create(tempFile))
+                {
+                    try
+                    {
+                        copied = await byIdResource.CopyNupkgToStreamAsync(identity.Id, identity.Version, fileStream, cacheContext, Logger, cancellationToken);
+                    }
+                    catch (FatalProtocolException)
+                    {
+                        // Source unreachable or does not have this package; try the next source.
+                        continue;
+                    }
+                }
+
+                if (!copied)
+                {
+                    continue;
+                }
+
+                await using var readStream = File.OpenRead(tempFile);
+                await GlobalPackagesFolderUtility.AddPackageAsync(
+                    source: repo.PackageSource.Source,
+                    packageIdentity: identity,
+                    packageStream: readStream,
+                    globalPackagesFolder: globalPackagesFolder,
+                    parentId: Guid.Empty,
+                    clientPolicyContext: clientPolicyContext,
+                    logger: Logger,
+                    token: cancellationToken);
+
+                return true;
+            }
+            finally
+            {
+                try
+                {
+                    File.Delete(tempFile);
+                }
+                catch
+                {
+                    // Best-effort cleanup of the temp download.
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         try
         {
@@ -158,10 +257,10 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                     continue;
                 }
 
-                var depVersion = ParseMinimumVersion(depVersionRange);
+                var depVersion = depVersionRange.MinVersion?.ToNormalizedString();
                 if (!string.IsNullOrEmpty(depVersion))
                 {
-                    await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cancellationToken);
+                    await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cacheContext, cancellationToken);
                 }
             }
         }
@@ -175,10 +274,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
 
     /// <summary>
     /// Reads dependencies from the .nuspec file embedded in an extracted NuGet package.
+    /// Returns every declared dependency across all target-framework groups (first occurrence wins).
     /// </summary>
-    private static Dictionary<string, string> ReadDependenciesFromNuspec(DirectoryInfo packageDir, string packageName)
+    private static Dictionary<string, VersionRange> ReadDependenciesFromNuspec(DirectoryInfo packageDir, string packageName)
     {
-        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var dependencies = new Dictionary<string, VersionRange>(StringComparer.OrdinalIgnoreCase);
 
         // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec
         var nuspecPath = Path.Combine(packageDir.FullName, $"{packageName.ToLowerInvariant()}.nuspec");
@@ -193,27 +293,14 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             nuspecPath = nuspecFiles[0];
         }
 
-        var doc = new XmlDocument();
-        doc.Load(nuspecPath);
-
-        var nsMgr = new XmlNamespaceManager(doc.NameTable);
-        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
-        if (!string.IsNullOrEmpty(ns))
+        var nuspec = new NuspecReader(nuspecPath);
+        foreach (var group in nuspec.GetDependencyGroups())
         {
-            nsMgr.AddNamespace("ns", ns);
-        }
-
-        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
-        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
-        if (depNodes != null)
-        {
-            foreach (XmlNode node in depNodes)
+            foreach (var dependency in group.Packages)
             {
-                var depId = node.Attributes?["id"]?.Value;
-                var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                if (!string.IsNullOrEmpty(dependency.Id) && dependency.VersionRange != null)
                 {
-                    dependencies.TryAdd(depId, depVersion);
+                    dependencies.TryAdd(dependency.Id, dependency.VersionRange);
                 }
             }
         }
@@ -297,91 +384,55 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     }
 
     /// <summary>
-    /// Fetches all listed (non-unlisted) versions of a package from the NuGet registration API.
-    /// The flat container index does not distinguish between listed and unlisted versions,
-    /// so we use the registration endpoint which includes a "listed" property.
+    /// Fetches all listed (non-unlisted) versions of a package, aggregated across every enabled
+    /// package source. Unlisted versions are excluded so they are never selected as "latest".
     /// </summary>
-    private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
+    private async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
-        var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await Http.GetAsync(url, cancellationToken);
-        resp.EnsureSuccessStatusCode();
-        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        EnsureCredentialService();
 
-        var list = new List<string>();
+        var versions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Exception? lastError = null;
+        using var cacheContext = new SourceCacheContext();
 
-        // The registration index contains "items" (pages). Each page may have inline "items"
-        // or require a separate fetch via its "@id" URL.
-        if (!doc.RootElement.TryGetProperty("items", out var pages) || pages.ValueKind != JsonValueKind.Array)
+        foreach (var repo in GetRepositories())
         {
-            throw new InvalidOperationException($"No versions found for {packageName}");
-        }
-
-        foreach (var page in pages.EnumerateArray())
-        {
-            JsonElement leafItems;
-
-            if (page.TryGetProperty("items", out var inlineItems) && inlineItems.ValueKind == JsonValueKind.Array)
+            var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+            if (metadataResource is null)
             {
-                leafItems = inlineItems;
-            }
-            else
-            {
-                // Page items are not inlined; fetch the page by its @id
-                if (!page.TryGetProperty("@id", out var pageIdElem))
-                {
-                    continue;
-                }
-
-                var pageUrl = pageIdElem.GetString();
-                if (string.IsNullOrEmpty(pageUrl))
-                {
-                    continue;
-                }
-
-                using var pageResp = await Http.GetAsync(pageUrl, cancellationToken);
-                pageResp.EnsureSuccessStatusCode();
-                using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
-                using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
-
-                if (!pageDoc.RootElement.TryGetProperty("items", out var fetchedItems) || fetchedItems.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                leafItems = fetchedItems.Clone();
+                continue;
             }
 
-            foreach (var leaf in leafItems.EnumerateArray())
+            try
             {
-                if (!leaf.TryGetProperty("catalogEntry", out var catalogEntry))
-                {
-                    continue;
-                }
+                var metadata = await metadataResource.GetMetadataAsync(
+                    packageName,
+                    includePrerelease: true,
+                    includeUnlisted: false,
+                    cacheContext,
+                    Logger,
+                    cancellationToken);
 
-                // Skip unlisted versions
-                if (catalogEntry.TryGetProperty("listed", out var listedProp) && !listedProp.GetBoolean())
+                foreach (var package in metadata)
                 {
-                    continue;
+                    versions.Add(package.Identity.Version.ToNormalizedString());
                 }
-
-                if (catalogEntry.TryGetProperty("version", out var versionProp))
-                {
-                    var v = versionProp.GetString();
-                    if (!string.IsNullOrWhiteSpace(v))
-                    {
-                        list.Add(v);
-                    }
-                }
+            }
+            catch (Exception ex)
+            {
+                // A single unreachable/unauthorized source should not prevent other sources from
+                // resolving the package. Remember the error in case no source yields a version.
+                lastError = ex;
             }
         }
 
-        return list;
+        if (versions.Count == 0 && lastError != null)
+        {
+            throw new InvalidOperationException($"No versions found for {packageName}", lastError);
+        }
+
+        return [.. versions];
     }
-
-    [GeneratedRegex(@"[\[\]\(\)]")]
-    private static partial Regex BracketsAndParenthesesRegex();
 
     /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
@@ -392,7 +443,9 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);
         }
 
-        var directDeps = await FetchDirectDependenciesAsync(packageName, version, cancellationToken);
+        EnsureCredentialService();
+        using var cacheContext = new SourceCacheContext();
+        var directDeps = await FetchDirectDependenciesAsync(packageName, version, cacheContext, cancellationToken);
 
         // Recursively resolve transitive dependencies
         var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
@@ -409,49 +462,56 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nugetVersion = NuGetVersion.Parse(version);
 
-        // Fetch the .nuspec from NuGet flat container API
-        var id = packageName.ToLowerInvariant();
-        var ver = version.ToLowerInvariant();
-        var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
-
-        using var resp = await Http.GetAsync(nuspecUrl, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
+        foreach (var repo in GetRepositories())
         {
-            return dependencies;
-        }
-
-        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        var doc = new XmlDocument();
-        doc.Load(stream);
-
-        // The nuspec uses a default namespace; we need a namespace manager
-        var nsMgr = new XmlNamespaceManager(doc.NameTable);
-        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
-        if (!string.IsNullOrEmpty(ns))
-        {
-            nsMgr.AddNamespace("ns", ns);
-        }
-
-        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
-        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
-        if (depNodes != null)
-        {
-            foreach (XmlNode node in depNodes)
+            var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+            if (byIdResource is null)
             {
-                var depId = node.Attributes?["id"]?.Value;
-                var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion)
-                    && !IgnoredDependencyPrefixes.Any(p => depId.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            }
+
+            FindPackageByIdDependencyInfo? dependencyInfo;
+            try
+            {
+                dependencyInfo = await byIdResource.GetDependencyInfoAsync(packageName, nugetVersion, cacheContext, Logger, cancellationToken);
+            }
+            catch (FatalProtocolException)
+            {
+                // Source unreachable; try the next one.
+                continue;
+            }
+
+            if (dependencyInfo is null)
+            {
+                // This source does not have the requested version; try the next one.
+                continue;
+            }
+
+            foreach (var group in dependencyInfo.DependencyGroups)
+            {
+                foreach (var dependency in group.Packages)
                 {
-                    // Remove any brackets or parentheses from the version string
-                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
-                    dependencies.TryAdd(depId, cleanedVersion);
+                    if (string.IsNullOrEmpty(dependency.Id)
+                        || IgnoredDependencyPrefixes.Any(p => dependency.Id.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    var minVersion = dependency.VersionRange?.MinVersion?.ToNormalizedString();
+                    if (!string.IsNullOrEmpty(minVersion))
+                    {
+                        dependencies.TryAdd(dependency.Id, minVersion);
+                    }
                 }
             }
+
+            // Dependencies resolved from the first source that has the package.
+            return dependencies;
         }
 
         return dependencies;
