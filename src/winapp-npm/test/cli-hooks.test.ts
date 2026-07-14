@@ -12,6 +12,8 @@ import {
   makeIndentedLog,
   printInitWrapperOnlyHelp,
   handleGenerateBindings,
+  formatJsBindingsImportsHints,
+  planJsBindingsImportsHints,
 } from '../src/jsbindings/cli-hooks';
 
 // Shorthand: build a default `false` set, override with `overrides`.
@@ -99,6 +101,74 @@ test('printInitWrapperOnlyHelp documents --add-js-bindings', () => {
   const joined = captured.join('\n');
   assert.match(joined, /--add-js-bindings/);
   assert.match(joined, /JS bindings/);
+});
+
+test('formatJsBindingsImportsHints emits the added-hint when the map was written', () => {
+  const hints = formatJsBindingsImportsHints({ outcome: 'added', diverged: [] });
+  assert.deepEqual(hints, ['💡 Added "#winapp/bindings" package imports to package.json.']);
+});
+
+test('formatJsBindingsImportsHints is silent when the map was already present', () => {
+  const hints = formatJsBindingsImportsHints({ outcome: 'unchanged', diverged: [] });
+  assert.deepEqual(hints, []);
+});
+
+test('formatJsBindingsImportsHints warns per divergent alias without overwriting', () => {
+  const hints = formatJsBindingsImportsHints({
+    outcome: 'unchanged',
+    diverged: ['#winapp/bindings', '#winapp/bindings/*'],
+  });
+  assert.equal(hints.length, 2);
+  for (const hint of hints) {
+    assert.match(hint, /differs from the winapp default/);
+    assert.match(hint, /Delete it and rerun `npx winapp init --add-js-bindings`/);
+  }
+  assert.match(hints[0], /"#winapp\/bindings"/);
+  assert.match(hints[1], /"#winapp\/bindings\/\*"/);
+});
+
+test('formatJsBindingsImportsHints combines added + divergent warnings', () => {
+  const hints = formatJsBindingsImportsHints({ outcome: 'added', diverged: ['#winapp/bindings'] });
+  assert.equal(hints.length, 2);
+  assert.match(hints[0], /Added "#winapp\/bindings" package imports/);
+  assert.match(hints[1], /differs from the winapp default/);
+});
+
+test('planJsBindingsImportsHints suppresses configured hints when quiet', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: [] } },
+    { quiet: true }
+  );
+  assert.deepEqual(hints, []);
+});
+
+test('planJsBindingsImportsHints suppresses unsupported hints when quiet', () => {
+  const hints = planJsBindingsImportsHints({ kind: 'unsupported' }, { quiet: true });
+  assert.deepEqual(hints, []);
+});
+
+test('planJsBindingsImportsHints emits the added hint for configured imports', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: [] } },
+    { quiet: false }
+  );
+  assert.deepEqual(hints, ['💡 Added "#winapp/bindings" package imports to package.json.']);
+});
+
+test('planJsBindingsImportsHints combines configured added hint with divergence warning', () => {
+  const hints = planJsBindingsImportsHints(
+    { kind: 'configured', result: { outcome: 'added', diverged: ['#winapp/bindings'] } },
+    { quiet: false }
+  );
+  assert.equal(hints.length, 2);
+  assert.match(hints[0], /Added "#winapp\/bindings" package imports/);
+  assert.match(hints[1], /differs from the winapp default/);
+});
+
+test('planJsBindingsImportsHints emits an upgrade hint when package imports are unsupported', () => {
+  const hints = planJsBindingsImportsHints({ kind: 'unsupported' }, { quiet: false });
+  assert.equal(hints.length, 1);
+  assert.match(hints[0], /npm i -D @microsoft\/dynwinrt-codegen@latest && npx winapp init --add-js-bindings/);
 });
 
 test('handleGenerateBindings --help prints command help (no fs probe, no exit)', async () => {

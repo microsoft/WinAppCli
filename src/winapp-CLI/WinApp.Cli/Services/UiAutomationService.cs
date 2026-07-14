@@ -788,41 +788,11 @@ return Task.FromResult<UiElement?>(null);
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
         }
 
-        try
-        {
-            var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
-            unsafe
-            {
-                var bstrPtr = Marshal.StringToBSTR(text);
-                try
-                {
-                    pattern.SetValue(new Windows.Win32.Foundation.BSTR((char*)bstrPtr));
-                }
-                finally
-                {
-                    Marshal.FreeBSTR(bstrPtr);
-                }
-            }
-            return Task.CompletedTask;
-        }
-        catch
-        {
-            // ValuePattern not supported — try RangeValuePattern for sliders/progress bars
-            if (double.TryParse(text, out var numericValue))
-            {
-                try
-                {
-                    var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
-                    rangePattern.SetValue(numericValue);
-                    return Task.CompletedTask;
-                }
-                catch { }
-            }
-
-            throw new InvalidOperationException(
-                $"Element {element.Id} ({element.Type}) does not support ValuePattern or RangeValuePattern. " +
-                "Only editable controls (TextBox, ComboBox, Slider, etc.) support set-value.");
-        }
+        // The fallback ordering (ValuePattern → RangeValuePattern → LegacyIAccessible/put_accValue,
+        // then a send-keys hint) lives in the pure, unit-tested ValueSetter; ComValueSetStrategy
+        // supplies the live UIA COM mechanics.
+        ValueSetter.Apply(new ComValueSetStrategy(comElement, _logger), element, text);
+        return Task.CompletedTask;
     }
 
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)

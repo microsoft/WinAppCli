@@ -11,19 +11,19 @@ test('classifyPackage defaults unknown packages to emit', () => {
   assert.equal(classifyPackage('Some.Vendor.Package'), 'emit');
 });
 
-test('classifyPackage marks SDK.CPP and InteractiveExperiences as refOnly', () => {
+test('classifyPackage marks SDK.CPP, InteractiveExperiences, and WinUI as refOnly', () => {
   assert.equal(classifyPackage('Microsoft.Windows.SDK.CPP'), 'refOnly');
   assert.equal(classifyPackage('Microsoft.WindowsAppSDK.InteractiveExperiences'), 'refOnly');
+  assert.equal(classifyPackage('Microsoft.WindowsAppSDK.WinUI'), 'refOnly');
 });
 
-test('classifyPackage skips WinUI and WebView2 packages', () => {
-  assert.equal(classifyPackage('Microsoft.WindowsAppSDK.WinUI'), 'skip');
+test('classifyPackage skips WebView2 packages', () => {
   assert.equal(classifyPackage('Microsoft.Web.WebView2'), 'skip');
 });
 
 test('classifyPackage is case-insensitive', () => {
   assert.equal(classifyPackage('microsoft.windows.sdk.cpp'), 'refOnly');
-  assert.equal(classifyPackage('microsoft.windowsappsdk.winui'), 'skip');
+  assert.equal(classifyPackage('microsoft.windowsappsdk.winui'), 'refOnly');
   assert.equal(classifyPackage('MICROSOFT.WEB.WEBVIEW2'), 'skip');
   assert.equal(classifyPackage('microsoft.windowsappsdk.interactiveexperiences'), 'refOnly');
 });
@@ -43,8 +43,8 @@ test('partitionPackageWinmds buckets winmds by package category', () => {
   ]);
 
   assert.deepEqual(result.emit, ['a.winmd', 'b.winmd']);
-  assert.deepEqual(result.refOnly, ['ie.winmd', 'sdk.winmd']);
-  assert.deepEqual(result.skipped, ['winui.winmd', 'wv2.winmd']);
+  assert.deepEqual(result.refOnly, ['ie.winmd', 'sdk.winmd', 'winui.winmd']);
+  assert.deepEqual(result.skipped, ['wv2.winmd']);
 });
 
 test('partitionPackageWinmds ignores packages with no name or no winmds', () => {

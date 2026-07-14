@@ -28,7 +28,9 @@ npx winapp node add-electron-debug-identity
 
 ## Step 2: Call Phi Silica from the Electron main process
 
-Import the generated bindings from `.winapp/bindings/index.js`, create a `TextSummarizer`, and call it at the end of `createWindow()` to verify everything works:
+Import the generated bindings through `#winapp/bindings`, create a `TextSummarizer`, and call it at the end of `createWindow()` to verify everything works:
+
+> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`** — see [Get started with Electron](index.md#2-call-windows-apis-from-javascript) for older-project fallbacks.
 
 ```js
 // src/index.js (Electron main, CommonJS)
@@ -36,7 +38,7 @@ const {
   AIFeatureReadyState,
   LanguageModel,
   TextSummarizer,
-} = require('../.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 const callPhiSilica = async () => {
   console.log('Summarizing with Phi Silica:');

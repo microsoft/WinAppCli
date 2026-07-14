@@ -8,6 +8,6 @@
     <PackageVersion Include="Microsoft.JavaScript.NodeApi" Version="0.9.17" />
     <PackageVersion Include="Microsoft.JavaScript.NodeApi.Generator" Version="0.9.17" />
 
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.0.250930001-experimental1" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
   </ItemGroup>
 </Project>
