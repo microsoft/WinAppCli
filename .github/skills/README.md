@@ -15,6 +15,7 @@ repo-specific developer tasks like reviewing a PR before push.
 | Skill | Purpose |
 |-------|---------|
 | [`pr-review/`](pr-review/SKILL.md) | Multi-dimensional review of a PR / feature branch diff (security, correctness, CLI UX, alternative solutions, tests, docs/samples, packaging, multi-model cross-check). Reports findings to stdout; does not apply fixes. |
+| [`spec-review/`](spec-review/SKILL.md) | Pre-code, decision-oriented review of a spec or proposed feature against the real codebase (necessity & scope, approach & alternatives, feasibility vs reality, risks/unknowns/edge cases, DX & user impact, multi-model cross-check). Reports a proceed / proceed-with-changes / reconsider recommendation to stdout; does not change code or the spec. |
 
 ## Conventions
 
