@@ -182,14 +182,3 @@ steps:
   inputs:
     path: '$(Build.ArtifactStagingDirectory)/nuget-packages'
     artifactName: nuget-packages
-- task: CopyFiles@2
-  displayName: Copy Artifacts - VS Code Extension
-  inputs:
-    sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/'
-    contents: '*.vsix'
-    targetFolder: '$(Build.ArtifactStagingDirectory)/vscode-extension'
-- task: 1ES.PublishPipelineArtifact@1
-  displayName: Upload Artifact - VS Code Extension
-  inputs:
-    path: '$(Build.ArtifactStagingDirectory)/vscode-extension'
-    artifactName: vscode-extension

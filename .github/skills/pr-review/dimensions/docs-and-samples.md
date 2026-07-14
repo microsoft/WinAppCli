@@ -56,9 +56,6 @@ must be kept in sync when public-facing features change:
   command must appear in both.
 - **Critical-rules updates.** When a behavior changes that contradicts a rule
   listed in `winapp.agent.md` "Critical rules", that rule needs updating.
-- **VSC extension labels.** New VS Code commands should follow the
-  `"category": "WinApp"` convention and avoid `"WinApp:"` prefixes in titles
-  (see repo memory).
 
 ## What to drop
 
