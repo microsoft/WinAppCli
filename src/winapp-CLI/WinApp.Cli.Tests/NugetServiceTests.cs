@@ -899,5 +899,82 @@ public class NugetServiceTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_PackageMatchesNoMappingPattern_ReportsMissingMapping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // Mapping is enabled and only maps Contoso.* -> alpha; the requested package matches no
+            // pattern, so no source is eligible. The error must say the package isn't mapped (not that a
+            // source is disabled).
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="alpha">
+                      <package pattern="Contoso.*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Unmapped.Package", "1.0.0", TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "no <packageSourceMapping> pattern maps 'Unmapped.Package'", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_PackageMappedToDisabledSource_ReportsUnusableMappedSource()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // The package IS mapped, but to a source name that no enabled <packageSources> entry provides
+            // (disabled/misspelled/missing). The eligible set is empty for a different reason than "no
+            // mapping", so the error must point at fixing the mapped source, not at adding a mapping.
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="phantom">
+                      <package pattern="Winapp.*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Winapp.Thing", "1.0.0", TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "mapped to source(s) [phantom]", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "not enabled/configured", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     #endregion
 }

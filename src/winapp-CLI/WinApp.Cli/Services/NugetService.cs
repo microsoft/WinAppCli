@@ -89,9 +89,10 @@ internal class NugetService(
     }
 
     /// <summary>
-    /// Explains why no source was eligible to serve <paramref name="packageId"/>, distinguishing
-    /// "no sources are configured/enabled at all" from "<c>&lt;packageSourceMapping&gt;</c> excludes this
-    /// package", so the error points the user at the right nuget.config section.
+    /// Explains why no source was eligible to serve <paramref name="packageId"/>, distinguishing the
+    /// distinct causes — no sources configured at all, the package matching no
+    /// <c>&lt;packageSourceMapping&gt;</c> pattern, or the package being mapped to a source that is
+    /// disabled/missing — so the error points the user at the right nuget.config fix.
     /// </summary>
     private string DescribeNoEligibleSources(string packageId)
     {
@@ -102,9 +103,17 @@ internal class NugetService(
             return "no enabled NuGet sources are configured (add or enable a source in the <packageSources> section of your nuget.config)";
         }
 
-        // Sources exist, so the only way to reach an empty eligible set is that packageSourceMapping is
-        // enabled and maps this package to none of them.
-        return $"no configured NuGet source is mapped to '{packageId}' (check <packageSourceMapping> in nuget.config)";
+        // Sources exist, so packageSourceMapping is what pruned them. Separate "the package matches no
+        // mapping pattern" from "the package is mapped, but to a source that isn't enabled/configured"
+        // (e.g. the mapped key names a disabled or misspelled source) — the fixes are different.
+        var mappedSources = PackageSourceMapping.GetConfiguredPackageSources(packageId);
+        if (mappedSources is null || mappedSources.Count == 0)
+        {
+            return $"no <packageSourceMapping> pattern maps '{packageId}' to a source (add a matching entry in nuget.config)";
+        }
+
+        var mapped = string.Join(", ", mappedSources);
+        return $"'{packageId}' is mapped to source(s) [{mapped}] that are not enabled/configured (enable or fix the mapped source in the <packageSources> section of your nuget.config)";
     }
 
     private static readonly string[] IgnoredDependencyPrefixes =
