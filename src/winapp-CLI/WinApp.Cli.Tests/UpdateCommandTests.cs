@@ -25,16 +25,20 @@ public class UpdateCommandTests : BaseCommandTests
 {
     private FakeNugetService _fakeNuget = null!;
     private RecordingPackageInstallationService _installer = null!;
+    private StubBuildToolsService _buildTools = null!;
+    private StubWorkspaceSetupService _workspace = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeNuget = new FakeNugetService();
         _installer = new RecordingPackageInstallationService();
+        _buildTools = new StubBuildToolsService(_tempDirectory);
+        _workspace = new StubWorkspaceSetupService();
         return services
             .AddSingleton<INugetService>(_fakeNuget)
             .AddSingleton<IPackageInstallationService>(_installer)
-            .AddSingleton<IBuildToolsService>(new StubBuildToolsService(_tempDirectory))
-            .AddSingleton<IWorkspaceSetupService>(new StubWorkspaceSetupService());
+            .AddSingleton<IBuildToolsService>(_buildTools)
+            .AddSingleton<IWorkspaceSetupService>(_workspace);
     }
 
     private const string PackageName = "Test.Pkg";
@@ -145,6 +149,67 @@ public class UpdateCommandTests : BaseCommandTests
         Assert.IsEmpty(_installer.InstalledPackages, "A cancelled update must not reinstall packages.");
     }
 
+    [TestMethod]
+    public void ShortDescription_SummarizesUpdatingYaml()
+    {
+        Assert.AreEqual("Update packages in winapp.yaml", new UpdateCommand().ShortDescription);
+    }
+
+    [TestMethod]
+    public async Task Update_ConfigExistsButHasNoPackages_SkipsPackageWorkAndSucceeds()
+    {
+        // winapp.yaml is present but pins nothing: the package-update loop is skipped entirely and the
+        // command proceeds straight to build-tool / runtime work, succeeding without installing anything.
+        _configService.Save(new WinappConfig());
+        Assert.IsTrue(_configService.Exists(), "Precondition: an (empty) winapp.yaml must exist.");
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsEmpty(_installer.InstalledPackages, "An empty config must not install any packages.");
+        Assert.IsEmpty(_fakeNuget.QueriedPackages, "An empty config must not query any latest versions.");
+    }
+
+    [TestMethod]
+    public async Task Update_NoConfigFile_SkipsPackageStepAndStillProcessesBuildTools()
+    {
+        // No winapp.yaml at all: the package step is skipped, but build-tool and runtime work still run and
+        // the command succeeds.
+        Assert.IsFalse(_configService.Exists(), "Precondition: there must be no winapp.yaml.");
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsEmpty(_installer.InstalledPackages, "With no config, nothing is installed.");
+    }
+
+    [TestMethod]
+    public async Task Update_BuildToolsUnavailable_ExitsNonZero()
+    {
+        // EnsureBuildToolsAsync returning null means the build tools could not be installed/updated; the
+        // command must fail with a non-zero exit code rather than report success.
+        _buildTools.BuildToolsDir = null;
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(1, exitCode, "A null build-tools path must fail the command.");
+    }
+
+    [TestMethod]
+    public async Task Update_WindowsAppSdkMsixDirectoryFound_InstallsRuntime()
+    {
+        // When a Windows App SDK MSIX directory is present, the update flow must install the Windows App
+        // Runtime from it before completing successfully.
+        var msixDir = _tempDirectory.CreateSubdirectory("msix");
+        _workspace.MsixDir = msixDir;
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_workspace.RuntimeInstalled, "A found MSIX directory must trigger the Windows App Runtime install.");
+        Assert.AreEqual(msixDir.FullName, _workspace.RuntimeInstallDir?.FullName, "The runtime must be installed from the discovered MSIX directory.");
+    }
+
     /// <summary>
     /// Records which packages were passed to <see cref="InstallPackagesAsync"/> so tests can assert whether
     /// an update reinstalled anything. All other members are unreachable in the update flow and throw.
@@ -173,13 +238,15 @@ public class UpdateCommandTests : BaseCommandTests
     }
 
     /// <summary>
-    /// Returns an existing directory from <see cref="EnsureBuildToolsAsync"/> so the handler treats build
-    /// tools as available (a null return makes the handler fail with exit code 1). Other members throw.
+    /// Returns a configurable directory from <see cref="EnsureBuildToolsAsync"/>: a non-null value makes the
+    /// handler treat build tools as available, a null value makes it fail with exit code 1. Other members throw.
     /// </summary>
-    private sealed class StubBuildToolsService(DirectoryInfo buildToolsDir) : IBuildToolsService
+    private sealed class StubBuildToolsService(DirectoryInfo? buildToolsDir) : IBuildToolsService
     {
+        public DirectoryInfo? BuildToolsDir { get; set; } = buildToolsDir;
+
         public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-            => Task.FromResult<DirectoryInfo?>(buildToolsDir);
+            => Task.FromResult(BuildToolsDir);
 
         public FileInfo? GetBuildToolPath(string toolName) => throw new NotSupportedException();
 
@@ -191,17 +258,27 @@ public class UpdateCommandTests : BaseCommandTests
     }
 
     /// <summary>
-    /// Reports no Windows App SDK MSIX directory so the update flow skips runtime installation. The
-    /// runtime-install members are unreachable and throw.
+    /// Reports a configurable Windows App SDK MSIX directory (null by default, so the update flow skips
+    /// runtime installation) and records the runtime install when one is triggered.
     /// </summary>
     private sealed class StubWorkspaceSetupService : IWorkspaceSetupService
     {
-        public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null) => null;
+        public DirectoryInfo? MsixDir { get; set; }
+
+        public bool RuntimeInstalled { get; private set; }
+
+        public DirectoryInfo? RuntimeInstallDir { get; private set; }
+
+        public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null) => MsixDir;
 
         public Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
-            => throw new NotSupportedException();
+        {
+            RuntimeInstalled = true;
+            RuntimeInstallDir = msixDir;
+            return Task.FromResult((1, 0));
+        }
     }
 }

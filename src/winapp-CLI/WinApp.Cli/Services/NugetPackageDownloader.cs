@@ -67,6 +67,10 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                         var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
                         if (byIdResource is null)
                         {
+                            // Coverage note: every v3 HTTP, v2, and local folder source exposes a
+                            // FindPackageByIdResource, so GetResourceAsync only returns null for a malformed
+                            // source that cannot be produced by a real/in-memory feed. This is a defensive
+                            // guard; it is intentionally not covered because no feed shape can drive it.
                             continue;
                         }
 
@@ -95,9 +99,10 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // A false return covers both "this source doesn't have the package" (normal failover)
-                    // and a content-endpoint failure (e.g. 401/403) that was retried and logged rather than
-                    // thrown. Preserve any captured error so an auth/network failure isn't later reported as
-                    // a plain "package/version was not found".
+                    // and a content-endpoint failure (e.g. a 5xx/401/403 on the .nupkg download) that the
+                    // NuGet client retried, logged, and reported by returning false rather than throwing.
+                    // Preserve any captured error so an auth/network failure isn't later reported as a plain
+                    // "package/version was not found".
                     if (downloadLogger.LastErrorMessage is not null)
                     {
                         lastError = new InvalidOperationException(downloadLogger.LastErrorMessage);
@@ -128,6 +133,11 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                 catch
                 {
                     // Best-effort cleanup of the temp download.
+                    //
+                    // Coverage note: deleting a temp file this method created and already closed does not fail
+                    // deterministically, so this OS-boundary catch cannot be driven from a test without locking
+                    // a path the method chooses internally. It is a defensive guard against a transient
+                    // filesystem error and is intentionally left uncovered.
                 }
             }
         }
@@ -152,8 +162,10 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
     /// operation. Used to recover the underlying reason (e.g. a 401/403 on a package-content endpoint)
     /// when an API such as <c>CopyNupkgToStreamAsync</c> reports failure by returning <c>false</c> and
     /// logging rather than throwing, so the failure is not later misreported as a plain "not found".
+    /// Exposed as <c>internal</c> (rather than private) purely so its message-capture logic can be
+    /// unit-tested directly; production still constructs and uses it exactly the same way.
     /// </summary>
-    private sealed class CollectingLogger : LoggerBase
+    internal sealed class CollectingLogger : LoggerBase
     {
         public string? LastErrorMessage { get; private set; }
 
