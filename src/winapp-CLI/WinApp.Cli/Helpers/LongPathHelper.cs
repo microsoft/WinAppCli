@@ -19,18 +19,38 @@ internal static class LongPathHelper
     /// Checks whether the system-level long path support is enabled via the
     /// <c>HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled</c> registry key.
     /// </summary>
-    internal static bool IsSystemLongPathEnabled()
+    internal static bool IsSystemLongPathEnabled() => IsSystemLongPathEnabled(ReadLongPathsEnabledValue);
+
+    /// <summary>
+    /// Core of <see cref="IsSystemLongPathEnabled()"/> with the registry read injected as
+    /// <paramref name="readLongPathsEnabledValue"/> (returning the raw <c>LongPathsEnabled</c> value,
+    /// or <c>null</c> when the key or value is absent). Long path support counts as enabled only when
+    /// the value is the integer <c>1</c>; any other value, an absent value, or a read failure yields
+    /// <c>false</c>. The seam lets unit tests drive every branch without depending on the machine's
+    /// registry state.
+    /// </summary>
+    internal static bool IsSystemLongPathEnabled(Func<object?> readLongPathsEnabledValue)
     {
         try
         {
-            using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            using var key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem");
-            return key?.GetValue("LongPathsEnabled") is int value && value == 1;
+            return readLongPathsEnabledValue() is int value && value == 1;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads the raw <c>LongPathsEnabled</c> value from HKLM, or returns <c>null</c> when the
+    /// <c>FileSystem</c> key or the value is absent. This is the production reader injected into
+    /// <see cref="IsSystemLongPathEnabled(Func{object})"/>.
+    /// </summary>
+    private static object? ReadLongPathsEnabledValue()
+    {
+        using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem");
+        return key?.GetValue("LongPathsEnabled");
     }
 
     /// <summary>
@@ -40,12 +60,22 @@ internal static class LongPathHelper
     /// </summary>
     internal static void ValidatePathLength(string path)
     {
+        ValidatePathLength(path, IsSystemLongPathEnabled());
+    }
+
+    /// <summary>
+    /// Pure core of <see cref="ValidatePathLength(string)"/>: throws when <paramref name="path"/>
+    /// exceeds MAX_PATH and <paramref name="longPathEnabled"/> is <c>false</c>. Split out so the
+    /// throwing branch is unit testable without depending on the machine's registry state.
+    /// </summary>
+    internal static void ValidatePathLength(string path, bool longPathEnabled)
+    {
         if (path.Length <= MaxPath)
         {
             return;
         }
 
-        if (!IsSystemLongPathEnabled())
+        if (!longPathEnabled)
         {
             throw new InvalidOperationException(
                 $"The path exceeds the Windows MAX_PATH limit of {MaxPath} characters and long path support is not enabled on this system. Visit https://aka.ms/enable-long-paths-on-windows for guidance on enabling long paths.");
@@ -87,7 +117,15 @@ internal static class LongPathHelper
     /// Returns the original path unchanged if it is already within MAX_PATH or if 8.3 name
     /// generation is not available.
     /// </summary>
-    internal static string GetShortPath(string path)
+    internal static string GetShortPath(string path) => GetShortPath(path, NativeGetShortPathName);
+
+    /// <summary>
+    /// Core of <see cref="GetShortPath(string)"/> with the native 8.3 shortener injected as
+    /// <paramref name="shortener"/> (returning the shortened path, or <c>null</c> when it cannot
+    /// shorten). The seam lets unit tests drive the prefix-stripping and failure paths without
+    /// depending on the volume's 8.3 name-generation state.
+    /// </summary>
+    internal static string GetShortPath(string path, Func<string, string?> shortener)
     {
         if (path.Length <= MaxPath)
         {
@@ -103,7 +141,7 @@ internal static class LongPathHelper
             return path;
         }
 
-        var shortDir = GetShortPathRaw(directory);
+        var shortDir = GetShortPathRaw(directory, shortener);
         var result = Path.Combine(shortDir, fileName);
 
         // Preserve trailing separator: Path.Combine drops it when fileName is empty
@@ -140,57 +178,83 @@ internal static class LongPathHelper
     }
 
     /// <summary>
-    /// Converts an entire path (including filename) to its short (8.3) form.
+    /// Converts an entire path (including filename) to its short (8.3) form via the injected
+    /// <paramref name="shortener"/>, then strips the extended-length prefix. Returns the original
+    /// path unchanged when the shortener cannot shorten it (returns <c>null</c>) or is unavailable.
     /// </summary>
-    private static string GetShortPathRaw(string path)
+    private static string GetShortPathRaw(string path, Func<string, string?> shortener)
     {
         // GetShortPathName needs the \\?\ prefix to accept paths > MAX_PATH
         var extendedPath = EnsureExtendedLengthPrefix(path);
 
+        string? shortPath;
         try
         {
-            unsafe
-            {
-                fixed (char* pInput = extendedPath)
-                {
-                    var bufferSize = PInvoke.GetShortPathName(pInput, null, 0);
-                    if (bufferSize == 0)
-                    {
-                        return path;
-                    }
-
-                    Span<char> buffer = stackalloc char[(int)bufferSize];
-                    fixed (char* pBuffer = buffer)
-                    {
-                        var result = PInvoke.GetShortPathName(pInput, new Windows.Win32.Foundation.PWSTR(pBuffer), bufferSize);
-                        if (result == 0)
-                        {
-                            return path;
-                        }
-
-                        var shortPath = new string(pBuffer, 0, (int)result);
-
-                        // Strip the extended-length prefix added by EnsureExtendedLengthPrefix.
-                        // \\?\UNC\server\share\... must be converted back to \\server\share\...
-                        // not to UNC\server\share\... (which would be invalid).
-                        if (shortPath.StartsWith(ExtendedLengthUncPrefix, StringComparison.Ordinal))
-                        {
-                            shortPath = @"\\" + shortPath[ExtendedLengthUncPrefix.Length..];
-                        }
-                        else if (shortPath.StartsWith(ExtendedLengthPathPrefix, StringComparison.Ordinal))
-                        {
-                            shortPath = shortPath[ExtendedLengthPathPrefix.Length..];
-                        }
-
-                        return shortPath;
-                    }
-                }
-            }
+            shortPath = shortener(extendedPath);
         }
         catch (DllNotFoundException)
         {
             // GetShortPathName is not available on this platform; return the original path unchanged.
             return path;
+        }
+
+        if (shortPath is null)
+        {
+            return path;
+        }
+
+        return StripExtendedPrefix(shortPath);
+    }
+
+    /// <summary>
+    /// Strips the extended-length prefix that <see cref="EnsureExtendedLengthPrefix"/> may have added.
+    /// <c>\\?\UNC\server\share\...</c> must be converted back to <c>\\server\share\...</c> (not to
+    /// <c>UNC\server\share\...</c> which would be invalid). Extracted as a pure function for testing.
+    /// </summary>
+    internal static string StripExtendedPrefix(string shortPath)
+    {
+        if (shortPath.StartsWith(ExtendedLengthUncPrefix, StringComparison.Ordinal))
+        {
+            return @"\\" + shortPath[ExtendedLengthUncPrefix.Length..];
+        }
+
+        if (shortPath.StartsWith(ExtendedLengthPathPrefix, StringComparison.Ordinal))
+        {
+            return shortPath[ExtendedLengthPathPrefix.Length..];
+        }
+
+        return shortPath;
+    }
+
+    /// <summary>
+    /// Invokes the Win32 <c>GetShortPathName</c> API. Returns the shortened path, or <c>null</c>
+    /// when the API reports failure (buffer size 0). This is the production shortener injected into
+    /// <see cref="GetShortPath(string, Func{string, string?})"/>.
+    /// </summary>
+    private static unsafe string? NativeGetShortPathName(string extendedPath)
+    {
+        fixed (char* pInput = extendedPath)
+        {
+            var bufferSize = PInvoke.GetShortPathName(pInput, null, 0);
+            if (bufferSize == 0)
+            {
+                return null;
+            }
+
+            Span<char> buffer = stackalloc char[(int)bufferSize];
+            fixed (char* pBuffer = buffer)
+            {
+                var result = PInvoke.GetShortPathName(pInput, new Windows.Win32.Foundation.PWSTR(pBuffer), bufferSize);
+                // Honest-uncovered native guard: the fill call only fails here if GetShortPathName
+                // succeeded sizing (non-zero buffer) but then returned 0 — an inconsistent native
+                // failure not deterministically reproducible from a unit test. Kept for safety.
+                if (result == 0)
+                {
+                    return null;
+                }
+
+                return new string(pBuffer, 0, (int)result);
+            }
         }
     }
 }

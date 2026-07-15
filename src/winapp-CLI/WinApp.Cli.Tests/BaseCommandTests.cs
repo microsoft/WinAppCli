@@ -90,12 +90,7 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
     }
 
     protected async Task<int> ParseAndInvokeWithCaptureAsync(Command command, string[] manifestArgs)
-    {
-        var parseResult = command.Parse(manifestArgs);
-        parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
-        parseResult.InvocationConfiguration.Error = ConsoleStdErr;
-        return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: TestContext.CancellationToken);
-    }
+        => await ParseAndInvokeWithCaptureAsync(command, manifestArgs, TestContext.CancellationToken);
 
     /// <summary>
     /// Overload that invokes with a caller-supplied cancellation token (e.g. a pre-cancelled one) so

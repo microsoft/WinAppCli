@@ -108,7 +108,9 @@ The E2E tests provide comprehensive coverage of real-world scenarios, ensuring t
 We gate coverage on the **testable surface** of the CLI, not the raw line count. The raw
 `--coverage` denominator is dominated by generated interop (CsWin32 `NativeMethods.g.cs`,
 `ComInterfaceGenerator` COM shims for D3D11/UI Automation, `RegexGenerator`) emitted into
-`obj\`, which made the reported number misleading (~18% vs. ~49% real). See issue #630.
+`obj\`, which — together with Release-build brace under-counting (see **Why a Debug build**
+below) — made the reported number misleading (~18% raw vs. ~59% real over hand-written
+source). See issue #630.
 
 ### Measuring
 
@@ -120,16 +122,33 @@ pwsh scripts\coverage-report.ps1
 pwsh scripts\coverage-report.ps1 -Area Services -Filter "FullyQualifiedName~MsixService" -Threshold 95
 ```
 
-`build-cli.ps1` also runs the suite with `src\winapp-CLI\coverage.runsettings` so CI numbers
-match local ones.
+`build-cli.ps1` runs the suite the same way — a **Debug** build with
+`src\winapp-CLI\coverage.runsettings` — so the coverage number CI posts on your PR matches
+what `coverage-report.ps1` prints locally.
+
+### Why a Debug build
+
+Coverage is collected on a **Debug** build, not Release. On optimized Release builds the C#
+compiler often drops or merges the sequence points for standalone block braces (and duplicate
+`return` statements), so the Microsoft coverage engine reports many `{`/`}` lines as `hits=0`
+**even when the method fully executes** — systematically under-counting line coverage and
+capping control-flow-heavy files around 70–80%. Debug builds map every line faithfully, so the
+number reflects what the tests actually exercised. This is the standard configuration for
+coverage measurement.
+
+The shipped CLI is still the Release `dotnet publish`, and it's exercised end-to-end by the
+sample and npm E2E suites — so moving the C# unit suite to Debug for coverage doesn't drop
+Release-artifact validation. The Debug solution build passes `-p:TreatWarningsAsErrors=true`
+so it keeps the warning-as-error gate that `Directory.Build.props` otherwise applies only to
+Release.
 
 ### What's excluded (and why)
 
 **Only generated code is excluded** — via `coverage.runsettings` (`obj\**`, `*.g.cs`,
 `*.Designer.cs`, plus the `[GeneratedCode]` attribute). This is the CsWin32 P/Invoke thunks,
 `ComInterfaceGenerator` COM shims, and `RegexGenerator` state machines. It isn't hand-written,
-so it doesn't belong in the denominator. That single change is what moves the reported number
-from the misleading ~18% to the real figure.
+so it doesn't belong in the denominator. That change is the biggest single correction to the
+raw ~18%; the Debug build (above) closes the remaining brace-undercount gap.
 
 **Hardware / COM / GPU code is _not_ excluded.** `UiAutomationService`, `WgcCapture`, and the
 keyboard/mouse input helpers are real product code and stay in the denominator. This foundation
