@@ -31,6 +31,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiFocusResult))]
 [JsonSerializable(typeof(UiScrollIntoViewResult))]
 [JsonSerializable(typeof(UiHoverResult))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(UiSendKeysResult))]
 [JsonSerializable(typeof(UiDragResult))]
 [JsonSerializable(typeof(UiErrorResult))]
@@ -234,6 +235,7 @@ internal sealed class UiSendKeysResult
     public int ActionCount { get; set; }
     public string? Target { get; set; }
     public long Hwnd { get; set; }
+    public List<string> Warnings { get; set; } = [];
 }
 
 internal sealed class UiDragResult
