@@ -282,6 +282,40 @@ internal static class TestProcessDump
     }
 
     /// <summary>
+    /// Waits for <paramref name="process"/> to exit within <paramref name="timeoutMs"/> while draining
+    /// BOTH stdout and stderr concurrently. Reading the two pipes concurrently (rather than one
+    /// <see cref="System.IO.StreamReader.ReadToEnd"/> after the other) prevents the classic deadlock
+    /// where the child blocks writing to the pipe we are not yet reading while we block waiting for EOF
+    /// on the other. Kills the process tree on timeout. Returns true iff the process exited in time.
+    /// </summary>
+    private static bool WaitForExitDrainingPipes(Process process, int timeoutMs, out string stdout, out string stderr)
+    {
+        // Start both reads BEFORE waiting so neither pipe can back-pressure (and stall) the child.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        if (!process.WaitForExit(timeoutMs))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            // Killing closes the pipes, so the drains complete; bound the wait defensively.
+            try { Task.WaitAll([stdoutTask, stderrTask], 5000); } catch { /* best effort */ }
+            stdout = SafeResult(stdoutTask);
+            stderr = SafeResult(stderrTask);
+            return false;
+        }
+
+        stdout = stdoutTask.GetAwaiter().GetResult();
+        stderr = stderrTask.GetAwaiter().GetResult();
+        return true;
+
+        static string SafeResult(Task<string> t)
+        {
+            try { return t.IsCompletedSuccessfully ? t.Result : string.Empty; }
+            catch { return string.Empty; }
+        }
+    }
+
+    /// <summary>
     /// Compiles a standalone .NET console EXE from C# source using the .NET Framework compiler that
     /// <c>Add-Type -OutputType ConsoleApplication</c> drives (available via <c>powershell.exe</c>).
     /// </summary>
@@ -316,9 +350,11 @@ internal static class TestProcessDump
                     continue;
                 }
 
-                var stderr = p.StandardError.ReadToEnd();
-                _ = p.StandardOutput.ReadToEnd();
-                p.WaitForExit(60000);
+                if (!WaitForExitDrainingPipes(p, 60000, out _, out var stderr))
+                {
+                    error = $"compilation via {host} timed out";
+                    continue;
+                }
 
                 if (File.Exists(outputExePath))
                 {
@@ -600,11 +636,8 @@ internal static class TestProcessDump
                 return false;
             }
 
-            var stdout = proc.StandardOutput.ReadToEnd();
-            var stderr = proc.StandardError.ReadToEnd();
-            if (!proc.WaitForExit(120000))
+            if (!WaitForExitDrainingPipes(proc, 120000, out var stdout, out var stderr))
             {
-                try { proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
                 error = "'dotnet build' timed out";
                 return false;
             }

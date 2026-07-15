@@ -18,47 +18,47 @@ namespace WinApp.Cli.Tests;
 /// the static <see cref="CrashDumpService.SymbolFileDownloader"/> seam.
 /// </summary>
 /// <remarks>
-/// <para><b>Documented coverage ceiling (~91.5% Debug line coverage; the full-suite run is authoritative).</b>
-/// The remaining 67 uncovered lines are unreachable on this host without a foreign CPU architecture, a live
+/// <para><b>Documented coverage ceiling (~91.3% Debug line coverage; the full-suite run is authoritative).</b>
+/// The remaining 68 uncovered lines are unreachable on this host without a foreign CPU architecture, a live
 /// symbol server, a corrupted/stripped/mismatched PE or PDB, or Win32/engine fault injection, and per policy
 /// are left honestly uncovered rather than forced with flaky tests or excluded from coverage. Current
 /// uncovered ranges and why:</para>
 /// <list type="bullet">
-///   <item>162-165, 171-174 — <c>MiniDumpWriteDump</c> P/Invoke returning FALSE and the outer catch (native
+///   <item>168-171, 177-180 — <c>MiniDumpWriteDump</c> P/Invoke returning FALSE and the outer catch (native
 ///   dump-write failure): defensive; cannot be provoked for a live process without corrupting the OS call.</item>
-///   <item>378-384, 397-398, 401-407 — cross-architecture DAC / emulation branches (a dump whose target
+///   <item>384-390, 403-404, 407-413 — cross-architecture DAC / emulation branches (a dump whose target
 ///   architecture differs from the host, and the <c>ClrDiagnosticsException</c>/<c>BadImageFormatException</c>
 ///   DAC-load-failure path): require a non-x64 dump analyzed on an x64 host.</item>
-///   <item>598-599, 601, 603 — <c>DumpHasWinUiModule</c> catch and its fall-through: reached only if
+///   <item>604-605, 607, 609 — <c>DumpHasWinUiModule</c> catch and its fall-through: reached only if
 ///   <c>DataTarget.EnumerateModules()</c> throws; defensive engine guard.</item>
-///   <item>659-661 — <c>FormatManagedException</c> "… N more frames" line: runs only when ClrMD surfaces a
+///   <item>665-667 — <c>FormatManagedException</c> "… N more frames" line: runs only when ClrMD surfaces a
 ///   managed exception whose stack exceeds 15 frames. The dedicated <c>AnalyzeDumpAsync_ManagedDumpWithDeepStack…</c>
 ///   / <c>…DeepStackWithPortablePdb…</c> tests below drive exactly this shape, but they
 ///   <see cref="Assert.Inconclusive(string)"/> on hosts where the matching DAC cannot be loaded (as here), so
 ///   the line stays uncovered in this run.</item>
-///   <item>689-691 — <c>FormatManagedException</c> per-frame source append: runs only when ClrMD/DAC resolves
+///   <item>695-697 — <c>FormatManagedException</c> per-frame source append: runs only when ClrMD/DAC resolves
 ///   a source location for a managed frame. Covered by <c>AnalyzeDumpAsync_DeepStackWithPortablePdb_ResolvesManagedSourceLocations</c>
 ///   when the DAC is available; that test goes <see cref="Assert.Inconclusive(string)"/> here because the DAC
 ///   for the child's runtime is not loadable on this host.</item>
-///   <item>714-715 — <c>AnalyzeWithDbgEng</c> <c>WaitForEvent</c> non-success HRESULT: defensive engine guard,
+///   <item>720-721 — <c>AnalyzeWithDbgEng</c> <c>WaitForEvent</c> non-success HRESULT: defensive engine guard,
 ///   not drivable once <c>OpenDumpFile</c> has succeeded without corrupting engine state.</item>
-///   <item>834-835 — the non-CodeView debug-directory entry skip while reading a module's PDB GUID: reached
+///   <item>840-841 — the non-CodeView debug-directory entry skip while reading a module's PDB GUID: reached
 ///   only if a non-CodeView debug entry precedes the CodeView entry; the test modules' CodeView entry is
 ///   first, so the loop breaks before hitting it (PE-layout-dependent).</item>
-///   <item>913-918, 921-925 — <c>DefaultDownloadSymbolFile</c> real HTTPS symbol download: network boundary
+///   <item>919-924, 927-932 — <c>DefaultDownloadSymbolFile</c> real HTTPS symbol download streamed to disk: network boundary
 ///   (the <c>SymbolFileDownloader</c> seam is stubbed in tests, so the default body is never invoked). Note:
 ///   the offline-testable download / cache-hit / not-found / PE-CodeView parse core
 ///   (<c>DownloadSymbolsForModules</c>) is fully covered by the M4 unit tests below, and the live
 ///   <c>GetModuleImagePath</c> lmvm boundary is covered by the in-process-engine workflow tests.</item>
-///   <item>1034, 1037-1038 — <c>ValidatePdbMatchesDll</c> foreach-exit brace and the "no CodeView entry →
+///   <item>1041, 1044-1045 — <c>ValidatePdbMatchesDll</c> foreach-exit brace and the "no CodeView entry →
 ///   accept by name" early return: needs a release-stripped DLL with no CodeView debug entry (PE-dependent).</item>
-///   <item>1081-1082, 1101-1102 — <c>PdbSourceResolver.GetSourceLocation</c> null-<c>Method</c> / null-<c>Module</c>
+///   <item>1088-1089, 1108-1109 — <c>PdbSourceResolver.GetSourceLocation</c> null-<c>Method</c> / null-<c>Module</c>
 ///   guards: ClrMD's <c>ClrStackFrame</c>/<c>ClrMethod</c>/<c>ClrModule</c> are engine-produced and have no
 ///   public constructor, so a null-bearing instance cannot be fabricated as a fake.</item>
-///   <item>1143-1145, 1147, 1149 — the <c>BadImageFormatException</c> catch around sequence-point reading and
+///   <item>1150-1152, 1154, 1156 — the <c>BadImageFormatException</c> catch around sequence-point reading and
 ///   the no-match fall-through <c>return null</c>: needs a corrupt portable PDB or a method with no matching
 ///   sequence point; engine/PDB-dependent.</item>
-///   <item>1209-1210, 1219-1220, 1222-1223 — <c>GetOrLoadPdbReader</c> PDB-GUID-mismatch <c>continue</c> and
+///   <item>1216-1217, 1226-1227, 1229-1230 — <c>GetOrLoadPdbReader</c> PDB-GUID-mismatch <c>continue</c> and
 ///   the corrupt-/locked-PDB catch: reached only with a mismatched or corrupt candidate PDB in the search
 ///   path; environment-dependent and would be a TOCTOU/flaky test to force.</item>
 /// </list>
@@ -303,23 +303,25 @@ public sealed class CrashDumpServiceWorkflowTests
         }
 
         var requestedUrls = new List<string>();
-        var saved = CrashDumpService.SymbolFileDownloader;
+        var savedDownloader = CrashDumpService.SymbolFileDownloader;
+        var savedCacheDir = CrashDumpService.SymbolCacheDirectory;
 
-        // The product caches downloaded PDBs under %TEMP%\symbols and, on a cache hit, counts the
-        // module WITHOUT consulting the download seam. Clear that regenerable temp cache first so this
-        // run deterministically takes the "not cached -> download" path (otherwise a prior run's cache
-        // would make the seam appear unused).
-        var symbolCache = Path.Combine(Path.GetTempPath(), "symbols");
-        try { if (Directory.Exists(symbolCache)) { Directory.Delete(symbolCache, recursive: true); } } catch { /* best effort */ }
+        // Point the product's PDB cache at an isolated, empty per-test directory. This deterministically
+        // forces the "not cached -> download" path AND guarantees we never read or delete the developer's
+        // or CI's SHARED %TEMP%\symbols cache (a fresh _tempDir\symbols starts empty).
+        var symbolCache = Path.Combine(_tempDir, "symbols");
+        CrashDumpService.SymbolCacheDirectory = symbolCache;
 
         try
         {
             // Stub the symbol-server boundary: pretend every PDB is available (small dummy payload) so
             // the "downloaded > 0 -> reload and re-run with symbols" branch runs without any network.
-            CrashDumpService.SymbolFileDownloader = url =>
+            CrashDumpService.SymbolFileDownloader = (url, destPath) =>
             {
                 requestedUrls.Add(url);
-                return [0x4D, 0x69, 0x63]; // arbitrary non-null bytes
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                File.WriteAllBytes(destPath, [0x4D, 0x69, 0x63]); // drop a dummy PDB at the cache path
+                return true;
             };
 
             (string Summary, string Details) result;
@@ -347,7 +349,8 @@ public sealed class CrashDumpServiceWorkflowTests
         }
         finally
         {
-            CrashDumpService.SymbolFileDownloader = saved;
+            CrashDumpService.SymbolFileDownloader = savedDownloader;
+            CrashDumpService.SymbolCacheDirectory = savedCacheDir;
             try { File.Delete(dump); } catch { /* best effort */ }
         }
     }
@@ -659,7 +662,7 @@ public sealed class CrashDumpServiceWorkflowTests
         var downloaderInvoked = false;
         try
         {
-            CrashDumpService.SymbolFileDownloader = _ => { downloaderInvoked = true; return [1]; };
+            CrashDumpService.SymbolFileDownloader = (_, _) => { downloaderInvoked = true; return true; };
 
             var count = CrashDumpService.DownloadSymbolsForModules(
                 ["nullpath", "missingfile"],
@@ -689,12 +692,14 @@ public sealed class CrashDumpServiceWorkflowTests
         var downloadCount = 0;
         try
         {
-            CrashDumpService.SymbolFileDownloader = url =>
+            CrashDumpService.SymbolFileDownloader = (url, destPath) =>
             {
                 downloadCount++;
                 Assert.IsTrue(url.StartsWith("https://msdl.microsoft.com/", StringComparison.OrdinalIgnoreCase),
                     "The symbol download must target the Microsoft Symbol Server.");
-                return [0x4D, 0x69, 0x63]; // arbitrary non-null PDB payload
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                File.WriteAllBytes(destPath, [0x4D, 0x69, 0x63]); // stream a fixture PDB into the cache path
+                return true;
             };
 
             // First pass: cache miss -> PE CodeView read -> download -> write PDB into the cache.
@@ -714,7 +719,7 @@ public sealed class CrashDumpServiceWorkflowTests
     }
 
     [TestMethod]
-    public void DownloadSymbolsForModules_DownloaderReturnsNull_DoesNotCount()
+    public void DownloadSymbolsForModules_DownloaderReportsUnavailable_DoesNotCount()
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "winapp.dll");
         if (!File.Exists(dll))
@@ -726,11 +731,11 @@ public sealed class CrashDumpServiceWorkflowTests
         var saved = CrashDumpService.SymbolFileDownloader;
         try
         {
-            CrashDumpService.SymbolFileDownloader = _ => null; // symbol server 404 / unavailable
+            CrashDumpService.SymbolFileDownloader = (_, _) => false; // symbol server 404 / unavailable
 
             var count = CrashDumpService.DownloadSymbolsForModules(["winapp"], _ => dll, _tempDir);
 
-            Assert.AreEqual(0, count, "A null download (symbol not found) must break out without counting.");
+            Assert.AreEqual(0, count, "An unavailable download (symbol not found) must break out without counting.");
         }
         finally
         {

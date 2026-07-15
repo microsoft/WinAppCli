@@ -197,6 +197,17 @@ public sealed class XamlTriageRunnerTests
                 return;
             }
 
+            // If DbgEng's `.load` of the (absent) provider returns a failure HRESULT on this host,
+            // RunTriageSequence early-returns with the provider-load-failure message and never reaches
+            // the !xamlstowed command. That HRESULT is host/version dependent, so treat it as
+            // inconclusive here — the load-failure path itself is covered deterministically offline by
+            // RunTriageSequence_LoadProviderFails. Otherwise the full sequence ran and must show it.
+            if (result.Contains("could not load the JavaScript provider", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Inconclusive("DbgEng '.load' rejected the absent provider on this host; the full command sequence was not reached.");
+                return;
+            }
+
             // Proves the extension commands ran against an opened dump (the extension exports are absent
             // because the real JsProvider.dll is not present, which is expected in a hermetic test).
             StringAssert.Contains(result, "xamlstowed");
@@ -233,6 +244,16 @@ public sealed class XamlTriageRunnerTests
             if (exit != 0)
             {
                 Assert.Inconclusive("In-process DbgEng engine unavailable (Run mapped it to a non-zero exit).");
+                return;
+            }
+
+            // A host where `.load` of the absent provider fails short-circuits before !xamlstowed, so
+            // Run() can return 0 (triage fails open) yet stdout holds the load-failure message rather
+            // than the command output. Don't treat that as the success path — go inconclusive (the
+            // load-failure path is covered offline by RunTriageSequence_LoadProviderFails).
+            if (stdout.Contains("could not load the JavaScript provider", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Inconclusive("DbgEng '.load' rejected the absent provider on this host; the full command sequence was not reached.");
                 return;
             }
 

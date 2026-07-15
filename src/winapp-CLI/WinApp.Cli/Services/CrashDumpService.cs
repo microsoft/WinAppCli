@@ -37,9 +37,15 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     // For testing only — overrides the DbgEng native-fallback boundary. Null means use the real engine.
     internal Func<string, bool, (string Summary, string Details)>? DbgEngAnalyzerOverride { get; set; }
 
-    // For testing only — the symbol-file download boundary used by DownloadSymbolsForStack.
-    // Defaults to a real HTTPS GET from the Microsoft Symbol Server.
-    internal static Func<string, byte[]?> SymbolFileDownloader { get; set; } = DefaultDownloadSymbolFile;
+    // For testing only — the symbol-file download boundary used by DownloadSymbolsForModules.
+    // Given a symbol-server URL and a destination path, streams the PDB straight to that path
+    // (constant memory) and returns true, or returns false when the file is unavailable. Defaults to
+    // a real HTTPS GET from the Microsoft Symbol Server.
+    internal static Func<string, string, bool> SymbolFileDownloader { get; set; } = DefaultDownloadSymbolFile;
+
+    // For testing only — the on-disk PDB symbol cache directory. Defaults to the shared %TEMP%\symbols
+    // cache; tests point it at an isolated temp dir so they never read or mutate the real cache.
+    internal static string SymbolCacheDirectory { get; set; } = Path.Combine(Path.GetTempPath(), "symbols");
 
     /// <inheritdoc/>
     public unsafe string? WriteMiniDump(uint processId,
@@ -736,7 +742,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         // If --symbols, download PDBs for modules on the stack, then re-run
         if (useSymbols)
         {
-            var symbolCachePath = Path.Combine(Path.GetTempPath(), "symbols");
+            var symbolCachePath = SymbolCacheDirectory;
             var downloaded = DownloadSymbolsForStack(stackOutput, control, client, symbolCachePath);
             if (downloaded > 0)
             {
@@ -847,15 +853,14 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                         break;
                     }
 
-                    // Download from Microsoft Symbol Server (seamed for tests)
-                    var pdbBytes = SymbolFileDownloader($"https://msdl.microsoft.com/download/symbols/{pdbName}/{sig}/{pdbName}");
-                    if (pdbBytes == null)
+                    // Download from Microsoft Symbol Server, streamed straight to the cache file
+                    // (constant memory; seamed for tests).
+                    var url = $"https://msdl.microsoft.com/download/symbols/{pdbName}/{sig}/{pdbName}";
+                    if (!SymbolFileDownloader(url, localPdb))
                     {
                         break;
                     }
 
-                    Directory.CreateDirectory(Path.GetDirectoryName(localPdb)!);
-                    File.WriteAllBytes(localPdb, pdbBytes);
                     downloaded++;
                     break;
                 }
@@ -905,23 +910,25 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     }
 
     /// <summary>
-    /// Real symbol-file download boundary: HTTPS GET from the Microsoft Symbol Server.
-    /// Returns the PDB bytes, or null when the file is unavailable. Seamed via
+    /// Real symbol-file download boundary: HTTPS GET from the Microsoft Symbol Server, streamed
+    /// directly to <paramref name="destPath"/> with constant memory (no full-PDB buffering). Returns
+    /// <c>true</c> when the file was downloaded, <c>false</c> when unavailable. Seamed via
     /// <see cref="SymbolFileDownloader"/> so tests never hit the network.
     /// </summary>
-    private static byte[]? DefaultDownloadSymbolFile(string url)
+    private static bool DefaultDownloadSymbolFile(string url, string destPath)
     {
         using var http = new HttpClient();
         using var response = http.Send(new HttpRequestMessage(HttpMethod.Get, url));
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            return false;
         }
 
+        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
         using var pdbStream = response.Content.ReadAsStream();
-        using var ms = new MemoryStream();
-        pdbStream.CopyTo(ms);
-        return ms.ToArray();
+        using var fileStream = File.Create(destPath);
+        pdbStream.CopyTo(fileStream);
+        return true;
     }
 
     internal static string? ExtractImagePath(string lmvmOutput)
