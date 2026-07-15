@@ -16,12 +16,30 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> logger) : IStatusService
 {
+    /// <summary>
+    /// Decides whether the animated live spinner is used vs. plain streaming output.
+    /// Overridable in tests so both rendering branches are reachable regardless of the
+    /// host terminal (test hosts always report redirected/ non-interactive output).
+    /// </summary>
+    internal Func<IAnsiConsole, ILogger, bool> ShouldUseLiveSpinnerProvider { get; set; } = ProgressDisplay.ShouldUseLiveSpinner;
+
+    /// <summary>
+    /// Factory for the root task. Overridable in tests to inject a task whose execution
+    /// faults, exercising the otherwise-defensive cancellation/error handling below
+    /// (the production <see cref="GroupableTask{T}"/> swallows task-body exceptions).
+    /// </summary>
+    internal virtual GroupableTask<(int ReturnCode, T CompletedMessage)> CreateRootTask<T>(
+        string inProgressMessage,
+        Func<TaskContext, CancellationToken, Task<(int ReturnCode, T CompletedMessage)>> taskFunc,
+        Lock renderLock)
+        => new(inProgressMessage, null, taskFunc, ansiConsole, logger, renderLock);
+
     public async Task<int> ExecuteWithStatusAsync<T>(string inProgressMessage, Func<TaskContext, CancellationToken, Task<(int ReturnCode, T CompletedMessage)>> taskFunc, CancellationToken cancellationToken)
     {
         var renderLock = new Lock();
-        GroupableTask<(int ReturnCode, T CompletedMessage)> task = new(inProgressMessage, null, taskFunc, ansiConsole, logger, renderLock);
+        GroupableTask<(int ReturnCode, T CompletedMessage)> task = CreateRootTask(inProgressMessage, taskFunc, renderLock);
 
-        var useLiveSpinner = ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
+        var useLiveSpinner = ShouldUseLiveSpinnerProvider(ansiConsole, logger);
         var infoEnabled = logger.IsEnabled(LogLevel.Information);
 
         // In plain mode, hook a renderer that prints each task start/finish and status
