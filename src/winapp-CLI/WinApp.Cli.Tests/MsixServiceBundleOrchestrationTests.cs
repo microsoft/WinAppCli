@@ -621,6 +621,43 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task CreateMsixBundleAsync_SliceWithAppXDirectory_ExcludesAppXFromStaging()
+    {
+        // A bundle slice input folder containing a normal binary plus a build-artifact 'AppX'
+        // directory (the MSBuild output folder that must never ship inside the package). This
+        // guards the second CopyDirectoryRecursive call site (MsixService.Bundle.cs) — the
+        // equivalent of the single-package AppX-exclusion guard in PackageCommandTests.
+        var sliceFolder = CreateSliceFolder("bundle-appx-slice", 0x8664, "x64");
+        var appxDir = Directory.CreateDirectory(Path.Combine(sliceFolder.FullName, "AppX"));
+        File.WriteAllText(Path.Combine(appxDir.FullName, "leftover.txt"), "build artifact");
+
+        var result = await _msixService.CreateMsixBundleAsync(
+            [sliceFolder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.BundlePath.Exists);
+
+        // A normal file IS staged for packing...
+        Assert.IsTrue(
+            _makeAppxStagedFiles.Any(f => string.Equals(Path.GetFileName(f), "TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            $"Expected the normal binary to be staged. Staged: [{string.Join(", ", _makeAppxStagedFiles)}]");
+
+        // ...but the build-artifact 'AppX' directory is genuinely excluded from the bundle slice
+        // staging that makeappx packs (fails pre-fix, when Bundle.cs copied the folder wholesale).
+        var stagedAppx = _makeAppxStagedFiles
+            .Where(f => f.StartsWith("AppX/", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.AreEqual(
+            0,
+            stagedAppx.Count,
+            $"The build-artifact 'AppX' directory must be excluded from bundle slice staging. Staged AppX entries: [{string.Join(", ", stagedAppx)}]");
+    }
+
+    [TestMethod]
     public async Task CreateMsixBundleAsync_WithPriGeneration_InvokesMakePri()
     {
         var x64Folder = CreateSliceFolder("pri-x64", 0x8664, "x64");
