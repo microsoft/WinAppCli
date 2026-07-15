@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using WinApp.Cli.Services;
-
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
@@ -13,28 +11,13 @@ namespace WinApp.Cli.Helpers;
 internal static class FrameworkHint
 {
     /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="hwnd"/> looks like a XAML-based window
-    /// (WinUI 3 desktop, UWP/CoreWindow, or a XAML content island), where a posted <c>WM_CHAR</c> is
-    /// dropped by the XAML input pipeline and literal typed text via <c>--via post-message</c> silently
-    /// no-ops. Non-XAML stacks (Win32/WinForms/WPF edit controls, Electron/Chromium) consume
-    /// <c>WM_CHAR</c>, so they should not be warned. Unknown/undeterminable windows return
-    /// <see langword="false"/> (don't warn) since post-message text works for the non-XAML majority.
-    /// </summary>
-    public static bool IsLikelyXaml(long hwnd)
-    {
-        if (hwnd == 0)
-        {
-            return false;
-        }
-
-        return IsXamlClassName(UiSessionService.GetWindowClassName((nint)hwnd));
-    }
-
-    /// <summary>
-    /// Pure class-name classifier behind <see cref="IsLikelyXaml(long)"/>, split out so the framework
-    /// heuristic can be unit-tested without a live window handle. Returns <see langword="true"/> for
-    /// WinUI 3 desktop / UWP CoreWindow / XAML-island class names; <see langword="false"/> for
-    /// null/empty or non-XAML stacks (Win32, WPF <c>HwndWrapper*</c>, Electron <c>Chrome_WidgetWin_*</c>).
+    /// Pure class-name classifier for XAML-based windows (WinUI 3 desktop / UWP CoreWindow / XAML
+    /// content island), where a posted <c>WM_CHAR</c> is dropped by the XAML input pipeline so literal
+    /// typed text via <c>--via post-message</c> silently no-ops. Returns <see langword="true"/> for
+    /// those class names; <see langword="false"/> for null/empty or non-XAML stacks (Win32, WPF
+    /// <c>HwndWrapper*</c>, Electron <c>Chrome_WidgetWin_*</c>) which consume <c>WM_CHAR</c>. The
+    /// command reads the class name through ISystemUiQuery and passes it here, keeping the heuristic
+    /// unit-testable without a live window handle.
     /// </summary>
     internal static bool IsXamlClassName(string? className)
     {

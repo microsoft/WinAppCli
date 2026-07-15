@@ -39,15 +39,37 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
 
     public Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
+        if (RegisterLooseLayoutThrows is not null)
+        {
+            throw RegisterLooseLayoutThrows;
+        }
         RegisterLooseLayoutCalls.Add(manifestPath);
         return Task.CompletedTask;
     }
 
     public Task RegisterSparseAsync(string manifestPath, string externalLocation, CancellationToken cancellationToken = default)
     {
+        if (RegisterSparseThrows is not null)
+        {
+            throw RegisterSparseThrows;
+        }
         RegisterSparseCalls.Add((manifestPath, externalLocation));
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterLooseLayoutAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterLooseLayoutPackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterLooseLayoutThrows { get; set; }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterSparseAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterSparsePackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterSparseThrows { get; set; }
 
     public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {

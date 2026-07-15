@@ -7,57 +7,6 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
-/// <summary>
-/// Fake package installation service for exercising the native/C++ SDK-install path of
-/// WorkspaceSetupService without touching NuGet or the filesystem package layout.
-/// </summary>
-internal sealed class FakePackageInstallationService : IPackageInstallationService
-{
-    /// <summary>Versions returned from <see cref="InstallPackagesAsync"/>.</summary>
-    public Dictionary<string, string> InstallResult { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>When true, <see cref="InstallPackagesAsync"/> returns null to exercise the error branch.</summary>
-    public bool ReturnNull { get; set; }
-
-    /// <summary>
-    /// When set, <see cref="InstallPackagesAsync"/> throws this exception to exercise the
-    /// unexpected-failure catch in <see cref="WorkspaceSetupService"/>.
-    /// </summary>
-    public Exception? ThrowOnInstall { get; set; }
-
-    public List<DirectoryInfo> InitializedWorkspaces { get; } = [];
-
-    /// <summary>Package names passed to the most recent <see cref="InstallPackagesAsync"/> call.</summary>
-    public string[] LastRequestedPackages { get; private set; } = [];
-
-    public void InitializeWorkspace(DirectoryInfo rootDirectory) => InitializedWorkspaces.Add(rootDirectory);
-
-    public Task<Dictionary<string, string>> InstallPackagesAsync(
-        DirectoryInfo rootDirectory,
-        IEnumerable<string> packages,
-        TaskContext taskContext,
-        SdkInstallMode sdkInstallMode = SdkInstallMode.Stable,
-        bool ignoreConfig = false,
-        CancellationToken cancellationToken = default)
-    {
-        LastRequestedPackages = packages.ToArray();
-        if (ThrowOnInstall != null)
-        {
-            throw ThrowOnInstall;
-        }
-        return Task.FromResult(ReturnNull ? null! : InstallResult);
-    }
-
-    public Task<bool> EnsurePackageAsync(
-        DirectoryInfo rootDirectory,
-        string packageName,
-        TaskContext taskContext,
-        string? version = null,
-        SdkInstallMode sdkInstallMode = SdkInstallMode.Stable,
-        CancellationToken cancellationToken = default)
-        => Task.FromResult(true);
-}
-
 /// <summary>Fake C++/WinRT service: reports a (dummy) cppwinrt.exe and no-ops projection generation.</summary>
 internal sealed class FakeCppWinrtService : ICppWinrtService
 {

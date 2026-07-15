@@ -31,6 +31,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IBundleService, BundleService>()
             .AddSingleton<IBundleValidationService, BundleValidationService>()
             .AddSingleton<IPriService, PriService>()
+            .AddSingleton<NugetSourceProvider>()
+            .AddSingleton<NugetPackageDownloader>()
             .AddSingleton<INugetService, NugetService>()
             .AddSingleton<IPackageInstallationService, PackageInstallationService>()
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
@@ -55,7 +57,10 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<IKeyboardInput, RealKeyboardInput>()
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
+            .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
+            .AddSingleton<IPollDelay, RealPollDelay>()
             .AddSingleton<ISelectorService, SelectorService>()
+            .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>();
     }

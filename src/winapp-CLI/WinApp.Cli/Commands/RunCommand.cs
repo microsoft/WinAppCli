@@ -144,6 +144,15 @@ internal partial class RunCommand : Command, IShortDescription
         IStatusService statusService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
+        // Test seams for the execution-alias launch path. They isolate the two operating-system
+        // boundaries — resolving the Windows App Execution Alias proxy location and starting the
+        // resolved process — so tests can exercise all of the surrounding validation, debug,
+        // cancellation and error-handling logic without registering a real alias proxy under
+        // %LOCALAPPDATA%\Microsoft\WindowsApps or spawning the resolved binary. Both default to
+        // the production behavior, so runtime behavior is unchanged.
+        internal Func<string, FileInfo?> ResolveAliasProxy { get; set; } = alias => ExecutionAliasResolver.ResolveAliasPath(alias);
+        internal Func<ProcessStartInfo, Process?> ProcessStarter { get; set; } = Process.Start;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
@@ -580,7 +589,7 @@ internal partial class RunCommand : Command, IShortDescription
             // mitigation for the bare-filename CWD/PATH lookup that CreateProcess would
             // otherwise perform — passing just "a.exe" would let an attacker-supplied
             // a.exe in the project folder hijack the launch.
-            var aliasFile = ExecutionAliasResolver.ResolveAliasPath(alias);
+            var aliasFile = ResolveAliasProxy(alias);
             if (aliasFile is null || !aliasFile.Exists)
             {
                 logger.LogError(
@@ -599,7 +608,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             try
             {
-                using var process = Process.Start(psi);
+                using var process = ProcessStarter(psi);
                 if (process == null)
                 {
                     logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}' ({Path}).", UiSymbols.Error, alias, aliasFile.FullName);
