@@ -797,4 +797,39 @@ public class PointerInputFrameTests
         Assert.AreEqual(PointerInput.MaxErrorNotReadyRetries + 1, callCount,
             $"Must retry MaxErrorNotReadyRetries ({PointerInput.MaxErrorNotReadyRetries}) times then make one final attempt; got {callCount} total calls");
     }
+
+    [TestMethod]
+    public void RunTouchGesture_NonError21_PropagatesImmediately_CalledExactlyOnce()
+    {
+        // M6: SendFrameWithRetry only catches Win32 error 21 (ERROR_NOT_READY). Any other
+        // exception must NOT be retried — it must propagate unchanged on the very first call.
+        int callCount = 0;
+        var expected = new InvalidOperationException("CreateTouchInjector failed — some other error");
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            callCount++;
+            throw expected; // NOT a Win32 error 21 message
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(100, 200) }
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.RunTouchGesture(TouchGesture.Tap, paths, holdMs: 0, durationMs: 0, sender,
+                sleepInter: _ => { });
+            Assert.Fail("Expected InvalidOperationException was not thrown");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(expected, caught, "Must propagate the exact exception object unchanged");
+        Assert.AreEqual(1, callCount,
+            "Non-error-21 exceptions must NOT be retried — sender must be called exactly once");
+        Assert.IsFalse(PointerInput.IsWin32ErrorNotReady(caught!),
+            "The propagated exception must not be recognised as a Win32 error 21");
+    }
 }

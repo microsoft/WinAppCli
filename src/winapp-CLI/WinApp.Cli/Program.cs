@@ -142,6 +142,12 @@ internal static class Program
 
         var parsedArgs = parseResult!;
 
+        // Derive the effective JSON mode from the SELECTED command's PARSED --json value (M1).
+        // The pre-scan flag (json) is needed for early logging/first-run setup but may be wrong:
+        //   - `--json false` → pre-scan sees --json as present; parsed value is false
+        //   - commands without --json (e.g. `complete`) → pre-scan may see --json; command has no option
+        bool effectiveJson = ResolveEffectiveJson(parsedArgs, json);
+
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
         // "Unrecognized command or argument" pointing at the wrong token (issue #467).
@@ -153,9 +159,19 @@ internal static class Program
             if (typo is not null)
             {
                 var suggested = "-" + typo;
-                Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
-                Console.Error.WriteLine(
-                    "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                if (effectiveJson)
+                {
+                    // M2: single-dash typo errors must also route through the JSON bridge when
+                    // the selected command has --json and its parsed value is true.
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
+                        $"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    Console.Error.WriteLine(
+                        "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                }
                 return 1;
             }
         }
@@ -167,14 +183,20 @@ internal static class Program
                 CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
-            // Parse-error → JSON bridge: when --json is present and SCL failed to parse a typed
-            // option (e.g. --pressure nope, --tilt-x nope), emit a structured invalid_arguments
-            // envelope to stderr instead of the default help-banner + plain text (M1, M2 fix).
-            // The non-JSON path is unchanged (help banner + exit 1 via normal SCL pipeline).
-            if (json && parsedArgs.Errors.Count > 0)
+            // Parse-error → JSON bridge: activated only when the SELECTED command exposes --json
+            // AND its parsed value is true (effectiveJson). This guards against:
+            //   - `--json false` firing the bridge (M1)
+            //   - commands without --json (e.g. `complete`) misfiring (M1)
+            //   - single-dash-typo path bypassing the bridge (M2, handled above)
+            // M3: emit CommandCompletedEvent before the early return to keep telemetry paired.
+            if (effectiveJson && parsedArgs.Errors.Count > 0)
             {
                 var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
                 UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg);
+                if (!isCompleteMode)
+                {
+                    CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                }
                 return 1;
             }
 
@@ -192,6 +214,38 @@ internal static class Program
             TelemetryFactory.Get<ITelemetry>().LogException(parsedArgs.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Derives the effective JSON mode from the selected command's PARSED <c>--json</c> option,
+    /// rather than from the raw token pre-scan. Handles two cases the pre-scan gets wrong:
+    /// <list type="bullet">
+    ///   <item><c>--json false</c> — pre-scan sees <c>--json</c> as present; parsed value is false</item>
+    ///   <item>commands without <c>--json</c> — pre-scan may see the token but the selected command
+    ///         does not own the option (e.g. <c>complete</c>), so no bridge should fire</item>
+    /// </list>
+    /// </summary>
+    private static bool ResolveEffectiveJson(System.CommandLine.ParseResult parsedArgs, bool jsonPreScan)
+    {
+        if (!jsonPreScan)
+        {
+            return false;
+        }
+        // Only engage the bridge when the selected (innermost) command actually owns --json.
+        var selectedCmd = parsedArgs.CommandResult.Command;
+        if (!selectedCmd.Options.Contains(WinAppRootCommand.JsonOption))
+        {
+            return false;
+        }
+        try
+        {
+            return parsedArgs.GetValue(WinAppRootCommand.JsonOption);
+        }
+        catch
+        {
+            // If reading the parsed value fails for any reason, do not fire the bridge.
+            return false;
         }
     }
 }

@@ -96,18 +96,36 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
         parseResult.InvocationConfiguration.Error = ConsoleStdErr;
 
-        // Mirror the parse-error → JSON bridge from Program.cs: when --json is present and SCL
-        // failed to parse a typed option (e.g. --pressure nope, --tilt-x nope), emit a structured
-        // invalid_arguments envelope instead of the default help-banner (M1/M2 root-cause fix).
-        if (parseResult.Errors.Count > 0 &&
-            GlobalOptionPreScan.IsFlagPresent(manifestArgs, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
-        {
-            var errorMsg = string.Join("; ", parseResult.Errors.Select(e => e.Message));
-            UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg, errorOut: ConsoleStdErr);
-            return 1;
-        }
-
         return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Invokes <see cref="Program.Main"/> with captured stdout/stderr.
+    /// Writers are intentionally not disposed to avoid ObjectDisposedException from
+    /// Spectre.Console's static AnsiConsole.Console which may reference them after return.
+    /// </summary>
+    /// <remarks>
+    /// Must only be called from a <c>[DoNotParallelize]</c> test class because it redirects
+    /// the process-wide <see cref="Console.Out"/> and <see cref="Console.Error"/> streams.
+    /// </remarks>
+    protected static async Task<(string Stdout, string Stderr, int ExitCode)> InvokeProgramAsync(string[] args)
+    {
+        var originalOut = Console.Out;
+        var originalErr = Console.Error;
+        var stdoutWriter = new StringWriter();
+        var stderrWriter = new StringWriter();
+        try
+        {
+            Console.SetOut(stdoutWriter);
+            Console.SetError(stderrWriter);
+            var exitCode = await Program.Main(args);
+            return (stdoutWriter.ToString(), stderrWriter.ToString(), exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalErr);
+        }
     }
 
     protected virtual IServiceCollection ConfigureServices(IServiceCollection services)
