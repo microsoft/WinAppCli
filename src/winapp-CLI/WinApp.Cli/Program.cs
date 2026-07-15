@@ -153,21 +153,35 @@ internal static class Program
     /// error plus exit code 1. The <paramref name="invoke"/> seam lets tests exercise both the
     /// success and top-level-failure paths without needing a real, throwing command.
     /// </summary>
+    internal static Task<int> RunWithTelemetryAsync(
+        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke) =>
+        RunWithTelemetryAsync(parsedArgs, isCompleteMode, invoke, CommandInvokedEvent.Log, CommandCompletedEvent.Log);
+
+    /// <summary>
+    /// Core of <see cref="RunWithTelemetryAsync(System.CommandLine.ParseResult, bool, Func{Task{int}})"/>
+    /// with the telemetry sinks injected. <paramref name="logCommandInvoked"/> and
+    /// <paramref name="logCommandCompleted"/> default (via the public overload) to the production
+    /// <see cref="CommandInvokedEvent.Log"/>/<see cref="CommandCompletedEvent.Log"/> events; the seam
+    /// lets tests assert that the invoked/completed events fire around the invocation — in order, with
+    /// the parsed command result and real exit code, and only when not in completion mode.
+    /// </summary>
     internal static async Task<int> RunWithTelemetryAsync(
-        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke)
+        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke,
+        Action<System.CommandLine.Parsing.CommandResult> logCommandInvoked,
+        Action<System.CommandLine.Parsing.CommandResult, int> logCommandCompleted)
     {
         try
         {
             if (!isCompleteMode)
             {
-                CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                logCommandInvoked(parsedArgs.CommandResult);
             }
 
             var returnCode = await invoke();
 
             if (!isCompleteMode)
             {
-                CommandCompletedEvent.Log(parsedArgs.CommandResult, returnCode);
+                logCommandCompleted(parsedArgs.CommandResult, returnCode);
             }
 
             return returnCode;

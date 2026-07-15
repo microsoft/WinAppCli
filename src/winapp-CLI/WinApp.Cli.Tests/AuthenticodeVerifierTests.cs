@@ -84,15 +84,35 @@ public class AuthenticodeVerifierTests
     private const int CERT_E_REVOCATION_FAILURE = unchecked((int)0x800B010E);
     private const int CRYPT_E_REVOCATION_OFFLINE = unchecked((int)0x80092013);
 
+    // WTD_* policy flags mirrored from the production constants (which are private), so the two-pass
+    // policy can be asserted precisely: whole-chain revocation via locally cached CRLs first, then a
+    // signature-only fallback with revocation checking disabled.
+    private const uint WTD_REVOKE_NONE = 0;
+    private const uint WTD_REVOKE_WHOLECHAIN = 1;
+    private const uint WTD_REVOCATION_CHECK_NONE = 0x00000010;
+    private const uint WTD_CACHE_ONLY_URL_RETRIEVAL = 0x00001000;
+
     [TestMethod]
     public void IsTrustedMicrosoftSigned_TrustOkAndMicrosoftSigner_ReturnsTrue()
     {
+        (uint RevocationChecks, uint ProvFlags)? firstPass = null;
         var result = AuthenticodeVerifier.IsTrustedMicrosoftSigned(
             "any.dll", NullLogger.Instance,
-            verifyTrustCore: (_, _, _) => 0,
+            verifyTrustCore: (_, revocationChecks, provFlags) =>
+            {
+                firstPass ??= (revocationChecks, provFlags);
+                return 0;
+            },
             isMicrosoftSigner: _ => true);
 
         Assert.IsTrue(result);
+
+        // The single successful pass must use the strict policy: whole-chain revocation, cache-only.
+        Assert.IsNotNull(firstPass, "WinVerifyTrust must be invoked.");
+        Assert.AreEqual(WTD_REVOKE_WHOLECHAIN, firstPass.Value.RevocationChecks,
+            "The initial pass must request whole-chain revocation checking.");
+        Assert.AreEqual(WTD_CACHE_ONLY_URL_RETRIEVAL, firstPass.Value.ProvFlags,
+            "The initial pass must retrieve revocation data from the local cache only.");
     }
 
     [TestMethod]
@@ -122,16 +142,33 @@ public class AuthenticodeVerifierTests
     [TestMethod]
     public void IsTrustedMicrosoftSigned_RevocationOffline_FallsBackToSignatureOnly_AndPasses()
     {
-        // First call (whole-chain) reports revocation data unavailable; the fallback signature-only
-        // call succeeds, so trust verification passes and the Microsoft signer gate then applies.
-        var call = 0;
+        // First call (whole-chain, cache-only) reports revocation data unavailable; the fallback
+        // signature-only call (revocation checking disabled) succeeds, so trust verification passes
+        // and the Microsoft signer gate then applies.
+        var calls = new List<(uint RevocationChecks, uint ProvFlags)>();
         var result = AuthenticodeVerifier.IsTrustedMicrosoftSigned(
             "any.dll", NullLogger.Instance,
-            verifyTrustCore: (_, _, _) => ++call == 1 ? CERT_E_REVOCATION_FAILURE : 0,
+            verifyTrustCore: (_, revocationChecks, provFlags) =>
+            {
+                calls.Add((revocationChecks, provFlags));
+                return calls.Count == 1 ? CERT_E_REVOCATION_FAILURE : 0;
+            },
             isMicrosoftSigner: _ => true);
 
         Assert.IsTrue(result);
-        Assert.AreEqual(2, call, "The fallback signature-only verification must run.");
+        Assert.AreEqual(2, calls.Count, "The fallback signature-only verification must run.");
+
+        // First pass: WITH revocation checking — full chain, but using locally cached CRLs only.
+        Assert.AreEqual(WTD_REVOKE_WHOLECHAIN, calls[0].RevocationChecks,
+            "First pass must request whole-chain revocation checking.");
+        Assert.AreEqual(WTD_CACHE_ONLY_URL_RETRIEVAL, calls[0].ProvFlags,
+            "First pass must retrieve revocation data from the local cache only.");
+
+        // Fallback pass: WITHOUT revocation checking — signature-only once revocation data is offline.
+        Assert.AreEqual(WTD_REVOKE_NONE, calls[1].RevocationChecks,
+            "Fallback pass must disable revocation checking.");
+        Assert.AreEqual(WTD_REVOCATION_CHECK_NONE, calls[1].ProvFlags,
+            "Fallback pass must set the no-revocation-check provider flag.");
     }
 
     [TestMethod]

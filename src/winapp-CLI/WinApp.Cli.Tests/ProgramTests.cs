@@ -200,6 +200,9 @@ public class ProgramSeamTests
     private static System.CommandLine.ParseResult ParseEmptyRoot() =>
         new System.CommandLine.RootCommand("test").Parse([], WinApp.Cli.Helpers.WinAppParserConfiguration.Default);
 
+    // Expected telemetry ordering: CommandInvoked fires, the command runs, then CommandCompleted fires.
+    private static readonly string[] ExpectedTelemetrySequence = ["invoked", "invoke", "completed"];
+
     [TestMethod]
     public void ConfigureConsoleEncoding_NonThrowingAction_IsApplied()
     {
@@ -221,24 +224,63 @@ public class ProgramSeamTests
     public async Task RunWithTelemetryAsync_CompleteMode_ReturnsInvokeResult()
     {
         var invoked = false;
+        var invokedLogged = false;
+        var completedLogged = false;
 
-        var result = await Program.RunWithTelemetryAsync(ParseEmptyRoot(), isCompleteMode: true, () =>
-        {
-            invoked = true;
-            return Task.FromResult(3);
-        });
+        var result = await Program.RunWithTelemetryAsync(ParseEmptyRoot(), isCompleteMode: true,
+            invoke: () =>
+            {
+                invoked = true;
+                return Task.FromResult(3);
+            },
+            logCommandInvoked: _ => invokedLogged = true,
+            logCommandCompleted: (_, _) => completedLogged = true);
 
         Assert.AreEqual(3, result);
-        Assert.IsTrue(invoked);
+        Assert.IsTrue(invoked, "The command must still be invoked in completion mode.");
+        Assert.IsFalse(invokedLogged, "Completion mode must not emit CommandInvoked telemetry.");
+        Assert.IsFalse(completedLogged, "Completion mode must not emit CommandCompleted telemetry.");
     }
 
     [TestMethod]
     public async Task RunWithTelemetryAsync_NonCompleteMode_LogsTelemetryAndReturnsResult()
     {
-        var result = await Program.RunWithTelemetryAsync(ParseEmptyRoot(), isCompleteMode: false,
-            () => Task.FromResult(0));
+        var parseResult = ParseEmptyRoot();
+        var expectedCommandResult = parseResult.CommandResult;
+        var sequence = new List<string>();
+        System.CommandLine.Parsing.CommandResult? invokedWith = null;
+        System.CommandLine.Parsing.CommandResult? completedWith = null;
+        var completedExitCode = int.MinValue;
 
-        Assert.AreEqual(0, result);
+        var result = await Program.RunWithTelemetryAsync(parseResult, isCompleteMode: false,
+            invoke: () =>
+            {
+                sequence.Add("invoke");
+                return Task.FromResult(7);
+            },
+            logCommandInvoked: cr =>
+            {
+                sequence.Add("invoked");
+                invokedWith = cr;
+            },
+            logCommandCompleted: (cr, code) =>
+            {
+                sequence.Add("completed");
+                completedWith = cr;
+                completedExitCode = code;
+            });
+
+        Assert.AreEqual(7, result);
+
+        // Telemetry must bracket the invocation: CommandInvoked before running, CommandCompleted after.
+        CollectionAssert.AreEqual(ExpectedTelemetrySequence, sequence,
+            "Invoked telemetry fires before the command runs and completed telemetry fires after it returns.");
+        Assert.AreSame(expectedCommandResult, invokedWith,
+            "CommandInvoked telemetry must carry the parsed command result.");
+        Assert.AreSame(expectedCommandResult, completedWith,
+            "CommandCompleted telemetry must carry the parsed command result.");
+        Assert.AreEqual(7, completedExitCode,
+            "CommandCompleted telemetry must report the real exit code returned by the command.");
     }
 
     [TestMethod]
@@ -246,12 +288,16 @@ public class ProgramSeamTests
     {
         var originalErr = Console.Error;
         var stderr = new StringWriter();
+        var invokedLogged = false;
+        var completedLogged = false;
         try
         {
             Console.SetError(stderr);
 
             var result = await Program.RunWithTelemetryAsync(ParseEmptyRoot(), isCompleteMode: false,
-                () => throw new InvalidOperationException("boom"));
+                invoke: () => throw new InvalidOperationException("boom"),
+                logCommandInvoked: _ => invokedLogged = true,
+                logCommandCompleted: (_, _) => completedLogged = true);
 
             Assert.AreEqual(1, result);
             Assert.IsTrue(stderr.ToString().Contains("An unexpected error occurred: boom", StringComparison.Ordinal),
@@ -261,5 +307,9 @@ public class ProgramSeamTests
         {
             Console.SetError(originalErr);
         }
+
+        // Invoked telemetry fires before the throwing invocation; completed telemetry must be skipped.
+        Assert.IsTrue(invokedLogged, "CommandInvoked telemetry fires before the command that throws.");
+        Assert.IsFalse(completedLogged, "CommandCompleted telemetry must not fire when the invocation throws.");
     }
 }
