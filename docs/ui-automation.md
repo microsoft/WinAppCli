@@ -275,9 +275,8 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 
 **Capture modes** (reported in the JSON `mode` field):
 - `wgc` — Windows Graphics Capture (default; works while the window is occluded).
-- `printwindow` — GDI PrintWindow (fallback when WGC is unavailable).
-- `screen` — Screen DC via `--capture-screen` (includes overlays/popups).
-- `screen-fallback` — WGC init failed; automatically fell back to screen DC.
+- `printwindow` — GDI PrintWindow (fallback when WGC is unavailable on this system/session; re-run with `--capture-screen` to use screen DC instead).
+- `screen` — Screen DC via `--capture-screen` (includes overlays/popups; brings the window to the foreground).
 
 **JSON output (`--json`):**
 - **stdout** (final result): `{ "path", "frames", "width", "height", "fileSize", "codec": "h264", "mode", "fps", "durationSec" }`
@@ -505,7 +504,7 @@ winapp ui list-windows --show-hidden                        # include invisible 
 | "Window has zero size" | Window is minimized | App will be auto-restored |
 | Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
 | `element_not_found` during record | Selector given but no matching element | Re-run `inspect` or `search` to get a fresh selector |
-| Record `mode: "screen-fallback"` | WGC capture init failed; fell back to screen DC | Check GPU/driver; use `--capture-screen` explicitly to use screen DC on purpose |
+| WGC unavailable during record | WGC capture init failed; no silent fallback | Check GPU/driver; use `--capture-screen` to consent to screen-DC capture |
 
 ## Common Patterns
 

@@ -94,16 +94,17 @@ internal sealed partial class UiAutomationService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogDebug(ex, "WGC recorder init failed; checking if screen-DC fallback is consented");
+                    _logger.LogDebug(ex, "WGC recorder init failed; throwing (no silent screen fallback without --capture-screen)");
                     grabber?.Dispose();
                     grabber = null;
                     // H1 privacy guard: do not silently fall back to screen capture unless the user
                     // explicitly consented by passing --capture-screen. Screen-DC capture includes any
                     // window overlapping the target on screen, which can leak unrelated content.
+                    // EnsureWgcFallbackConsented always throws here because WGC only runs when
+                    // --capture-screen is NOT set, so captureScreenRequested is always false.
                     EnsureWgcFallbackConsented(ex, options.CaptureScreen, _logger);
                     useScreen = true;
                     useWgc = false;
-                    mode = "screen-fallback";
                     srcWidth = rect.right - rect.left;
                     srcHeight = rect.bottom - rect.top;
                     captureOriginLeft = rect.left;

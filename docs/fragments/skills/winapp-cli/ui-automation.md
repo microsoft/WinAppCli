@@ -120,9 +120,9 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
 - Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
-- `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable the CLI automatically falls back to screen-DC capture (`mode: "screen-fallback"` in the JSON result).
+- `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout result: `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), `mode` (`wgc`, `printwindow`, `screen`, or `screen-fallback`). A `{"event":"recording-started","path":"…","fps":N,"durationSec":N}` liveness event is emitted to **stderr** as soon as capture begins, before the final result.
+- `--json` stdout result: `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), `mode` (`wgc`, `printwindow`, or `screen`). A `{"event":"recording-started","path":"…","fps":N,"durationSec":N}` liveness event is emitted to **stderr** as soon as capture begins, before the final result.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
@@ -290,4 +290,4 @@ Full schemas with examples: `references/ui-json-envelope.md`.
 | Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
 | `element_not_found` during record | Selector given but element not in tree | Re-run `inspect` or `search` to get a fresh selector |
 | `ambiguous_selector` during record | Plain-text selector matched multiple elements | Use a slug from the suggestions in the error message, or from `inspect` output |
-| Record `mode: "screen-fallback"` | WGC capture init failed; fell back to screen DC | Check GPU/driver; use `--capture-screen` explicitly if screen DC is preferred |
+| WGC unavailable during record | WGC capture init failed; no silent fallback | Check GPU/driver; use `--capture-screen` to explicitly request screen DC capture |

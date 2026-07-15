@@ -55,19 +55,14 @@ internal class UiRecordCommand : Command, IShortDescription
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-
-            if (string.IsNullOrWhiteSpace(app) && window is null)
-            {
-                UiErrors.MissingApp(logger, json);
-                return 1;
-            }
-
             var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
             var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
             var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
 
+            // Validate all numeric/range arguments before requiring a target, so bad argument
+            // values produce invalid_arguments regardless of whether a target was supplied.
             if (durationSec < 0)
             {
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must be 0 or greater.");
@@ -90,6 +85,12 @@ internal class UiRecordCommand : Command, IShortDescription
             {
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
                 logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
+                return 1;
+            }
+
+            if (string.IsNullOrWhiteSpace(app) && window is null)
+            {
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 

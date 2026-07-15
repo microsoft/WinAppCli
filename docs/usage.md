@@ -1123,6 +1123,6 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 
 With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
 `height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
-(`wgc`, `printwindow`, `screen`, or `screen-fallback` when WGC init failed silently).
+(`wgc`, `printwindow`, or `screen`).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

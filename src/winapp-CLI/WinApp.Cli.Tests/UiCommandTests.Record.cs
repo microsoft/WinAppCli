@@ -191,19 +191,19 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Record_Success_ReportsScreenFallbackMode()
+    public async Task Record_Success_ReportsScreenMode()
     {
-        // Verify that when the fake service reports "screen-fallback" (WGC init failed silently),
-        // the command passes the mode through unchanged so consumers can detect degradation.
-        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 2, Width = 100, Height = 100, Mode = "screen-fallback" };
+        // Verify that when the fake service reports "screen" (consented --capture-screen path),
+        // the command passes the mode through unchanged so consumers can detect the capture path.
+        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 2, Width = 100, Height = 100, Mode = "screen" };
 
-        var outputPath = Path.Combine(_tempDirectory.FullName, "fallback.mp4");
+        var outputPath = Path.Combine(_tempDirectory.FullName, "screen.mp4");
         var command = GetRequiredService<UiRecordCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath, "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--capture-screen", "--duration-sec", "1", "-o", outputPath, "--json"]);
 
         Assert.AreEqual(0, exitCode);
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
-        Assert.AreEqual("screen-fallback", result.GetProperty("mode").GetString());
+        Assert.AreEqual("screen", result.GetProperty("mode").GetString());
     }
 
     [TestMethod]
@@ -694,6 +694,60 @@ public partial class UiCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command, ["-a", "TestApp", "--max-edge", "0", "--duration-sec", "1", "-o", outputPath, "--json"]);
         Assert.AreEqual(0, exitCode, "--max-edge 0 (unbounded) must be accepted");
+    }
+
+    // -----------------------------------------------------------------------
+    // M1 (round-8) — numeric validation must run BEFORE the missing-target check
+    // so that bad argument values yield invalid_arguments even when no target is given.
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Record_MaxEdgeOne_NoTarget_ReturnsInvalidArguments()
+    {
+        // --max-edge 1 (non-zero, below 64) with NO -a/-w must yield invalid_arguments,
+        // not missing_app. Before the fix, the missing-target check ran first.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--max-edge", "1", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--max-edge must be 0",
+            "error must be invalid_arguments, not missing_app");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "64");
+    }
+
+    [TestMethod]
+    public async Task Record_MaxEdge63_NoTarget_ReturnsInvalidArguments()
+    {
+        // --max-edge 63 (non-zero, one below the 64px minimum) with NO target must yield
+        // invalid_arguments — the numeric validation must fire before the target check.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--max-edge", "63", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--max-edge must be 0",
+            "error must be invalid_arguments, not missing_app");
+    }
+
+    [TestMethod]
+    public async Task Record_MaxEdge64_NoTarget_ReturnsMissingApp()
+    {
+        // --max-edge 64 (valid — encoder minimum) with NO target must pass numeric validation
+        // and then fail with missing_app, not invalid_arguments.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--max-edge", "64", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("--max-edge must be 0"),
+            "--max-edge 64 is valid; error must be missing_app, not invalid_arguments");
+    }
+
+    [TestMethod]
+    public async Task Record_MaxEdgeZero_NoTarget_ReturnsMissingApp()
+    {
+        // --max-edge 0 (unbounded) with NO target must pass numeric validation and then fail
+        // with missing_app, not invalid_arguments.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--max-edge", "0", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("--max-edge must be 0"),
+            "--max-edge 0 is valid; error must be missing_app, not invalid_arguments");
     }
 
     // -----------------------------------------------------------------------
