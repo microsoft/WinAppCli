@@ -140,14 +140,17 @@ internal partial class NugetService
     }
 
     /// <summary>
-    /// Fetches all listed (non-unlisted) versions of a package from every source eligible to serve it
-    /// (honoring <c>&lt;packageSourceMapping&gt;</c>). Unlisted versions are excluded so they are never
-    /// selected as "latest". Because the result feeds a MAX ("latest") decision, a source that cannot be
-    /// queried is treated as fatal rather than silently skipped: a partial result could otherwise make a
-    /// caller select an older version (e.g. <c>update</c> could downgrade a pinned package). A source that
-    /// exposes only <c>PackageBaseAddress</c> (no registration resource) is enumerated via its flat container
-    /// through <see cref="GetSourceVersionsAsync"/> rather than skipped, so private feeds of that shape still
-    /// contribute versions.
+    /// Fetches the versions of a package from every source eligible to serve it (honoring
+    /// <c>&lt;packageSourceMapping&gt;</c>). Unlisted versions are filtered out on sources that support
+    /// registration/metadata, so they are not selected as "latest"; a flat-container-only feed
+    /// (<c>PackageBaseAddress</c> with no registration resource) exposes no listed/unlisted flag, so that
+    /// filter cannot be applied there and an unlisted version could be enumerated — see
+    /// <see cref="GetSourceVersionsAsync"/> and the <see cref="INugetService.GetLatestVersionAsync"/> remarks.
+    /// Because the result feeds a MAX ("latest") decision, a source that cannot be queried is treated as fatal
+    /// rather than silently skipped: a partial result could otherwise make a caller select an older version
+    /// (e.g. <c>update</c> could downgrade a pinned package). A source that exposes only the flat container is
+    /// still enumerated through <see cref="GetSourceVersionsAsync"/> rather than skipped, so private feeds of
+    /// that shape still contribute versions.
     /// </summary>
     private async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
@@ -165,9 +168,11 @@ internal partial class NugetService
 
             try
             {
-                // Exclude unlisted versions so an unlisted build is never selected as "latest". A source that
-                // exposes only PackageBaseAddress (no registration resource) is enumerated via its flat
-                // container instead of being skipped, so latest resolution still works against such feeds.
+                // Request listed versions only. Registration/metadata-backed sources honor this and exclude
+                // unlisted builds from "latest"; a flat-container-only feed (PackageBaseAddress, no
+                // registration) exposes no listed/unlisted flag, so the filter cannot be applied there and an
+                // unlisted version could be enumerated. Such a feed is still enumerated via its flat container
+                // rather than skipped, so latest resolution keeps working against feeds of that shape.
                 foreach (var version in await GetSourceVersionsAsync(repo, packageName, includeUnlisted: false, cacheContext, cancellationToken))
                 {
                     versions.Add(version.ToNormalizedString());
