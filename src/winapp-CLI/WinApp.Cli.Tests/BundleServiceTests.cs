@@ -93,12 +93,61 @@ public class BundleServiceTests
         return new FileInfo(path);
     }
 
+    [TestMethod]
+    public async Task CreateBundleAsync_StagingCleanupFailure_IsSwallowed()
+    {
+        var file1 = CreateFakeMsix("slice.msix");
+        var output = new FileInfo(Path.Combine(_tempDir.FullName, "swallow.msixbundle"));
+
+        FileStream? held = null;
+        string? stagingDir = null;
+
+        // While "makeappx" runs, hold a file in the staging directory open with no sharing so the
+        // finally-block cleanup Delete throws — which the service must swallow (not rethrow).
+        _buildToolsService.OnRun = args =>
+        {
+            stagingDir = ExtractDirectoryArg(args);
+            held = new FileStream(Path.Combine(stagingDir!, "held.lock"), FileMode.Create, FileAccess.Write, FileShare.None);
+        };
+
+        try
+        {
+            // Must complete without throwing even though staging cleanup fails.
+            await _service.CreateBundleAsync([file1], output, _taskContext);
+        }
+        finally
+        {
+            held?.Dispose();
+            if (stagingDir != null && Directory.Exists(stagingDir))
+            {
+                Directory.Delete(stagingDir, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>Extracts the staging directory from a makeappx <c>bundle /d "..."</c> argument string.</summary>
+    private static string ExtractDirectoryArg(string arguments)
+    {
+        const string marker = "/d \"";
+        var start = arguments.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        var end = arguments.IndexOf('"', start);
+        var dir = arguments[start..end];
+        if (dir.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            dir = dir[4..];
+        }
+        return dir;
+    }
+
     /// <summary>
     /// Captures build tool invocations without actually running anything.
     /// </summary>
     private sealed class CapturingBuildToolsService : IBuildToolsService
     {
         public List<(string ToolName, string Arguments)> Invocations { get; } = [];
+
+        /// <summary>Optional hook invoked with the raw tool arguments; lets a test simulate side effects.</summary>
+        public Action<string>? OnRun { get; set; }
 
         public FileInfo? GetBuildToolPath(string toolName) => new(Path.Combine(Path.GetTempPath(), toolName));
 
@@ -111,6 +160,7 @@ public class BundleServiceTests
         public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
         {
             Invocations.Add((tool.ExecutableName, arguments));
+            OnRun?.Invoke(arguments);
             return Task.FromResult(("", ""));
         }
     }

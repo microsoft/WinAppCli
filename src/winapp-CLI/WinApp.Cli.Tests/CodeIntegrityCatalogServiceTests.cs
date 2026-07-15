@@ -359,4 +359,146 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
     }
 
     #endregion
+
+    #region ReadBytes / IsExecutable / IfExists edge cases
+
+    [TestMethod]
+    public void ReadBytes_InsufficientBytes_ThrowsEndOfStream()
+    {
+        using var stream = new MemoryStream([0x01, 0x02]);
+        using var reader = new BinaryReader(stream);
+
+        // int needs 4 bytes but only 2 are available.
+        var ex = Assert.ThrowsExactly<EndOfStreamException>(() => CodeIntegrityCatalogService.ReadBytes<int>(reader));
+        StringAssert.Contains(ex.Message, "Int32");
+    }
+
+    private static void WriteWord(byte[] b, int off, ushort v)
+    {
+        b[off] = (byte)(v & 0xFF);
+        b[off + 1] = (byte)(v >> 8);
+    }
+
+    private static void WriteDword(byte[] b, int off, uint v)
+    {
+        b[off] = (byte)(v & 0xFF);
+        b[off + 1] = (byte)((v >> 8) & 0xFF);
+        b[off + 2] = (byte)((v >> 16) & 0xFF);
+        b[off + 3] = (byte)((v >> 24) & 0xFF);
+    }
+
+    private static byte[] BuildPeWithOneSection(byte[] name8, uint characteristics)
+    {
+        var b = new byte[128];
+        WriteWord(b, 0, 0x5A4D);           // e_magic 'MZ'
+        WriteDword(b, 60, 64);             // e_lfanew -> NT headers at 64
+        WriteDword(b, 64, 0x00004550);     // 'PE\0\0'
+        WriteWord(b, 68 + 2, 1);           // FileHeader.NumberOfSections = 1
+        WriteWord(b, 68 + 16, 0);          // FileHeader.SizeOfOptionalHeader = 0
+        for (var i = 0; i < name8.Length && i < 8; i++)
+        {
+            b[88 + i] = name8[i];          // SectionHeader.Name
+        }
+        WriteDword(b, 88 + 36, characteristics); // SectionHeader.Characteristics
+        return b;
+    }
+
+    private bool InvokeIsExecutable(byte[] peBytes)
+    {
+        var path = Path.Combine(_tempDirectory.FullName, $"pe_{Guid.NewGuid():N}.bin");
+        File.WriteAllBytes(path, peBytes);
+        var method = typeof(CodeIntegrityCatalogService).GetMethod(
+            "IsExecutable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        return (bool)method.Invoke(null, [path])!;
+    }
+
+    [TestMethod]
+    public void IsExecutable_NotMzMagic_ReturnsFalse()
+    {
+        // 64 zero bytes: large enough for a DOS header but e_magic != 'MZ'.
+        Assert.IsFalse(InvokeIsExecutable(new byte[64]));
+    }
+
+    [TestMethod]
+    public void IsExecutable_InvalidLfanew_ReturnsFalse()
+    {
+        var b = new byte[64];
+        WriteWord(b, 0, 0x5A4D); // 'MZ' but e_lfanew stays 0 (<= 0)
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_BadNtSignature_ReturnsFalse()
+    {
+        var b = new byte[72];
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0xFFFFFFFF); // not 'PE\0\0'
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_TruncatedBeforeFileHeader_ReturnsFalse()
+    {
+        var b = new byte[80]; // room for PE signature but not the whole file header
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_OptionalHeaderExceedsStream_ReturnsFalse()
+    {
+        var b = new byte[88]; // exactly a file header, but SizeOfOptionalHeader overflows the stream
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        WriteWord(b, 68 + 16, 0xFFFF); // SizeOfOptionalHeader
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_SectionsExceedStream_ReturnsFalse()
+    {
+        var b = new byte[88];
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        WriteWord(b, 68 + 2, 10);  // NumberOfSections far more than the stream can hold
+        WriteWord(b, 68 + 16, 0);  // SizeOfOptionalHeader
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_TextSectionWithoutCodeFlag_ReturnsTrue()
+    {
+        // A ".text" section is treated as executable even without the code/exec characteristics.
+        var name = new byte[] { (byte)'.', (byte)'t', (byte)'e', (byte)'x', (byte)'t', 0, 0, 0 };
+        Assert.IsTrue(InvokeIsExecutable(BuildPeWithOneSection(name, 0)));
+    }
+
+    [TestMethod]
+    public void IsExecutable_NoExecutableSection_ReturnsFalse()
+    {
+        // A single non-code, non-".text" section => not executable.
+        var name = new byte[] { (byte)'.', (byte)'d', (byte)'a', (byte)'t', (byte)'a', 0, 0, 0 };
+        Assert.IsFalse(InvokeIsExecutable(BuildPeWithOneSection(name, 0)));
+    }
+
+    [TestMethod]
+    public async Task CreateExternalCatalog_OutputExistsWithSkip_DoesNotRegenerate()
+    {
+        var outputPath = Path.Combine(_tempDirectory.FullName, "existing.cat");
+        File.WriteAllText(outputPath, "SENTINEL");
+
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
+            [_testInputDirectory], false, false, false, IfExists.Skip, new FileInfo(outputPath));
+
+        // Skip mode must return before collecting/regenerating, leaving the file untouched.
+        // (If Skip were ignored, the empty input directory would throw InvalidOperationException.)
+        Assert.AreEqual("SENTINEL", File.ReadAllText(outputPath));
+    }
+
+    #endregion
 }

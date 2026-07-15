@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console.Testing;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -9,6 +12,9 @@ namespace WinApp.Cli.Tests;
 public class MrtAssetHelperTests
 {
     private DirectoryInfo _tempDir = null!;
+
+    private static TaskContext CreateTaskContext()
+        => new(new GroupableTask("test", null), null, new TestConsole(), NullLogger<MrtAssetHelperTests>.Instance, new Lock());
 
     [TestInitialize]
     public void Setup()
@@ -362,6 +368,40 @@ public class MrtAssetHelperTests
 
         // Dictionary-based dedup should prevent duplicates
         Assert.AreEqual(2, result.Count); // Logo.png + Logo.scale-200.png
+    }
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_MissingDirectory_WithTaskContext_LogsWarningAndSkips()
+    {
+        var taskContext = CreateTaskContext();
+
+        // Referenced file lives under a subdirectory that does not exist -> the per-file source
+        // directory check logs a warning and continues (exercising the non-null taskContext path).
+        var result = MrtAssetHelper.ExpandManifestReferencedFiles(
+            _tempDir,
+            ["nonexistent\\Logo.png"],
+            taskContext);
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    #endregion
+
+    #region GetExpandedManifestReferencedFiles
+
+    [TestMethod]
+    public void GetExpandedManifestReferencedFiles_ManifestAtDriveRoot_ReturnsEmpty()
+    {
+        var taskContext = CreateTaskContext();
+
+        // A manifest whose FileInfo.Directory is null (drive root) must short-circuit to empty
+        // without attempting to read the file.
+        var driveRoot = Path.GetPathRoot(_tempDir.FullName)!;
+        var manifestAtRoot = new FileInfo(driveRoot);
+
+        var result = MrtAssetHelper.GetExpandedManifestReferencedFiles(manifestAtRoot, taskContext);
+
+        Assert.AreEqual(0, result.Count);
     }
 
     #endregion
