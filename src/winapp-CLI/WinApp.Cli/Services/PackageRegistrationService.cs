@@ -20,6 +20,21 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     // package (e.g., a previously installed signed MSIX with the same identity).
     private const int ERROR_ACCESS_DISABLED_BY_POLICY = unchecked((int)0x800704EC);
 
+    // OS-boundary seams. Each defaults to the real WinRT PackageManager call and is
+    // overridable in tests so the surrounding mapping, filtering, and error-handling
+    // logic can be exercised without a real package, admin rights, or the packageQuery
+    // capability (which the unit-test host lacks). Mirrors the Func<> seam precedent
+    // used by UpdateNotificationService.
+    internal Func<Uri, CancellationToken, Task<DeploymentOutcome>> RegisterLooseImpl { get; set; } = DefaultRegisterLoose;
+
+    internal Func<Uri, Uri, CancellationToken, Task<DeploymentOutcome>> RegisterSparseImpl { get; set; } = DefaultRegisterSparse;
+
+    internal Func<IReadOnlyList<InstalledPackageView>> EnumerateUserPackagesImpl { get; set; } = DefaultEnumerateUserPackages;
+
+    internal Func<string, bool, CancellationToken, Task<RemovalOutcome>> RemovePackageImpl { get; set; } = DefaultRemovePackage;
+
+    internal Func<Uri, CancellationToken, Task<InstallOutcome>> AddPackageImpl { get; set; } = DefaultAddPackage;
+
     /// <inheritdoc />
     public async Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
@@ -29,22 +44,17 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
         // Convert to 8.3 short path as a workaround; throw if shortening fails.
         var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
-        var pm = new PackageManager();
 
         try
         {
-            var result = await pm.RegisterPackageAsync(
-                manifestUri,
-                null,
-                DeploymentOptions.DevelopmentMode | DeploymentOptions.ForceApplicationShutdown
-            ).AsTask(cancellationToken);
+            var result = await RegisterLooseImpl(manifestUri, cancellationToken);
 
             if (!result.IsRegistered)
             {
                 throw BuildRegistrationException(
                     "Failed to register package",
                     result.ErrorText,
-                    result.ExtendedErrorCode?.HResult,
+                    result.ExtendedErrorHResult,
                     packageIdentityName: TryReadIdentityName(fullPath));
             }
 
@@ -79,34 +89,26 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // Convert to 8.3 short paths as a workaround; throw if shortening fails.
         var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullManifestPath));
         var shortExternalPath = LongPathHelper.GetShortPathOrThrow(fullExternalPath + Path.DirectorySeparatorChar);
+        // Documented coverage ceiling: this re-append runs only when Win32 GetShortPathName strips
+        // the trailing separator, which depends on 8.3 short-name generation being enabled on the
+        // volume — env-dependent, so it can't be exercised deterministically in a unit test.
         if (!Path.EndsInDirectorySeparator(shortExternalPath))
         {
             shortExternalPath += Path.DirectorySeparatorChar;
         }
 
         var externalUri = new Uri(shortExternalPath);
-        var pm = new PackageManager();
 
         try
         {
-            var options = new RegisterPackageOptions
-            {
-                ExternalLocationUri = externalUri,
-                DeveloperMode = true,
-                ForceUpdateFromAnyVersion = true,
-            };
-
-            var result = await pm.RegisterPackageByUriAsync(
-                manifestUri,
-                options
-            ).AsTask(cancellationToken);
+            var result = await RegisterSparseImpl(manifestUri, externalUri, cancellationToken);
 
             if (!result.IsRegistered)
             {
                 throw BuildRegistrationException(
                     "Failed to register sparse package",
                     result.ErrorText,
-                    result.ExtendedErrorCode?.HResult,
+                    result.ExtendedErrorHResult,
                     packageIdentityName: TryReadIdentityName(fullManifestPath));
             }
 
@@ -132,13 +134,10 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public async Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
-        var pm = new PackageManager();
-
         // FindPackagesForUser with name+publisher requires both to match.
-        // Use the single-string overload to find by family name prefix, then filter by name.
-        var allUserPackages = pm.FindPackagesForUser(string.Empty);
-        var matchingPackages = allUserPackages
-            .Where(p => string.Equals(p.Id.Name, packageName, StringComparison.OrdinalIgnoreCase))
+        // Enumerate all user packages, then filter by name.
+        var matchingPackages = EnumerateUserPackagesImpl()
+            .Where(p => string.Equals(p.Name, packageName, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (matchingPackages.Count == 0)
@@ -148,14 +147,10 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
 
         foreach (var pkg in matchingPackages)
         {
-            var fullName = pkg.Id.FullName;
+            var fullName = pkg.FullName;
             logger.LogDebug("Removing package: {PackageFullName} (preserveAppData={PreserveAppData})", fullName, preserveAppData);
 
-            var removalOptions = preserveAppData
-                ? RemovalOptions.PreserveApplicationData
-                : RemovalOptions.None;
-
-            var result = await pm.RemovePackageAsync(fullName, removalOptions).AsTask(cancellationToken);
+            var result = await RemovePackageImpl(fullName, preserveAppData, cancellationToken);
 
             if (!string.IsNullOrEmpty(result.ErrorText))
             {
@@ -169,15 +164,9 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public async Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
-        var pm = new PackageManager();
-
         logger.LogDebug("Removing package: {PackageFullName} (preserveAppData={PreserveAppData})", packageFullName, preserveAppData);
 
-        var removalOptions = preserveAppData
-            ? RemovalOptions.PreserveApplicationData
-            : RemovalOptions.None;
-
-        var result = await pm.RemovePackageAsync(packageFullName, removalOptions).AsTask(cancellationToken);
+        var result = await RemovePackageImpl(packageFullName, preserveAppData, cancellationToken);
 
         if (!string.IsNullOrEmpty(result.ErrorText))
         {
@@ -194,18 +183,13 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // WinRT PackageManager doesn't support paths exceeding MAX_PATH or symlinks.
         // Convert to 8.3 short path as a workaround; throw if shortening fails.
         var packageUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullPath));
-        var pm = new PackageManager();
 
-        var result = await pm.AddPackageAsync(
-            packageUri,
-            null,
-            DeploymentOptions.ForceApplicationShutdown
-        ).AsTask(cancellationToken);
+        var result = await AddPackageImpl(packageUri, cancellationToken);
 
         if (!string.IsNullOrEmpty(result.ErrorText))
         {
             throw new InvalidOperationException(
-                $"Failed to install package '{Path.GetFileName(packagePath)}': {result.ErrorText} (0x{result.ExtendedErrorCode?.HResult:X8})");
+                $"Failed to install package '{Path.GetFileName(packagePath)}': {result.ErrorText} (0x{result.ExtendedErrorHResult:X8})");
         }
 
         logger.LogDebug("Installed package: {PackagePath}", packagePath);
@@ -214,18 +198,11 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public string? GetInstalledVersion(string packageName)
     {
-        var pm = new PackageManager();
-        // Use the single-parameter overload and filter manually.
-        // The (userId, name, publisher) overload rejects empty/null publisher
-        // because string.Empty marshals as null HSTRING in WinRT interop.
-        var allUserPackages = pm.FindPackagesForUser(string.Empty);
-
-        foreach (var pkg in allUserPackages)
+        foreach (var pkg in EnumerateUserPackagesImpl())
         {
-            if (string.Equals(pkg.Id.Name, packageName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(pkg.Name, packageName, StringComparison.OrdinalIgnoreCase))
             {
-                var v = pkg.Id.Version;
-                return $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
+                return $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}";
             }
         }
 
@@ -235,13 +212,11 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <inheritdoc />
     public List<DevPackageInfo> FindDevPackages(string packageName)
     {
-        var pm = new PackageManager();
-        var allUserPackages = pm.FindPackagesForUser(string.Empty);
         var results = new List<DevPackageInfo>();
 
-        foreach (var pkg in allUserPackages)
+        foreach (var pkg in EnumerateUserPackagesImpl())
         {
-            if (!string.Equals(pkg.Id.Name, packageName, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(pkg.Name, packageName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -249,18 +224,17 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
             string? installLocation = null;
             try
             {
-                installLocation = pkg.InstalledLocation?.Path;
+                installLocation = pkg.InstalledLocationAccessor();
             }
             catch
             {
                 // InstalledLocation can throw if the path no longer exists
             }
 
-            var v = pkg.Id.Version;
             results.Add(new DevPackageInfo(
-                FullName: pkg.Id.FullName,
-                Name: pkg.Id.Name,
-                Version: $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}",
+                FullName: pkg.FullName,
+                Name: pkg.Name,
+                Version: $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}",
                 InstallLocation: installLocation,
                 IsDevelopmentMode: pkg.IsDevelopmentMode));
         }
@@ -334,4 +308,116 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
             return null;
         }
     }
+
+    // ---- Real WinRT PackageManager seam implementations (documented coverage ceiling) --------
+    // The Default* methods below are the production Windows.Management.Deployment.PackageManager
+    // calls that the RegisterLooseImpl / RegisterSparseImpl / RemovePackageImpl / AddPackageImpl /
+    // EnumerateUserPackagesImpl seams default to; tests inject those seams to cover all surrounding
+    // logic. The lines left uncovered here are an OS boundary that cannot be exercised without
+    // machine-mutating MSIX deployment:
+    //  * RegisterLoose / RegisterSparse / AddPackage - their failure paths ARE covered by the
+    //    deterministic _RealDefault_*_Throws/_Fails tests; only the *Outcome returned AFTER a
+    //    successful WinRT call stays uncovered (needs a real, valid package to actually deploy).
+    //  * RemovePackage - has no real-default test: removing a non-existent package has no
+    //    observable effect and its failure mode (throw vs error-result) is host-dependent, so such
+    //    a test would be vacuous or flaky. The warning / no-warning logic is covered via the seam.
+    private static async Task<DeploymentOutcome> DefaultRegisterLoose(Uri manifestUri, CancellationToken cancellationToken)
+    {
+        var pm = new PackageManager();
+        var result = await pm.RegisterPackageAsync(
+            manifestUri,
+            null,
+            DeploymentOptions.DevelopmentMode | DeploymentOptions.ForceApplicationShutdown
+        ).AsTask(cancellationToken);
+        return new DeploymentOutcome(result.IsRegistered, result.ErrorText, result.ExtendedErrorCode?.HResult);
+    }
+
+    private static async Task<DeploymentOutcome> DefaultRegisterSparse(Uri manifestUri, Uri externalUri, CancellationToken cancellationToken)
+    {
+        var pm = new PackageManager();
+        var options = new RegisterPackageOptions
+        {
+            ExternalLocationUri = externalUri,
+            DeveloperMode = true,
+            ForceUpdateFromAnyVersion = true,
+        };
+        var result = await pm.RegisterPackageByUriAsync(manifestUri, options).AsTask(cancellationToken);
+        return new DeploymentOutcome(result.IsRegistered, result.ErrorText, result.ExtendedErrorCode?.HResult);
+    }
+
+    private static IReadOnlyList<InstalledPackageView> DefaultEnumerateUserPackages()
+    {
+        // Behavior note (intentional): this eagerly snapshots Id.Version and IsDevelopmentMode for
+        // every package into plain-data InstalledPackageView records, rather than reading those
+        // WinRT accessors lazily only for the name-matching package as earlier inline code did.
+        // The snapshot decouples callers from live WinRT Package objects (so seams can inject test
+        // data); the only observable difference — a corrupted-metadata *unrelated* package could
+        // abort the whole enumeration — is effectively unreachable for real user packages. The
+        // matching InstalledLocation accessor stays deferred (a Func) because it is the one member
+        // that legitimately throws for a valid package whose files were removed.
+        // Documented coverage ceiling: the live accessor lambda (() => p.InstalledLocation?.Path)
+        // and the eager Id.Version / IsDevelopmentMode reads only execute over a real installed
+        // Package, so they stay uncovered; the seam-injected views cover the projection logic.
+        // The (userId, name, publisher) overload rejects empty/null publisher because
+        // string.Empty marshals as a null HSTRING in WinRT interop, so use the single
+        // (userSecurityId) overload with the current user and filter by name in callers.
+        var pm = new PackageManager();
+        var views = new List<InstalledPackageView>();
+        foreach (var p in pm.FindPackagesForUser(string.Empty))
+        {
+            var v = p.Id.Version;
+            views.Add(new InstalledPackageView(
+                p.Id.Name,
+                p.Id.FullName,
+                v.Major,
+                v.Minor,
+                v.Build,
+                v.Revision,
+                p.IsDevelopmentMode,
+                () => p.InstalledLocation?.Path));
+        }
+
+        return views;
+    }
+
+    private static async Task<RemovalOutcome> DefaultRemovePackage(string packageFullName, bool preserveAppData, CancellationToken cancellationToken)
+    {
+        var pm = new PackageManager();
+        var removalOptions = preserveAppData
+            ? RemovalOptions.PreserveApplicationData
+            : RemovalOptions.None;
+        var result = await pm.RemovePackageAsync(packageFullName, removalOptions).AsTask(cancellationToken);
+        return new RemovalOutcome(result.ErrorText);
+    }
+
+    private static async Task<InstallOutcome> DefaultAddPackage(Uri packageUri, CancellationToken cancellationToken)
+    {
+        var pm = new PackageManager();
+        var result = await pm.AddPackageAsync(
+            packageUri,
+            null,
+            DeploymentOptions.ForceApplicationShutdown
+        ).AsTask(cancellationToken);
+        return new InstallOutcome(result.ErrorText, result.ExtendedErrorCode?.HResult);
+    }
+
+    /// <summary>Outcome of a package register/deploy operation, decoupled from WinRT types.</summary>
+    internal readonly record struct DeploymentOutcome(bool IsRegistered, string? ErrorText, int? ExtendedErrorHResult);
+
+    /// <summary>Outcome of a package removal, decoupled from WinRT types.</summary>
+    internal readonly record struct RemovalOutcome(string? ErrorText);
+
+    /// <summary>Outcome of a package install/add, decoupled from WinRT types.</summary>
+    internal readonly record struct InstallOutcome(string? ErrorText, int? ExtendedErrorHResult);
+
+    /// <summary>A projection of an installed package, decoupled from WinRT <c>Package</c>.</summary>
+    internal sealed record InstalledPackageView(
+        string Name,
+        string FullName,
+        ushort VersionMajor,
+        ushort VersionMinor,
+        ushort VersionBuild,
+        ushort VersionRevision,
+        bool IsDevelopmentMode,
+        Func<string?> InstalledLocationAccessor);
 }

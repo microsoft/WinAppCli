@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text.RegularExpressions;
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using WinApp.Cli.Tools;
 
 namespace WinApp.Cli.Tests;
 
@@ -51,52 +50,6 @@ internal sealed class FakeBundleValidationService : IBundleValidationService
     }
 }
 
-internal sealed class FakeBuildToolsService : IBuildToolsService
-{
-    private static readonly Regex OutputPathRegex = new("(?:^|\\s)/p\\s+\"(?<path>[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    public List<(string ToolName, string Arguments)> Invocations { get; } = [];
-
-    public FileInfo? GetBuildToolPath(string toolName)
-    {
-        return new FileInfo(Path.Combine(Path.GetTempPath(), toolName));
-    }
-
-    public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
-    }
-
-    public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult<DirectoryInfo?>(null);
-    }
-
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
-    {
-        Invocations.Add((tool.ExecutableName, arguments));
-
-        // Only create fake output files for makeappx (not signtool or other tools)
-        if (tool.ExecutableName.Contains("makeappx", StringComparison.OrdinalIgnoreCase))
-        {
-            var match = OutputPathRegex.Match(arguments);
-            if (match.Success)
-            {
-                var outputPath = NormalizeLongPath(match.Groups["path"].Value);
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                File.WriteAllText(outputPath, $"fake {tool.ExecutableName} output");
-            }
-        }
-
-        return Task.FromResult<(string stdout, string stderr)>((string.Empty, string.Empty));
-    }
-
-    private static string NormalizeLongPath(string path)
-    {
-        return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
-    }
-}
-
 [TestClass]
 public class MsixServiceBundleOrchestrationTests : BaseCommandTests
 {
@@ -108,11 +61,29 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     private FakeBundleValidationService _fakeBundleValidationService = null!;
     private FakeBuildToolsService _fakeBuildToolsService = null!;
 
+    /// <summary>
+    /// Relative file paths ('/'-separated) captured from the makeappx <c>/d</c> staging directory at
+    /// pack time — snapshotted before the SUT deletes the staging dir — so tests can assert exactly
+    /// what was staged for packing.
+    /// </summary>
+    private readonly List<string> _makeAppxStagedFiles = [];
+
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeBundleService = new FakeBundleService();
         _fakeBundleValidationService = new FakeBundleValidationService();
-        _fakeBuildToolsService = new FakeBuildToolsService();
+        _fakeBuildToolsService = new FakeBuildToolsService
+        {
+            Handler = (tool, arguments) =>
+            {
+                if (tool.ExecutableName.Contains("makeappx", StringComparison.OrdinalIgnoreCase))
+                {
+                    CaptureMakeAppxStaging(arguments);
+                }
+
+                return FakeBuildToolsService.EmulateSdkToolOutput(tool, arguments);
+            }
+        };
 
         return services
             .AddSingleton<IBundleService>(_fakeBundleService)
@@ -170,18 +141,21 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task CreateMsixBundleAsync_RuntimeToolExeIsSkippedInAutoDetection_UsesRealExe()
     {
-        // Arrange - folder with createdump.exe (runtime tool) and the real app exe
+        // Arrange - a folder whose manifest references an ABSENT exe, which forces the "last resort"
+        // folder scan in ResolveExecutableForFolder. That scan must skip the runtime tool
+        // (createdump.exe) and pick the real app exe. To make the choice observable, give the two
+        // exes DIFFERENT architectures: if the runtime-tool filter were removed, createdump.exe would
+        // be selected and the detected slice arch would be arm64 instead of x64.
         var folder = _tempDirectory.CreateSubdirectory("runtime-tool-folder");
-        // Put createdump.exe first alphabetically (c < t) to verify it's skipped
-        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0x8664));
-        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0xAA64)); // arm64 runtime tool
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));   // x64 real app
         File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
-        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64"));
+        // Manifest references a non-existent exe, so manifest-based resolution fails and the scan runs.
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64", executableName: "MissingApp.exe"));
 
         var arm64Folder = CreateSliceFolder("slice-arm64", 0xAA64, "arm64");
 
-        // Act - should succeed because manifest specifies executable, so runtime tool filter 
-        // only affects the "last resort" fallback
+        // Act
         var result = await _msixService.CreateMsixBundleAsync(
             [folder, arm64Folder],
             outputPath: null,
@@ -189,9 +163,13 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
             skipPri: true,
             cancellationToken: TestContext.CancellationToken);
 
-        // Assert
+        // Assert - the scan skipped createdump.exe (arm64) and selected TestApp.exe (x64), so the
+        // slice's detected architecture is x64. This would be arm64 if the runtime-tool filter were gone.
         Assert.IsNotNull(result);
         Assert.AreEqual(2, result.Slices.Count);
+        var scannedSlice = result.Slices.Single(s => s.InputFolder.Name == "runtime-tool-folder");
+        Assert.AreEqual("x64", scannedSlice.Architecture,
+            "The runtime-tool filter must skip createdump.exe (arm64) so the real app exe (x64) drives arch detection");
     }
 
     [TestMethod]
@@ -404,6 +382,49 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         return folder;
     }
 
+    /// <summary>
+    /// Snapshots the relative contents of the makeappx <c>/d</c> staging directory into
+    /// <see cref="_makeAppxStagedFiles"/>. Invoked from the fake build-tools handler at pack time,
+    /// before the SUT deletes the staging directory, so tests can assert what was actually staged.
+    /// </summary>
+    private void CaptureMakeAppxStaging(string arguments)
+    {
+        var stagingDir = ExtractQuotedFlagValue(arguments, "/d");
+        if (stagingDir == null || !Directory.Exists(stagingDir))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(stagingDir, "*", SearchOption.AllDirectories))
+        {
+            _makeAppxStagedFiles.Add(Path.GetRelativePath(stagingDir, file).Replace('\\', '/'));
+        }
+    }
+
+    /// <summary>
+    /// Extracts the quoted value following a command-line flag (e.g. the path in <c>/d "value"</c>),
+    /// stripping any <c>\\?\</c> extended-length prefix. Returns null when the flag or value is absent.
+    /// </summary>
+    private static string? ExtractQuotedFlagValue(string arguments, string flag)
+    {
+        var token = flag + " \"";
+        var start = arguments.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        start += token.Length;
+        var end = arguments.IndexOf('"', start);
+        if (end < 0)
+        {
+            return null;
+        }
+
+        var value = arguments[start..end];
+        return value.StartsWith(@"\\?\", StringComparison.Ordinal) ? value[4..] : value;
+    }
+
     [TestMethod]
     public async Task CreateMsixBundleAsync_NeutralArchWithSelfContained_ThrowsWithClearError()
     {
@@ -485,7 +506,180 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         Assert.AreEqual(2, _fakeBundleService.LastMsixFiles!.Count, "Should produce two intermediate MSIX files");
     }
 
-    private static string CreateManifestContent(string processorArchitecture)
+    #region Additional coverage: executable resolution, path validation, external manifest, PRI
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_UnrecognizedPeFormat_ThrowsWithClearError()
+    {
+        // Manifest references an executable that exists but is not a valid PE.
+        var folder = _tempDirectory.CreateSubdirectory("bad-pe-folder");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), [0x01, 0x02, 0x03, 0x04]);
+        File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64"));
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "unrecognized PE format");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_WithExplicitExecutableOption_ResolvesViaOption()
+    {
+        // The folder's manifest declares TestApp.exe (x64). Add a SECOND exe with a DIFFERENT
+        // architecture and pass it via --executable. If the option is honored, arch detection uses
+        // AltApp.exe (arm64); if the option were ignored, the manifest's TestApp.exe (x64) would win.
+        var folder = CreateSliceFolder("opt-folder", 0x8664, "x64");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "AltApp.exe"), BuildMinimalNativePe(0xAA64)); // arm64
+
+        var result = await _msixService.CreateMsixBundleAsync(
+            [folder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            executable: "AltApp.exe",
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(1, result.Slices.Count);
+        Assert.AreEqual("arm64", result.Slices[0].Architecture,
+            "--executable must drive arch detection: AltApp.exe (arm64) overrides the manifest's default TestApp.exe (x64)");
+    }
+
+    [TestMethod]
+    public void ResolveExecutableForFolder_MalformedManifest_FallsBackToExeScan()
+    {
+        var folder = _tempDirectory.CreateSubdirectory("malformed-manifest-folder");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        // A manifest that AppxManifestDocument.Load cannot parse => the catch falls through to an EXE scan.
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), "this is <not> valid xml <<<");
+
+        var method = typeof(MsixService).GetMethod("ResolveExecutableForFolder", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var resolved = (string?)method.Invoke(_msixService, [folder, null, null, TestTaskContext]);
+
+        Assert.IsNotNull(resolved);
+        Assert.IsTrue(resolved!.EndsWith("TestApp.exe", StringComparison.OrdinalIgnoreCase), $"Unexpected resolution: {resolved}");
+    }
+
+    [TestMethod]
+    public void ResolveAndValidatePathUnderFolder_RejectsRootedTraversalAndOutside()
+    {
+        var folder = _tempDirectory.CreateSubdirectory("path-validation");
+        Directory.CreateDirectory(Path.Combine(folder.FullName, "sub"));
+        File.WriteAllText(Path.Combine(folder.FullName, "sub", "app.exe"), "x");
+
+        var method = typeof(MsixService).GetMethod("ResolveAndValidatePathUnderFolder", BindingFlags.NonPublic | BindingFlags.Static)!;
+        string? Invoke(string rel) => (string?)method.Invoke(null, [folder, rel]);
+
+        Assert.IsNull(Invoke(@"C:\absolute\app.exe"), "Rooted paths must be rejected");
+        Assert.IsNull(Invoke(@"..\escape.exe"), "Parent traversal must be rejected");
+        Assert.IsNull(Invoke("."), "A path that normalizes to the folder itself must be rejected");
+
+        var valid = Invoke(@"sub\app.exe");
+        Assert.IsNotNull(valid, "A contained relative path must resolve");
+        Assert.IsTrue(valid!.EndsWith(@"sub\app.exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_ExternalManifest_CopiesReferencedAssetsAndCreatesOutputDir()
+    {
+        // Input folder has the binary but NO manifest; the manifest lives elsewhere.
+        var inputFolder = _tempDirectory.CreateSubdirectory("ext-input");
+        File.WriteAllBytes(Path.Combine(inputFolder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+
+        var manifestDir = _tempDirectory.CreateSubdirectory("ext-manifest");
+        var externalManifest = new FileInfo(Path.Combine(manifestDir.FullName, "Package.appxmanifest"));
+        File.WriteAllText(externalManifest.FullName, CreateManifestContent("x64"));
+        // Referenced asset sits next to the external manifest so CopyAllAssets has something to copy.
+        File.WriteAllBytes(Path.Combine(manifestDir.FullName, "logo.png"), [0x89, 0x50, 0x4E, 0x47]);
+
+        // Non-existent output directory to also exercise the outputFolder.Create() path.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "ext-out-new"));
+
+        var result = await _msixService.CreateMsixBundleAsync(
+            [inputFolder],
+            outputDir,
+            TestTaskContext,
+            skipPri: true,
+            manifestPath: externalManifest,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.BundlePath.Exists);
+        Assert.IsTrue(outputDir.Exists, "Output directory should have been created");
+
+        // The external asset must have been genuinely staged for packing (not merely discovered):
+        // the capturing handler snapshotted the makeappx /d staging directory before it was cleaned up.
+        Assert.IsTrue(
+            _makeAppxStagedFiles.Any(f => string.Equals(Path.GetFileName(f), "logo.png", StringComparison.OrdinalIgnoreCase)),
+            $"The manifest-referenced external asset 'logo.png' should have been copied into the makeappx staging dir. Staged: [{string.Join(", ", _makeAppxStagedFiles)}]");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_SliceWithAppXDirectory_ExcludesAppXFromStaging()
+    {
+        // A bundle slice input folder containing a normal binary plus a build-artifact 'AppX'
+        // directory (the MSBuild output folder that must never ship inside the package). This
+        // guards the second CopyDirectoryRecursive call site (MsixService.Bundle.cs) — the
+        // equivalent of the single-package AppX-exclusion guard in PackageCommandTests.
+        var sliceFolder = CreateSliceFolder("bundle-appx-slice", 0x8664, "x64");
+        var appxDir = Directory.CreateDirectory(Path.Combine(sliceFolder.FullName, "AppX"));
+        File.WriteAllText(Path.Combine(appxDir.FullName, "leftover.txt"), "build artifact");
+
+        var result = await _msixService.CreateMsixBundleAsync(
+            [sliceFolder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.BundlePath.Exists);
+
+        // A normal file IS staged for packing...
+        Assert.IsTrue(
+            _makeAppxStagedFiles.Any(f => string.Equals(Path.GetFileName(f), "TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            $"Expected the normal binary to be staged. Staged: [{string.Join(", ", _makeAppxStagedFiles)}]");
+
+        // ...but the build-artifact 'AppX' directory is genuinely excluded from the bundle slice
+        // staging that makeappx packs (fails pre-fix, when Bundle.cs copied the folder wholesale).
+        var stagedAppx = _makeAppxStagedFiles
+            .Where(f => f.StartsWith("AppX/", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.AreEqual(
+            0,
+            stagedAppx.Count,
+            $"The build-artifact 'AppX' directory must be excluded from bundle slice staging. Staged AppX entries: [{string.Join(", ", stagedAppx)}]");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_WithPriGeneration_InvokesMakePri()
+    {
+        var x64Folder = CreateSliceFolder("pri-x64", 0x8664, "x64");
+        var arm64Folder = CreateSliceFolder("pri-arm64", 0xAA64, "arm64");
+
+        // skipPri:false and no pre-existing resources.pri => the PRI generation branch runs.
+        var result = await _msixService.CreateMsixBundleAsync(
+            [x64Folder, arm64Folder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: false,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.IsTrue(
+            _fakeBuildToolsService.Invocations.Any(i => i.ToolName.Contains("makepri", StringComparison.OrdinalIgnoreCase)),
+            "Expected makepri to be invoked during PRI generation");
+    }
+
+    #endregion
+
+    private static string CreateManifestContent(string processorArchitecture, string executableName = "TestApp.exe")
     {
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -499,7 +693,7 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
                 <Capability Name="internetClient" />
               </Capabilities>
               <Applications>
-                <Application Id="App" Executable="TestApp.exe" EntryPoint="Windows.FullTrustApplication">
+                <Application Id="App" Executable="{{executableName}}" EntryPoint="Windows.FullTrustApplication">
                   <uap:VisualElements DisplayName="TestApp" Description="Test" Square150x150Logo="logo.png" Square44x44Logo="logo.png" BackgroundColor="transparent" />
                 </Application>
               </Applications>

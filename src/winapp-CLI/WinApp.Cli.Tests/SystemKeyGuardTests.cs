@@ -108,4 +108,47 @@ public class SystemKeyGuardTests
     {
         Assert.AreEqual(0, SystemKeyGuard.FindSystemCombos([]).Count);
     }
+
+    // --- FindNeverBypassableCombos ---
+
+    [TestMethod]
+    [DataRow("win+l")]   // standard win+l
+    [DataRow("cmd+l")]   // cmd is an alias for win
+    public void NeverBypassable_WinL_IsDetected(string keys)
+    {
+        // win+l (and its aliases) must always be refused — it locks the workstation via the shell hook.
+        var hits = SystemKeyGuard.FindNeverBypassableCombos(KeyStringParser.Parse(keys));
+        Assert.AreEqual(1, hits.Count);
+        Assert.AreEqual("win+l", hits[0]);
+    }
+
+    [TestMethod]
+    [DataRow("win+r")]
+    [DataRow("win+d")]
+    [DataRow("win+shift+v")]
+    [DataRow("alt+f4")]
+    [DataRow("ctrl+shift+esc")]
+    [DataRow("vk=0x5B")]  // lone win key
+    public void NeverBypassable_OtherCombos_AreNotHardBlocked(string keys)
+    {
+        // Soft-blocked combos (win+r, alt+f4, etc.) must NOT appear in the never-bypassable list —
+        // callers may legitimately opt in to them with --allow-system-keys.
+        var hits = SystemKeyGuard.FindNeverBypassableCombos(KeyStringParser.Parse(keys));
+        Assert.AreEqual(0, hits.Count);
+    }
+
+    [TestMethod]
+    public void NeverBypassable_EmptyActions_ReturnsEmpty()
+    {
+        Assert.AreEqual(0, SystemKeyGuard.FindNeverBypassableCombos([]).Count);
+    }
+
+    [TestMethod]
+    public void NeverBypassable_Duplicates_AreCollapsed()
+    {
+        // Multiple win+l tokens collapse to a single entry.
+        var hits = SystemKeyGuard.FindNeverBypassableCombos(KeyStringParser.Parse("win+l win+l"));
+        Assert.AreEqual(1, hits.Count);
+        Assert.AreEqual("win+l", hits[0]);
+    }
 }

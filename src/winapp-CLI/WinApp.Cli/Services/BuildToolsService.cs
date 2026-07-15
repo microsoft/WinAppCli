@@ -25,15 +25,16 @@ internal partial class BuildToolsService(
     internal const string WINAPP_SDK_RUNTIME_PACKAGE = "Microsoft.WindowsAppSDK.Runtime";
 
     /// <summary>
-    /// Find a path within any package structure (generic version)
-    /// Uses the NuGet global packages cache layout: {cache}/{lowercase-id}/{version}/
+    /// Find the architecture-specific bin path within a package in the NuGet global packages
+    /// cache (layout: {cache}/{lowercase-id}/{version}/{subPath}/{sdk-version}/{arch}).
+    /// Resolves the pinned version (from winapp.yaml or the project's .csproj) when available,
+    /// otherwise the latest installed version, then the current architecture with a fallback
+    /// across x64/x86/arm64.
     /// </summary>
-    /// <param name="packageName">The package name (e.g., BUILD_TOOLS_PACKAGE or CPP_SDK_PACKAGE)</param>
-    /// <param name="subPath">The subdirectory within the package (e.g., "bin", "schemas", "c")</param>
-    /// <param name="finalSubPath">Optional final subdirectory (e.g., "winrt" for schemas, "Include" for SDK)</param>
-    /// <param name="requireArchitecture">Whether to append architecture directory for bin paths</param>
-    /// <returns>Full path to the requested location, or null if not found</returns>
-    private DirectoryInfo? FindPackagePath(string packageName, string subPath, string? finalSubPath = null, bool requireArchitecture = false)
+    /// <param name="packageName">The package name (e.g., BUILD_TOOLS_PACKAGE).</param>
+    /// <param name="subPath">The subdirectory within the package (e.g., "bin").</param>
+    /// <returns>Full path to the architecture-specific directory, or null if not found.</returns>
+    private DirectoryInfo? FindPackagePath(string packageName, string subPath)
     {
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
         var packageBaseDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageName.ToLowerInvariant()));
@@ -96,13 +97,17 @@ internal partial class BuildToolsService(
         // Check if we have a pinned version
         if (!string.IsNullOrWhiteSpace(pinnedVersion))
         {
+            // A pin may be shorthand (e.g. "1.0"); the cache uses NuGet's canonical folder name ("1.0.0"),
+            // so normalize before matching directory names — otherwise a valid shorthand pin would never
+            // match and would fall through to the strict null return below.
+            var normalizedPin = NugetService.NormalizeVersion(pinnedVersion);
+
             // Look for the specific pinned version directory
             selectedVersionDir = versionDirs
-                .FirstOrDefault(d => string.Equals(d.Name, pinnedVersion, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(d => string.Equals(d.Name, normalizedPin, StringComparison.OrdinalIgnoreCase));
 
-            // If pinned version is specified but not found for bin path, return null (strict requirement)
-            // For other paths, continue to try latest
-            if (selectedVersionDir == null && requireArchitecture)
+            // If pinned version is specified but not found, return null (strict requirement).
+            if (selectedVersionDir == null)
             {
                 return null;
             }
@@ -134,48 +139,34 @@ internal partial class BuildToolsService(
             .OrderByDescending(d => ParseVersion(d.Name))
             .First();
 
-        if (requireArchitecture)
+        // Resolve the architecture-specific bin directory.
+        var currentArch = WorkspaceSetupService.GetSystemArchitecture();
+        var archPath = Path.Combine(latestVersion.FullName, currentArch);
+
+        if (Directory.Exists(archPath))
         {
-            // For bin paths, need to find architecture directory
-            var currentArch = WorkspaceSetupService.GetSystemArchitecture();
-            var archPath = Path.Combine(latestVersion.FullName, currentArch);
+            return new DirectoryInfo(archPath);
+        }
 
-            if (Directory.Exists(archPath))
+        // If the detected architecture isn't available, fall back to common architectures
+        var fallbackArchs = new[] { "x64", "x86", "arm64" };
+        foreach (var arch in fallbackArchs)
+        {
+            if (arch != currentArch) // Skip the one we already tried
             {
-                return new DirectoryInfo(archPath);
-            }
-
-            // If the detected architecture isn't available, fall back to common architectures
-            var fallbackArchs = new[] { "x64", "x86", "arm64" };
-            foreach (var arch in fallbackArchs)
-            {
-                if (arch != currentArch) // Skip the one we already tried
+                var fallbackArchPath = Path.Combine(latestVersion.FullName, arch);
+                if (Directory.Exists(fallbackArchPath))
                 {
-                    var fallbackArchPath = Path.Combine(latestVersion.FullName, arch);
-                    if (Directory.Exists(fallbackArchPath))
-                    {
-                        return new DirectoryInfo(fallbackArchPath);
-                    }
+                    return new DirectoryInfo(fallbackArchPath);
                 }
             }
-            return null;
         }
-        else if (!string.IsNullOrEmpty(finalSubPath))
-        {
-            // For schemas path or SDK Include path with final subdirectory
-            var finalPath = new DirectoryInfo(Path.Combine(latestVersion.FullName, finalSubPath));
-            return finalPath.Exists ? finalPath : null;
-        }
-        else
-        {
-            // Return the version folder directly
-            return latestVersion;
-        }
+        return null;
     }
 
     private DirectoryInfo? FindBuildToolsBinPath()
     {
-        return FindPackagePath(BUILD_TOOLS_PACKAGE, "bin", requireArchitecture: true);
+        return FindPackagePath(BUILD_TOOLS_PACKAGE, "bin");
     }
 
     private static Version ParseVersion(string versionString)

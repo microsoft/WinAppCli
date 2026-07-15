@@ -206,7 +206,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         }
     }
 
-    private unsafe void HandleException(
+    internal unsafe void HandleException(
         in DEBUG_EVENT debugEvent,
         ref bool initialBreakpointSeen,
         ref NTSTATUS continueStatus)
@@ -310,7 +310,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     /// stowed exception (<c>0xC000027B</c>) element 0 is the stowed-exception array pointer and element
     /// 1 is the count; these are copied verbatim into the dump so WinUI triage can locate them.
     /// </summary>
-    private static unsafe nuint[]? ReadExceptionParameters(in EXCEPTION_RECORD record)
+    internal static unsafe nuint[]? ReadExceptionParameters(in EXCEPTION_RECORD record)
     {
         var count = (int)Math.Min(record.NumberParameters, (uint)record.ExceptionInformation.Length);
         if (count <= 0)
@@ -326,6 +326,17 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         }
         return parameters;
     }
+
+    /// <summary>
+    /// Maps the host CPU architecture to the <c>CONTEXT</c> flags requested from
+    /// <c>GetThreadContext</c>. Extracted as a pure function so both arms are unit-testable without a
+    /// live thread handle.
+    /// </summary>
+    internal static CONTEXT_FLAGS GetContextFlags(Architecture architecture) => architecture switch
+    {
+        Architecture.Arm64 => CONTEXT_FLAGS.CONTEXT_FULL_ARM64,
+        _ => CONTEXT_FLAGS.CONTEXT_FULL_AMD64,
+    };
 
     /// <summary>
     /// Captures the faulting thread's context at first-chance time, when it still
@@ -350,11 +361,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         try
         {
             NativeMemory.Clear(pContext, (nuint)contextSize);
-            pContext->ContextFlags = RuntimeInformation.ProcessArchitecture switch
-            {
-                Architecture.Arm64 => CONTEXT_FLAGS.CONTEXT_FULL_ARM64,
-                _ => CONTEXT_FLAGS.CONTEXT_FULL_AMD64,
-            };
+            pContext->ContextFlags = GetContextFlags(RuntimeInformation.ProcessArchitecture);
 
             if (PInvoke.GetThreadContext(new HANDLE(threadHandle.DangerousGetHandle()), pContext))
             {
@@ -381,7 +388,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         }
     }
 
-    private static string GetExceptionName(uint code) => code switch
+    internal static string GetExceptionName(uint code) => code switch
     {
         0xC0000005 => "Access Violation",
         0xC00000FD => "Stack Overflow",
@@ -403,7 +410,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     /// Returns true if the debug message is internal OS/framework noise
     /// rather than an app-specific debug message worth showing on the console.
     /// </summary>
-    private static bool IsFrameworkNoise(string message)
+    internal static bool IsFrameworkNoise(string message)
     {
         // Windows OS source paths (onecore, onecoreuap, minkernel, etc.)
         if (message.StartsWith("onecore\\", StringComparison.OrdinalIgnoreCase) ||
@@ -449,7 +456,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     /// Returns true if the message looks like a framework DLL debug trace
     /// (e.g., "Microsoft.UI.Xaml.dll!0x..." or "twinapi.appcore.dll!SomeFunc").
     /// </summary>
-    private static bool IsFrameworkDllTrace(string message)
+    internal static bool IsFrameworkDllTrace(string message)
     {
         var bangIndex = message.IndexOf('!');
         if (bangIndex < 5)

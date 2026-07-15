@@ -17,6 +17,9 @@ public partial class UiCommandTests : BaseCommandTests
     private FakeMouseInput _fakeMouse = null!;
     private FakeKeyboardInput _fakeKeyboard = null!;
     private FakeForegroundGuard _fakeForeground = null!;
+    private FakeOwnedWindowFinder _fakeWindowFinder = null!;
+    private FakeSystemUiQuery _fakeSystemQuery = null!;
+    private FakePollDelay _fakePollDelay = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
@@ -25,12 +28,18 @@ public partial class UiCommandTests : BaseCommandTests
         _fakeMouse = new FakeMouseInput();
         _fakeKeyboard = new FakeKeyboardInput();
         _fakeForeground = new FakeForegroundGuard();
+        _fakeWindowFinder = new FakeOwnedWindowFinder();
+        _fakeSystemQuery = new FakeSystemUiQuery();
+        _fakePollDelay = new FakePollDelay();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
             .AddSingleton<IUiSessionService>(_fakeSession)
             .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
             .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard)
-            .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground);
+            .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground)
+            .AddSingleton<WinApp.Cli.Helpers.IOwnedWindowFinder>(_fakeWindowFinder)
+            .AddSingleton<ISystemUiQuery>(_fakeSystemQuery)
+            .AddSingleton<WinApp.Cli.Helpers.IPollDelay>(_fakePollDelay);
     }
 
     [TestMethod]
