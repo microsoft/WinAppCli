@@ -43,8 +43,14 @@ public class NugetServiceFeedTests : BaseCommandTests
         }
     }
 
-    private static NugetService CreateServiceRootedAt(DirectoryInfo root) =>
-        new(new DefaultWinappDirectoryService(), new CurrentDirectoryProvider(root.FullName));
+    private static NugetSourceProvider CreateSourceProviderRootedAt(DirectoryInfo root) =>
+        new(new CurrentDirectoryProvider(root.FullName));
+
+    private static NugetService CreateServiceRootedAt(DirectoryInfo root)
+    {
+        var sourceProvider = CreateSourceProviderRootedAt(root);
+        return new NugetService(new DefaultWinappDirectoryService(), sourceProvider, new NugetPackageDownloader(sourceProvider));
+    }
 
     private static DirectoryInfo CreateFeedTestDirectory()
     {
@@ -92,9 +98,9 @@ public class NugetServiceFeedTests : BaseCommandTests
                 </configuration>
                 """);
 
-            var service = CreateServiceRootedAt(root);
+            var provider = CreateSourceProviderRootedAt(root);
 
-            var sources = service.GetRepositoriesForPackage("Any.Package")
+            var sources = provider.GetRepositoriesForPackage("Any.Package")
                 .Select(r => r.PackageSource.Name)
                 .ToList();
 
@@ -135,16 +141,16 @@ public class NugetServiceFeedTests : BaseCommandTests
                 </configuration>
                 """);
 
-            var service = CreateServiceRootedAt(root);
+            var provider = CreateSourceProviderRootedAt(root);
 
             // Contoso.* is mapped exclusively to 'alpha'.
-            var mapped = service.GetRepositoriesForPackage("Contoso.Widget")
+            var mapped = provider.GetRepositoriesForPackage("Contoso.Widget")
                 .Select(r => r.PackageSource.Name)
                 .ToList();
             CollectionAssert.AreEqual(AlphaOnly, mapped, "Contoso.* must resolve to the mapped source only.");
 
             // Everything else falls back to the '*' mapping on 'beta'.
-            var fallback = service.GetRepositoriesForPackage("Fabrikam.Thing")
+            var fallback = provider.GetRepositoriesForPackage("Fabrikam.Thing")
                 .Select(r => r.PackageSource.Name)
                 .ToList();
             CollectionAssert.AreEqual(BetaOnly, fallback, "Unmatched packages use the '*' mapping.");
@@ -181,9 +187,9 @@ public class NugetServiceFeedTests : BaseCommandTests
                 </configuration>
                 """);
 
-            var service = CreateServiceRootedAt(root);
+            var provider = CreateSourceProviderRootedAt(root);
 
-            var sources = service.GetRepositoriesForPackage("Unmapped.Package").ToList();
+            var sources = provider.GetRepositoriesForPackage("Unmapped.Package").ToList();
 
             Assert.IsEmpty(sources, "A package matching no packageSourceMapping pattern must resolve to no sources.");
         }
@@ -594,6 +600,110 @@ public class NugetServiceFeedTests : BaseCommandTests
                 async () => await service.GetPackageDependenciesAsync("Winapp.TestA", "not-a-version", TestContext.CancellationToken));
 
             StringAssert.Contains(ex.Message, "'not-a-version' is not a valid NuGet version for package 'Winapp.TestA'", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_MultipleEligibleSources_ReturnsHighestAcrossSources()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // Two local feeds, both eligible (each mapped to '*'). The higher version lives ONLY in the
+            // second-listed source, so a bug that queried just the first source (or returned only its
+            // max) would yield 1.0.0 — this pins the "highest across ALL eligible sources" contract that
+            // the single-source live tests never exercise.
+            var low = new DirectoryInfo(Path.Combine(root.FullName, "low"));
+            low.Create();
+            var high = new DirectoryInfo(Path.Combine(root.FullName, "high"));
+            high.Create();
+
+            WriteNupkgToFeed(low, "Multi.Pkg", "1.0.0");
+            WriteNupkgToFeed(high, "Multi.Pkg", "2.0.0");
+
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="low" value="{low.FullName}" />
+                    <add key="high" value="{high.FullName}" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="low">
+                      <package pattern="*" />
+                    </packageSource>
+                    <packageSource key="high">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var latest = await service.GetLatestVersionAsync("Multi.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
+
+            Assert.AreEqual(
+                "2.0.0",
+                latest,
+                "Latest must be the highest version merged across every eligible source, not just the first source's.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_OneEligibleSourceFails_FailsClosed()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // One good local feed plus one unreachable source, both eligible. Because "latest" is a MAX
+            // across sources, a source that cannot be queried could hide a newer version, so the resolver
+            // must fail closed (throw and name the failed source) rather than return the reachable feed's
+            // partial result. The broken source uses the reserved '.invalid' TLD (RFC 6761), which never
+            // resolves, keeping this deterministic and offline.
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            WriteNupkgToFeed(feed, "FailClosed.Pkg", "1.0.0");
+
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="local" value="{feed.FullName}" />
+                    <add key="broken" value="https://nuget.invalid/v3/index.json" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="local">
+                      <package pattern="*" />
+                    </packageSource>
+                    <packageSource key="broken">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetLatestVersionAsync("FailClosed.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken));
+
+            // The error must name the unreachable source and explain it could not be queried, proving the
+            // resolver did not silently return 1.0.0 from the reachable feed.
+            StringAssert.Contains(ex.Message, "could not be queried", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "broken", StringComparison.Ordinal);
         }
         finally
         {
