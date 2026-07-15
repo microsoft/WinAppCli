@@ -36,6 +36,14 @@ public class NugetServiceVersionRangeTests
     [DataRow("1.2.3-beta.*|1.2.3-rc.*", false, DisplayName = "Disjoint prerelease-prefix floats are a conflict")]
     [DataRow("1.2.3-beta.*|1.2.3-beta.*", true, DisplayName = "Identical prerelease-prefix floats are satisfiable")]
     [DataRow("1.*", true, DisplayName = "A single float is trivially satisfiable")]
+    // Exclusive bounds: the intersection must be computed as an interval, not by testing each range's minimum
+    // version (an exclusive minimum is not itself in its own range, so a minimum-only test falsely reports a
+    // conflict for genuinely overlapping ranges).
+    [DataRow("[1.0.0, 3.0.0)|(2.0.0, 4.0.0)", true, DisplayName = "Overlap across an exclusive lower bound is satisfiable (2.1.0)")]
+    [DataRow("[1.0.0, 2.0.0)|(2.0.0, 3.0.0)", false, DisplayName = "Exclusive bounds meeting at 2.0.0 share no version")]
+    [DataRow("1.*|(1.2.0, 1.8.0)", true, DisplayName = "Float overlapping an exclusively-bounded range is satisfiable")]
+    [DataRow("[1.0.0, 2.0.0]|[2.0.0, 3.0.0]", true, DisplayName = "Inclusive endpoints sharing exactly 2.0.0 are satisfiable")]
+    [DataRow("[1.0.0, 2.0.0)|[2.0.0, 3.0.0]", false, DisplayName = "Exclusive upper vs inclusive lower at 2.0.0 share no version")]
     public void RangesHaveCommonVersion_AccountsForFloatingBands(string pipeSeparatedRanges, bool expected)
     {
         var ranges = pipeSeparatedRanges.Split('|').Select(VersionRange.Parse).ToList();

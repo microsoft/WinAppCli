@@ -362,36 +362,147 @@ internal partial class NugetService : INugetService
     /// [2.0,), where a higher version satisfies both and keeping winapp's first-selected version is a
     /// documented limitation, not a conflict).
     ///
-    /// The intersection of these upward version intervals, when non-empty, is anchored at the greatest lower
-    /// bound, which is one of the ranges' (inclusive) minimum versions — including a float's floor (1.* => 1.0.0,
-    /// 1.2.3-beta.* => 1.2.3-beta.0). So each candidate minimum is tested against every range with the full
-    /// float-aware predicate (<see cref="RangeSatisfiesWithFloat"/>) rather than reducing floats to numeric
-    /// bounds: that keeps prerelease/prefix eligibility intact, so two floats sharing a numeric prefix but no
-    /// common version (1.2.3-beta.* and 1.2.3-rc.*) are correctly reported as a conflict, while an unbounded
-    /// float (*) still overlaps anything. Real NuGet dependency ranges always carry an inclusive lower bound,
-    /// so scanning the candidate minimums is exhaustive for them; a set with no lower bound at all is open below
-    /// and therefore trivially satisfiable.
+    /// The ranges are intersected as numeric intervals — the greatest lower bound and least upper bound, each
+    /// carrying its own inclusivity, with a floating range's implicit next-prefix ceiling folded into the upper
+    /// bound (1.* caps just below 2.0.0). Working with the actual interval (rather than only testing each
+    /// range's minimum version) is what makes an exclusive lower bound correct: [1.0.0,3.0.0) and (2.0.0,4.0.0)
+    /// share 2.1.0, yet neither minimum (1.0.0, 2.0.0) lies in both, so a minimum-only test would falsely report
+    /// a conflict. A prerelease-prefix float (1.2.3-beta.*) has no numeric ceiling and its floor overlaps a
+    /// sibling prefix (1.2.3-rc.*) that shares no real version, so when one is present a non-empty numeric
+    /// interval is confirmed with a concrete witness via <see cref="RangeSatisfiesWithFloat"/> (which honors the
+    /// float ceiling, prerelease eligibility and prefix).
     /// </summary>
     internal static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
     {
-        var sawLowerBound = false;
+        // Greatest lower bound / least upper bound of the intersection. null = open on that side.
+        NuGetVersion? low = null;
+        var lowInclusive = true;
+        NuGetVersion? high = null;
+        var highInclusive = true;
 
         foreach (var range in ranges)
         {
-            if (!range.HasLowerBound || range.MinVersion is not { } candidate)
+            var (rangeLow, rangeLowInclusive, rangeHigh, rangeHighInclusive) = GetEffectiveBounds(range);
+
+            if (rangeLow is not null)
             {
-                continue;
+                var comparison = low is null ? 1 : rangeLow.CompareTo(low);
+                if (comparison > 0)
+                {
+                    low = rangeLow;
+                    lowInclusive = rangeLowInclusive;
+                }
+                else if (comparison == 0)
+                {
+                    // Same greatest lower bound from two ranges: the intersection includes it only if both do.
+                    lowInclusive &= rangeLowInclusive;
+                }
             }
 
-            sawLowerBound = true;
-            if (ranges.All(r => RangeSatisfiesWithFloat(r, candidate)))
+            if (rangeHigh is not null)
             {
-                return true;
+                var comparison = high is null ? -1 : rangeHigh.CompareTo(high);
+                if (comparison < 0)
+                {
+                    high = rangeHigh;
+                    highInclusive = rangeHighInclusive;
+                }
+                else if (comparison == 0)
+                {
+                    highInclusive &= rangeHighInclusive;
+                }
             }
         }
 
-        // No range constrains the low end: the intersection is open below and non-empty, so treat it as
-        // satisfiable rather than a conflict.
-        return !sawLowerBound;
+        // Empty numeric interval => no version can satisfy every range. The interval is empty when the lower
+        // bound is above the upper bound, or they touch at a single point that at least one side excludes.
+        if (low is not null && high is not null)
+        {
+            var comparison = low.CompareTo(high);
+            if (comparison > 0 || (comparison == 0 && !(lowInclusive && highInclusive)))
+            {
+                return false;
+            }
+        }
+
+        // A non-empty numeric interval settles plain and numeric-float ranges. Prerelease-prefix floats need a
+        // witness because their numeric floor over-includes sibling prerelease prefixes (see summary).
+        if (!ranges.Any(IsPrereleasePrefixFloat))
+        {
+            return true;
+        }
+
+        // Candidate witnesses anchored at the intersection's lower edge: each floating range's floor and the
+        // numeric greatest lower bound when it is itself included. For the prerelease-prefix floats winapp
+        // actually encounters (an inclusive floor, open above) one of these is the binding version.
+        var witnesses = new List<NuGetVersion>();
+        foreach (var range in ranges)
+        {
+            if (range.IsFloating && range.Float is { } floatRange)
+            {
+                witnesses.Add(floatRange.MinVersion);
+            }
+        }
+
+        if (low is not null && lowInclusive)
+        {
+            witnesses.Add(low);
+        }
+
+        return witnesses.Any(witness => ranges.All(range => RangeSatisfiesWithFloat(range, witness)));
+    }
+
+    private static bool IsPrereleasePrefixFloat(VersionRange range)
+        => range.IsFloating && range.Float is { } floatRange && floatRange.MinVersion.IsPrerelease;
+
+    /// <summary>
+    /// Projects a range onto the numeric interval used by <see cref="RangesHaveCommonVersion"/>: its declared
+    /// lower/upper bounds plus, for a floating range, the implicit exclusive ceiling just below the next prefix
+    /// increment (1.* => &lt; 2.0.0, 1.2.* => &lt; 1.3.0). Interval intersection fundamentally needs numeric
+    /// endpoints, which is why the ceiling is materialized here; <see cref="RangeSatisfiesWithFloat"/> remains
+    /// the authoritative point test, and the caller's prerelease-prefix witness check recovers the semantics a
+    /// numeric ceiling cannot express.
+    /// </summary>
+    private static (NuGetVersion? Low, bool LowInclusive, NuGetVersion? High, bool HighInclusive) GetEffectiveBounds(VersionRange range)
+    {
+        NuGetVersion? low = range.HasLowerBound ? range.MinVersion : null;
+        var lowInclusive = range.HasLowerBound && range.IsMinInclusive;
+
+        NuGetVersion? high = range.HasUpperBound ? range.MaxVersion : null;
+        var highInclusive = range.HasUpperBound && range.IsMaxInclusive;
+
+        if (range.IsFloating && range.Float is { } floatRange && TryGetFloatUpperBound(floatRange) is { } floatCeiling)
+        {
+            // The floated ceiling is the exclusive next-prefix boundary; fold it in when it is tighter than any
+            // declared upper bound.
+            if (high is null || floatCeiling < high)
+            {
+                high = floatCeiling;
+                highInclusive = false;
+            }
+        }
+
+        return (low, lowInclusive, high, highInclusive);
+    }
+
+    /// <summary>
+    /// The exclusive numeric ceiling of a numeric floating range (the first version the float no longer
+    /// accepts): 1.* => 2.0.0, 1.2.* => 1.3.0, 1.2.3.* => 1.2.4. Fully-open floats (*) and prerelease-only
+    /// floats (1.2.3-beta.*, which float the label of a fixed major.minor.patch) have no finite numeric ceiling
+    /// and return null — the former is open above, the latter is bounded by the prerelease witness check.
+    /// </summary>
+    private static NuGetVersion? TryGetFloatUpperBound(FloatRange floatRange)
+    {
+        var prefix = floatRange.MinVersion;
+        return floatRange.FloatBehavior switch
+        {
+            NuGetVersionFloatBehavior.Minor or NuGetVersionFloatBehavior.PrereleaseMinor
+                => new NuGetVersion(prefix.Major + 1, 0, 0),
+            NuGetVersionFloatBehavior.Patch or NuGetVersionFloatBehavior.PrereleasePatch
+                => new NuGetVersion(prefix.Major, prefix.Minor + 1, 0),
+            NuGetVersionFloatBehavior.Revision or NuGetVersionFloatBehavior.PrereleaseRevision
+                => new NuGetVersion(prefix.Major, prefix.Minor, prefix.Patch + 1),
+            _ => null,
+        };
     }
 }

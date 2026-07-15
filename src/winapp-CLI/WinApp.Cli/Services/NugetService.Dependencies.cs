@@ -33,7 +33,14 @@ internal partial class NugetService
             var nuspecFiles = Directory.GetFiles(packageDir.FullName, "*.nuspec", SearchOption.TopDirectoryOnly);
             if (nuspecFiles.Length == 0)
             {
-                return dependencies;
+                // A validly extracted NuGet package always contains a root .nuspec, so its absence (in a
+                // directory the caller already accepted via the completion marker) means the cache entry is
+                // corrupt or was partially deleted. Returning an empty set here would be indistinguishable from
+                // a package that genuinely declares no dependencies, letting the install report success while
+                // silently omitting required transitive packages. Throw so the caller records a dependency
+                // failure and the overall operation fails loudly instead.
+                throw new FileNotFoundException(
+                    $"No .nuspec found for package '{packageName}' in '{packageDir.FullName}'. The cached package directory is corrupt or incompletely extracted.");
             }
             nuspecPath = nuspecFiles[0];
         }
