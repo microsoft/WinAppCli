@@ -89,6 +89,9 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // Convert to 8.3 short paths as a workaround; throw if shortening fails.
         var manifestUri = new Uri(LongPathHelper.GetShortPathOrThrow(fullManifestPath));
         var shortExternalPath = LongPathHelper.GetShortPathOrThrow(fullExternalPath + Path.DirectorySeparatorChar);
+        // Documented coverage ceiling: this re-append runs only when Win32 GetShortPathName strips
+        // the trailing separator, which depends on 8.3 short-name generation being enabled on the
+        // volume — env-dependent, so it can't be exercised deterministically in a unit test.
         if (!Path.EndsInDirectorySeparator(shortExternalPath))
         {
             shortExternalPath += Path.DirectorySeparatorChar;
@@ -306,6 +309,18 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         }
     }
 
+    // ---- Real WinRT PackageManager seam implementations (documented coverage ceiling) --------
+    // The Default* methods below are the production Windows.Management.Deployment.PackageManager
+    // calls that the RegisterLooseImpl / RegisterSparseImpl / RemovePackageImpl / AddPackageImpl /
+    // EnumerateUserPackagesImpl seams default to; tests inject those seams to cover all surrounding
+    // logic. The lines left uncovered here are an OS boundary that cannot be exercised without
+    // machine-mutating MSIX deployment:
+    //  * RegisterLoose / RegisterSparse / AddPackage - their failure paths ARE covered by the
+    //    deterministic _RealDefault_*_Throws/_Fails tests; only the *Outcome returned AFTER a
+    //    successful WinRT call stays uncovered (needs a real, valid package to actually deploy).
+    //  * RemovePackage - has no real-default test: removing a non-existent package has no
+    //    observable effect and its failure mode (throw vs error-result) is host-dependent, so such
+    //    a test would be vacuous or flaky. The warning / no-warning logic is covered via the seam.
     private static async Task<DeploymentOutcome> DefaultRegisterLoose(Uri manifestUri, CancellationToken cancellationToken)
     {
         var pm = new PackageManager();
@@ -340,6 +355,9 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         // abort the whole enumeration — is effectively unreachable for real user packages. The
         // matching InstalledLocation accessor stays deferred (a Func) because it is the one member
         // that legitimately throws for a valid package whose files were removed.
+        // Documented coverage ceiling: the live accessor lambda (() => p.InstalledLocation?.Path)
+        // and the eager Id.Version / IsDevelopmentMode reads only execute over a real installed
+        // Package, so they stay uncovered; the seam-injected views cover the projection logic.
         // The (userId, name, publisher) overload rejects empty/null publisher because
         // string.Empty marshals as a null HSTRING in WinRT interop, so use the single
         // (userSecurityId) overload with the current user and filter by name in callers.
