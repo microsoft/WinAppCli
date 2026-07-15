@@ -719,6 +719,18 @@ public partial class UiCommandTests
 
 
     [TestMethod]
+    public void Record_ShouldEncodeClosedDrainFrame_SkipsAlreadyEncodedVersion()
+    {
+        Assert.IsFalse(UiAutomationService.ShouldEncodeClosedDrainFrame(cachedVersion: 7, lastEncodedVersion: 7));
+    }
+
+    [TestMethod]
+    public void Record_ShouldEncodeClosedDrainFrame_EncodesNewerVersion()
+    {
+        Assert.IsTrue(UiAutomationService.ShouldEncodeClosedDrainFrame(cachedVersion: 8, lastEncodedVersion: 7));
+    }
+
+    [TestMethod]
     public void Record_ProcessFrame_MismatchedCropAspect_LetterboxesInsteadOfStretching()
     {
         const int srcW = 100, srcH = 50;

@@ -255,6 +255,7 @@ internal sealed partial class UiAutomationService
             var totalFrames = options.DurationSec > 0 ? (long)options.DurationSec * options.Fps : (long?)null;
             var stopwatch = Stopwatch.StartNew();
             var frameIndex = 0;
+            long lastEncodedVersion = -1;
             var startedSignaled = false;
 
             while (!ct.IsCancellationRequested)
@@ -279,17 +280,21 @@ internal sealed partial class UiAutomationService
                     var closedLatest = grabber.TryGetLatest();
                     if (closedLatest is not null)
                     {
-                        var (closedSrc, closedSw, closedSh) = closedLatest.Value;
-                        // H2: use current frame dims for whole-window WGC, fixed crop for element.
-                        var closedCropW = isWholeWindowWgc ? closedSw : cropW;
-                        var closedCropH = isWholeWindowWgc ? closedSh : cropH;
-                        var closedFrame = ProcessFrame(closedSrc, closedSw, closedSh, cropX, cropY, closedCropW, closedCropH, encoderW, encoderH, displayW, displayH);
-                        encoder.WriteFrame(closedFrame, frameIndex * frameDurationHns, frameDurationHns);
-                        frameIndex++;
-                        if (!startedSignaled)
+                        var (closedSrc, closedSw, closedSh, closedVersion) = closedLatest.Value;
+                        if (ShouldEncodeClosedDrainFrame(closedVersion, lastEncodedVersion))
                         {
-                            startedSignaled = true;
-                            onRecordingStarted?.Invoke();
+                            // H2: use current frame dims for whole-window WGC, fixed crop for element.
+                            var closedCropW = isWholeWindowWgc ? closedSw : cropW;
+                            var closedCropH = isWholeWindowWgc ? closedSh : cropH;
+                            var closedFrame = ProcessFrame(closedSrc, closedSw, closedSh, cropX, cropY, closedCropW, closedCropH, encoderW, encoderH, displayW, displayH);
+                            encoder.WriteFrame(closedFrame, frameIndex * frameDurationHns, frameDurationHns);
+                            lastEncodedVersion = closedVersion;
+                            frameIndex++;
+                            if (!startedSignaled)
+                            {
+                                startedSignaled = true;
+                                onRecordingStarted?.Invoke();
+                            }
                         }
                     }
                     _logger.LogDebug("WGC capture item closed mid-recording; finalizing {Frames} frames captured so far", frameIndex);
@@ -298,6 +303,7 @@ internal sealed partial class UiAutomationService
 
                 byte[]? source;
                 int sw, sh;
+                long sourceVersion = -1;
                 if (useWgc)
                 {
                     var latest = grabber!.TryGetLatest();
@@ -306,7 +312,7 @@ internal sealed partial class UiAutomationService
                         await Task.Delay(5, ct).ConfigureAwait(false);
                         continue;
                     }
-                    (source, sw, sh) = latest.Value;
+                    (source, sw, sh, sourceVersion) = latest.Value;
                 }
                 else if (useScreen)
                 {
@@ -332,6 +338,10 @@ internal sealed partial class UiAutomationService
                     isWholeWindowWgc ? sh : cropH,
                     encoderW, encoderH, displayW, displayH);
                 encoder.WriteFrame(frame, frameIndex * frameDurationHns, frameDurationHns);
+                if (useWgc)
+                {
+                    lastEncodedVersion = sourceVersion;
+                }
                 frameIndex++;
 
                 // Signal readiness after the first frame is encoded: the encoder is initialized
@@ -400,6 +410,8 @@ internal sealed partial class UiAutomationService
             "WGC init failed; falling back to screen-DC capture as requested by --capture-screen. " +
             "Overlapping windows may be captured.");
     }
+
+    internal static bool ShouldEncodeClosedDrainFrame(long cachedVersion, long lastEncodedVersion) => cachedVersion != lastEncodedVersion;
 
     // Minimum dimensions accepted by the Windows MF H.264 encoder.
     // Empirically, the encoder rejects frames narrower or shorter than 64 pixels with

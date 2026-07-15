@@ -75,6 +75,7 @@ internal static partial class WgcCapture
         private byte[]? _latestPixels;
         private int _latestWidth;
         private int _latestHeight;
+        private long _version;
         private bool _disposed;
         // Track the pool's current creation size so we can detect window resizes.
         private Windows.Graphics.SizeInt32 _poolSize;
@@ -187,6 +188,7 @@ internal static partial class WgcCapture
                     _latestPixels = pixels;
                     _latestWidth = width;
                     _latestHeight = height;
+                    _version++;
                 }
             }
             catch (Exception ex)
@@ -200,7 +202,7 @@ internal static partial class WgcCapture
         }
 
         /// <summary>Returns the most recently captured frame, or <see langword="null"/> if none has arrived yet.</summary>
-        public (byte[] Pixels, int Width, int Height)? TryGetLatest()
+        public (byte[] Pixels, int Width, int Height, long Version)? TryGetLatest()
         {
             lock (_lock)
             {
@@ -208,7 +210,7 @@ internal static partial class WgcCapture
                 {
                     return null;
                 }
-                return (_latestPixels, _latestWidth, _latestHeight);
+                return (_latestPixels, _latestWidth, _latestHeight, _version);
             }
         }
 
