@@ -96,7 +96,8 @@ public class NugetServiceTests : BaseCommandTests
         // Assert
         Assert.IsNotNull(result);
         Assert.IsNotEmpty(result, "Should have dependencies");
-        // Each dependency value is the resolved minimum version (normalized), never a raw range
+        // Each dependency value is a concrete version that satisfies the declared range (the lowest listed
+        // satisfying version), never a raw range
         foreach (var dep in result)
         {
             Assert.IsFalse(string.IsNullOrEmpty(dep.Value), $"Dependency {dep.Key} should have a version");

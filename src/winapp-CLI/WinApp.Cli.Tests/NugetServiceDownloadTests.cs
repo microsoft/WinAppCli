@@ -22,6 +22,47 @@ public class NugetServiceDownloadTests : BaseCommandTests
     #region Download / install Tests
 
     [TestMethod]
+    public async Task InstallPackageAsync_DependencyHasExclusiveLowerBound_InstallsLowestSatisfyingVersion()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root's .nuspec declares its dependency with an EXCLUSIVE lower bound (1.0.0, 2.0.0]. Installing
+            // the lower bound 1.0.0 would be wrong (the range excludes it); the install must resolve and
+            // extract the lowest listed satisfying version, 1.5.0.
+            WriteNupkgToFeed(feed, "Install.Root", "1.0.0", ("Install.Child", "(1.0.0, 2.0.0]"));
+            WriteNupkgToFeed(feed, "Install.Child", "1.0.0");
+            WriteNupkgToFeed(feed, "Install.Child", "1.5.0");
+            WriteNupkgToFeed(feed, "Install.Child", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var installed = await service.InstallPackageAsync("Install.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+
+            Assert.IsTrue(installed.TryGetValue("Install.Child", out var childVersion), "The transitive dependency must be resolved and installed.");
+            Assert.AreEqual("1.5.0", childVersion, "The exclusive lower bound (1.0.0) must be excluded; the lowest satisfying version (1.5.0) is installed.");
+            Assert.IsTrue(service.GetNuGetPackageDir("Install.Child", "1.5.0").Exists, "The resolved dependency version must be extracted on disk.");
+            Assert.IsFalse(service.GetNuGetPackageDir("Install.Child", "1.0.0").Exists, "The excluded lower-bound version must NOT be installed.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     public async Task InstallPackageAsync_LocalFeed_InstallsPackageAndNormalizedTransitiveDependency()
     {
         // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.

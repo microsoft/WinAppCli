@@ -420,6 +420,73 @@ public class NugetServiceFeedTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task GetPackageDependenciesAsync_ExclusiveLowerBoundRange_ResolvesLowestListedSatisfyingVersion()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root depends on Child with an EXCLUSIVE lower bound: (1.0.0, 2.0.0]. The declared lower bound
+            // 1.0.0 does NOT satisfy the range, so reducing the range to MinVersion would resolve to a
+            // disallowed version. The lowest LISTED version that satisfies the range is 1.5.0 (1.0.0 is
+            // excluded; 2.0.0 is a higher valid match).
+            WriteNupkgToFeed(feed, "Range.Root", "1.0.0", ("Range.Child", "(1.0.0, 2.0.0]"));
+            WriteNupkgToFeed(feed, "Range.Child", "1.0.0");
+            WriteNupkgToFeed(feed, "Range.Child", "1.5.0");
+            WriteNupkgToFeed(feed, "Range.Child", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var deps = await service.GetPackageDependenciesAsync("Range.Root", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(deps.TryGetValue("Range.Child", out var childVersion), "The dependency must be resolved, not skipped.");
+            Assert.AreEqual("1.5.0", childVersion, "The exclusive lower bound (1.0.0) must be excluded and the lowest satisfying listed version selected.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_UpperBoundOnlyRange_ResolvesInsteadOfSkipping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root depends on Child with an UPPER-BOUND-ONLY range: (, 2.0.0]. MinVersion is null for such a
+            // range, so the old MinVersion-based logic silently DROPPED the dependency. The lowest listed
+            // version that satisfies "<= 2.0.0" is 1.0.0 (3.0.0 is excluded).
+            WriteNupkgToFeed(feed, "Upper.Root", "1.0.0", ("Upper.Child", "(, 2.0.0]"));
+            WriteNupkgToFeed(feed, "Upper.Child", "1.0.0");
+            WriteNupkgToFeed(feed, "Upper.Child", "2.0.0");
+            WriteNupkgToFeed(feed, "Upper.Child", "3.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var deps = await service.GetPackageDependenciesAsync("Upper.Root", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(deps.TryGetValue("Upper.Child", out var childVersion), "An upper-bound-only dependency must be resolved, not silently skipped.");
+            Assert.AreEqual("1.0.0", childVersion, "The lowest listed version satisfying '<= 2.0.0' must be selected.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     public async Task GetLatestVersionAsync_MultipleEligibleSources_ReturnsHighestAcrossSources()
     {
         var root = CreateFeedTestDirectory();

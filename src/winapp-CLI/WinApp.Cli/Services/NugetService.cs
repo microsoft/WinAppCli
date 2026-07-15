@@ -212,9 +212,12 @@ internal class NugetService : INugetService
                 continue;
             }
 
-            var depVersion = depVersionRange.MinVersion?.ToNormalizedString();
+            var depVersion = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
             if (string.IsNullOrEmpty(depVersion))
             {
+                // The declared range names no installable version on the configured sources (e.g. a
+                // version-less dependency or a range no listed version satisfies); skip it rather than
+                // guessing a version to install.
                 continue;
             }
 
@@ -440,6 +443,95 @@ internal class NugetService : INugetService
         return [.. versions];
     }
 
+    /// <summary>
+    /// Resolves a dependency's declared <see cref="VersionRange"/> to a single concrete version to install.
+    /// For the common inclusive lower bound (e.g. <c>[1.2.3, )</c>, which is also how a bare <c>1.2.3</c> is
+    /// interpreted) the lower bound itself satisfies the range and is exactly what NuGet's lowest-applicable
+    /// resolution selects, so it is used directly without an extra feed round-trip. For ranges whose lower
+    /// bound is not a valid install target — an exclusive lower bound such as <c>(1.0.0, 2.0.0]</c> or an
+    /// upper-bound-only range such as <c>(, 2.0.0]</c> — the configured sources are queried and the lowest
+    /// listed version that satisfies the full range is chosen. Returns null when the range constrains nothing
+    /// (a version-less dependency) or when no listed version satisfies it.
+    /// </summary>
+    private async Task<string?> ResolveDependencyVersionAsync(string packageId, VersionRange? range, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    {
+        if (range is null)
+        {
+            return null;
+        }
+
+        // Inclusive lower bound: the lower bound is a valid, satisfying version and is exactly what NuGet's
+        // lowest-applicable resolution picks, so use it directly and avoid an extra feed query.
+        if (range.HasLowerBound && range.IsMinInclusive && range.MinVersion is not null)
+        {
+            return range.MinVersion.ToNormalizedString();
+        }
+
+        // A range with no bounds at all (a version-less dependency) constrains nothing; keep the historical
+        // behavior of skipping it rather than pulling in an arbitrary version.
+        if (!range.HasLowerBound && !range.HasUpperBound)
+        {
+            return null;
+        }
+
+        // Exclusive lower bound or upper-bound-only range: the declared lower bound is not itself an
+        // installable version, so enumerate the listed versions and select the lowest one that satisfies the
+        // full range (FindBestMatch returns null when none do).
+        var available = await GetListedVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
+        return range.FindBestMatch(available)?.ToNormalizedString();
+    }
+
+    /// <summary>
+    /// Collects the listed (non-unlisted) versions of a package across every eligible source, for resolving a
+    /// dependency's version range to a concrete version. Unlike <see cref="GetListedVersionsAsync"/> — which
+    /// feeds a "latest" MAX decision and therefore fails closed if any source errors — this tolerates a
+    /// per-source failure and moves on, matching the source-by-source failover the dependency paths already
+    /// use: another eligible source may still list a version that satisfies the range.
+    /// </summary>
+    private async Task<IReadOnlyList<NuGetVersion>> GetListedVersionsForRangeAsync(string packageId, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    {
+        var versions = new HashSet<NuGetVersion>();
+
+        foreach (var repo in _sourceProvider.GetRepositoriesForPackage(packageId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+                if (metadataResource is null)
+                {
+                    continue;
+                }
+
+                var metadata = await metadataResource.GetMetadataAsync(
+                    packageId,
+                    includePrerelease: true,
+                    includeUnlisted: false,
+                    cacheContext,
+                    Logger,
+                    cancellationToken);
+
+                foreach (var package in metadata)
+                {
+                    versions.Add(package.Identity.Version);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Propagate genuine cancellation instead of masking it as "no versions found".
+                throw;
+            }
+            catch
+            {
+                // Best-effort: a source we cannot query contributes no versions; another eligible source may
+                // still satisfy the range. (The dependency paths already fail over source-by-source.)
+            }
+        }
+
+        return [.. versions];
+    }
+
     /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
@@ -523,10 +615,10 @@ internal class NugetService : INugetService
                         continue;
                     }
 
-                    var minVersion = dependency.VersionRange?.MinVersion?.ToNormalizedString();
-                    if (!string.IsNullOrEmpty(minVersion))
+                    var resolvedVersion = await ResolveDependencyVersionAsync(dependency.Id, dependency.VersionRange, cacheContext, cancellationToken);
+                    if (!string.IsNullOrEmpty(resolvedVersion))
                     {
-                        dependencies.TryAdd(dependency.Id, minVersion);
+                        dependencies.TryAdd(dependency.Id, resolvedVersion);
                     }
                 }
             }
