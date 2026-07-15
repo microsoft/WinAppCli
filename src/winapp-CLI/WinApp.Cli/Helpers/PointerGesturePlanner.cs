@@ -1,14 +1,11 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Globalization;
-
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
-/// Pure geometry/parsing helpers shared by <c>ui touch</c> and <c>ui pen</c>. Parses the <c>x,y</c>
-/// coordinate grammar (identical to <c>ui drag</c>'s) and expands a high-level touch gesture into the
-/// per-finger waypoint paths that <see cref="IPointerInput.Touch"/> replays.
+/// Pure geometry helpers shared by <c>ui touch</c> and <c>ui pen</c>. Expands a high-level touch
+/// gesture into the per-finger waypoint paths that <see cref="IPointerInput.Touch"/> replays.
 /// </summary>
 internal static class PointerGesturePlanner
 {
@@ -47,28 +44,7 @@ internal static class PointerGesturePlanner
     /// Parses a single <c>x,y</c> integer pair (app coordinates as reported by <c>ui inspect</c>).
     /// </summary>
     public static bool TryParsePoint(string? value, out PointerPoint point)
-    {
-        point = default;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var parts = value.Split(',', StringSplitOptions.TrimEntries);
-        if (parts.Length != 2)
-        {
-            return false;
-        }
-
-        if (int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int x)
-            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int y))
-        {
-            point = new PointerPoint(x, y);
-            return true;
-        }
-
-        return false;
-    }
+        => CoordinateParser.TryParsePoint(value, out point);
 
     /// <summary>
     /// Whether a token that failed to parse as a point was nonetheless meant as coordinates (has a comma
@@ -76,11 +52,7 @@ internal static class PointerGesturePlanner
     /// a precise error instead of a misleading "element not found".
     /// </summary>
     public static bool LooksLikeCoordinates(string token)
-    {
-        var parts = token.Split(',');
-        return parts.Length >= 2
-            && int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
-    }
+        => CoordinateParser.LooksLikeCoordinates(token);
 
     /// <summary>
     /// Parses a pen ink path — a whitespace-separated list of <c>x,y</c> pairs

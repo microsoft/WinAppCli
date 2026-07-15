@@ -14,6 +14,46 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class PointerGesturePlannerTests
 {
+    [TestMethod]
+    [DataRow("100,200", 100, 200)]
+    [DataRow(" 100 , 200 ", 100, 200)]
+    [DataRow("-5,+6", -5, 6)]
+    public void CoordinateParser_TryParsePoint_AcceptsSharedCoordinateGrammar(string value, int expectedX, int expectedY)
+    {
+        Assert.IsTrue(CoordinateParser.TryParsePoint(value, out var point));
+        Assert.AreEqual(expectedX, point.X);
+        Assert.AreEqual(expectedY, point.Y);
+
+        Assert.IsTrue(CoordinateParser.TryParsePoint(value, out int x, out int y));
+        Assert.AreEqual(expectedX, x);
+        Assert.AreEqual(expectedY, y);
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
+    [DataRow("100")]
+    [DataRow("100,")]
+    [DataRow("100,200,300")]
+    [DataRow("2147483648,1")]
+    public void CoordinateParser_TryParsePoint_RejectsInvalidOrOutOfRangePairs(string value)
+    {
+        Assert.IsFalse(CoordinateParser.TryParsePoint(value, out _));
+        Assert.IsFalse(CoordinateParser.TryParsePoint(value, out _, out _));
+    }
+
+    [TestMethod]
+    [DataRow("100,", true)]
+    [DataRow("100,abc", true)]
+    [DataRow("100,200,300", true)]
+    [DataRow("name=Save, Continue", false)]
+    [DataRow("abc,100", false)]
+    public void CoordinateParser_LooksLikeCoordinates_DisambiguatesMalformedCoordinatesFromSelectors(
+        string token, bool expected)
+    {
+        Assert.AreEqual(expected, CoordinateParser.LooksLikeCoordinates(token));
+    }
+
     // -------------------------------------------------------------------------
     // M9 — Pinch geometry
     // -------------------------------------------------------------------------
