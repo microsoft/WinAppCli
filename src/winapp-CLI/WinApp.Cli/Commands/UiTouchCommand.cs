@@ -233,7 +233,9 @@ internal class UiTouchCommand : Command, IShortDescription
 
                 long targetHwnd = session.WindowHandle;
                 PointerPoint start;
-                var targetLabel = selectorStr ?? atStr;
+                // L1: report the effective target — the --at value when explicit coordinates were given,
+                // or the selector when the selector resolved the contact point.
+                var targetLabel = at is not null ? atStr : selectorStr;
 
                 if (at is not null)
                 {
@@ -326,7 +328,20 @@ internal class UiTouchCommand : Command, IShortDescription
                     return 1;
                 }
 
-                pointerInput.Touch(gesture, contactPaths, holdMs, durationMs);
+                // M8: narrow the injection_unsupported catch to only the actual injection call so that
+                // pre-injection failures (session resolution, element not found, etc.) are NOT
+                // mis-classified as injection_unsupported — they surface through GenericError instead.
+                try
+                {
+                    pointerInput.Touch(gesture, contactPaths, holdMs, durationMs);
+                }
+                catch (InvalidOperationException injectEx)
+                {
+                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
+                    UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message,
+                        errorOut: parseResult.InvocationConfiguration.Error);
+                    return 1;
+                }
 
                 if (json)
                 {
@@ -355,12 +370,6 @@ internal class UiTouchCommand : Command, IShortDescription
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
                 UiErrors.StaleElement(logger, json);
-                return 1;
-            }
-            catch (InvalidOperationException injectEx)
-            {
-                logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
-                UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message);
                 return 1;
             }
             catch (Exception ex)

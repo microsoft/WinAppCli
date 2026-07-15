@@ -97,6 +97,13 @@ internal static class PointerInput
         int holdMs,
         int durationMs)
     {
+        // NOTE (M2 — P/Invoke test coverage): The production path below (CreateSyntheticPointerDevice
+        // → RunTouchGesture → InjectSyntheticPointerInput / InjectTouchInput → DestroySyntheticPointerDevice)
+        // requires an unlocked, interactive desktop and cannot be exercised in this shared CI/test
+        // environment without live input injection. Unit tests in PointerInputFrameTests cover the
+        // frame-planning and ordering logic via InjectTouchStroke's injectable TouchSender delegate;
+        // the P/Invoke device-create → payload-marshal → destroy path requires a dedicated
+        // interactive-desktop test lane.
         // Primary path: a synthetic touch pointer device, mirroring the working pen path. This is the
         // modern, better-supported mechanism (Windows 10 1809+).
         var device = PInvoke.CreateSyntheticPointerDevice(

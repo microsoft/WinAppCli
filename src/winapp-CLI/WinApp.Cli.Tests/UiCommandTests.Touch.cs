@@ -313,9 +313,8 @@ public partial class UiCommandTests
     public async Task Touch_InjectThrowsInvalidOperation_ReturnsNonZeroWithStructuredError()
     {
         // If the pointer-injection path throws InvalidOperationException (e.g. UP-frame failure
-        // now surfacing on the normal path), the command must catch it and return non-zero rather
-        // than letting it crash unhandled. The exception is mapped to injection_unsupported via
-        // the existing catch block in UiTouchCommand.Handler.InvokeAsync.
+        // now surfacing on the normal path), the command must catch it and return non-zero with a
+        // structured JSON error (injection_unsupported), not crash or report success.
         _fakeSession.SessionResult.WindowHandle = 5162;
         _fakePointer.ThrowException = new InvalidOperationException("UP frame injection failed — pointer stuck");
 
@@ -327,5 +326,17 @@ public partial class UiCommandTests
             "Command must return non-zero when the inject call throws InvalidOperationException");
         Assert.AreEqual(0, _fakePointer.TouchCalls.Count,
             "No successful injection was recorded (the fake threw before recording)");
+        // Stdout must be empty — no success envelope must be emitted.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty on injection failure — success envelope must not be emitted");
+        // Stderr must contain a structured JSON error with code == injection_unsupported.
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInjectionUnsupported,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'injection_unsupported' when injection throws InvalidOperationException");
     }
 }

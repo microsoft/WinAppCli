@@ -28,10 +28,12 @@ internal class UiPenCommand : Command, IShortDescription
         Description = "Ink stroke path as a whitespace-separated list of x,y pairs, e.g. \"10,10 20,30 40,50\"."
     };
 
-    public static Option<float> PressureOption { get; } = new("--pressure")
+    // Option<string?> so --pressure nope --json reaches the handler and produces a structured
+    // invalid_arguments JSON error instead of SCL's plain-text parse-failure message (M4).
+    public static Option<string?> PressureOption { get; } = new("--pressure")
     {
         Description = "Pen pressure from 0.0 to 1.0 (default: 0.5).",
-        DefaultValueFactory = _ => 0.5f
+        DefaultValueFactory = _ => "0.5"
     };
 
     public static Option<int> TiltXOption { get; } = new("--tilt-x")
@@ -93,7 +95,7 @@ internal class UiPenCommand : Command, IShortDescription
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var atStr = parseResult.GetValue(AtOption);
             var pathStr = parseResult.GetValue(PathOption);
-            var pressure = parseResult.GetValue(PressureOption);
+            var pressureStr = parseResult.GetValue(PressureOption) ?? "0.5";
             var tiltX = parseResult.GetValue(TiltXOption);
             var tiltY = parseResult.GetValue(TiltYOption);
             var eraser = parseResult.GetValue(EraserOption);
@@ -105,10 +107,13 @@ internal class UiPenCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (!float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
+            if (!float.TryParse(pressureStr, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float pressure)
+                || !float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
             {
-                logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0.", UiSymbols.Error);
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--pressure must be a finite number between 0.0 and 1.0.",
+                logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0. Got '{Pressure}'.", UiSymbols.Error, pressureStr);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    $"--pressure must be a finite number between 0.0 and 1.0. Got '{pressureStr}'.",
                     errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
@@ -139,7 +144,7 @@ internal class UiPenCommand : Command, IShortDescription
             }
 
             PointerPoint? at = null;
-            if (!string.IsNullOrWhiteSpace(atStr))
+            if (path is null && !string.IsNullOrWhiteSpace(atStr))
             {
                 if (!PointerGesturePlanner.TryParsePoint(atStr, out var atPoint))
                 {
@@ -157,12 +162,19 @@ internal class UiPenCommand : Command, IShortDescription
                 return 1;
             }
 
+            // Track whether --path was provided (before the inner block mutates path).
+            // Used by M7: the selector branch calls SetForeground during stable-resolve so we skip
+            // the post-resolution SetForeground for that path only.
+            bool pathFromOption = path is not null;
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
                 long targetHwnd = session.WindowHandle;
-                var targetLabel = pathStr ?? selectorStr ?? atStr;
+                // L1: report the effective target — pathStr when --path was given, atStr when --at
+                // was given, or selectorStr when the selector resolved the contact point.
+                var targetLabel = pathStr ?? (at is not null ? atStr : selectorStr);
 
                 // Build the ink path: explicit --path wins; else --at; else the selector's center.
                 if (path is null)
@@ -210,7 +222,10 @@ internal class UiPenCommand : Command, IShortDescription
                     path = [contact];
                 }
 
-                if (targetHwnd != 0)
+                // M7: SetForeground only when the selector branch did not already do it.
+                // The selector branch (no --path and no --at) calls SetForeground during stable-resolve;
+                // the --at and --path branches do not, so they need it here before injection.
+                if ((pathFromOption || at is not null) && targetHwnd != 0)
                 {
                     Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
                     await Task.Delay(100, cancellationToken);
@@ -257,7 +272,20 @@ internal class UiPenCommand : Command, IShortDescription
                     return 1;
                 }
 
-                pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
+                // M6: narrow the injection_unsupported catch to only the actual injection call so that
+                // pre-injection failures (session resolution, element not found, etc.) are NOT
+                // mis-classified as injection_unsupported — they surface through GenericError instead.
+                try
+                {
+                    pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
+                }
+                catch (InvalidOperationException injectEx)
+                {
+                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
+                    UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message,
+                        errorOut: parseResult.InvocationConfiguration.Error);
+                    return 1;
+                }
 
                 var action = eraser ? "erase" : (path.Count > 1 ? "draw" : "tap");
 
@@ -290,12 +318,6 @@ internal class UiPenCommand : Command, IShortDescription
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
                 UiErrors.StaleElement(logger, json);
-                return 1;
-            }
-            catch (InvalidOperationException injectEx)
-            {
-                logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
-                UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message);
                 return 1;
             }
             catch (Exception ex)

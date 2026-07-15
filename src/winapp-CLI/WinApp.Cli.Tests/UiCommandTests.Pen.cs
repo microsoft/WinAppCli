@@ -117,18 +117,22 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Pen_PressureInfinity_Rejected_NoInjection()
     {
-        // PositiveInfinity bypasses the old range check; however "Infinity" is rejected at System.CommandLine
-        // parse time (float.TryParse("Infinity") returns false in the SCL parser), so the handler never runs
-        // and UiJsonError.Emit is never called. The rejection still correctly prevents any injection.
+        // With --pressure as Option<string?>, "Infinity" now reaches the handler (float.TryParse
+        // succeeds returning PositiveInfinity, then !float.IsFinite rejects it). The handler emits
+        // a structured JSON invalid_arguments error to stderr — no longer a raw SCL parse-failure.
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--pressure", "Infinity", "--json"]);
-        Assert.AreEqual(1, exitCode, "Non-parseable --pressure Infinity must fail with exit code 1");
+        Assert.AreEqual(1, exitCode, "Non-finite --pressure Infinity must fail with exit code 1");
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for Infinity pressure");
-        // The parse error is emitted by System.CommandLine (not UiJsonError), so stderr contains the SCL
-        // error message rather than a JSON error object. Verify the right error surface is populated.
         var stderr = ConsoleStdErr.ToString();
-        Assert.IsTrue(stderr.Length > 0, "stderr must contain an error message for Infinity pressure");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for Infinity pressure");
     }
 
     [TestMethod]
@@ -152,6 +156,61 @@ public partial class UiCommandTests
             ["-a", "TestApp", "--at", "100,100", "--pressure", "1.5", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Pen_InjectThrowsInvalidOperation_ReturnsNonZeroWithStructuredError()
+    {
+        // If the pointer-injection path throws InvalidOperationException (e.g. pen device creation
+        // or InjectSyntheticPointerInput fails), the command must catch it at the injection call site
+        // and return non-zero with a structured JSON error (injection_unsupported), not crash or
+        // report success.
+        _fakeSession.SessionResult.WindowHandle = 4401;
+        _fakePointer.ThrowException = new InvalidOperationException("CreateSyntheticPointerDevice(PT_PEN) failed — locked desktop");
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(1, exitCode,
+            "Command must return non-zero when the inject call throws InvalidOperationException");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count,
+            "No successful injection was recorded (the fake threw before recording)");
+        // Stdout must be empty — no success envelope must be emitted.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty on injection failure — success envelope must not be emitted");
+        // Stderr must contain a structured JSON error with code == injection_unsupported.
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInjectionUnsupported,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'injection_unsupported' when injection throws InvalidOperationException");
+    }
+
+    [TestMethod]
+    public async Task Pen_PressureTypo_Json_EmitsStructuredInvalidArgumentsError()
+    {
+        // M4: --pressure nope --json used to bypass the handler (SCL parse failure) and emit plain
+        // text + help. With --pressure as Option<string?> the handler now runs and must emit a
+        // structured JSON invalid_arguments error to stderr and exit 1.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--pressure", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Bad --pressure must fail with exit code 1");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for invalid pressure");
+        // Must emit structured JSON error to stderr.
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object for --json mode; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for bad --pressure");
     }
 
     [TestMethod]
