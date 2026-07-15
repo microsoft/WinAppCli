@@ -19,6 +19,10 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
 
+    <!-- Allow unsafe blocks so SlugGeneratorTests can build a real SAFEARRAY (via oleaut32)
+         to exercise SlugGenerator's COM-interop hashing overloads. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
     <!-- Exclude test app source files from compilation -->
     <DefaultItemExcludes>$(DefaultItemExcludes);TestApps\**\*</DefaultItemExcludes>
 

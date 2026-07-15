@@ -57,6 +57,12 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
 
     public List<(string ToolName, string Arguments)> Invocations { get; } = [];
 
+    /// <summary>
+    /// Result returned from <see cref="EnsureBuildToolsAsync"/>. Defaults to null (build tools
+    /// directory not resolved); set to a directory to exercise the "BuildTools ready" branch.
+    /// </summary>
+    public DirectoryInfo? BuildToolsResult { get; set; }
+
     public FileInfo? GetBuildToolPath(string toolName)
     {
         return new FileInfo(Path.Combine(Path.GetTempPath(), toolName));
@@ -69,7 +75,7 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
 
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<DirectoryInfo?>(null);
+        return Task.FromResult(BuildToolsResult);
     }
 
     public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
