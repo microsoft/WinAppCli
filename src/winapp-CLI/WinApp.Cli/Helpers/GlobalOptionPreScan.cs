@@ -127,7 +127,9 @@ internal static class GlobalOptionPreScan
     /// Callers use this to fail fast with a single clean <c>invalid_arguments</c> error instead,
     /// mirroring how the parser rejects other malformed option values (e.g. <c>--pressure nope</c>).
     /// The bare form, valid <c>--json=true</c>/<c>--json=false</c> spellings, and space-separated
-    /// values are not considered invalid here.
+    /// values are not considered invalid here. ALL occurrences before the separator are scanned:
+    /// a later invalid value is reported even when an earlier occurrence was valid, so that a
+    /// repeated option such as <c>--json=true --json=bogus</c> is still rejected (M2).
     /// </remarks>
     /// <returns>
     /// <see langword="true"/> and sets <paramref name="invalidValue"/> when an invalid attached
@@ -142,6 +144,7 @@ internal static class GlobalOptionPreScan
         {
             if (token == "--")
             {
+                // Passthrough payload begins here — stop scanning.
                 return false;
             }
 
@@ -153,10 +156,16 @@ internal static class GlobalOptionPreScan
                     var val = token[prefix.Length..];
                     if (!bool.TryParse(val, out _))
                     {
+                        // Invalid '='-attached value on this option. Report the first such
+                        // occurrence; do NOT early-return false on an earlier VALID occurrence —
+                        // e.g. `--json=true --json=bogus` must still be rejected (M2).
                         invalidValue = val;
                         return true;
                     }
-                    return false; // valid boolean attached value
+
+                    // Valid boolean attached value for this token — keep scanning the remaining
+                    // tokens in case a later duplicate of the same option carries a bad value.
+                    break;
                 }
             }
         }

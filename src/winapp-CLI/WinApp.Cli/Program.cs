@@ -44,15 +44,19 @@ internal static class Program
         // Pre-scan argv for the global logging-mode flags. The scan stops at the first
         // standalone '--' separator so that passthrough payload (e.g. `winapp run . --
         // --json`) is not misread as a winapp global flag.
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
+        // Use the value-aware scan for --verbose/--quiet (mirroring --json below) so that
+        // --verbose=false / --verbose false disable the mode and --verbose / --verbose=true
+        // enable it, matching how System.CommandLine parses the typed bool option. Token-presence
+        // alone would misread `--verbose false` as verbose-on and false-conflict with --json (M3).
+        verbose = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases);
+        if (verbose)
         {
             minimumLogLevel = LogLevel.Debug;
-            verbose = true;
         }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
+        quiet = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases);
+        if (quiet)
         {
             minimumLogLevel = LogLevel.Warning;
-            quiet = true;
         }
         // Use value-aware scan for --json so that --json=true, --json true, --json false, and
         // --json=false are all handled correctly before a real parse is available (M1).
@@ -111,6 +115,30 @@ internal static class Program
             {
                 Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
             }
+
+            // Reject an invalid '='-attached value on ANY boolean option reachable by the selected
+            // command — a global flag like --json=bogus or a command flag like --eraser=bogus.
+            // System.CommandLine silently coerces such a value to TRUE with no parse error, which
+            // would (a) silently enable a flag the user never set (e.g. the pen eraser) and (b) for
+            // --json leave logging un-suppressed, so the human ❌ line and the JSON envelope BOTH hit
+            // stderr and corrupt machine-readable output. Fail fast HERE — before the first-run /
+            // update notice can print anything (M1) — with a single clean invalid_arguments error,
+            // mirroring how the parser already rejects other malformed values (e.g. --pressure nope).
+            if (TryFindInvalidBooleanOption(parseResult, args, out var invalidBoolOption, out var invalidBoolValue))
+            {
+                var message =
+                    $"Cannot parse argument '{invalidBoolValue}' for option '{invalidBoolOption}' as expected type 'System.Boolean'.";
+                if (ResolveEffectiveJson(parseResult) && IsUiDescendant(parseResult))
+                {
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
+                }
+                else
+                {
+                    Console.Error.WriteLine(message);
+                }
+
+                return 1;
+            }
         }
 
         // Skip first-run notice for machine-readable output modes and completions
@@ -148,37 +176,6 @@ internal static class Program
         // The pre-scan (json) is value-aware but still a heuristic; the parsed value is the truth.
         // Reading the parsed bool works even when a different option (e.g. --pressure) failed parse.
         bool effectiveJson = ResolveEffectiveJson(parsedArgs);
-
-        // Reject a global boolean flag given a non-boolean '='-attached value (e.g. --json=bogus).
-        // System.CommandLine silently coerces such a value to true (no parse error) while the value-
-        // aware pre-scan reads it as false. That disagreement means the human ❌ log line (emitted
-        // because the pre-scan left logging un-suppressed) and the machine-readable JSON envelope
-        // (emitted because the parsed --json is true) would BOTH reach stderr, corrupting --json
-        // output. Fail fast with a single clean invalid_arguments error before the command runs,
-        // mirroring how the parser already rejects other malformed option values (e.g. --pressure
-        // nope). The command never executes, so no logger line can leak alongside the error. (M1)
-        foreach (var boolOption in new[]
-                 {
-                     WinAppRootCommand.JsonOption,
-                     WinAppRootCommand.VerboseOption,
-                     WinAppRootCommand.QuietOption,
-                 })
-        {
-            if (GlobalOptionPreScan.TryFindInvalidBooleanValue(args, boolOption.Name, boolOption.Aliases, out var badValue))
-            {
-                var message =
-                    $"Cannot parse argument '{badValue}' for option '{boolOption.Name}' as expected type 'System.Boolean'.";
-                if (effectiveJson && IsUiDescendant(parsedArgs))
-                {
-                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
-                }
-                else
-                {
-                    Console.Error.WriteLine(message);
-                }
-                return 1;
-            }
-        }
 
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
@@ -288,6 +285,53 @@ internal static class Program
             }
             cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Scans argv for an invalid <c>=</c>-attached value on any boolean option reachable by the
+    /// selected command — the command's own <see cref="System.CommandLine.Option{T}"/> boolean
+    /// options plus inherited/global ones on ancestor commands (e.g. <c>--json</c>/<c>--verbose</c>/
+    /// <c>--quiet</c> on the root, or <c>--eraser</c> on <c>ui pen</c>). System.CommandLine silently
+    /// coerces a non-boolean attached value (e.g. <c>--eraser=bogus</c>) to <see langword="true"/>;
+    /// the caller uses this to reject it with a clean error instead (#600 H1/M1/M2).
+    /// </summary>
+    private static bool TryFindInvalidBooleanOption(
+        System.CommandLine.ParseResult parseResult,
+        string[] args,
+        out string optionName,
+        out string invalidValue)
+    {
+        optionName = string.Empty;
+        invalidValue = string.Empty;
+
+        // Walk the selected command up through its ancestors so both command-level bool options
+        // and inherited/global ones are covered. Dedupe by name in case an option appears twice.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            foreach (var option in cmd.Options)
+            {
+                if (option is not System.CommandLine.Option<bool>)
+                {
+                    continue;
+                }
+                if (!seen.Add(option.Name))
+                {
+                    continue;
+                }
+                if (GlobalOptionPreScan.TryFindInvalidBooleanValue(args, option.Name, option.Aliases, out var badValue))
+                {
+                    optionName = option.Name;
+                    invalidValue = badValue;
+                    return true;
+                }
+            }
+
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+
         return false;
     }
 }

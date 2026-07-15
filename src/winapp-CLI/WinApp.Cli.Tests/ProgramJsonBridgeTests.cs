@@ -699,4 +699,146 @@ public class ProgramJsonBridgeTests : BaseCommandTests
         Assert.IsFalse(stderr.Contains("\"error\":"),
             $"--json=false must not emit a bridge envelope; got stderr: {stderr}");
     }
+
+    // -------------------------------------------------------------------------
+    // Round 13 — the invalid-attached-boolean rejection is generalized from the three global
+    // flags to EVERY bool option reachable by the selected command (H1: e.g. --eraser on
+    // `ui pen`), scans ALL occurrences so a later bad value is caught (M2), fires BEFORE the
+    // first-run notice so a cold cache does not leak a banner to stdout (M1), and the
+    // verbose/quiet conflict checks are value-aware (M3). InvokeProgramAsync now isolates the
+    // real first-run/update cache from Program.Main (M5).
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Pen_EraserEqualsBogus_Json_RejectedAsInvalidArguments_NoErase()
+    {
+        // H1: --eraser is a COMMAND-level Option<bool>. System.CommandLine silently coerces
+        // --eraser=bogus to true, which would switch the pen to its eraser end. The generalized
+        // guard must reject ANY invalid '='-attached bool value — not just the global flags — so
+        // the command never runs and no eraser stroke is injected.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--eraser=bogus", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --eraser value must exit 1");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"Expected a JSON error envelope; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            $"--eraser=bogus must be rejected as invalid_arguments; got stderr: {stderr}");
+        Assert.IsTrue(error.GetProperty("error").GetProperty("message").GetString()!.Contains("--eraser"),
+            $"The error message must name the offending --eraser option; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Command must not run, so no missing_app envelope should appear; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task Pen_EraserEqualsBogus_NoJson_RejectedAsInvalidArguments_PlainText()
+    {
+        // H1 without --json: a command-level bool with a bad attached value is rejected with a
+        // plain-text message naming --eraser, and no JSON envelope is emitted.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--eraser=bogus"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --eraser value must exit 1");
+        Assert.IsTrue(stderr.Contains("for option '--eraser'"),
+            $"Expected a plain-text invalid-argument message for --eraser; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains("\"error\":"),
+            $"No --json in play, so no JSON envelope should be emitted; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonValidThenBogus_Rejected_NotAcceptedAsTrue()
+    {
+        // M2: a repeated option where an EARLIER occurrence is valid and a LATER one is invalid
+        // (--json=true --json=bogus) must still be rejected. The scan must not early-return on the
+        // first valid occurrence.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--json=true", "--json=bogus"]);
+
+        Assert.AreEqual(1, exitCode, "Duplicate --json with a later invalid value must exit 1");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"Expected a JSON error envelope; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            $"--json=true --json=bogus must be rejected as invalid_arguments; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Command must not run; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsBogus_ColdCache_NoFirstRunBannerOnStdout()
+    {
+        // M1: on a COLD cache (no .first-run-complete marker), the invalid-bool rejection must fire
+        // BEFORE the first-run notice, so the first-run banner never contaminates stdout. Only the
+        // JSON invalid_arguments error is emitted, on stderr; stdout stays empty. (This test also
+        // exercises the M5 isolation: coldCache:true only reproduces a true first run because the
+        // harness redirects the global winapp dir to a fresh, markerless temp cache.)
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--json=bogus"],
+            coldCache: true);
+
+        Assert.AreEqual(1, exitCode, "Invalid --json value must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(),
+            $"On a cold cache the first-run banner must not print to stdout; got stdout: {stdout}");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"Expected a JSON error envelope on stderr; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            $"--json=bogus must be rejected as invalid_arguments; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task VerboseFalse_Json_NoFalseConflict()
+    {
+        // M3: `--verbose false --json` must NOT trigger the verbose/json conflict. The value-aware
+        // scan resolves --verbose to false, so the command proceeds to its normal missing_app path.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--verbose", "false", "--json", "--at", "100,100", "--app", "__no_such_app__"]);
+
+        Assert.AreEqual(1, exitCode, "Missing app must exit 1");
+        Assert.IsFalse(stdout.Contains("Cannot specify both --verbose and --json"),
+            $"--verbose false must not trigger the conflict; got stdout: {stdout}");
+        Assert.IsFalse(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--verbose false must not trigger the conflict; got stderr: {stderr}");
+        Assert.IsTrue(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"With no real conflict the command must reach the missing_app path; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task VerboseEqualsTrue_Json_TriggersConflict()
+    {
+        // M3: `--verbose=true --json` DOES conflict — the value-aware scan resolves --verbose to
+        // true, so the mutually-exclusive verbose/json conflict must fire and short-circuit.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--verbose=true", "--json", "--at", "100,100", "--app", "__no_such_app__"]);
+
+        Assert.AreEqual(1, exitCode, "verbose/json conflict must exit 1");
+        Assert.IsTrue(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--verbose=true --json must trigger the conflict; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task InvokeProgramAsync_RestoresEnvironment_AfterIsolatedRun()
+    {
+        // M5: the isolation harness sets WINAPP_CLI_CACHE_DIRECTORY / WINAPP_CLI_UPDATE_CHECK for
+        // the duration of the Program.Main call and must restore them afterwards, so invoking
+        // Program.Main from a test never leaks an override (or mutates the real cache) into later
+        // tests.
+        var beforeCache = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
+        var beforeUpdate = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
+
+        _ = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--json=bogus"]);
+
+        Assert.AreEqual(beforeCache, Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"),
+            "WINAPP_CLI_CACHE_DIRECTORY must be restored after InvokeProgramAsync");
+        Assert.AreEqual(beforeUpdate, Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK"),
+            "WINAPP_CLI_UPDATE_CHECK must be restored after InvokeProgramAsync");
+    }
 }

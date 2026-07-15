@@ -106,14 +106,49 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
     /// </summary>
     /// <remarks>
     /// Must only be called from a <c>[DoNotParallelize]</c> test class because it redirects
-    /// the process-wide <see cref="Console.Out"/> and <see cref="Console.Error"/> streams.
+    /// the process-wide <see cref="Console.Out"/> and <see cref="Console.Error"/> streams and
+    /// mutates process environment variables for the duration of the call.
+    /// <para>
+    /// <see cref="Program.Main"/> builds its OWN service collection, so the per-test overrides
+    /// wired up in <c>SetupBase</c> (SetCacheDirectoryForTesting / ConfigPath) do NOT reach it.
+    /// This harness isolates the real first-run and update services the same way CI does — it
+    /// redirects the global winapp directory (where the <c>.first-run-complete</c> marker lives)
+    /// to a throwaway temp dir via <c>WINAPP_CLI_CACHE_DIRECTORY</c> and disables the update-check
+    /// network call via <c>WINAPP_CLI_UPDATE_CHECK=0</c>. Without this, invoking Program.Main from
+    /// a test would mutate the developer's real <c>~/.winapp</c> cache and could hit the network (M5).
+    /// </para>
     /// </remarks>
-    protected static async Task<(string Stdout, string Stderr, int ExitCode)> InvokeProgramAsync(string[] args)
+    /// <param name="args">The argv passed to <see cref="Program.Main"/>.</param>
+    /// <param name="coldCache">
+    /// When <see langword="false"/> (default) the isolated cache is pre-seeded with the
+    /// <c>.first-run-complete</c> marker so the first-run notice does not fire (a warm cache).
+    /// Pass <see langword="true"/> to exercise the genuine first-run / cold-cache path.
+    /// </param>
+    protected static async Task<(string Stdout, string Stderr, int ExitCode)> InvokeProgramAsync(
+        string[] args, bool coldCache = false)
     {
         var originalOut = Console.Out;
         var originalErr = Console.Error;
         var stdoutWriter = new StringWriter();
         var stderrWriter = new StringWriter();
+
+        var isolatedCacheDir = new DirectoryInfo(
+            Path.Combine(Path.GetTempPath(), $"winapp-invoke-{Guid.NewGuid():N}"));
+        isolatedCacheDir.Create();
+
+        // Pre-seed the first-run marker unless the test explicitly wants the cold-cache path, so
+        // the first-run banner does not pollute the captured stdout of unrelated invocations.
+        if (!coldCache)
+        {
+            File.WriteAllText(
+                Path.Combine(isolatedCacheDir.FullName, ".first-run-complete"), string.Empty);
+        }
+
+        var originalCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
+        var originalUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
+        Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", isolatedCacheDir.FullName);
+        Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", "0");
+
         try
         {
             Console.SetOut(stdoutWriter);
@@ -125,6 +160,16 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         {
             Console.SetOut(originalOut);
             Console.SetError(originalErr);
+            Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", originalCacheDir);
+            Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", originalUpdateCheck);
+            try
+            {
+                isolatedCacheDir.Delete(recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup; a leaked temp dir must never fail a test.
+            }
         }
     }
 
