@@ -252,7 +252,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                   </config>
                   <packageSources>
                     <clear />
-                    <add key="private" value="{feed.IndexUrl}" />
+                    <add key="private" value="{feed.IndexUrl}" allowInsecureConnections="true" />
                   </packageSources>
                   <packageSourceCredentials>
                     <private>
@@ -307,7 +307,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                   </config>
                   <packageSources>
                     <clear />
-                    <add key="private" value="{feed.IndexUrl}" />
+                    <add key="private" value="{feed.IndexUrl}" allowInsecureConnections="true" />
                   </packageSources>
                   <packageSourceMapping>
                     <clear />
@@ -364,7 +364,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 <configuration>
                   <packageSources>
                     <clear />
-                    <add key="private" value="{feed.IndexUrl}" />
+                    <add key="private" value="{feed.IndexUrl}" allowInsecureConnections="true" />
                   </packageSources>
                   <packageSourceCredentials>
                     <private>
@@ -420,7 +420,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 <configuration>
                   <packageSources>
                     <clear />
-                    <add key="private" value="{feed.IndexUrl}" />
+                    <add key="private" value="{feed.IndexUrl}" allowInsecureConnections="true" />
                   </packageSources>
                   <disabledPackageSources>
                     <clear />
@@ -446,6 +446,61 @@ public class NugetServiceDownloadTests : BaseCommandTests
 
             Assert.AreEqual("1.0.0", latest, "A RegistrationsBaseUrl/Versioned feed must resolve latest via the registration/metadata resource and exclude the unlisted 2.0.0 — not fall back to the flat container.");
             Assert.IsTrue(feed.ReceivedAuthenticatedRequest, "The registration feed should have served the request carrying the configured credentials.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_PlainHttpSourceWithoutOptIn_IsRejected()
+    {
+        // SDK packages are executable tools, so a plain-HTTP feed is a code-substitution vector. NuGet's
+        // low-level protocol APIs don't enforce restore's insecure-source policy, so NugetSourceProvider
+        // must: an http:// source is refused unless it explicitly opts in with allowInsecureConnections.
+        // This is the same feed shape as the flat-container test, but WITHOUT the attribute — it must be
+        // rejected and never contacted (proving the opt-in in the other tests is what makes them work).
+        NugetSourceProvider.EnsureCredentialService();
+
+        using var feed = new BasicAuthNuGetFeed("winapp-user", "s3cret-token!", ("Flat.Pkg", "1.0.0"));
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="private" value="{feed.IndexUrl}" />
+                  </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
+                  <packageSourceCredentials>
+                    <private>
+                      <add key="Username" value="{feed.Username}" />
+                      <add key="ClearTextPassword" value="{feed.Password}" />
+                    </private>
+                  </packageSourceCredentials>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="private">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetLatestVersionAsync("Flat.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken));
+
+            // The rejection must name the insecure-HTTP reason (not a generic "package not found"), and the
+            // feed must never have been contacted.
+            StringAssert.Contains(ex.Message, "HTTP", StringComparison.OrdinalIgnoreCase);
+            Assert.IsFalse(feed.ReceivedAuthenticatedRequest, "An insecure HTTP source without allowInsecureConnections must be rejected before any request is sent.");
         }
         finally
         {

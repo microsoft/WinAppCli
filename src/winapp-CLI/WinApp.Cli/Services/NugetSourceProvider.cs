@@ -28,7 +28,15 @@ internal sealed class NugetSourceProvider
     // resources against a not-yet-configured credential service and hit a private feed anonymously.
     private static readonly Lazy<bool> CredentialServiceInitializer = new(() =>
     {
+        // Prompting is only safe on a real interactive console. Treat the process as non-interactive
+        // whenever stdin OR stdout is redirected, it isn't running in a user-interactive session (a Windows
+        // service, a task runner), or a CI marker is set — mirroring WorkspaceSetupService's interactive
+        // gating. Relying on stdin alone would let a credential-provider plugin raise a prompt that blocks
+        // the process indefinitely under a task runner / service / unrecognized CI whose stdin isn't
+        // redirected.
         var nonInteractive = Console.IsInputRedirected
+            || Console.IsOutputRedirected
+            || !Environment.UserInteractive
             || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"))
             || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD"));
 
@@ -136,8 +144,23 @@ internal sealed class NugetSourceProvider
     /// </summary>
     internal static void EnsureCredentialService() => _ = CredentialServiceInitializer.Value;
 
-    private IReadOnlyList<SourceRepository> GetRepositories() =>
+    private IReadOnlyList<SourceRepository> GetAllConfiguredRepositories() =>
         [.. _sourceRepositoryProvider.Value.GetRepositories()];
+
+    /// <summary>
+    /// The configured sources with insecure plain-HTTP feeds removed. The restored packages are executable
+    /// SDK tools, so a plaintext feed is a man-in-the-middle code-substitution vector. NuGet's low-level
+    /// protocol APIs (unlike its <c>restore</c> command) don't enforce this, so any <c>http://</c> source
+    /// that has not explicitly opted in with <c>allowInsecureConnections="true"</c> is dropped; HTTPS and
+    /// local-folder sources are always kept.
+    /// </summary>
+    private IReadOnlyList<SourceRepository> GetRepositories() =>
+        [.. GetAllConfiguredRepositories().Where(r => !IsInsecureSource(r.PackageSource))];
+
+    // A plain-HTTP source (non-HTTPS, non-local) that has not opted in to insecure connections. IsHttp is
+    // true for both http and https, so require !IsHttps to isolate plaintext http://.
+    private static bool IsInsecureSource(PackageSource source) =>
+        source.IsHttp && !source.IsHttps && !source.AllowInsecureConnections;
 
     private PackageSourceMapping PackageSourceMapping => _packageSourceMapping.Value;
 
@@ -179,6 +202,18 @@ internal sealed class NugetSourceProvider
         // mean the feed list itself is empty, regardless of whether packageSourceMapping is enabled.
         if (GetRepositories().Count == 0)
         {
+            // Distinguish "nothing configured" from "the only configured source(s) were dropped because they
+            // are insecure plain-HTTP feeds", so the user knows to switch to HTTPS or opt in rather than add
+            // a source.
+            var insecure = GetAllConfiguredRepositories()
+                .Where(r => IsInsecureSource(r.PackageSource))
+                .Select(r => r.PackageSource.Name)
+                .ToList();
+            if (insecure.Count > 0)
+            {
+                return $"the only configured NuGet source(s) [{string.Join(", ", insecure)}] use plain HTTP; winapp refuses to download executable SDK packages over an insecure connection (switch the source to HTTPS, or set allowInsecureConnections=\"true\" on it in nuget.config to opt in)";
+            }
+
             return "no enabled NuGet sources are configured (add or enable a source in the <packageSources> section of your nuget.config)";
         }
 

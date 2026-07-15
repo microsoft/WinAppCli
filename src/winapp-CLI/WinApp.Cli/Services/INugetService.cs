@@ -25,7 +25,10 @@ internal interface INugetService
     /// <summary>
     /// Resolves the dependencies of a specific package version by reading the package's .nuspec from the
     /// sources configured in the user's nuget.config (honoring <c>&lt;packageSourceMapping&gt;</c>).
-    /// Returns a dictionary mapping each dependency package ID to its normalized minimum version.
+    /// Returns a dictionary mapping each dependency package ID to the normalized concrete version selected
+    /// to satisfy its declared range from the configured sources — the lowest available version that
+    /// satisfies the range (which may be higher than the range's lower bound, and for a floating range is
+    /// the highest match), not the range minimum.
     /// </summary>
     Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default);
 
