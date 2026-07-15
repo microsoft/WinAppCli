@@ -104,6 +104,30 @@ public class CompleteCommandTests : BaseCommandTests
         CollectionAssert.DoesNotContain(completions, "--verbose");
     }
 
+    [TestMethod]
+    public async Task Complete_EnumOptionValue_ReturnsBareLabelsWithoutDescriptions()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        // Completing the value of the enum-typed --setup-sdks option offers the enum
+        // member names. These candidates carry no description, so they are emitted as
+        // bare labels (no tab separator) — exercising the no-detail completion branch.
+        const string commandLine = "winapp init --setup-sdks ";
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["complete", "--commandline", commandLine, "--position", commandLine.Length.ToString()]);
+
+        Assert.AreEqual(0, exitCode);
+        var lines = GetCompletionLines();
+        Assert.IsTrue(lines.Length > 0, "Should return enum value completions");
+        Assert.IsTrue(lines.All(l => !l.Contains('\t')),
+            "Enum value completions should be bare labels with no description");
+        var labels = GetCompletionLabels();
+        Assert.IsTrue(
+            labels.Any(l => string.Equals(l, "Stable", StringComparison.OrdinalIgnoreCase)) ||
+            labels.Any(l => string.Equals(l, "None", StringComparison.OrdinalIgnoreCase)),
+            "Enum value completions should include the SdkInstallMode members");
+    }
+
     // --- Alias exclusion ---
 
     [TestMethod]

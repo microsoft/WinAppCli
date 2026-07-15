@@ -51,6 +51,42 @@ public class CustomHelpTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void AllCommands_IncludingNested_ShortDescriptionMatchesDescription()
+    {
+        // Every command that implements IShortDescription (including nested subcommands such
+        // as `manifest generate` or `cert info`) must expose non-empty help text. This walks
+        // the whole command tree, not just the top level.
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var offenders = new List<string>();
+        foreach (var command in EnumerateCommands(rootCommand))
+        {
+            if (command is IShortDescription shortDescription)
+            {
+                if (string.IsNullOrWhiteSpace(shortDescription.ShortDescription))
+                {
+                    offenders.Add(command.Name);
+                }
+            }
+        }
+
+        Assert.IsEmpty(offenders,
+            $"These commands implement IShortDescription but return empty text: {string.Join(", ", offenders)}");
+    }
+
+    private static IEnumerable<System.CommandLine.Command> EnumerateCommands(System.CommandLine.Command command)
+    {
+        foreach (var child in command.Subcommands)
+        {
+            yield return child;
+            foreach (var descendant in EnumerateCommands(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task RootHelp_ShouldRenderSuccessfully()
     {
         // Arrange

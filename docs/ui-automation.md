@@ -356,6 +356,7 @@ winapp ui send-keys "down down enter" -a myapp --verbatim      # same, but type 
 winapp ui send-keys "alt+f4" -a myapp                          # close window via accelerator
 winapp ui send-keys "vk=0x5D" -a myapp                         # a key with no friendly name (Apps/Menu key)
 winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide injection instead of PostMessage
+winapp ui send-keys "win+shift+v" -a myapp --via send-input --allow-system-keys  # opt in to drive a global hotkey
 ```
 
 **Key grammar** (whitespace-separated tokens, quote multi-token strings):
@@ -375,7 +376,7 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 **Choosing a transport / known limits:**
 - `post-message` is the default because it bypasses UIPI and doesn't depend on the window being foreground. Limits: it cannot trigger global hotkeys registered through `WH_KEYBOARD_LL` low-level hooks (those tap input upstream of any window queue), and apps that read raw key state via `GetAsyncKeyState` may not observe held modifiers. For classic Win32/WinForms apps whose controls are separate child windows, target the control's native window handle with `-w` (or `--target`) so keys reach the right control. WinUI 3 / WPF apps have a single window and route keys to the internally focused element, so targeting the top-level window works.
 - `send-input` produces fully real input (modifiers visible to `GetAsyncKeyState`, fires low-level hooks) but goes to whatever window is foreground and is **blocked by UIPI when injecting from an elevated process into a lower-integrity (AppContainer/AppX) target**. If `send-input` reports a failure, the target is likely elevated or an AppX app — use `post-message`, or run the CLI at a matching integrity level. As a safety guard, `send-input` verifies the target window is actually in the foreground immediately before injecting and **fails (`foreground_not_target`) rather than typing into the wrong window** if focus could not be brought to it — focus or click the window first. On a **locked or secure desktop** it instead fails with **`no_interactive_desktop`** (no foreground window exists to inject into) — unlock the session, or use a UIA-pattern verb (`set-value`, `invoke`).
-- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **rejects them** (errors with `invalid_arguments` and sends nothing) because injecting them at the OS level has effects well beyond the target window (e.g. `win+l` would lock the session). If you genuinely need to deliver one to a window, use `--via post-message`, which is window-scoped and unaffected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
+- **System-reserved combos** (`win+l`, `win+r`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, `alt+f4`, `ctrl+esc`, lone `win`/`printscreen`, …) act on the OS/shell rather than just the target when sent OS-wide. `send-input` **rejects them by default** (errors with `invalid_arguments` and sends nothing) because injecting them at the OS level has effects well beyond the target window (e.g. `win+l` would lock the session). Pass **`--allow-system-keys`** to opt in — this lets you drive a global hotkey such as PowerToys' `win+shift+v` or `win+r` (the global low-level hook watches the OS-wide input stream, so the injected combo fires it). **Exception: `win+l` stays blocked even with `--allow-system-keys`** — it locks the workstation via `LockWorkStation()` which is unrecoverable from automation (breaks CI and remote-desktop sessions). Other combos (`alt+f4`, `ctrl+shift+esc`, `win+r`, …) become allowed with the flag — caller beware. Windows still blocks secure sequences like `ctrl+alt+del` (SAS) from injected input regardless of the flag. Alternatively, to deliver a system combo to a specific window use `--via post-message`, which is window-scoped and unaffected (a posted `win+l` is harmless, though a posted `alt+f4` still closes the target window).
 
 **Per-keystroke events (KeyDown / TextChanged):**
 - **Named keys and modifier combos** (`down`, `enter`, `ctrl+shift+t`, `vk=0xNN`) fire a real `KeyDown` (and `KeyUp`) on **both** transports — they're delivered as discrete `WM_KEYDOWN`/`WM_KEYUP` (or `SendInput` virtual-key events).
@@ -385,11 +386,19 @@ winapp ui send-keys "ctrl+shift+t" -a myapp --via send-input   # use OS-wide inj
 
 
 ### set-value
-Set a value on an editable element (text for TextBox/ComboBox, number for Slider).
+Set a value on an editable element **programmatically** (no keystrokes, no app foreground). Uses a fallback chain:
+1. **ValuePattern** — TextBox, ComboBox, PasswordBox, and most editable controls.
+2. **RangeValuePattern** — numeric controls (Slider, ProgressBar) when the value parses as a number.
+3. **LegacyIAccessible** (`IAccessible::put_accValue`) — the fallback for **TextPattern-only** edit controls that expose no ValuePattern (e.g. rich-edit / `Document` compose boxes). This closes the read/write gap where `get-value` could read such a control but `set-value` could not.
 ```bash
 winapp ui set-value txt-textbox-a4b1 "Hello world" -a notepad
 winapp ui set-value sld-volume-b2c3 75 -a myapp
+winapp ui set-value doc-compose-9f3a "hello" -a myapp        # RichEdit/compose box via LegacyIAccessible
 ```
+If none of the three patterns can set the value, `set-value` fails with a clear error pointing at `send-keys` as the last resort.
+
+> **Not every rich editor supports programmatic set.** The LegacyIAccessible fallback only works on controls whose accessibility implements `IAccessible::put_accValue` — native Win32 rich-edit controls and Chromium/Electron/WebView2 compose surfaces typically do. **WinUI 3 `RichEditBox` and WPF `RichTextBox` don't support programmatic value-setting** — by design they expose their contents to UI Automation as read-only (Text pattern, no settable Value pattern), so `set-value` can't write to them. Use `send-keys` (which needs an unlocked, foregrounded desktop) for those.
+
 
 ### get-value
 Read the current value from an element. Uses a smart fallback chain: TextPattern (RichEditBox, Document) → ValuePattern (TextBox, Slider) → SelectionPattern (ComboBox, RadioButton, TabView) → Name (labels).
@@ -473,12 +482,14 @@ winapp ui list-windows --show-hidden                        # include invisible 
 
 | Framework | inspect | search | invoke | set-value | screenshot |
 |---|---|---|---|---|---|
-| **WPF** | ✅ Full tree | ✅ All properties | ✅ All patterns | ✅ | ✅ |
+| **WPF** | ✅ Full tree | ✅ All properties | ✅ All patterns | ✅ ¹ | ✅ |
 | **WinForms** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Win32** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **WinUI 3** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **WinUI 3** | ✅ | ✅ | ✅ | ✅ ¹ | ✅ |
 | **Electron** | ⚠️ Chromium tree | ⚠️ Limited | ⚠️ Varies | ⚠️ Varies | ✅ |
 | **Flutter** | ⚠️ Basic | ⚠️ Basic | ❌ Minimal | ❌ | ✅ |
+
+¹ `set-value` works on any control exposing ValuePattern/RangeValuePattern, plus TextPattern-only edit controls whose accessibility implements `IAccessible::put_accValue` (LegacyIAccessible fallback). **WinUI 3 `RichEditBox` and WPF `RichTextBox` are exceptions** — they expose only the read-only Text pattern (no settable Value pattern), so they can't be set programmatically by design; use `send-keys` (interactive desktop required) to type into them.
 
 ## Troubleshooting
 

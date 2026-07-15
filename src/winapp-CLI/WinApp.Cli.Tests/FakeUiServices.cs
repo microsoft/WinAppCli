@@ -40,8 +40,53 @@ internal class FakeUiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> WindowsByTitleResult { get; set; } = [];
     public List<(nint Hwnd, int Pid, string Title)> WindowsByPidResult { get; set; } = [];
 
-    public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => WindowsByTitleResult;
-    public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => WindowsByPidResult;
+    /// <summary>Text returned by <see cref="GetTextAsync"/>. Set to <see langword="null"/> to exercise
+    /// the "no value" branches of get-value / wait-for. Defaults to a non-null sample.</summary>
+    public string? GetTextResult { get; set; } = "fake text content";
+
+    /// <summary>Per-call text sequence for <see cref="GetTextAsync"/>: each read dequeues the next entry,
+    /// so a wait-for --value poll can see the value change across polls (e.g. "old" then "target"). Once
+    /// drained, falls back to <see cref="GetTextResult"/>. Empty by default = use the single result.</summary>
+    public Queue<string?> GetTextResults { get; } = new();
+
+    // ---- Additive throw knobs (default null = no-op, so existing tests are unaffected) --------------
+    // Each method throws the configured exception at its start, letting a test drive a command's
+    // COMException (stale-element) or generic error branches without touching real UIA.
+    public Exception? FindSingleThrow { get; set; }
+
+    /// <summary>When &gt; 0, the next N <see cref="FindSingleElementAsync"/> calls throw a transient error
+    /// (then decrement), simulating an element that isn't ready on the first poll(s). Drives wait-for's
+    /// per-poll catch → keep-polling continuation deterministically. Default 0 = no transient failures.</summary>
+    public int FindSingleThrowCount { get; set; }
+    public Exception? InspectThrow { get; set; }
+    public Exception? SearchThrow { get; set; }
+    public Exception? PropertiesThrow { get; set; }
+    public Exception? ScreenshotThrow { get; set; }
+    public Exception? InvokeThrow { get; set; }
+    public Exception? FocusThrow { get; set; }
+    public Exception? GetFocusedThrow { get; set; }
+    public Exception? GetTextThrow { get; set; }
+    public Exception? ScrollContainerThrow { get; set; }
+    public Exception? ScrollIntoViewThrow { get; set; }
+    public Exception? SetValueThrow { get; set; }
+    public Exception? FindWindowsThrow { get; set; }
+
+    /// <summary>When set, the primary <see cref="InvokeAsync"/> throws this for an element that carries an
+    /// <see cref="UiElement.InvokableAncestor"/> (simulating "element not invokable"), while the follow-up
+    /// call on the ancestor itself (no InvokableAncestor) succeeds — driving invoke's ancestor-fallback.</summary>
+    public bool InvokeThrowsForAncestorFallback { get; set; }
+
+    public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery)
+    {
+        if (FindWindowsThrow is not null) { throw FindWindowsThrow; }
+        return WindowsByTitleResult;
+    }
+
+    public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid)
+    {
+        if (FindWindowsThrow is not null) { throw FindWindowsThrow; }
+        return WindowsByPidResult;
+    }
 
     /// <summary>When non-null, <see cref="FindSingleElementAsync"/> throws this exception instead of
     /// returning a result. Use to simulate selector-ambiguity or other UIA failures.</summary>
@@ -71,18 +116,32 @@ internal class FakeUiAutomationService : IUiAutomationService
     }
 
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
-        => Task.FromResult(InspectResult);
+    {
+        if (InspectThrow is not null) { throw InspectThrow; }
+        return Task.FromResult(InspectResult);
+    }
 
     public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct)
-        => Task.FromResult(InspectResult);
+    {
+        if (InspectThrow is not null) { throw InspectThrow; }
+        return Task.FromResult(InspectResult);
+    }
 
     public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct)
-        => Task.FromResult(SearchResult.Take(maxResults).ToArray());
+    {
+        if (SearchThrow is not null) { throw SearchThrow; }
+        return Task.FromResult(SearchResult.Take(maxResults).ToArray());
+    }
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
         if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
-
+        if (FindSingleThrow is not null) { throw FindSingleThrow; }
+        if (FindSingleThrowCount > 0)
+        {
+            FindSingleThrowCount--;
+            throw new InvalidOperationException("Transient element lookup failure (test).");
+        }
         var key = selector.Slug ?? selector.Query ?? string.Empty;
 
         // Per-selector movement sequence (N5 stability tests): advance each read, last value sticks.
@@ -112,33 +171,65 @@ internal class FakeUiAutomationService : IUiAutomationService
     }
 
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
-        => Task.FromResult(PropertiesResult);
+    {
+        if (PropertiesThrow is not null) { throw PropertiesThrow; }
+        return Task.FromResult(PropertiesResult);
+    }
 
     public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
-        => Task.FromResult(ScreenshotResult);
+    {
+        if (ScreenshotThrow is not null) { throw ScreenshotThrow; }
+        return Task.FromResult(ScreenshotResult);
+    }
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
-        => Task.FromResult(InvokeResult);
+    {
+        if (InvokeThrow is not null) { throw InvokeThrow; }
+        if (InvokeThrowsForAncestorFallback && element.InvokableAncestor is not null)
+        {
+            throw new InvalidOperationException("Element does not support an actionable pattern (test).");
+        }
+        return Task.FromResult(InvokeResult);
+    }
 
     public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct)
-        => Task.CompletedTask;
+    {
+        if (SetValueThrow is not null) { throw SetValueThrow; }
+        return Task.CompletedTask;
+    }
 
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
-        => Task.CompletedTask;
+    {
+        if (FocusThrow is not null) { throw FocusThrow; }
+        return Task.CompletedTask;
+    }
 
     public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
-        => Task.CompletedTask;
+    {
+        if (ScrollIntoViewThrow is not null) { throw ScrollIntoViewThrow; }
+        return Task.CompletedTask;
+    }
 
     public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
-        => Task.CompletedTask;
+    {
+        if (ScrollContainerThrow is not null) { throw ScrollContainerThrow; }
+        return Task.CompletedTask;
+    }
 
     public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
 
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
-        => Task.FromResult(FocusedResult);
+    {
+        if (GetFocusedThrow is not null) { throw GetFocusedThrow; }
+        return Task.FromResult(FocusedResult);
+    }
 
     public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
-        => Task.FromResult<string?>("fake text content");
+    {
+        if (GetTextThrow is not null) { throw GetTextThrow; }
+        if (GetTextResults.Count > 0) { return Task.FromResult(GetTextResults.Dequeue()); }
+        return Task.FromResult(GetTextResult);
+    }
 }
 
 /// <summary>
@@ -157,9 +248,14 @@ internal class FakeUiSessionService : IUiSessionService
     /// of returning <see cref="SessionResult"/>. Use to test command-level exception handling.</summary>
     public Exception? ThrowException { get; set; }
 
+    /// <summary>When set, <see cref="ResolveSessionAsync"/> throws this — drives a command's generic
+    /// (or COMException) catch from inside its <c>try</c>, before any element work. Default null = no-op.</summary>
+    public Exception? ResolveThrow { get; set; }
+
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
         if (ThrowException is not null) { throw ThrowException; }
+        if (ResolveThrow is not null) { throw ResolveThrow; }
         return Task.FromResult(SessionResult);
     }
 }
@@ -267,6 +363,11 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
     /// <summary>When <see langword="false"/>, emits the configured error and aborts the gesture.</summary>
     public bool Allow { get; set; } = true;
 
+    /// <summary>When set, denies exactly the Nth call (1-based) regardless of <see cref="Allow"/>, letting
+    /// a test drive the *final* foreground gate (e.g. click/scroll/drag check the foreground twice —
+    /// first gate passes, final gate denies). Other calls fall back to <see cref="Allow"/>.</summary>
+    public int? DenyOnCallNumber { get; set; }
+
     /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
     public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
 
@@ -278,7 +379,9 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
     public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
     {
         Calls.Add(new(targetHwnd, action));
-        if (Allow)
+
+        var deny = DenyOnCallNumber is int n ? Calls.Count == n : !Allow;
+        if (!deny)
         {
             return true;
         }
@@ -288,4 +391,104 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
         return false;
     }
 }
+
+/// <summary>
+/// Fake <see cref="WinApp.Cli.Helpers.IOwnedWindowFinder"/> — returns a configurable owned-window list
+/// (default empty) so the screenshot command's owned-dialog / multi-window discovery can be exercised
+/// without a live desktop. The real finder issues a Win32 window walk.
+/// </summary>
+internal class FakeOwnedWindowFinder : WinApp.Cli.Helpers.IOwnedWindowFinder
+{
+    /// <summary>Owned windows returned for any input. Default empty = "no owned dialogs".</summary>
+    public List<(nint Hwnd, int Pid, string Title)> OwnedWindowsResult { get; set; } = [];
+
+    public List<(nint Hwnd, int Pid, string Title)> FindOwnedWindows(List<(nint Hwnd, int Pid, string Title)> appWindows)
+        => OwnedWindowsResult;
+}
+
+/// <summary>
+/// Fake <see cref="ISystemUiQuery"/> — drives <see cref="UiSessionService"/>'s OS boundaries
+/// (process enumeration + a few Win32 window queries) from in-memory data so its resolver logic can
+/// be exercised deterministically. Every knob defaults to "nothing found" so a bare instance yields
+/// the same behavior a headless box would (no processes, no foreground, no window title).
+/// </summary>
+internal sealed class FakeSystemUiQuery : ISystemUiQuery
+{
+    /// <summary>Explicit per-PID lookups. A key mapped to <c>null</c> models "no such process".</summary>
+    public Dictionary<int, UiProcessInfo?> ProcessesById { get; } = [];
+
+    /// <summary>When set, any PID not in <see cref="ProcessesById"/> resolves to this snapshot
+    /// (with its <see cref="UiProcessInfo.Id"/> swapped to the requested PID). Lets CreateSession's
+    /// name lookup succeed for arbitrary PIDs without seeding each one.</summary>
+    public UiProcessInfo? DefaultProcessById { get; set; }
+
+    /// <summary>Result for <see cref="GetProcessesByName"/> (exact-name match). Default empty.</summary>
+    public List<UiProcessInfo> ByNameResult { get; set; } = [];
+
+    /// <summary>Result for <see cref="GetProcessesMatching"/> (partial-name match). Default empty.</summary>
+    public List<UiProcessInfo> MatchingResult { get; set; } = [];
+
+    /// <summary>Handle returned by <see cref="GetForegroundWindow"/>. Default 0 = "no foreground".</summary>
+    public nint ForegroundWindowResult { get; set; }
+
+    /// <summary>PID returned by <see cref="GetProcessIdForWindow"/>. Default 0 = "window not found".</summary>
+    public uint ProcessIdForWindowResult { get; set; }
+
+    /// <summary>Title returned by <see cref="GetWindowText"/>. Default null = "no/empty title".</summary>
+    public string? WindowTextResult { get; set; }
+
+    /// <summary>Per-HWND window sizes for <see cref="GetWindowSize"/>. Unmapped handles report (0, 0),
+    /// matching a headless box; seed distinct areas to drive the "largest window" auto-select heuristic.</summary>
+    public Dictionary<long, (int Width, int Height)> WindowSizeByHwnd { get; } = [];
+
+    /// <summary>Per-HWND class names for <see cref="GetWindowClassName"/>. Unmapped handles report null.</summary>
+    public Dictionary<long, string?> WindowClassNameByHwnd { get; } = [];
+
+    /// <summary>Per-HWND owner handles for <see cref="GetWindowOwner"/>. Unmapped handles report 0 (no owner).</summary>
+    public Dictionary<long, nint> WindowOwnerByHwnd { get; } = [];
+
+    public UiProcessInfo? GetProcessById(int pid)
+    {
+        if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
+        if (DefaultProcessById is { } d) { return d with { Id = pid }; }
+        return null;
+    }
+
+    public IReadOnlyList<UiProcessInfo> GetProcessesByName(string name) => ByNameResult;
+
+    public IReadOnlyList<UiProcessInfo> GetProcessesMatching(string substring) => MatchingResult;
+
+    public nint GetForegroundWindow() => ForegroundWindowResult;
+
+    public uint GetProcessIdForWindow(long hwnd) => ProcessIdForWindowResult;
+
+    public string? GetWindowText(long hwnd) => WindowTextResult;
+
+    public (int Width, int Height) GetWindowSize(long hwnd)
+        => WindowSizeByHwnd.TryGetValue(hwnd, out var size) ? size : (0, 0);
+
+    public string? GetWindowClassName(long hwnd)
+        => WindowClassNameByHwnd.TryGetValue(hwnd, out var name) ? name : null;
+
+    public nint GetWindowOwner(long hwnd)
+        => WindowOwnerByHwnd.TryGetValue(hwnd, out var owner) ? owner : 0;
+}
+
+/// <summary>
+/// Fake <see cref="WinApp.Cli.Helpers.IPollDelay"/> — replaces wait-for's inter-poll wall-clock wait so
+/// the retry-loop continuations run deterministically. Uses a 1ms yield (not a busy no-op) to keep poll
+/// counts bounded without depending on real 100ms sleeps. Records how many times it was awaited.
+/// </summary>
+internal sealed class FakePollDelay : WinApp.Cli.Helpers.IPollDelay
+{
+    /// <summary>Number of inter-poll delays awaited — one per "condition not met, keep polling" iteration.</summary>
+    public int CallCount { get; private set; }
+
+    public Task DelayAsync(int milliseconds, CancellationToken ct)
+    {
+        CallCount++;
+        return Task.Delay(1, ct);
+    }
+}
+
 

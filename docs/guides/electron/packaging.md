@@ -19,7 +19,7 @@ module.exports = {
   packagerConfig: {
     asar: true,
     ignore: [
-      /^\/\.winapp($|\/)/,     // SDK packages and headers
+      /^\/\.winapp\/(?!bindings($|\/))/, // SDK files except generated JS bindings
       /^\/winapp\.yaml$/,       // SDK config
       /\.pfx$/,                 // Certificate files
       /\.pdb$/,                 // Debug symbols
@@ -31,6 +31,10 @@ module.exports = {
   // ... rest of your config
 };
 ```
+
+The generated `.winapp/bindings` directory must remain in the packaged app
+because `#winapp/bindings` resolves to it through the application's
+`package.json#imports` map.
 
 > [!IMPORTANT]
 > Verify that your `Package.appxmanifest` matches your packaged app structure:

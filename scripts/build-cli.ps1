@@ -205,9 +205,14 @@ try
         exit 1
     }
 
-    # Step 3: Build test project (CLI is already built from publish, this mainly compiles tests)
-    Write-Host "[BUILD] Building CLI solution..." -ForegroundColor Blue
-    dotnet build $CliSolutionPath -c Release
+    # Step 3: Build the solution in Debug to compile the tests. Coverage is collected on
+    # this Debug build (Step 5) -- optimized Release builds under-count line coverage (many
+    # block-brace lines report hits=0). The shipped CLI artifact is the Release `dotnet publish`
+    # above; this Debug build exists only to run the test suite. See issue #630.
+    # TreatWarningsAsErrors is Release-only (Directory.Build.props), so pass it explicitly here
+    # to keep the warning-as-error quality gate the previous Release test build provided.
+    Write-Host "[BUILD] Building CLI solution (Debug, for tests + coverage)..." -ForegroundColor Blue
+    dotnet build $CliSolutionPath -c Debug -p:TreatWarningsAsErrors=true
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build CLI solution"
         exit 1
@@ -257,7 +262,14 @@ try
     # Step 5: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
+        # Measure coverage honestly. Two things distort the raw number: (1) auto-generated
+        # interop (CsWin32/COM/Regex generators in obj\**) inflates the denominator -- excluded
+        # via coverage.runsettings; (2) optimized Release builds report many block-brace lines as
+        # hits=0, so line coverage is under-counted -- so we collect on the Debug build from
+        # Step 3. Hand-written services (incl. the hardware/COM/GPU interop) are NOT excluded;
+        # they are covered by real tests. See issue #630.
+        $CoverageSettings = (Resolve-Path "$CliSolutionDir\coverage.runsettings").Path
+        dotnet run --project $CliTestsProjectPath -c Debug --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files

@@ -14,54 +14,86 @@ public static class ShellIcon
     /// Gets the "Jumbo" (typically 256x256) shell icon for a file path (exe/dll/anything).
     /// Returns null if no icon can be resolved.
     /// </summary>
-    public static Icon? GetJumboIcon(string path)
+    public static Icon? GetJumboIcon(string path) =>
+        GetJumboIconCore(path, GetSystemIconIndex, GetIconFromJumboImageList);
+
+    /// <summary>
+    /// Pure orchestration seam for <see cref="GetJumboIcon"/>: resolves the system icon index for
+    /// <paramref name="path"/>, returns null when the shell reports no icon, otherwise materializes
+    /// the jumbo icon. Any exception from the resolvers is swallowed and reported as null. The
+    /// resolver delegates are injected so tests can drive the no-icon, success, and failure paths
+    /// without invoking the native shell APIs.
+    /// </summary>
+    internal static Icon? GetJumboIconCore(
+        string path,
+        Func<string, int?> getSystemIconIndex,
+        Func<int, Icon?> getIconFromImageList)
     {
         try
         {
             // 1) Get the system image list index for this file (Explorer uses this)
-            SHFILEINFOW sfi = new();
-            // SHGFI_SYSICONINDEX gives us sfi.iIcon
-            var flags = SHGFI_FLAGS.SHGFI_SYSICONINDEX;
-            var result = PInvoke.SHGetFileInfo(path, 0, ref sfi, flags);
-            if (result == 0)
+            int? iconIndex = getSystemIconIndex(path);
+            if (iconIndex is null)
             {
                 return null;
             }
 
-            // 2) Ask for the Jumbo image list
-            // CsWin32 exposes SHGetImageList and IImageList
-            var hr = PInvoke.SHGetImageList((int)PInvoke.SHIL_JUMBO, typeof(IImageList2).GUID, out object ppvObj);
-            IImageList2 imageList = (IImageList2)ppvObj;
-            if (hr.Failed || imageList is null)
-            {
-                return null;
-            }
-
-            // 3) Get an HICON for that index
-            // Use ILD_IMAGE to preserve full color depth and alpha channel
-            DestroyIconSafeHandle? hIcon = null;
-            try
-            {
-                imageList.GetIcon(sfi.iIcon, (uint)IMAGE_LIST_DRAW_STYLE.ILD_IMAGE, out hIcon);
-
-                // Clone the icon to create a copy that owns its own data
-                // Icon.FromHandle doesn't own the handle, so we must clone before disposing hIcon
-                using var tempIcon = Icon.FromHandle(hIcon.DangerousGetHandle());
-                return (Icon)tempIcon.Clone();
-            }
-            finally
-            {
-                if (ppvObj is System.Runtime.InteropServices.Marshalling.ComObject comObj)
-                {
-                    comObj.FinalRelease();
-                }
-                hIcon?.Dispose();
-            }
+            // 2+3) Resolve an HICON for that index from the Jumbo image list and clone it
+            return getIconFromImageList(iconIndex.Value);
         }
         catch
         {
             // Swallow all exceptions and return null if anything goes wrong
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns the system image-list icon index for <paramref name="path"/>, or null when the shell
+    /// cannot resolve one (SHGetFileInfo returns 0).
+    /// </summary>
+    private static int? GetSystemIconIndex(string path)
+    {
+        SHFILEINFOW sfi = new();
+        // SHGFI_SYSICONINDEX gives us sfi.iIcon
+        var result = PInvoke.SHGetFileInfo(path, 0, ref sfi, SHGFI_FLAGS.SHGFI_SYSICONINDEX);
+        return result == 0 ? null : sfi.iIcon;
+    }
+
+    /// <summary>
+    /// Materializes a standalone <see cref="Icon"/> for the given system image-list index from the
+    /// Jumbo image list, or null when the image list cannot be obtained.
+    /// </summary>
+    private static Icon? GetIconFromJumboImageList(int iconIndex)
+    {
+        // CsWin32 exposes SHGetImageList and IImageList
+        var hr = PInvoke.SHGetImageList((int)PInvoke.SHIL_JUMBO, typeof(IImageList2).GUID, out object ppvObj);
+        IImageList2 imageList = (IImageList2)ppvObj;
+        // Defensive guard: the system Jumbo image list is always available on a real desktop, so this
+        // failure branch is not reachable from a test without a broken shell. Kept for safety.
+        if (hr.Failed || imageList is null)
+        {
+            return null;
+        }
+
+        // Use ILD_IMAGE to preserve full color depth and alpha channel
+        DestroyIconSafeHandle? hIcon = null;
+        try
+        {
+            imageList.GetIcon(iconIndex, (uint)IMAGE_LIST_DRAW_STYLE.ILD_IMAGE, out hIcon);
+
+            // Clone the icon to create a copy that owns its own data
+            // Icon.FromHandle doesn't own the handle, so we must clone before disposing hIcon
+            using var tempIcon = Icon.FromHandle(hIcon.DangerousGetHandle());
+            return (Icon)tempIcon.Clone();
+        }
+        finally
+        {
+            if (ppvObj is System.Runtime.InteropServices.Marshalling.ComObject comObj)
+            {
+                comObj.FinalRelease();
+            }
+            hIcon?.Dispose();
         }
     }
 }
