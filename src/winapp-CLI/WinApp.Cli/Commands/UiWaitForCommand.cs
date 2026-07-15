@@ -60,6 +60,7 @@ internal class UiWaitForCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IPollDelay pollDelay,
         IAnsiConsole ansiConsole,
         ILogger<UiWaitForCommand> logger) : AsynchronousCommandLineAction
     {
@@ -201,7 +202,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                         }
                     }
 
-                    await Task.Delay(100, cancellationToken);
+                    await pollDelay.DelayAsync(100, cancellationToken);
                 }
 
                 // Timeout exhausted without satisfying the condition.

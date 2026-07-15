@@ -84,6 +84,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         ISelectorService selectorService,
         IKeyboardInput keyboardInput,
         IForegroundGuard foregroundGuard,
+        ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
         ILogger<UiSendKeysCommand> logger) : AsynchronousCommandLineAction
     {
@@ -211,11 +212,14 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // WM_CHAR posted to a WinUI 3 / XAML host window is not turned into text by the XAML input
                 // pipeline, so typed literal text silently no-ops there. Warn — but only when the target
                 // actually looks like a XAML window — rather than false-alarming on Win32/WPF/Electron
-                // apps that do consume WM_CHAR. (Named keys/combos still post KeyDown regardless.)
+                // apps that do consume WM_CHAR. (Named keys/combos still post KeyDown regardless.) The
+                // class name is read through ISystemUiQuery so this branch is exercisable with a fake.
+                var targetLooksXaml = targetHwnd != 0
+                    && FrameworkHint.IsXamlClassName(systemQuery.GetWindowClassName(targetHwnd));
                 if (ShouldWarnPostMessageTextDropped(
                         transport == KeyTransport.PostMessage,
                         actions.Any(a => a is TextInput),
-                        FrameworkHint.IsLikelyXaml(targetHwnd)))
+                        targetLooksXaml))
                 {
                     logger.LogWarning(
                         "{Symbol} Literal text via --via post-message may not be delivered to WinUI 3 / XAML apps (WM_CHAR is dropped by the input pipeline). Use --via send-input if the text does not appear.",
@@ -323,7 +327,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
         /// (<paramref name="isPostMessage"/>) AND the payload actually contains literal text AND the
         /// target looks like a XAML window (WinUI 3 / UWP), which drops posted WM_CHAR text. Pure so
         /// the gate is unit-testable without a live XAML window; the command computes the three inputs
-        /// (the third via <see cref="FrameworkHint.IsLikelyXaml"/>) and routes the warning through here.
+        /// (the third via FrameworkHint.IsXamlClassName over the seam-read class name) and routes the
+        /// warning through here.
         /// </summary>
         internal static bool ShouldWarnPostMessageTextDropped(bool isPostMessage, bool hasLiteralText, bool targetLooksXaml)
             => isPostMessage && hasLiteralText && targetLooksXaml;
