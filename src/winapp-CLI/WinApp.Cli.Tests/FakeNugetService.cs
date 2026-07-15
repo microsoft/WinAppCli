@@ -39,6 +39,13 @@ internal class FakeNugetService : INugetService
     /// </summary>
     public CancellationTokenSource? CancelOnQuery { get; set; }
 
+    /// <summary>
+    /// Overrides the map returned from <see cref="InstallPackageAsync"/> for a given package
+    /// (e.g. to simulate a package that pulls in additional installed packages). When a package
+    /// is not listed here, install returns just <c>{ [package] = version }</c>.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>> InstallReturns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
     {
         QueriedPackages.Add(packageName);
@@ -57,7 +64,18 @@ internal class FakeNugetService : INugetService
     public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         InstalledPackages.Add((package, version));
-        return Task.FromResult(new Dictionary<string, string> { [package] = version });
+
+        // When a cache directory is configured, create the package folder AND the completion marker so
+        // subsequent "already present" checks (INugetService.IsPackageInstalled) behave like a real,
+        // fully-extracted NuGet cache entry.
+        if (CacheDirectory != null)
+        {
+            MarkInstalled(package, version);
+        }
+
+        return Task.FromResult(InstallReturns.TryGetValue(package, out var configured)
+            ? new Dictionary<string, string>(configured)
+            : new Dictionary<string, string> { [package] = version });
     }
 
     public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
@@ -85,9 +103,20 @@ internal class FakeNugetService : INugetService
         return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
     }
 
-    public bool IsPackageInstalled(string package, string version)
+    public bool IsPackageInstalled(string packageName, string version)
     {
-        var dir = GetNuGetPackageDir(package, version);
+        var dir = GetNuGetPackageDir(packageName, version);
         return dir.Exists && File.Exists(Path.Combine(dir.FullName, ".nupkg.metadata"));
+    }
+
+    /// <summary>
+    /// Creates the on-disk package directory AND the ".nupkg.metadata" completion marker, so
+    /// <see cref="IsPackageInstalled"/> reports the package as a complete, already-extracted cache entry.
+    /// </summary>
+    public void MarkInstalled(string packageName, string version)
+    {
+        var dir = GetNuGetPackageDir(packageName, version);
+        dir.Create();
+        File.WriteAllText(Path.Combine(dir.FullName, ".nupkg.metadata"), "{}");
     }
 }
