@@ -24,6 +24,14 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
     private readonly NugetSourceProvider _sourceProvider = sourceProvider;
 
     /// <summary>
+    /// Deletes the temporary download file after a package has been transferred. Defaults to
+    /// <see cref="File.Delete(string)"/> and is exposed as a settable seam only so a test can force the
+    /// best-effort cleanup to fail and verify the failure is swallowed rather than surfaced to the caller;
+    /// production behavior is identical to calling <see cref="File.Delete(string)"/> directly.
+    /// </summary>
+    internal Action<string> DeleteTempFile { get; set; } = File.Delete;
+
+    /// <summary>
     /// Downloads <paramref name="identity"/> from the first configured source that has it and extracts it
     /// into <paramref name="globalPackagesFolder"/> using the standard NuGet on-disk layout. Honors
     /// <c>&lt;packageSourceMapping&gt;</c> for source selection and throws an
@@ -128,16 +136,12 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
             {
                 try
                 {
-                    File.Delete(tempFile);
+                    DeleteTempFile(tempFile);
                 }
                 catch
                 {
-                    // Best-effort cleanup of the temp download.
-                    //
-                    // Coverage note: deleting a temp file this method created and already closed does not fail
-                    // deterministically, so this OS-boundary catch cannot be driven from a test without locking
-                    // a path the method chooses internally. It is a defensive guard against a transient
-                    // filesystem error and is intentionally left uncovered.
+                    // Best-effort cleanup of the temp download: a failure to delete the temporary file must
+                    // not fail the user's package download, so any cleanup error is swallowed here.
                 }
             }
         }

@@ -80,6 +80,43 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task DownloadPackageAsync_TempFileCleanupFails_SwallowsErrorAndStillSucceeds()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            packages.Create();
+            WriteLocalFeedConfig(root, feed, packages);
+            WriteNupkgToFeed(feed, "Cleanup.Pkg", "1.0.0");
+
+            var sourceProvider = CreateSourceProviderRootedAt(root);
+            var downloader = new NugetPackageDownloader(sourceProvider)
+            {
+                // Force the best-effort temp-file cleanup to throw after the package has transferred.
+                DeleteTempFile = _ => throw new IOException("simulated temp-file cleanup failure"),
+            };
+
+            var identity = new PackageIdentity("Cleanup.Pkg", NuGetVersion.Parse("1.0.0"));
+            using var cacheContext = new SourceCacheContext { NoCache = true, DirectDownload = true };
+
+            // A failure to delete the temporary download must be swallowed: the package still extracts and the
+            // method completes normally instead of surfacing the cleanup error to the caller.
+            await downloader.DownloadPackageAsync(identity, packages.FullName, cacheContext, TestContext.CancellationToken);
+
+            Assert.IsTrue(
+                Directory.Exists(Path.Combine(packages.FullName, "cleanup.pkg", "1.0.0")),
+                "The package must have extracted into the global packages folder despite the temp-cleanup failure.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     public void CollectingLogger_CapturesWarningAndErrorMessages_IgnoringLowerLevels()
     {
         var logger = new NugetPackageDownloader.CollectingLogger();
